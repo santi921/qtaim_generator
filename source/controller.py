@@ -23,8 +23,8 @@ def controller_single(dir_active):
 
         
         print(folder_choice)    
-        os.system("orca " dir_active + folder_choice + "/reactants" +  "/input.in" )
-        os.system("orca " dir_active + folder_choice + "/products" +  "/input.in" )
+        os.system("orca " + dir_active + folder_choice + "/reactants" +  "/input.in" )
+        os.system("orca " + dir_active + folder_choice + "/products" +  "/input.in" )
         #cond_qtaim = os.path.exists(folder_choice + "/out")
 
         subprocess.run(dir_active + folder_choice + "/reactants" + '/props.sh')
