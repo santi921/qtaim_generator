@@ -23,11 +23,16 @@ def controller_single(dir_active):
 
         
         print(folder_choice)    
-        os.system("orca " + "./" + folder_choice +  "/input.in")
+        os.system("orca " dir_active + folder_choice + "/reactants" +  "/input.in" )
+        os.system("orca " dir_active + folder_choice + "/products" +  "/input.in" )
         #cond_qtaim = os.path.exists(folder_choice + "/out")
-        subprocess.run("./"+folder_choice + '/props.sh')
+
+        subprocess.run(dir_active + folder_choice + "/reactants" + '/props.sh')
+        os.system("mv " + "./CPprop.txt " + dir_active + folder_choice + "/reactants/")
+
+        subprocess.run(dir_active + folder_choice + "/products" + '/props.sh')
+        os.system("mv " + "./CPprop.txt " + dir_active + folder_choice + "/products/")
         # move CPprop.txt to folder 
-        os.system("mv " + "./CPprop.txt " + dir_active + folder_choice)
 
 
 def main():
