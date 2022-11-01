@@ -11,21 +11,23 @@ class ThreadWithResult(threading.Thread):
 
 
 def controller_single(dir_active):
-    #folders = [ name for name in os.listdir("./") if os.path.isdir(os.path.join('./', name)) ]
-    cond = True 
 
-    while(cond):
+    #get random folder from dir_active
+    for i in range(1000):
+        folders = [ name for name in os.listdir(dir_active) if os.path.isdir(os.path.join(dir_active, name)) ]
+
+        #while(cond):
         folder_choice = random.choice(folders)
-        print(os.path.exists(folder_choice + "/input.wfn"))
-        cond =  os.path.exists(folder_choice + "/input.wfn")
+        #    print(os.path.exists(folder_choice + "/input.wfn"))
+        #    cond =  os.path.exists(folder_choice + "/input.wfn")
 
-
-    print(folder_choice)    
-    os.system("orca " + "./" + folder_choice +  "/input.in")
-    #cond_qtaim = os.path.exists(folder_choice + "/out")
-    subprocess.run("./"+folder_choice + '/props.sh')
-    # move CPprop.txt to folder 
-    os.system("mv " + "./CPprop.txt " + dir_active + folder_choice)
+        
+        print(folder_choice)    
+        os.system("orca " + "./" + folder_choice +  "/input.in")
+        #cond_qtaim = os.path.exists(folder_choice + "/out")
+        subprocess.run("./"+folder_choice + '/props.sh')
+        # move CPprop.txt to folder 
+        os.system("mv " + "./CPprop.txt " + dir_active + folder_choice)
 
 
 def main():
