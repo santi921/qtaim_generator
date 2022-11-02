@@ -16,7 +16,11 @@ def main():
         json_loc = "../data/hydro/"
         json_file = json_loc + "rev_corrected_bonds_qm_9_hydro_training.json"
         pandas_file = pd.read_json(json_file)
-
+        product_wfn_count = 0
+        reactant_wfn_count = 0
+        product_out_count = 0
+        reactant_out_count = 0
+        
         for ind, _ in pandas_file.iterrows():
 
             row = pandas_file.iloc[ind]

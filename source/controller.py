@@ -24,36 +24,50 @@ def controller_single(dir_active):
             if os.path.isdir(os.path.join(dir_active, name))
         ]
 
+        
         # while(cond):
         folder_choice = random.choice(folders)
+        # check if folder has *wfn file
+        
         print(folder_choice)
-        os.system(
-            "orca "
-            + dir_active
-            + folder_choice
-            + "/reactants"
-            + "/input.in > "
-            + dir_active
-            + folder_choice
-            + "/reactants/output.out"
-        )
-        os.system(
-            "orca "
-            + dir_active
-            + folder_choice
-            + "/products"
-            + "/input.in > "
-            + dir_active
-            + folder_choice
-            + "/products/output.out"
-        )
-        # cond_qtaim = os.path.exists(folder_choice + "/out")
+        
+        if len(glob(dir_active + folder_choice + "/reactants" + "/*.wfn")) > 0:
+            pass
+        else: 
+            os.system(
+                "orca "
+                + dir_active
+                + folder_choice
+                + "/reactants"
+                + "/input.in > "
+                + dir_active
+                + folder_choice
+                + "/reactants/output.out"
+            )
+        if len(glob(dir_active + folder_choice + "/products" + "/*.wfn")) > 0:
+            pass
+        else:
+            os.system(
+                "orca "
+                + dir_active
+                + folder_choice
+                + "/products"
+                + "/input.in > "
+                + dir_active
+                + folder_choice
+                + "/products/output.out"
+            )
 
-        subprocess.run(dir_active + folder_choice + "/reactants" + "/props.sh")
-        os.system("mv " + "./CPprop.txt " + dir_active + folder_choice + "/reactants/")
-
-        subprocess.run(dir_active + folder_choice + "/products" + "/props.sh")
-        os.system("mv " + "./CPprop.txt " + dir_active + folder_choice + "/products/")
+        if len(glob(dir_active + folder_choice + "/reactants/*.CPprop.txt")) > 0:
+            pass
+        else: 
+            subprocess.run(dir_active + folder_choice + "/reactants/props.sh")
+            os.system("mv " + "./CPprop.txt " + dir_active + folder_choice + "/reactants/")
+        if len(glob(dir_active + folder_choice + "/products/*.CPprop.txt")) > 0:
+            pass
+        else: 
+            subprocess.run(dir_active + folder_choice + "/products/props.sh")
+            os.system("mv " + "./CPprop.txt " + dir_active + folder_choice + "/products/")
         # move CPprop.txt to folder
 
 
