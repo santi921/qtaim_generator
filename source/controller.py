@@ -62,12 +62,12 @@ def controller_single(dir_active):
         pass
     else: 
         subprocess.run(dir_active + folder_choice + "/reactants/props.sh")
-        os.system("mv " + "./CPprop.txt " + dir_active + folder_choice + "/reactants/")
+        os.system("mv " + "./Multiwfn/CPprop.txt " + dir_active + folder_choice + "/reactants/")
     if len(glob(dir_active + folder_choice + "/products/*.CPprop.txt")) > 0:
         pass
     else: 
         subprocess.run(dir_active + folder_choice + "/products/props.sh")
-        os.system("mv " + "./CPprop.txt " + dir_active + folder_choice + "/products/")
+        os.system("mv " + "./Multiwfn/CPprop.txt " + dir_active + folder_choice + "/products/")
     # move CPprop.txt to folder
 
 
