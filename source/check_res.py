@@ -37,14 +37,14 @@ def main():
             QTAIM_loc_product = json_loc + "QTAIM/" + str(reaction_id) + "/products/"
 
             if os.path.exists(QTAIM_loc_reactant + "/input.wfn"):
-                if os.path.exists(QTAIM_loc_reactant + "/out"):
+                if os.path.exists(QTAIM_loc_reactant + "/CPprop.txt") :
                     if os.path.getsize(QTAIM_loc_reactant + "CPprop.txt") > 0:
                         reactant_out_count += 1
                     if os.path.getsize(QTAIM_loc_reactant + "input.wfn") > 0:
                         reactant_wfn_count += 1
 
             if os.path.exists(QTAIM_loc_product + "/input.wfn"):
-                if os.path.exists(QTAIM_loc_product + "/out"):
+                if os.path.exists(QTAIM_loc_product + "/CPprop.txt"):
                     if os.path.getsize(QTAIM_loc_product + "CPprop.txt") > 0:
                         product_out_count += 1
                     if os.path.getsize(QTAIM_loc_product + "input.wfn") > 0:
