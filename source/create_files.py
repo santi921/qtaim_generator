@@ -37,7 +37,7 @@ def main():
 
             # reactants
             try: reactants = row["combined_reactants_graph"]
-            except: reactants = row["reactants_graph"]
+            except: reactants = row["reactant_molecule_graph"]
 
             atoms = int(len(reactants["molecule"]["sites"]))
             with open(QTAIM_loc_reactant + "/input.in", "w") as f:
@@ -63,7 +63,7 @@ def main():
 
             # products
             try: products = row["combined_products_graph"]
-            except: products = row["products_graph"]
+            except: products = row["product_molecule_graph"]
 
             atoms = int(len(products["molecule"]["sites"]))
             with open(QTAIM_loc_product + "/input.in", "w") as f:
