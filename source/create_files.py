@@ -107,9 +107,9 @@ def main():
             with open(QTAIM_loc_product + "/props.sh", "w") as f:
                 f.write("#!/bin/bash\n")
                 f.write(
-                    "./Multiwfn_3.8_dev_bin_Linux_noGUI/Multiwfn "
+                    "./Multiwfn/Multiwfn "
                     + QTAIM_loc_product
-                    + "/input.wfn < ./Multiwfn_3.8_dev_bin_Linux_noGUI/data.txt | tee ./"
+                    + "/input.wfn < ./Multiwfn/data.txt | tee ./"
                     + QTAIM_loc_product
                     + "out \n"
                 )
@@ -157,9 +157,9 @@ def main():
                 # print("../Multiwfn_3.8_dev_bin_Linux_noGUI/Multiwfn input.wfn < ../Multiwfn_3.8_dev_bin_Linux_noGUI/data.txt\n")
                 f.write("#!/bin/bash\n")
                 f.write(
-                    "./Multiwfn_3.8_dev_bin_Linux_noGUI/Multiwfn "
+                    "./Multiwfn/Multiwfn "
                     + folder
-                    + "/input.wfn < ./Multiwfn_3.8_dev_bin_Linux_noGUI/data.txt | tee ./"
+                    + "/input.wfn < ./Multiwfn/data.txt | tee ./"
                     + folder
                     + "/out \n"
                 )
