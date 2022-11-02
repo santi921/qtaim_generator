@@ -15,9 +15,9 @@ def main():
 
         json_loc = "../data/hydro/"
         json_file = json_loc + "rev_corrected_bonds_qm_9_hydro_training.json"
-        json_loc = "../data/mg1/"
-        json_file = json_loc + "merged_mg.json"
         json_loc = "../data/mg2/"
+        json_file = json_loc + "merged_mg.json"
+        json_loc = "../data/mg1/"
         json_file = json_loc + "20220613_reaction_data.json"
         
         pandas_file = pd.read_json(json_file)
