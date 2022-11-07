@@ -54,6 +54,7 @@ def main():
         print("Reactant wfn count: {}".format(reactant_wfn_count))
         print("Product out count: {}".format(product_out_count))
         print("Reactant out count: {}".format(reactant_out_count))
+        print("total rows: {}".format(len(pandas_file)))
 
     else:
         count = 0

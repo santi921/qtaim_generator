@@ -1,4 +1,4 @@
-import os, random, threading, subprocess
+import os, random, threading, subprocess, argparse
 from glob import glob
 
 folders = [name for name in os.listdir("./") if os.path.isdir(os.path.join("./", name))]
@@ -72,8 +72,18 @@ def controller_single(dir_active):
 
 
 def main():
-    dir_active = "../data/hydro/QTAIM/"
-    dir_active = "../data/mg1/QTAIM/"
+    
+    parser = argparse.ArgumentParser(
+                    prog = 'ProgramName',
+                    description = 'What the program does',
+                    epilog = 'Text at the bottom of help')
+    parser.add_argument('-hydro', '--hydro', action='store_true')
+    args = parser.parse_args()
+
+    if args.hydro:
+        dir_active = "../data/hydro/QTAIM/"
+    else:
+        dir_active = "../data/mg2/QTAIM/"
 
     for i in range(1000):
         counter = 0
