@@ -32,7 +32,8 @@ def controller_single(dir_active):
     print(folder_choice)
     
     if len(glob(dir_active + folder_choice + "/reactants" + "/*.wfn")) > 0:
-        pass
+        print("dft calc already done - reactants")
+
     else: 
         os.system(
             "orca "
@@ -45,7 +46,7 @@ def controller_single(dir_active):
             + "/reactants/output.out"
         )
     if len(glob(dir_active + folder_choice + "/products" + "/*.wfn")) > 0:
-        pass
+        print("dft calc already done - products")
     else:
         os.system(
             "orca "
@@ -59,12 +60,12 @@ def controller_single(dir_active):
         )
 
     if len(glob(dir_active + folder_choice + "/reactants/*.CPprop.txt")) > 0:
-        pass
+        print("cp calc already done - reactants")
     else: 
         subprocess.run(dir_active + folder_choice + "/reactants/props.sh")
         os.system("mv " + "./CPprop.txt " + dir_active + folder_choice + "/reactants/")
     if len(glob(dir_active + folder_choice + "/products/*.CPprop.txt")) > 0:
-        pass
+        print("cp calc already done - products")
     else: 
         subprocess.run(dir_active + folder_choice + "/products/props.sh")
         os.system("mv " + "./CPprop.txt " + dir_active + folder_choice + "/products/")
