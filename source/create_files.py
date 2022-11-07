@@ -19,11 +19,11 @@ def main():
         
         pandas_file = pd.read_json(json_file)
 
-        for ind, _ in pandas_file.iterrows():
+        for ind, row in pandas_file.iterrows():
 
-            ind_random = random.choice(range(len(pandas_file)))
+            #ind_random = random.choice(range(len(pandas_file)))
 
-            row = pandas_file.iloc[ind_random]
+            #row = pandas_file.iloc[ind_random]
             reaction_id = row["reaction_id"]
             # create folder in json directory for each reaction
             QTAIM_loc = json_loc + "QTAIM/"
