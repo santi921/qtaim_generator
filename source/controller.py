@@ -91,18 +91,18 @@ def main():
         t1 = ThreadWithResult(
             target=controller_single, kwargs={"dir_active": dir_active}
         )
-        t2 = ThreadWithResult(
-            target=controller_single, kwargs={"dir_active": dir_active}
-        )
-        t3 = ThreadWithResult(
-            target=controller_single, kwargs={"dir_active": dir_active}
-        )
+        #t2 = ThreadWithResult(
+        #    target=controller_single, kwargs={"dir_active": dir_active}
+        #)
+        #t3 = ThreadWithResult(
+        #    target=controller_single, kwargs={"dir_active": dir_active}
+        #)
         t1.start()
-        t2.start()
-        t3.start()
+        #t2.start()
+        #t3.start()
         t1.join()
-        t2.join()
-        t3.join()
+        #t2.join()
+        #t3.join()
 
 
 main()
