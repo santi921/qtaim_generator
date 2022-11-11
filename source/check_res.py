@@ -46,7 +46,7 @@ def main():
 
             if os.path.exists(QTAIM_loc_product + "input.wfn"):
                 if os.path.getsize(QTAIM_loc_product + "input.wfn") > 0:
-                    product_out_count += 1
+                    product_wfn_count += 1
             if os.path.exists(QTAIM_loc_product + "CPprop.txt"):
                 if os.path.getsize(QTAIM_loc_product + "CPprop.txt") > 0:
                     product_out_count += 1
