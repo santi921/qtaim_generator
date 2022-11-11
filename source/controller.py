@@ -66,6 +66,7 @@ def controller_single(dir_active, redo_qtaim=False):
         os.system("mv " + "./CPprop.txt " + dir_active + folder_choice + "/reactants/")
     if len(glob(dir_active + folder_choice + "/products/*.CPprop.txt") and not redo_qtaim) > 0:
         print("cp calc already done - products")
+        
     else: 
         subprocess.run(dir_active + folder_choice + "/products/props.sh")
         os.system("mv " + "./CPprop.txt " + dir_active + folder_choice + "/products/")
