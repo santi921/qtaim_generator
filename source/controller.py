@@ -14,7 +14,7 @@ class ThreadWithResult(threading.Thread):
         super().__init__(group=group, target=function, name=name, daemon=daemon)
 
 
-def controller_single(dir_active):
+def controller_single(dir_active, redo_qtaim=False):
 
     # get random folder from dir_active
     #for i in range(1000):
@@ -59,12 +59,12 @@ def controller_single(dir_active):
             + "/products/output.out"
         )
 
-    if len(glob(dir_active + folder_choice + "/reactants/*.CPprop.txt")) > 0:
+    if len(glob(dir_active + folder_choice + "/reactants/*.CPprop.txt") and not redo_qtaim) > 0:
         print("cp calc already done - reactants")
     else: 
         subprocess.run(dir_active + folder_choice + "/reactants/props.sh")
         os.system("mv " + "./CPprop.txt " + dir_active + folder_choice + "/reactants/")
-    if len(glob(dir_active + folder_choice + "/products/*.CPprop.txt")) > 0:
+    if len(glob(dir_active + folder_choice + "/products/*.CPprop.txt") and not redo_qtaim) > 0:
         print("cp calc already done - products")
     else: 
         subprocess.run(dir_active + folder_choice + "/products/props.sh")
@@ -79,23 +79,26 @@ def main():
                     description = 'What the program does',
                     epilog = 'Text at the bottom of help')
     parser.add_argument('-hydro', '--hydro', action='store_true')
+    parser.add_argument('-redo_qtaim', '--redo_qtaim', action='store_true')
     args = parser.parse_args()
 
     if args.hydro:
         dir_active = "../data/hydro/QTAIM/"
     else:
         dir_active = "../data/mg2/QTAIM/"
+    redo_qtaim = args.redo_qtaim
+    
 
-    for i in range(1000):
+    for i in range(10000):
         counter = 0
         t1 = ThreadWithResult(
-            target=controller_single, kwargs={"dir_active": dir_active}
+            target=controller_single, kwargs={"dir_active": dir_active, "redo_qtaim": redo_qtaim}
         )
         #t2 = ThreadWithResult(
-        #    target=controller_single, kwargs={"dir_active": dir_active}
+        #    target=controller_single, kwargs={"dir_active": dir_active, "redo_qtaim": redo_qtaim}
         #)
         #t3 = ThreadWithResult(
-        #    target=controller_single, kwargs={"dir_active": dir_active}
+        #    target=controller_single, kwargs={"dir_active": dir_active, "redo_qtaim": redo_qtaim}
         #)
         t1.start()
         #t2.start()
