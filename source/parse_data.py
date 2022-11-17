@@ -1,19 +1,23 @@
+import json
+import os 
 import pandas as pd
 import numpy as np 
-#def parse_cp():
+
 
 def parse_cp(lines, verbose = True):
     lines_split = [line.split() for line in lines]
     cp_bond, cp_atom = False, False
     cp_name = "null"
     cp_dict = {}
-    #print(lines_split[0])
-    if(lines_split[0][4] == '(3,-3)'): 
+
+    if('(3,-3)' in lines_split[0]): 
         cp_atom = True
         if verbose: print("atom cp")
-    elif(lines_split[0][4] == '(3,-1)'): 
+
+    elif('(3,-1)'in lines_split[0]): 
         cp_bond = True
         if verbose: print("bond cp")
+    
     else: 
         if verbose: print("ring critical bond not implemented")
         return "ring", cp_dict
@@ -162,71 +166,9 @@ def get_qtaim_descs(file = "./CPprop_1157_1118_1158.txt", verbose = False):
     ret_dict = {k: v for k, v in ret_dict.items() if "ring" not in k}
     return ret_dict
 
-def add_ind_to_dict(dict, lines_dft_file): 
-    """
-    dict: dict
-        dictionary of cp descriptors
-    lines_dft_file: list
-        list of lines from dft input file
-    """
-    # TODO
-    return dict
-
-def map_feats_to_bonds(df, qtaim_descs):
-    # takes xyz positions of bond CP and finds nearest neighbors in dict
-    
-    list_of_bond_inds = []
-    list_of_list_of_features = []
-    for k, v in qtaim_descs.items():
-        if "bond" in k:
-            pass
-            #list_of_bond_inds.append(k)
-            #list_of_list_of_features.append(v)
-
-    return list_of_bond_inds, list_of_list_of_features
-
-def check_num_atoms(qtaim_descs, n_atoms):
-    nuclear_cp_count = 0 
-    for k, v in qtaim_descs.items():
-        #print(k)
-        if(k.split("_")[1] != 'bond' and k.split("_")[1] != 'Unknown'):
-            nuclear_cp_count += 1
-            
-    print(nuclear_cp_count, n_atoms)
-    if(n_atoms != nuclear_cp_count):
-        return False
-    return True
-
-def count_atoms(dict_comp):
-    count = 0 
-    for k, v in dict_comp.items():
-        count+=v
-    return int(count)
-
-def check_qtaim_mapping(map_dict, atom_dict, qtaim_descs):
-    for k, v in map_dict.items():
-        qtaim_descs_key = list(qtaim_descs.keys())[k]
-        print(list(atom_dict.keys()))
-        atom_dict_key = list(atom_dict.keys())[v]
-        element_qtaim = qtaim_descs[qtaim_descs_key]["element"]
-        element_atom = atom_dict[atom_dict_key]["element"]
-        xyz_qtaim = qtaim_descs[qtaim_descs_key]["pos_ang"]
-        xyz_atom = atom_dict[atom_dict_key]["pos"]
-        
-        if(np.linalg.norm(np.array(xyz_qtaim) - np.array(xyz_atom)) > 0.1):
-            print("error in mapping")
-            return False
-        if (element_atom != element_qtaim):
-            print("error in mapping")
-            return False
-    
-    return True
-
-def merge_qtaim_inds(qtaim_descs, dft_inp_file):
-    
-    ret_dict = {}   
+def dft_inp_to_dict(dft_inp_file):
     atom_dict = {}
-    # open dft input file 
+
     with open(dft_inp_file) as f:
         lines = f.readlines()
         # strip tabs
@@ -240,75 +182,352 @@ def merge_qtaim_inds(qtaim_descs, dft_inp_file):
 
     # filter lines before and including xyz_ind
     lines = lines[xyz_ind+1:-1]  
-    
-    
+
     for ind, line in enumerate(lines):
         line_split = line.split()
         atom_dict[ind] = {"element": line_split[0], "pos": [float(x) for x in line_split[1:]]} 
     
+    return atom_dict
+
+def only_atom_cps(qtaim_descs): 
+    ret_dict = {}
+    ret_dict_bonds = {}
     for k, v in qtaim_descs.items():
         if "bond" not in k and "Unknown" not in k:
-            ret_dict[int(v["cp_num"])] = int(v["number"])
-            ind += 1
+            ret_dict[k] = v
+        if "bond" in k:
+            ret_dict_bonds[k] = v
+    return ret_dict, ret_dict_bonds
 
-    valid_atoms = check_qtaim_mapping(ret_dict, atom_dict, qtaim_descs)
+def find_cp(atom_dict, atom_cp_dict):
+    """
+    From a dictionary of atom ind, position, and element, find the corresponding cp in the atom_cp_dict    
+    Takes: 
+        atom_dict: dict
+            dictionary of atom ind, position, and element
+        atom_cp_dict: dict
+            dictionary of cp ind, position, and element
+    Returns:
+        cp_key: str
+            key of cp_dict
+        cp_dict: dict
+            dictionary of cp values matching atom 
+    """
+
+    for k, v in atom_cp_dict.items():
+        distance = np.linalg.norm(np.array(v["pos_ang"]) - np.array(atom_dict["pos"]))
+        if(v["cp_num"] == atom_dict["ind"]):
+            element_cond_initial = v["element"] == atom_dict["element"]
+            distance_cond_initial = distance < 0.5  
+            return k, v 
+        
+        else: 
+            dist_cond = distance < 0.5
+            element_cond = v["element"] == atom_dict["element"]
+            if(dist_cond and element_cond):
+                return k, v
+
+    return False, {}
+        
+def find_cp_map(dft_dict, atom_cp_dict):
+    """
+    Iterate through dft dict and find nearest cp in atom_cp_dict
+    Takes: 
+        dft_dict: dict
+            dictionary of dft atoms
+        atom_cp_dict: dict  
+            dictionary of qtaim atoms
+    Returns:
+        ret_dict: dict
+    """
+    ret_dict, qtaim_to_dft = {}, {}
+    missing_atoms = []
+    for k, v in dft_dict.items():
+        v_send = {"element": v["element"], "pos": v["pos"], "ind": k}
+        ret_key, dict_ret = find_cp(v_send, atom_cp_dict)
+
+        if(ret_key != False):
+            ret_dict[k] = dict_ret
+            qtaim_to_dft[k] = {"key": ret_key, "pos": dict_ret["pos_ang"]}
+        else:
+            #print("CP no match found in dft")
+            ret_dict[k] = {}
+            qtaim_to_dft[k] = {"key": -1, "pos": []}
+            missing_atoms.append(k)
+
+    return ret_dict, qtaim_to_dft, missing_atoms
     
-    if(valid_atoms): 
-        print("valid mapping")
-        features_atom_remapped = {}
-        keys_qtaim = list(qtaim_descs.keys())
-        for k, v in ret_dict.items():
-            key_kth = keys_qtaim[k]
-            features_atom_remapped[v] = qtaim_descs[key_kth]
+def find_bond_cp(i, bonds_cps):
+    """
+    Takes:
+        i: list
+            list of two atom indices
+        bonds_cps: dict
+            dictionary of bond cps
+    Returns:
+        dict_cp_bond: dict
+            dictionary of cp values for bond
+    """
+    dict_cp_bond = {}
+    for k, v in bonds_cps.items():
+        if(i == v["atom_inds"] or i == [v["atom_inds"][1], v["atom_inds"][0]]):
+            return v
+        
+    return False
 
-        return ret_dict, features_atom_remapped
-    else:
-        print("invalid mapping")
-        return ret_dict, {}
+def add_closest_atoms_to_bond(bond_cps, dft_dict):
+    """
+    Takes in bonds cps and adds the index of the closest atoms to the bond
+    Takes:
+        bond_cps: dict
+            dictionary of bond cps
+        dft_to_qtaim: dict
+            dictionary of dft to qtaim atom indices
+    Returns:
+        bond_cps: dict
+            dictionary of bond cps with closest atoms added
+    """
+    for k, v in bond_cps.items():
+        for i in k:
+            dists = []
+            for j in dft_dict.keys():
+                dists.append(np.linalg.norm(np.array(v["pos_ang"]) - np.array(dft_dict[j]["pos"])))
+            
+            bond_cps[k]["atom_inds"] = np.argsort(dists)[:2].tolist()
+    return bond_cps
 
+def bond_cp(bond_cps, bond_list, dft_dict):
+    ret_dict = {}
+    
+    bond_cps = add_closest_atoms_to_bond(bond_cps, dft_dict)
+
+    for i in bond_list: 
+        dict_cp_bond = find_bond_cp(i, bond_cps)
+        
+        if dict_cp_bond != False:
+            ret_dict[tuple(i)] = dict_cp_bond
+        else: 
+            #print("No bond found for ", i)
+            ret_dict[tuple(i)] = {}
+
+    return ret_dict
+
+def merge_qtaim_inds(qtaim_descs, bond_list, dft_inp_file):
+    """
+        Gets mapping of qtaim indices to atom indices and remaps atom CP descriptors
+        qtaim_descs: dict of qtaim descriptors 
+        dft_inp_file: str input file for dft
+
+        returns: dict of qtaim descriptors ordered by atoms in dft_inp_file
+    """ 
+    # open dft input file 
+    dft_dict = dft_inp_to_dict(dft_inp_file)
+    # find only atom cps to map
+    atom_only_cps, bonds_only_cps = only_atom_cps(qtaim_descs)
+    # remap qtaim indices to atom indices
+    atom_cps_remapped, qtaim_to_dft, missing_atoms = find_cp_map(dft_dict, atom_only_cps)
+    # remapping bonds
+    bond_cps = bond_cp(bonds_only_cps, bond_list, dft_dict)
+    # merge dictionaries
+    ret_dict = {**atom_cps_remapped, **bond_cps}
+    return ret_dict
+
+
+def gather_imputation(df, features_atom, features_bond, root_dir  = "../data/hydro/", json_file_imputed = "./qm_9_hydro_training_impute_vals.json"): 
+             
+        
+    impute_dict = {"atom": {}, "bond": {}}
+    for i in features_atom: 
+        impute_dict["atom"][i] = []
+    for i in features_bond:
+        impute_dict["bond"][i] = []
+
+    if os.path.exists(json_file_imputed):
+        print("attempting to use previously stored imputation values")
+        with open(json_file_imputed, "r") as f:
+            impute_dict = json.load(f)
+        return impute_dict
+
+    else: 
+        for ind, row in df.iterrows():
+            reaction_id = row["reaction_id"]
+            #print(reaction_id)
+            bonds_reactants = row["reactant_bonds"]
+            QTAIM_loc_reactant = root_dir + "QTAIM/" + str(reaction_id) + "/reactants/"
+            cp_file_reactants = QTAIM_loc_reactant + "CPprop.txt"
+            dft_inp_file_reactant = QTAIM_loc_reactant + "input.in"
+            qtaim_descs_reactants = get_qtaim_descs(cp_file_reactants, verbose = False)
+            
+            bonds_products = row["product_bonds"]
+            QTAIM_loc_product = root_dir + "QTAIM/" + str(reaction_id) + "/products/"
+            cp_file_products = QTAIM_loc_product + "CPprop.txt"
+            dft_inp_file_product = QTAIM_loc_product + "input.in"
+            qtaim_descs_products = get_qtaim_descs(cp_file_products,  verbose = False)
+            
+            
+            mapped_descs_reactants = merge_qtaim_inds(
+                qtaim_descs_reactants, 
+                bonds_reactants, 
+                dft_inp_file_reactant)
+            
+            mapped_descs_products = merge_qtaim_inds(
+                qtaim_descs_products, 
+                bonds_products,  
+                dft_inp_file_product)
+            
+            for k, v in mapped_descs_reactants.items():
+                if(v=={}):
+                    pass 
+                elif (type(k) == tuple):
+                    for i in features_bond:
+                        impute_dict["bond"][i].append(v[i])
+                elif(type(k) == int):
+                    for i in features_atom:
+                        impute_dict["atom"][i].append(v[i])
+                else: pass 
+
+            for k, v in mapped_descs_products.items():
+                if(v=={}):
+                    pass 
+                elif (type(k) == tuple):
+                    for i in features_bond:
+                        impute_dict["bond"][i].append(v[i])
+                elif(type(k) == int):
+                    for i in features_atom:
+                        impute_dict["atom"][i].append(v[i])
+                else: pass 
+
+    # get the mean and median of each feature
+    for k, v in impute_dict.items():
+        for k1, v1 in v.items():
+            impute_dict[k][k1] = {"mean":np.mean(np.array(v1)), "median": np.median(np.array(v1))}
+    # save dictionary as json 
+    with open(json_file_imputed, "w") as f:
+        json.dump(impute_dict, f)
+
+    return impute_dict
+    
 def main():
-    
+
     json_loc = "../data/hydro/"
-    #json_file = json_loc + "20220613_reaction_data.json"
-    #json_loc_mg = "/home/santiagovargas/dev/bondnet/bondnet/dataset/mg_dataset/"
-    #json_file = json_loc + "merged_mg.json"
     json_file = json_loc + "rev_corrected_bonds_qm_9_hydro_training.json"
-    
     pandas_file = pd.read_json(json_file)
-    QTAIM_loc = json_loc + "QTAIM/"
+    imputed_file = json_loc + "qm_9_hydro_training_impute_vals.json"
+
+
+    features_atom = ['Lagrangian_K', 'Hamiltonian_K', 'e_density', 'lap_e_density', 'e_loc_func', 'ave_loc_ion_E',
+    'delta_g_promolecular', 'delta_g_hirsh', 'esp_nuc', 'esp_e', 'esp_total', 
+    'grad_norm', 'lap_norm', 'eig_hess', 'det_hessian', 'ellip_e_dens', 'eta']
+
+    features_bond = ['Lagrangian_K', 'Hamiltonian_K', 'e_density', 'lap_e_density', 
+        'e_loc_func', 'ave_loc_ion_E', 'delta_g_promolecular', 'delta_g_hirsh', 'esp_nuc',
+        'esp_e', 'esp_total', 'grad_norm', 'lap_norm', 'eig_hess',
+        'det_hessian', 'ellip_e_dens', 'eta']
+
+
+    impute_dict = gather_imputation(
+        pandas_file, 
+        features_atom, 
+        features_bond, 
+        root_dir  = json_loc, 
+        json_file_imputed = imputed_file)
+
+    for i in features_atom:
+        str_reactant = "extra_feat_atom_reactant_" + i
+        str_product = "extra_feat_atom_product_" + i
+        pandas_file[str_reactant] = "" 
+        pandas_file[str_product] = ""
+
+    for i in features_bond:
+        str_reactant = "extra_feat_bond_reactant_" + i
+        str_product = "extra_feat_bond_product_" + i
+        pandas_file[str_reactant] = "" 
+        pandas_file[str_product] = ""
     
-    for ind, row in pandas_file.head(10).iterrows():
+    print("Done gathering imputation data...")
 
+    for ind, row in pandas_file.iterrows():
         reaction_id = row["reaction_id"]
+        bonds_reactants = row["reactant_bonds"]
         QTAIM_loc_reactant = json_loc + "QTAIM/" + str(reaction_id) + "/reactants/"
+        cp_file_reactants = QTAIM_loc_reactant + "CPprop.txt"
+        dft_inp_file_reactant = QTAIM_loc_reactant + "input.in"
+        
+        bonds_products = row["product_bonds"]
         QTAIM_loc_product = json_loc + "QTAIM/" + str(reaction_id) + "/products/"
-        print(reaction_id)
-        qtaim_descs_reactant = get_qtaim_descs(QTAIM_loc_reactant + "CPprop.txt", verbose = False)
-        qtaim_descs_product = get_qtaim_descs(QTAIM_loc_product + "CPprop.txt", verbose = False)
-        # remove CPs 
-        natoms = count_atoms(row["composition"])
-        react_cp_found = check_num_atoms(qtaim_descs_reactant, natoms)
-        prod_cp_found = check_num_atoms(qtaim_descs_product, natoms)
-
-        features_in_order_reactants = merge_qtaim_inds(qtaim_descs_reactant, dft_inp_file = QTAIM_loc_product + "input.in")
-        features_in_order_products = merge_qtaim_inds(qtaim_descs_product, dft_inp_file = QTAIM_loc_product + "input.in")
-
-        #qtaim_descs_reactant = bond_feat_add_bond_inds(qtaim_descs_reactant, atom_maps_reactant)
-        #qtaim_descs_product = bond_feat_add_bond_inds(qtaim_descs_product, atom_maps_product)
-        print(react_cp_found, prod_cp_found)
-        # bond cp xyz to atom indicies
-
-        #reactant_feats_list, product_feats_list = pull_feats_from_qtaim(qtaim_descs_reactant, qtaim_descs_product)
+        cp_file_products = QTAIM_loc_product + "CPprop.txt"
+        dft_inp_file_product = QTAIM_loc_product + "input.in"
+        
+        qtaim_descs_reactants = get_qtaim_descs(cp_file_reactants, verbose = False)
+        qtaim_descs_products = get_qtaim_descs(cp_file_products,  verbose = False)
+        
+        mapped_descs_reactants = merge_qtaim_inds(
+            qtaim_descs_reactants, 
+            bonds_reactants, 
+            dft_inp_file_reactant)
+        
+        mapped_descs_products = merge_qtaim_inds(
+            qtaim_descs_products, 
+            bonds_products,  
+            dft_inp_file_product)
 
 
-        # reactants
-        #try: reactants = row["combined_reactants_graph"]
-        #except: reactants = row["reactant_molecule_graph"]
-        # products
-        #try: products = row["combined_products_graph"]
-        #except: products = row["product_molecule_graph"]
-        #product_bonds = row["combined_product_bonds_global"]
-        #reactant_bonds = row["reactant_bonds"]
+        bonds_products, bonds_reactants = [], []
+        # fill in imputation values
+        
+        for k, v in mapped_descs_reactants.items():
+            if(v=={}):
+                if (type(k) == tuple):
+                    bonds_reactants.append(list(k))
+                    for i in features_bond:
+                        v[i] = impute_dict["bond"][i]["median"]
+                else: 
+                    for i in features_atom:
+                        v[i] = impute_dict["atom"][i]["median"]   
+        
+        for k, v in mapped_descs_products.items():
+            if(v=={}):
+                if (type(k) == tuple):
+                    for i in features_bond:
+                        bonds_products.append(list(k))
+                        v[i] = impute_dict["bond"][i]["median"]
+                else: 
+                    for i in features_atom:
+                        v[i] = impute_dict["atom"][i]["median"]  
+
+
+        # update the pandas file with the new values
+        for k, v in mapped_descs_reactants.items():
+            if(v=={}):
+                print("still an empty dict!")
+
+            elif (type(k) == tuple):
+                for i in features_bond:
+                    str_reactant = "extra_feat_bond_reactant_" + i
+                    pandas_file.loc[ind, str_reactant] = v[i]
+            elif(type(k) == int):
+                for i in features_atom:
+                    str_reactant = "extra_feat_atom_reactant_" + i
+                    pandas_file.loc[ind, str_reactant] = v[i]
+            
+            else: print("invalid type in dict")
+        
+        for k, v in mapped_descs_products.items():
+            if(v=={}):
+                print("still an empty dict!")
+
+            elif (type(k) == tuple):
+                for i in features_bond:
+                    str_product = "extra_feat_bond_product_" + i
+                    pandas_file.loc[ind, str_product] = v[i]
+            elif(type(k) == int):
+                for i in features_atom:
+                    str_product = "extra_feat_atom_product_" + i
+                    pandas_file.loc[ind, str_product] = v[i]
+            
+            else: print("invalid type in dict")
+
+    print("done gathering and imputing features...")
 
 
 main()
