@@ -332,9 +332,7 @@ def merge_qtaim_inds(qtaim_descs, bond_list, dft_inp_file):
     ret_dict = {**atom_cps_remapped, **bond_cps}
     return ret_dict
 
-
-def gather_imputation(df, features_atom, features_bond, root_dir  = "../data/hydro/", json_file_imputed = "./qm_9_hydro_training_impute_vals.json"): 
-             
+def gather_imputation(df, features_atom, features_bond, root_dir  = "../data/hydro/", json_file_imputed = "./qm_9_hydro_training_impute_vals.json"):           
         
     impute_dict = {"atom": {}, "bond": {}}
     for i in features_atom: 
@@ -413,7 +411,9 @@ def main():
     json_file = json_loc + "rev_corrected_bonds_qm_9_hydro_training.json"
     pandas_file = pd.read_json(json_file)
     imputed_file = json_loc + "qm_9_hydro_training_impute_vals.json"
-
+    pandas_out = json_loc + "qm_9_hydro_qtaim.json"
+    bond_list_reactants = []
+    bond_list_products = []
 
     features_atom = ['Lagrangian_K', 'Hamiltonian_K', 'e_density', 'lap_e_density', 'e_loc_func', 'ave_loc_ion_E',
     'delta_g_promolecular', 'delta_g_hirsh', 'esp_nuc', 'esp_e', 'esp_total', 
@@ -473,8 +473,8 @@ def main():
 
 
         bonds_products, bonds_reactants = [], []
-        # fill in imputation values
         
+        # fill in imputation values
         for k, v in mapped_descs_reactants.items():
             if(v=={}):
                 if (type(k) == tuple):
@@ -494,7 +494,6 @@ def main():
                 else: 
                     for i in features_atom:
                         v[i] = impute_dict["atom"][i]["median"]  
-
 
         # update the pandas file with the new values
         for k, v in mapped_descs_reactants.items():
@@ -527,7 +526,19 @@ def main():
             
             else: print("invalid type in dict")
 
-    print("done gathering and imputing features...")
+        keys_products = mapped_descs_products.keys()
+        keys_reactants = mapped_descs_reactants.keys()
+        # filter keys that aren't tuples 
+        keys_products = [x for x in keys_products if type(x) == tuple]
+        keys_reactants = [x for x in keys_reactants if type(x) == tuple]
+        bond_list_reactants.append(keys_reactants)
+        bond_list_products.append(keys_products)
 
+    pandas_file["extra_feat_bond_reactants_indices_qtaim"] = bond_list_reactants
+    pandas_file["extra_feat_bond_products_indices_qtaim"] = bond_list_products
+    
+    print("done gathering and imputing features...")
+    # save the pandas file
+    pandas_file.to_json(pandas_out)
 
 main()
