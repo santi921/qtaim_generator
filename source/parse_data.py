@@ -471,7 +471,7 @@ def main():
             bonds_products,  
             dft_inp_file_product)
 
-
+        
         bonds_products, bonds_reactants = [], []
         
         # fill in imputation values
@@ -480,51 +480,76 @@ def main():
                 if (type(k) == tuple):
                     bonds_reactants.append(list(k))
                     for i in features_bond:
-                        v[i] = impute_dict["bond"][i]["median"]
+                        mapped_descs_reactants[k][i] = impute_dict["bond"][i]["median"]
                 else: 
                     for i in features_atom:
-                        v[i] = impute_dict["atom"][i]["median"]   
+                        mapped_descs_reactants[k][i] = impute_dict["atom"][i]["median"]   
         
         for k, v in mapped_descs_products.items():
             if(v=={}):
                 if (type(k) == tuple):
                     for i in features_bond:
                         bonds_products.append(list(k))
-                        v[i] = impute_dict["bond"][i]["median"]
+                        mapped_descs_products[k][i] = impute_dict["bond"][i]["median"]
                 else: 
                     for i in features_atom:
-                        v[i] = impute_dict["atom"][i]["median"]  
-
-        # update the pandas file with the new values
-        for k, v in mapped_descs_reactants.items():
-            if(v=={}):
-                print("still an empty dict!")
-
-            elif (type(k) == tuple):
-                for i in features_bond:
-                    str_reactant = "extra_feat_bond_reactant_" + i
-                    pandas_file.loc[ind, str_reactant] = v[i]
-            elif(type(k) == int):
-                for i in features_atom:
-                    str_reactant = "extra_feat_atom_reactant_" + i
-                    pandas_file.loc[ind, str_reactant] = v[i]
-            
-            else: print("invalid type in dict")
+                        mapped_descs_products[k][i] = impute_dict["atom"][i]["median"]  
         
-        for k, v in mapped_descs_products.items():
-            if(v=={}):
-                print("still an empty dict!")
+        # get all the values of a certain key for every dictionary in the dicitonary
+        cps_reactants = mapped_descs_reactants.keys()
+        cps_products = mapped_descs_products.keys()
+        flat_reactants, flat_products = {}, {}
+        
 
-            elif (type(k) == tuple):
-                for i in features_bond:
-                    str_product = "extra_feat_bond_product_" + i
-                    pandas_file.loc[ind, str_product] = v[i]
-            elif(type(k) == int):
-                for i in features_atom:
-                    str_product = "extra_feat_atom_product_" + i
-                    pandas_file.loc[ind, str_product] = v[i]
-            
-            else: print("invalid type in dict")
+        for cps_reactant in cps_reactants:
+            for i in features_atom: 
+                if (type(cps_reactant) != tuple):
+                    # check if the key exists
+                    name = "extra_feat_atom_reactant_" + i
+                    if name not in flat_reactants.keys():
+                        flat_reactants[name] = []    
+                    flat_reactants[name].append(mapped_descs_reactants[cps_reactant][i])
+            for i in features_bond:
+                if (type(cps_reactant) == tuple): 
+                    # check if the key exists
+                    name = "extra_feat_bond_reactant_" + i
+                    if name not in flat_reactants.keys():
+                        flat_reactants[name] = []    
+                    flat_reactants[name].append(mapped_descs_reactants[cps_reactant][i])
+
+        for cps_product in cps_products:
+            for i in features_atom: 
+                if (type(cps_product) != tuple):
+                    # check if the key exists
+                    name = "extra_feat_atom_product_" + i
+                    if name not in flat_products.keys():
+                        flat_products[name] = []    
+                    flat_products[name].append(mapped_descs_products[cps_product][i])
+
+            for i in features_bond:
+                if (type(cps_product) == tuple): 
+                    # check if the key exists
+                    name = "extra_feat_bond_product_" + i
+                    if name not in flat_products.keys():
+                        flat_products[name] = []    
+                    flat_products[name].append(mapped_descs_products[cps_product][i])
+
+        #print(flat_products)
+        #print(flat_reactants)
+        # update the pandas file with the new values
+        for k, v in flat_reactants.items():
+            if ("bond" in k): 
+                pandas_file.at[ind, k] = [v]
+            else: 
+                pandas_file.at[ind, k] = np.array(v)
+
+        for k, v in flat_products.items():
+            if ("bond" in k): 
+                pandas_file.at[ind, k] = [v]
+            else: 
+                pandas_file.at[ind, k] = np.array(v)
+
+    
 
         keys_products = mapped_descs_products.keys()
         keys_reactants = mapped_descs_reactants.keys()
