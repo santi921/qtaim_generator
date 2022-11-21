@@ -412,6 +412,13 @@ def main():
     pandas_file = pd.read_json(json_file)
     imputed_file = json_loc + "qm_9_hydro_training_impute_vals.json"
     pandas_out = json_loc + "qm_9_hydro_qtaim.json"
+
+    #json_loc = "../data/mg2/"
+    #json_file = json_loc + "merged_mg.json"
+    #pandas_file = pd.read_json(json_file)
+    #imputed_file = json_loc + "mg_impute.json"
+    #pandas_out = json_loc + "mg_qtaim_complete.json"
+
     bond_list_reactants = []
     bond_list_products = []
 
@@ -556,11 +563,11 @@ def main():
         # filter keys that aren't tuples 
         keys_products = [x for x in keys_products if type(x) == tuple]
         keys_reactants = [x for x in keys_reactants if type(x) == tuple]
-        bond_list_reactants.append(keys_reactants)
-        bond_list_products.append(keys_products)
+        bond_list_reactants.append([keys_reactants])
+        bond_list_products.append([keys_products])
 
-    pandas_file["extra_feat_bond_reactants_indices_qtaim"] = bond_list_reactants
-    pandas_file["extra_feat_bond_products_indices_qtaim"] = bond_list_products
+    pandas_file["extra_feat_bond_reactant_indices_qtaim"] = bond_list_reactants
+    pandas_file["extra_feat_bond_product_indices_qtaim"] = bond_list_products
     
     print("done gathering and imputing features...")
     # save the pandas file
