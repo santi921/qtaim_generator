@@ -516,23 +516,21 @@ def main():
         ind = 0 
         for k, v in mapped_descs_products.items():
             if(v=={}):
-                if (type(k) == tuple):
+                if (type(k) == tuple): # bond cp 
                     for i in features_bond:
                         bonds_products.append(list(k))
                         if impute:
                             mapped_descs_products[k][i] = impute_dict["bond"][i]["median"]
-                            if(ind not in drop_list):
-                                drop_list.append(ind)
+
                         else: 
                             mapped_descs_products[k][i] =  -1
                             if(ind not in drop_list):
                                 drop_list.append(ind)
-                else: 
+                else: # atom cp
                     for i in features_atom:
                         if impute:
                             mapped_descs_products[k][i] = impute_dict["atom"][i]["median"]  
-                            if(ind not in drop_list):
-                                drop_list.append(ind)
+
                         else: 
                             mapped_descs_products[k][i] = -1
                             if(ind not in drop_list):
