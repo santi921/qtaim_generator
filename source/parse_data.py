@@ -409,20 +409,20 @@ def main():
     impute = True
 
     drop_list = []
-    json_loc = "../data/hydro/"
-    json_file = json_loc + "qm_9_hydro_complete.json"
-    pandas_file = pd.read_json(json_file)
-    print(pandas_file.shape)
-    pandas_out = json_loc + "qm_9_hydro_qtaim.json"
-
-    #json_loc = "../data/madeira/"
-    #json_file = json_loc + "merged_mg.json"
+    #json_loc = "../data/hydro/"
+    #json_file = json_loc + "qm_9_hydro_complete.json"
     #pandas_file = pd.read_json(json_file)
-    #pandas_out = json_loc + "mg_qtaim_complete.json"
+    #print(pandas_file.shape)
+    #pandas_out = json_loc + "qm_9_hydro_qtaim.json"
+
+    json_loc = "../data/madeira/"
+    json_file = json_loc + "merged_mg.json"
+    pandas_file = pd.read_json(json_file)
+    pandas_out = json_loc + "mg_qtaim_complete.json"
     
     if impute: 
-        imputed_file = json_loc + "qm_9_hydro_training_impute_vals.json"
-        #imputed_file = json_loc + "mg_impute.json"
+        #imputed_file = json_loc + "qm_9_hydro_training_impute_vals.json"
+        imputed_file = json_loc + "mg_impute.json"
     
 
     bond_list_reactants = []
@@ -490,7 +490,7 @@ def main():
         
     
         # fill in imputation values
-        ind = 0
+        track_imp_ind = 0 
         for k, v in mapped_descs_reactants.items():
             if(v=={}):
                 if (type(k) == tuple):
@@ -511,9 +511,9 @@ def main():
                             mapped_descs_reactants[k][i] = -1
                             if(ind not in drop_list):
                                 drop_list.append(ind)
-            ind += 1 
+            track_imp_ind += 1 
         
-        ind = 0 
+        track_imp_ind = 0 
         for k, v in mapped_descs_products.items():
             if(v=={}):
                 if (type(k) == tuple): # bond cp 
@@ -523,6 +523,7 @@ def main():
                             mapped_descs_products[k][i] = impute_dict["bond"][i]["median"]
 
                         else: 
+                            print("feature missing", ind)
                             mapped_descs_products[k][i] =  -1
                             if(ind not in drop_list):
                                 drop_list.append(ind)
@@ -532,11 +533,12 @@ def main():
                             mapped_descs_products[k][i] = impute_dict["atom"][i]["median"]  
 
                         else: 
+                            print("feature missing", ind)
                             mapped_descs_products[k][i] = -1
                             if(ind not in drop_list):
                                 drop_list.append(ind)
                             
-            ind += 1
+            track_imp_ind += 1
 
         # get all the values of a certain key for every dictionary in the dicitonary
         cps_reactants = mapped_descs_reactants.keys()
