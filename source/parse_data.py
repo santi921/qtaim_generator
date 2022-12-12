@@ -407,10 +407,10 @@ def gather_imputation(df, features_atom, features_bond, root_dir  = "../data/hyd
     
 def main():
     impute = True
-    
+
     drop_list = []
     json_loc = "../data/hydro/"
-    json_file = json_loc + "rev_corrected_bonds_qm_9_hydro_training.json"
+    json_file = json_loc + "qm_9_hydro_complete.json"
     pandas_file = pd.read_json(json_file)
     print(pandas_file.shape)
     pandas_out = json_loc + "qm_9_hydro_qtaim.json"
