@@ -490,7 +490,6 @@ def main():
         
     
         # fill in imputation values
-        track_imp_ind = 0 
         for k, v in mapped_descs_reactants.items():
             if(v=={}):
                 if (type(k) == tuple):
@@ -499,21 +498,23 @@ def main():
                         if impute:
                             mapped_descs_reactants[k][i] = impute_dict["bond"][i]["median"]
                         else: 
+                            print("feature missing", ind)
                             mapped_descs_reactants[k][i] =  -1
-                            if(track_imp_ind not in drop_list):
-                                drop_list.append(track_imp_ind)
+                            if(ind not in drop_list):
+                                drop_list.append(ind)
                                                         
                 else: 
                     for i in features_atom:
                         if impute:
                             mapped_descs_reactants[k][i] = impute_dict["atom"][i]["median"]   
                         else:   
+                            print("feature missing", ind)
                             mapped_descs_reactants[k][i] = -1
-                            if(track_imp_ind not in drop_list):
-                                drop_list.append(track_imp_ind)
+                            if(ind not in drop_list):
+                                drop_list.append(ind)
             track_imp_ind += 1 
         
-        track_imp_ind = 0 
+        
         for k, v in mapped_descs_products.items():
             if(v=={}):
                 if (type(k) == tuple): # bond cp 
@@ -523,20 +524,20 @@ def main():
                             mapped_descs_products[k][i] = impute_dict["bond"][i]["median"]
 
                         else: 
-                            print("feature missing", track_imp_ind)
+                            print("feature missing", ind)
                             mapped_descs_products[k][i] =  -1
-                            if(track_imp_ind not in drop_list):
-                                drop_list.append(track_imp_ind)
+                            if(ind not in drop_list):
+                                drop_list.append(ind)
                 else: # atom cp
                     for i in features_atom:
                         if impute:
                             mapped_descs_products[k][i] = impute_dict["atom"][i]["median"]  
 
                         else: 
-                            print("feature missing", track_imp_ind)
+                            print("feature missing", ind)
                             mapped_descs_products[k][i] = -1
-                            if(track_imp_ind not in drop_list):
-                                drop_list.append(track_imp_ind)
+                            if(ind not in drop_list):
+                                drop_list.append(ind)
                             
             track_imp_ind += 1
 
