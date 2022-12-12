@@ -512,7 +512,6 @@ def main():
                             mapped_descs_reactants[k][i] = -1
                             if(ind not in drop_list):
                                 drop_list.append(ind)
-            track_imp_ind += 1 
         
         
         for k, v in mapped_descs_products.items():
@@ -539,7 +538,6 @@ def main():
                             if(ind not in drop_list):
                                 drop_list.append(ind)
                             
-            track_imp_ind += 1
 
         # get all the values of a certain key for every dictionary in the dicitonary
         cps_reactants = mapped_descs_reactants.keys()
