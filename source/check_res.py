@@ -14,7 +14,7 @@ def main():
     if json_tf:
 
         json_loc = "../data/hydro/"
-        json_file = json_loc + "rev_corrected_bonds_qm_9_hydro_training.json"
+        json_file = json_loc + "qm_9_hydro_complete.json"
         json_loc = "../data/mg2/"
         json_file = json_loc + "merged_mg.json"
         json_loc = "../data/mg1/"

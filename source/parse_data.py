@@ -332,7 +332,7 @@ def merge_qtaim_inds(qtaim_descs, bond_list, dft_inp_file):
     ret_dict = {**atom_cps_remapped, **bond_cps}
     return ret_dict
 
-def gather_imputation(df, features_atom, features_bond, root_dir  = "../data/hydro/", json_file_imputed = "./qm_9_hydro_training_impute_vals.json"):           
+def gather_imputation(df, features_atom, features_bond, root_dir  = "../data/hydro/", json_file_imputed = "./imputed_vals.json"):           
         
     impute_dict = {"atom": {}, "bond": {}}
     for i in features_atom: 
@@ -349,11 +349,11 @@ def gather_imputation(df, features_atom, features_bond, root_dir  = "../data/hyd
     else: 
         for ind, row in df.iterrows():
             reaction_id = row["reaction_id"]
-            #print(reaction_id)
             bonds_reactants = row["reactant_bonds"]
             QTAIM_loc_reactant = root_dir + "QTAIM/" + str(reaction_id) + "/reactants/"
             cp_file_reactants = QTAIM_loc_reactant + "CPprop.txt"
             dft_inp_file_reactant = QTAIM_loc_reactant + "input.in"
+
             qtaim_descs_reactants = get_qtaim_descs(cp_file_reactants, verbose = False)
             
             bonds_products = row["product_bonds"]
@@ -394,6 +394,7 @@ def gather_imputation(df, features_atom, features_bond, root_dir  = "../data/hyd
                     for i in features_atom:
                         impute_dict["atom"][i].append(v[i])
                 else: pass 
+            #except: print(reaction_id)
 
     # get the mean and median of each feature
     for k, v in impute_dict.items():
@@ -410,28 +411,33 @@ def main():
 
     drop_list = []
     #json_loc = "../data/hydro/"
-    #json_file = json_loc + "qm_9_hydro_complete.json"
-    #pandas_file = pd.read_json(json_file)
-    #print(pandas_file.shape)
-    #pandas_out = json_loc + "qm_9_hydro_qtaim.json"
-
-    json_loc = "../data/madeira/"
-    json_file = json_loc + "merged_mg.json"
+    #json_file = json_loc + "rev_corrected_bonds_qm_9_hydro_training.json"
+    
+    json_loc = "../data/hydro_full/"
+    json_file = json_loc + "qm_9_hydro_complete.json"
     pandas_file = pd.read_json(json_file)
-    pandas_out = json_loc + "mg_qtaim_complete.json"
+    pandas_out = json_loc + "qm_9_hydro_qtaim_temp.json"
     
-    if impute: 
-        #imputed_file = json_loc + "qm_9_hydro_training_impute_vals.json"
-        imputed_file = json_loc + "mg_impute.json"
+    #json_loc = "../data/madeira/"
+    #json_file = json_loc + "merged_mg.json"
+    #pandas_file = pd.read_json(json_file)
+    #pandas_out = json_loc + "mg_qtaim_complete_temp.json"
     
+    print(pandas_file.shape)
+    
+    #if impute: 
+    #    #imputed_file = json_loc + "qm_9_hydro_training_impute_vals.json"
+    #    #imputed_file = json_loc + "mg_impute.json"
+    imputed_file = json_loc + "hydro_temp_impute.json"
 
     bond_list_reactants = []
     bond_list_products = []
 
 
-    features_atom = ['Lagrangian_K', 'Hamiltonian_K', 'e_density', 'lap_e_density', 'e_loc_func', 'ave_loc_ion_E',
-    'delta_g_promolecular', 'delta_g_hirsh', 'esp_nuc', 'esp_e', 'esp_total', 
-    'grad_norm', 'lap_norm', 'eig_hess', 'det_hessian', 'ellip_e_dens', 'eta']
+    features_atom = ['Lagrangian_K', 'Hamiltonian_K', 'e_density', 'lap_e_density', 
+        'e_loc_func', 'ave_loc_ion_E', 'delta_g_promolecular', 'delta_g_hirsh', 'esp_nuc', 
+        'esp_e', 'esp_total', 'grad_norm', 'lap_norm', 'eig_hess', 
+        'det_hessian', 'ellip_e_dens', 'eta']
 
     features_bond = ['Lagrangian_K', 'Hamiltonian_K', 'e_density', 'lap_e_density', 
         'e_loc_func', 'ave_loc_ion_E', 'delta_g_promolecular', 'delta_g_hirsh', 'esp_nuc',
@@ -461,6 +467,7 @@ def main():
     print("Done gathering imputation data...")
 
     for ind, row in pandas_file.iterrows():
+
         reaction_id = row["reaction_id"]
         bonds_reactants = row["reactant_bonds"]
         QTAIM_loc_reactant = json_loc + "QTAIM/" + str(reaction_id) + "/reactants/"
@@ -471,7 +478,7 @@ def main():
         QTAIM_loc_product = json_loc + "QTAIM/" + str(reaction_id) + "/products/"
         cp_file_products = QTAIM_loc_product + "CPprop.txt"
         dft_inp_file_product = QTAIM_loc_product + "input.in"
-        
+         
         qtaim_descs_reactants = get_qtaim_descs(cp_file_reactants, verbose = False)
         qtaim_descs_products = get_qtaim_descs(cp_file_products,  verbose = False)
         
@@ -488,17 +495,18 @@ def main():
         
         bonds_products, bonds_reactants = [], []
         
-    
+        #print(mapped_descs_products)
         # fill in imputation values
         for k, v in mapped_descs_reactants.items():
             if(v=={}):
+                #print(mapped_descs_reactants)
                 if (type(k) == tuple):
                     bonds_reactants.append(list(k))
                     for i in features_bond:
                         if impute:
                             mapped_descs_reactants[k][i] = impute_dict["bond"][i]["median"]
                         else: 
-                            print("feature missing", ind)
+                            #print("feature missing, {}, {}".format(ind,i))
                             mapped_descs_reactants[k][i] =  -1
                             if(ind not in drop_list):
                                 drop_list.append(ind)
@@ -508,7 +516,7 @@ def main():
                         if impute:
                             mapped_descs_reactants[k][i] = impute_dict["atom"][i]["median"]   
                         else:   
-                            print("feature missing", ind)
+                            #print("feature missing, {}, {}".format(ind,i))
                             mapped_descs_reactants[k][i] = -1
                             if(ind not in drop_list):
                                 drop_list.append(ind)
@@ -523,7 +531,7 @@ def main():
                             mapped_descs_products[k][i] = impute_dict["bond"][i]["median"]
 
                         else: 
-                            print("feature missing", ind)
+                            #print("feature missing, {}, {}".format(ind,i))
                             mapped_descs_products[k][i] =  -1
                             if(ind not in drop_list):
                                 drop_list.append(ind)
@@ -533,7 +541,7 @@ def main():
                             mapped_descs_products[k][i] = impute_dict["atom"][i]["median"]  
 
                         else: 
-                            print("feature missing", ind)
+                            #print("feature missing, {}, {}".format(ind,i))
                             mapped_descs_products[k][i] = -1
                             if(ind not in drop_list):
                                 drop_list.append(ind)
