@@ -33,7 +33,6 @@ def controller_single(dir_active, redo_qtaim=False, just_dft = False):
     
     if len(glob(dir_active + folder_choice + "/reactants" + "/*.wfn")) > 0:
         print("dft calc already done - reactants")
-
     else: 
         os.system(
             "orca "

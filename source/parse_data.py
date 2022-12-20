@@ -348,53 +348,55 @@ def gather_imputation(df, features_atom, features_bond, root_dir  = "../data/hyd
 
     else: 
         for ind, row in df.iterrows():
-            reaction_id = row["reaction_id"]
-            bonds_reactants = row["reactant_bonds"]
-            QTAIM_loc_reactant = root_dir + "QTAIM/" + str(reaction_id) + "/reactants/"
-            cp_file_reactants = QTAIM_loc_reactant + "CPprop.txt"
-            dft_inp_file_reactant = QTAIM_loc_reactant + "input.in"
+            try: 
+                reaction_id = row["reaction_id"]
+                bonds_reactants = row["reactant_bonds"]
+                QTAIM_loc_reactant = root_dir + "QTAIM/" + str(reaction_id) + "/reactants/"
+                cp_file_reactants = QTAIM_loc_reactant + "CPprop.txt"
+                dft_inp_file_reactant = QTAIM_loc_reactant + "input.in"
 
-            qtaim_descs_reactants = get_qtaim_descs(cp_file_reactants, verbose = False)
-            
-            bonds_products = row["product_bonds"]
-            QTAIM_loc_product = root_dir + "QTAIM/" + str(reaction_id) + "/products/"
-            cp_file_products = QTAIM_loc_product + "CPprop.txt"
-            dft_inp_file_product = QTAIM_loc_product + "input.in"
-            qtaim_descs_products = get_qtaim_descs(cp_file_products,  verbose = False)
-            
-            
-            mapped_descs_reactants = merge_qtaim_inds(
-                qtaim_descs_reactants, 
-                bonds_reactants, 
-                dft_inp_file_reactant)
-            
-            mapped_descs_products = merge_qtaim_inds(
-                qtaim_descs_products, 
-                bonds_products,  
-                dft_inp_file_product)
-            
-            for k, v in mapped_descs_reactants.items():
-                if(v=={}):
-                    pass 
-                elif (type(k) == tuple):
-                    for i in features_bond:
-                        impute_dict["bond"][i].append(v[i])
-                elif(type(k) == int):
-                    for i in features_atom:
-                        impute_dict["atom"][i].append(v[i])
-                else: pass 
+                qtaim_descs_reactants = get_qtaim_descs(cp_file_reactants, verbose = False)
+                
+                bonds_products = row["product_bonds"]
+                QTAIM_loc_product = root_dir + "QTAIM/" + str(reaction_id) + "/products/"
+                cp_file_products = QTAIM_loc_product + "CPprop.txt"
+                dft_inp_file_product = QTAIM_loc_product + "input.in"
+                qtaim_descs_products = get_qtaim_descs(cp_file_products,  verbose = False)
+                
+                
+                mapped_descs_reactants = merge_qtaim_inds(
+                    qtaim_descs_reactants, 
+                    bonds_reactants, 
+                    dft_inp_file_reactant)
+                
+                mapped_descs_products = merge_qtaim_inds(
+                    qtaim_descs_products, 
+                    bonds_products,  
+                    dft_inp_file_product)
+                
+                for k, v in mapped_descs_reactants.items():
+                    if(v=={}):
+                        pass 
+                    elif (type(k) == tuple):
+                        for i in features_bond:
+                            impute_dict["bond"][i].append(v[i])
+                    elif(type(k) == int):
+                        for i in features_atom:
+                            impute_dict["atom"][i].append(v[i])
+                    else: pass 
 
-            for k, v in mapped_descs_products.items():
-                if(v=={}):
-                    pass 
-                elif (type(k) == tuple):
-                    for i in features_bond:
-                        impute_dict["bond"][i].append(v[i])
-                elif(type(k) == int):
-                    for i in features_atom:
-                        impute_dict["atom"][i].append(v[i])
-                else: pass 
-            #except: print(reaction_id)
+                for k, v in mapped_descs_products.items():
+                    if(v=={}):
+                        pass 
+                    elif (type(k) == tuple):
+                        for i in features_bond:
+                            impute_dict["bond"][i].append(v[i])
+                    elif(type(k) == int):
+                        for i in features_atom:
+                            impute_dict["atom"][i].append(v[i])
+                    else: pass 
+            
+            except: print(reaction_id)
 
     # get the mean and median of each feature
     for k, v in impute_dict.items():
@@ -407,13 +409,13 @@ def gather_imputation(df, features_atom, features_bond, root_dir  = "../data/hyd
     return impute_dict
     
 def main():
-    impute = True
+    impute = False
 
     drop_list = []
     #json_loc = "../data/hydro/"
     #json_file = json_loc + "rev_corrected_bonds_qm_9_hydro_training.json"
     
-    json_loc = "../data/hydro_full/"
+    json_loc = "../data/hydro/"
     json_file = json_loc + "qm_9_hydro_complete.json"
     pandas_file = pd.read_json(json_file)
     pandas_out = json_loc + "qm_9_hydro_qtaim_temp.json"
@@ -465,151 +467,175 @@ def main():
         pandas_file[str_product] = ""
     
     print("Done gathering imputation data...")
-
+    fail_count = 0
     for ind, row in pandas_file.iterrows():
+        
+        try: 
+            reaction_id = row["reaction_id"]
+            bonds_reactants = row["reactant_bonds"]
+            QTAIM_loc_reactant = json_loc + "QTAIM/" + str(reaction_id) + "/reactants/"
+            cp_file_reactants = QTAIM_loc_reactant + "CPprop.txt"
+            dft_inp_file_reactant = QTAIM_loc_reactant + "input.in"
+            
+            bonds_products = row["product_bonds"]
+            QTAIM_loc_product = json_loc + "QTAIM/" + str(reaction_id) + "/products/"
+            cp_file_products = QTAIM_loc_product + "CPprop.txt"
+            dft_inp_file_product = QTAIM_loc_product + "input.in"
+            
+            qtaim_descs_reactants = get_qtaim_descs(cp_file_reactants, verbose = False)
+            qtaim_descs_products = get_qtaim_descs(cp_file_products,  verbose = False)
+            
+            mapped_descs_reactants = merge_qtaim_inds(
+                qtaim_descs_reactants, 
+                bonds_reactants, 
+                dft_inp_file_reactant)
+            
+            mapped_descs_products = merge_qtaim_inds(
+                qtaim_descs_products, 
+                bonds_products,  
+                dft_inp_file_product)
 
-        reaction_id = row["reaction_id"]
-        bonds_reactants = row["reactant_bonds"]
-        QTAIM_loc_reactant = json_loc + "QTAIM/" + str(reaction_id) + "/reactants/"
-        cp_file_reactants = QTAIM_loc_reactant + "CPprop.txt"
-        dft_inp_file_reactant = QTAIM_loc_reactant + "input.in"
-        
-        bonds_products = row["product_bonds"]
-        QTAIM_loc_product = json_loc + "QTAIM/" + str(reaction_id) + "/products/"
-        cp_file_products = QTAIM_loc_product + "CPprop.txt"
-        dft_inp_file_product = QTAIM_loc_product + "input.in"
-         
-        qtaim_descs_reactants = get_qtaim_descs(cp_file_reactants, verbose = False)
-        qtaim_descs_products = get_qtaim_descs(cp_file_products,  verbose = False)
-        
-        mapped_descs_reactants = merge_qtaim_inds(
-            qtaim_descs_reactants, 
-            bonds_reactants, 
-            dft_inp_file_reactant)
-        
-        mapped_descs_products = merge_qtaim_inds(
-            qtaim_descs_products, 
-            bonds_products,  
-            dft_inp_file_product)
+            
+            bonds_products, bonds_reactants = [], []
+            
+            #print(mapped_descs_products)
+            # fill in imputation values
+            for k, v in mapped_descs_reactants.items():
+                if(v=={}):
+                    #print(mapped_descs_reactants)
+                    if (type(k) == tuple):
+                        bonds_reactants.append(list(k))
+                        for i in features_bond:
+                            if impute:
+                                mapped_descs_reactants[k][i] = impute_dict["bond"][i]["median"]
+                            else: 
+                                #print("feature missing, {}, {}".format(ind,i))
+                                mapped_descs_reactants[k][i] =  -1
+                                if(ind not in drop_list):
+                                    drop_list.append(ind)
+                                                            
+                    else: 
+                        for i in features_atom:
+                            if impute:
+                                mapped_descs_reactants[k][i] = impute_dict["atom"][i]["median"]   
+                            else:   
+                                #print("feature missing, {}, {}".format(ind,i))
+                                mapped_descs_reactants[k][i] = -1
+                                if(ind not in drop_list):
+                                    drop_list.append(ind)
+            
+            
+            for k, v in mapped_descs_products.items():
+                if(v=={}):
+                    if (type(k) == tuple): # bond cp 
+                        for i in features_bond:
+                            bonds_products.append(list(k))
+                            if impute:
+                                mapped_descs_products[k][i] = impute_dict["bond"][i]["median"]
 
+                            else: 
+                                
+                                mapped_descs_products[k][i] =  -1
+                                if(ind not in drop_list):
+                                    drop_list.append(ind)
+                    else: # atom cp
+                        for i in features_atom:
+                            if impute:
+                                mapped_descs_products[k][i] = impute_dict["atom"][i]["median"]  
+
+                            else: 
+                                
+                                mapped_descs_products[k][i] = -1
+                                if(ind not in drop_list):
+                                    drop_list.append(ind)
         
-        bonds_products, bonds_reactants = [], []
-        
-        #print(mapped_descs_products)
-        # fill in imputation values
-        for k, v in mapped_descs_reactants.items():
-            if(v=={}):
-                #print(mapped_descs_reactants)
-                if (type(k) == tuple):
-                    bonds_reactants.append(list(k))
-                    for i in features_bond:
-                        if impute:
-                            mapped_descs_reactants[k][i] = impute_dict["bond"][i]["median"]
-                        else: 
-                            #print("feature missing, {}, {}".format(ind,i))
-                            mapped_descs_reactants[k][i] =  -1
-                            if(ind not in drop_list):
-                                drop_list.append(ind)
-                                                        
+
+            # get all the values of a certain key for every dictionary in the dicitonary
+            cps_reactants = mapped_descs_reactants.keys()
+            cps_products = mapped_descs_products.keys()
+            flat_reactants, flat_products = {}, {}
+
+            
+            for cps_reactant in cps_reactants:
+                for i in features_atom: 
+                    if (type(cps_reactant) != tuple):
+                        # check if the key exists
+                        name = "extra_feat_atom_reactant_" + i
+                        if name not in flat_reactants.keys():
+                            flat_reactants[name] = []    
+                        flat_reactants[name].append(mapped_descs_reactants[cps_reactant][i])
+
+                for i in features_bond:
+                    if (type(cps_reactant) == tuple): 
+                        # check if the key exists
+                        name = "extra_feat_bond_reactant_" + i
+                        if name not in flat_reactants.keys():
+                            flat_reactants[name] = []    
+                        flat_reactants[name].append(mapped_descs_reactants[cps_reactant][i])
+
+            for cps_product in cps_products:
+                for i in features_atom: 
+                    if (type(cps_product) != tuple):
+                        # check if the key exists
+                        name = "extra_feat_atom_product_" + i
+                        if name not in flat_products.keys():
+                            flat_products[name] = []    
+                        flat_products[name].append(mapped_descs_products[cps_product][i])
+
+                for i in features_bond:
+                    if (type(cps_product) == tuple): 
+                        # check if the key exists
+                        name = "extra_feat_bond_product_" + i
+                        if name not in flat_products.keys():
+                            flat_products[name] = []    
+                        flat_products[name].append(mapped_descs_products[cps_product][i])
+
+
+            # update the pandas file with the new values
+            for k, v in flat_reactants.items():
+                if ("bond" in k): 
+                    pandas_file.at[ind, k] = [v]
                 else: 
-                    for i in features_atom:
-                        if impute:
-                            mapped_descs_reactants[k][i] = impute_dict["atom"][i]["median"]   
-                        else:   
-                            #print("feature missing, {}, {}".format(ind,i))
-                            mapped_descs_reactants[k][i] = -1
-                            if(ind not in drop_list):
-                                drop_list.append(ind)
-        
-        
-        for k, v in mapped_descs_products.items():
-            if(v=={}):
-                if (type(k) == tuple): # bond cp 
-                    for i in features_bond:
-                        bonds_products.append(list(k))
-                        if impute:
-                            mapped_descs_products[k][i] = impute_dict["bond"][i]["median"]
+                    pandas_file.at[ind, k] = np.array(v)
 
-                        else: 
-                            #print("feature missing, {}, {}".format(ind,i))
-                            mapped_descs_products[k][i] =  -1
-                            if(ind not in drop_list):
-                                drop_list.append(ind)
-                else: # atom cp
-                    for i in features_atom:
-                        if impute:
-                            mapped_descs_products[k][i] = impute_dict["atom"][i]["median"]  
+            for k, v in flat_products.items():
+                if ("bond" in k): 
+                    pandas_file.at[ind, k] = [v]
+                else: 
+                    pandas_file.at[ind, k] = np.array(v)
 
-                        else: 
-                            #print("feature missing, {}, {}".format(ind,i))
-                            mapped_descs_products[k][i] = -1
-                            if(ind not in drop_list):
-                                drop_list.append(ind)
-                            
 
-        # get all the values of a certain key for every dictionary in the dicitonary
-        cps_reactants = mapped_descs_reactants.keys()
-        cps_products = mapped_descs_products.keys()
-        flat_reactants, flat_products = {}, {}
+            keys_products = mapped_descs_products.keys()
+            keys_reactants = mapped_descs_reactants.keys()
+            # filter keys that aren't tuples 
+            keys_products = [x for x in keys_products if type(x) == tuple]
+            keys_reactants = [x for x in keys_reactants if type(x) == tuple]
+            bond_list_reactants.append([keys_reactants])
+            bond_list_products.append([keys_products])
 
-        
-        for cps_reactant in cps_reactants:
-            for i in features_atom: 
-                if (type(cps_reactant) != tuple):
-                    # check if the key exists
-                    name = "extra_feat_atom_reactant_" + i
-                    if name not in flat_reactants.keys():
-                        flat_reactants[name] = []    
-                    flat_reactants[name].append(mapped_descs_reactants[cps_reactant][i])
 
+        except: 
+            drop_list.append(ind)
+            bond_list_reactants.append([])
+            bond_list_products.append([])
+            # iterate over all the features and set them to -1
+            for i in features_atom:
+                name = "extra_feat_atom_reactant_" + i
+                pandas_file.at[ind, name] = -1
+                name = "extra_feat_atom_product_" + i
+                pandas_file.at[ind, name] = -1
+            # iterate over all the features and set them to -1
             for i in features_bond:
-                if (type(cps_reactant) == tuple): 
-                    # check if the key exists
-                    name = "extra_feat_bond_reactant_" + i
-                    if name not in flat_reactants.keys():
-                        flat_reactants[name] = []    
-                    flat_reactants[name].append(mapped_descs_reactants[cps_reactant][i])
+                name = "extra_feat_bond_reactant_" + i
+                pandas_file.at[ind, name] = -1
+                name = "extra_feat_bond_product_" + i
+                pandas_file.at[ind, name] = -1
 
-        for cps_product in cps_products:
-            for i in features_atom: 
-                if (type(cps_product) != tuple):
-                    # check if the key exists
-                    name = "extra_feat_atom_product_" + i
-                    if name not in flat_products.keys():
-                        flat_products[name] = []    
-                    flat_products[name].append(mapped_descs_products[cps_product][i])
+            print(reaction_id)            
+            fail_count += 1
 
-            for i in features_bond:
-                if (type(cps_product) == tuple): 
-                    # check if the key exists
-                    name = "extra_feat_bond_product_" + i
-                    if name not in flat_products.keys():
-                        flat_products[name] = []    
-                    flat_products[name].append(mapped_descs_products[cps_product][i])
-
-
-        # update the pandas file with the new values
-        for k, v in flat_reactants.items():
-            if ("bond" in k): 
-                pandas_file.at[ind, k] = [v]
-            else: 
-                pandas_file.at[ind, k] = np.array(v)
-
-        for k, v in flat_products.items():
-            if ("bond" in k): 
-                pandas_file.at[ind, k] = [v]
-            else: 
-                pandas_file.at[ind, k] = np.array(v)
-
-
-        keys_products = mapped_descs_products.keys()
-        keys_reactants = mapped_descs_reactants.keys()
-        # filter keys that aren't tuples 
-        keys_products = [x for x in keys_products if type(x) == tuple]
-        keys_reactants = [x for x in keys_reactants if type(x) == tuple]
-        bond_list_reactants.append([keys_reactants])
-        bond_list_products.append([keys_products])
-
+    print(fail_count/ind)        
+    
     pandas_file["extra_feat_bond_reactant_indices_qtaim"] = bond_list_reactants
     pandas_file["extra_feat_bond_product_indices_qtaim"] = bond_list_products
 
