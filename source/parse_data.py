@@ -446,6 +446,12 @@ def main():
         'esp_e', 'esp_total', 'grad_norm', 'lap_norm', 'eig_hess',
         'det_hessian', 'ellip_e_dens', 'eta']
 
+    features_atom = ['Lagrangian_K', 'e_density',
+        'e_loc_func', 'esp_nuc', 'esp_e', 'esp_total', 'eig_hess',  'ellip_e_dens']
+
+    features_bond = ['Lagrangian_K', 'e_density',
+        'e_loc_func', 'esp_nuc', 'esp_e', 'esp_total', 'eig_hess',  'ellip_e_dens']
+
     if impute:
         impute_dict = gather_imputation(
             pandas_file, 
