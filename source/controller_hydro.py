@@ -14,7 +14,7 @@ class ThreadWithResult(threading.Thread):
         super().__init__(group=group, target=function, name=name, daemon=daemon)
 
 
-def controller_single(dir_active, redo_qtaim=False, just_dft = False):
+def controller_single(dir_active, redo_qtaim=False):
 
     # get random folder from dir_active
     #for i in range(1000):
@@ -28,10 +28,12 @@ def controller_single(dir_active, redo_qtaim=False, just_dft = False):
     # while(cond):
     folder_choice = random.choice(folders)
     # check if folder has *wfn file
-    print("dir_active {}".format(folder_choice))
+    
+    print(folder_choice)
     
     if len(glob(dir_active + folder_choice + "/reactants" + "/*.wfn")) > 0:
         print("dft calc already done - reactants")
+
     else: 
         os.system(
             "orca "
@@ -57,21 +59,18 @@ def controller_single(dir_active, redo_qtaim=False, just_dft = False):
             + "/products/output.out"
         )
 
-    if not just_dft:
-        if len(glob(dir_active + folder_choice + "/reactants/*.CPprop.txt") and not redo_qtaim) > 0:
-            print("cp calc already done - reactants")
-            
-        else: 
-            subprocess.run(dir_active + folder_choice + "/reactants/props.sh")
-            os.system("mv " + "./CPprop.txt " + dir_active + folder_choice + "/reactants/")
+    if len(glob(dir_active + folder_choice + "/reactants/*.CPprop.txt") and not redo_qtaim) > 0:
+        print("cp calc already done - reactants")
+    else: 
+        subprocess.run(dir_active + folder_choice + "/reactants/props.sh")
+        os.system("mv " + "./CPprop.txt " + dir_active + folder_choice + "/reactants/")
+    if len(glob(dir_active + folder_choice + "/products/*.CPprop.txt") and not redo_qtaim) > 0:
+        print("cp calc already done - products")
         
-        if len(glob(dir_active + folder_choice + "/products/*.CPprop.txt") and not redo_qtaim) > 0:
-            print("cp calc already done - products")
-            
-        else: 
-            subprocess.run(dir_active + folder_choice + "/products/props.sh")
-            os.system("mv " + "./CPprop.txt " + dir_active + folder_choice + "/products/")
-        # move CPprop.txt to folder
+    else: 
+        subprocess.run(dir_active + folder_choice + "/products/props.sh")
+        os.system("mv " + "./CPprop.txt " + dir_active + folder_choice + "/products/")
+    # move CPprop.txt to folder
 
 
 def main():
@@ -82,25 +81,19 @@ def main():
                     epilog = 'Text at the bottom of help')
     parser.add_argument('-hydro', '--hydro', action='store_true')
     parser.add_argument('-redo_qtaim', '--redo_qtaim', action='store_true')
-    parser.add_argument('-just_dft', '--just_dft', action='store_true')
     args = parser.parse_args()
-    print("hydro_cond: {}".format(args.hydro))
 
-    if args.hydro:
-        dir_active = "../data/hydro3/QTAIM/"
-    else:
-        dir_active = "../data/mg2/QTAIM/"
-
-    dir_active = "../data/protonated1/QTAIM/"
-    dir_active = "../data/rapter/QTAIM/"
-
+    #if args.hydro:
+    dir_active = "../data/hydro3/QTAIM/"
+    #else:
+    #    dir_active = "../data/mg2/QTAIM/"
     redo_qtaim = args.redo_qtaim
-    just_dft = args.just_dft
-    print("active dir: {}".format(dir_active))    
-    for i in range(20000):
+    
+
+    for i in range(10000):
         counter = 0
         t1 = ThreadWithResult(
-            target=controller_single, kwargs={"dir_active": dir_active, "redo_qtaim": redo_qtaim, "just_dft": just_dft}
+            target=controller_single, kwargs={"dir_active": dir_active, "redo_qtaim": redo_qtaim}
         )
         #t2 = ThreadWithResult(
         #    target=controller_single, kwargs={"dir_active": dir_active, "redo_qtaim": redo_qtaim}

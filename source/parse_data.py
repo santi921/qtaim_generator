@@ -26,45 +26,14 @@ def parse_cp(lines, verbose = True):
         "cp_num": ["----------------"],
         "ele_info": ["Corresponding", "nucleus:"],
         "pos_ang": ["Position", "(Angstrom):"],
-        "Lagrangian_K": ["Lagrangian", "kinetic", "energy"],
-        "Hamiltonian_K": ["Hamiltonian", "kinetic", "energy"],
-        "e_density":["Energy", "density", "E(r)"],
-        "lap_e_density":["Laplacian", "electron", "density:"] ,
-        "e_loc_func":["Electron", "localization", "function"] ,
-        "ave_loc_ion_E":["Average", "local", "ionization", "energy"],
-        "delta_g_promolecular":["Delta-g", "promolecular"],
-        "delta_g_hirsh":["Delta-g", "Hirshfeld"],
-        "esp_nuc":["ESP" , "nuclear", "charges:"],
-        "esp_e":["ESP", "electrons:"],
         "esp_total":["Total", "ESP:"],
-        "grad_norm":["Components", "gradient", "x/y/z"],
-        "lap_norm":["Components", "Laplacian", "x/y/z"],
-        "eig_hess":["Eigenvalues", "Hessian:"],
-        "det_hessian":["Determinant", "Hessian:"],
-        "ellip_e_dens":["Ellipticity", "electron", "density:"],
-        "eta":["eta", "index:"]
     }
 
     cp_bond_conditionals = {
         "cp_num": ["----------------"],
         "pos_ang": ["Position", "(Angstrom):"],
-        "Lagrangian_K": ["Lagrangian", "kinetic", "energy"],
-        "Hamiltonian_K": ["Hamiltonian", "kinetic", "energy"],
-        "e_density":["Energy", "density", "E(r)"],
-        "lap_e_density":["Laplacian", "electron", "density:"] ,
         "e_loc_func":["Electron", "localization", "function"] ,
-        "ave_loc_ion_E":["Average", "local", "ionization", "energy"],
-        "delta_g_promolecular":["Delta-g", "promolecular"],
-        "delta_g_hirsh":["Delta-g", "Hirshfeld"],
-        "esp_nuc":["ESP" , "nuclear", "charges:"],
-        "esp_e":["ESP", "electrons:"],
         "esp_total":["Total", "ESP:"],
-        "grad_norm":["Components", "gradient", "x/y/z"],
-        "lap_norm":["Components", "Laplacian", "x/y/z"],
-        "eig_hess":["Eigenvalues", "Hessian:"],
-        "det_hessian":["Determinant", "Hessian:"],
-        "ellip_e_dens":["Ellipticity", "electron", "density:"],
-        "eta":["eta", "index:"]
     }
 
     if cp_atom:
@@ -409,28 +378,48 @@ def gather_imputation(df, features_atom, features_bond, root_dir  = "../data/hyd
     return impute_dict
     
 def main():
-    impute = False
+    impute = True
 
     drop_list = []
     #json_loc = "../data/hydro/"
     #json_file = json_loc + "rev_corrected_bonds_qm_9_hydro_training.json"
     
-    json_loc = "../data/hydro/"
-    json_file = json_loc + "qm_9_hydro_complete.json"
-    pandas_file = pd.read_json(json_file)
-    pandas_out = json_loc + "qm_9_hydro_qtaim_temp.json"
+    json_loc = "../data/hydro3/"
+    json_file = json_loc + "qm9_merge_3.json"
     
+    json_loc = '../data/holdout/'
+    json_file = json_loc + "holdout_test_set_complete_refined.json"
+
+    json_loc = '../data/protonated1/'
+    json_file = json_loc + "protonated_reactions_1.json"
+    pandas_file = pd.read_json(json_file)
+    pandas_out = json_loc + "qtaim_nonimputed.json"
+  
     #json_loc = "../data/madeira/"
     #json_file = json_loc + "merged_mg.json"
     #pandas_file = pd.read_json(json_file)
     #pandas_out = json_loc + "mg_qtaim_complete_temp.json"
+    json_loc = "../data/rapter/"
+    json_file = json_loc + "20230512_mpreact_assoc.bson"
+
+    print("reading file from: {}".format(json_file))
+    if json_file.endswith(".json"):
+        path_json = json_file
+        pandas_file = pd.read_json(path_json)
+    else:
+        path_bson = json_file
+        with open(path_bson,'rb') as f:
+            data = bson.decode_all(f.read())
+        pandas_file=pd.DataFrame(data)
+
+
     
     print(pandas_file.shape)
     
-    #if impute: 
-    #    #imputed_file = json_loc + "qm_9_hydro_training_impute_vals.json"
-    #    #imputed_file = json_loc + "mg_impute.json"
-    imputed_file = json_loc + "hydro_temp_impute.json"
+    if impute: 
+        imputed_file = json_loc + "impute_vals.json"
+        #imputed_file = json_loc + "mg_impute.json"
+    #imputed_file = json_loc + "hydro_temp_impute.json"
 
     bond_list_reactants = []
     bond_list_products = []
@@ -446,11 +435,8 @@ def main():
         'esp_e', 'esp_total', 'grad_norm', 'lap_norm', 'eig_hess',
         'det_hessian', 'ellip_e_dens', 'eta']
 
-    features_atom = ['Lagrangian_K', 'e_density',
-        'e_loc_func', 'esp_nuc', 'esp_e', 'esp_total', 'eig_hess',  'ellip_e_dens']
-
-    features_bond = ['Lagrangian_K', 'e_density',
-        'e_loc_func', 'esp_nuc', 'esp_e', 'esp_total', 'eig_hess',  'ellip_e_dens']
+    features_atom = ['esp_total', "ellip_e_dens", "Lagrangian_K", "Hamiltonian_K", "eta"]
+    features_bond = ['esp_total', "ellip_e_dens", "Lagrangian_K", "Hamiltonian_K", "eta"]
 
     if impute:
         impute_dict = gather_imputation(
@@ -640,8 +626,7 @@ def main():
             print(reaction_id)            
             fail_count += 1
 
-    print(fail_count/ind)        
-    
+    print(fail_count/ind)            
     pandas_file["extra_feat_bond_reactant_indices_qtaim"] = bond_list_reactants
     pandas_file["extra_feat_bond_product_indices_qtaim"] = bond_list_products
 
@@ -649,7 +634,7 @@ def main():
     if not impute:
         pandas_file.drop(drop_list, inplace=True)
         pandas_file.reset_index(drop=True, inplace=True)
-    
+    print("length of drop list: {}".format(len(drop_list)))
     print("done gathering and imputing features...")
     # save the pandas file
     print(pandas_file.shape)

@@ -5,19 +5,27 @@ import subprocess
 import os
 import stat
 import random
-
+import bson
 
 def main():
     json_tf = True
     if json_tf:
-        json_loc = "../data/hydro/"
-        json_file = json_loc + "qm_9_hydro_complete.json"
-        json_loc = "../data/mg1/"
-        json_file = json_loc + "merged_mg.json"
-        json_loc = "../data/mg2/"
-        json_file = json_loc + "20220613_reaction_data.json"
-        
-        pandas_file = pd.read_json(json_file)
+        #json_file = json_loc + "protonated_reactions_1.json"
+        json_loc = "../data/rapter/"
+        json_file = json_loc + "20230512_mpreact_assoc.bson"
+
+        print("reading file from: {}".format(json_file))
+        if json_file.endswith(".json"):
+            path_json = json_file
+            pandas_file = pd.read_json(path_json)
+        else:
+            path_bson = json_file
+            with open(path_bson,'rb') as f:
+                data = bson.decode_all(f.read())
+            pandas_file=pd.DataFrame(data)
+
+
+
 
         for ind, row in pandas_file.iterrows():
 

@@ -1,5 +1,5 @@
 import subprocess
-import os
+import os, bson
 import random
 from glob import glob
 import pandas as pd
@@ -19,8 +19,29 @@ def main():
         json_file = json_loc + "merged_mg.json"
         json_loc = "../data/mg1/"
         json_file = json_loc + "20220613_reaction_data.json"
-        
-        pandas_file = pd.read_json(json_file)
+
+        json_loc = "../data/hydro3/"
+        json_file = json_loc + "qm9_merge_3.json"
+
+        json_loc = '../data/holdout/'
+        json_file = json_loc + "holdout_test_set_complete_refined.json"
+
+        json_loc = '../data/rapter/'
+        json_file = json_loc + '20230512_mpreact_assoc.bson'
+
+        #pandas_file = pd.read_json(json_file)
+
+        print("reading file from: {}".format(json_file))
+        if json_file.endswith(".json"):
+            path_json = json_file
+            pandas_file = pd.read_json(path_json)
+        else:
+            path_bson = json_file
+            with open(path_bson,'rb') as f:
+                data = bson.decode_all(f.read())
+            pandas_file=pd.DataFrame(data)
+
+
         product_wfn_count = 0
         reactant_wfn_count = 0
         product_out_count = 0
