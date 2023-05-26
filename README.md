@@ -1,5 +1,9 @@
 # qtaim_generator
+
 Todo
-[] - bson integration 
-[] - single molecule generator 
-[] - other input files
+[ ] - single molecule generator/handler
+[ ] - full printout of errors by keytype
+
+[ ] - fix weird multiwfn errors on concurrent jobs 
+
+[ ] - json for inputs
