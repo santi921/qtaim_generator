@@ -6,6 +6,6 @@ Todo
 
 [ ] - full printout of errors by keytype
 
-[ ] - fix weird multiwfn errors on concurrent jobs 
+[ ] - fix weird multiwfn errors on concurrent jobs
 
 [ ] - json for inputs
