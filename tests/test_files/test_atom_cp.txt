@@ -1,0 +1,31 @@
+----------------   CP     1,     Type (3,-3)   ----------------
+Corresponding nucleus:    16(H )
+Position (Bohr):        0.870346207513   -7.235108480530   -1.099339222098
+Position (Angstrom):    0.460567378612   -3.828654526307   -0.581745263386
+Density of all electrons:  0.3780596565E+00
+Density of Alpha electrons:  0.1890298282E+00
+Density of Beta electrons:  0.1890298282E+00
+Spin density of electrons:  0.0000000000E+00
+Lagrangian kinetic energy G(r):  0.8311527546E-02
+G(r) in X,Y,Z:  0.2441271868E-02  0.2982784942E-02  0.2887470736E-02
+Hamiltonian kinetic energy K(r):  0.3026537067E+01
+Potential energy density V(r): -0.3034848594E+01
+Energy density E(r) or H(r): -0.3026537067E+01
+Laplacian of electron density: -0.1207290216E+02
+Electron localization function (ELF):  0.9997850647E+00
+Localized orbital locator (LOL):  0.9855667409E+00
+Local information entropy:  0.2819892168E-01
+Reduced density gradient (RDG):  0.1000000000E+03
+Reduced density gradient with promolecular approximation:  0.1000000000E+03
+Sign(lambda2)*rho: -0.3780596565E+00
+Sign(lambda2)*rho with promolecular approximation: -0.2840864469E+00
+Corr. hole for alpha, ref.:   0.00000   0.00000   0.00000 : -0.4390343648E-03
+Source function, ref.:   0.00000   0.00000   0.00000 :  0.1303618589E+00
+Wavefunction value for orbital         1 :  0.5570399251E-04
+Average local ionization energy (ALIE):  0.4580168052E+00
+Delta-g (under promolecular approximation):  0.1183249851E+00
+Delta-g (under Hirshfeld partition):  0.2328707750E+00
+User-defined real space function:  0.1000000000E+01
+ESP from nuclear charges:  0.3109174387E+02
+ESP from electrons: -0.1514191990E+02
+Total ESP:  0.1594982397E+02 a.u. ( 0.4340168E+03 eV, 0.1000867E+05 kcal/mol)

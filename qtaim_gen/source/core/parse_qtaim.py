@@ -211,6 +211,9 @@ def dft_inp_to_dict(dft_inp_file):
 
 
 def only_atom_cps(qtaim_descs):
+    """
+    separates qtaim descriptors into atom and bond descriptors
+    """
     ret_dict = {}
     ret_dict_bonds = {}
     for k, v in qtaim_descs.items():
