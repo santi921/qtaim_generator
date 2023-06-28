@@ -112,7 +112,6 @@ def main():
         "eta",
     ]
 
-
     if impute:
         impute_dict = gather_imputation(
             pandas_file,
@@ -178,11 +177,17 @@ def main():
                 qtaim_descs_products = get_qtaim_descs(cp_file_products, verbose=False)
 
                 mapped_descs_reactants = merge_qtaim_inds(
-                    qtaim_descs_reactants, bonds_reactants, dft_inp_file_reactant
+                    qtaim_descs_reactants,
+                    bonds_reactants,
+                    dft_inp_file_reactant,
+                    margin=2.0,
                 )
 
                 mapped_descs_products = merge_qtaim_inds(
-                    qtaim_descs_products, bonds_products, dft_inp_file_product
+                    qtaim_descs_products,
+                    bonds_products,
+                    dft_inp_file_product,
+                    margin=2.0,
                 )
 
                 bonds_products, bonds_reactants = [], []

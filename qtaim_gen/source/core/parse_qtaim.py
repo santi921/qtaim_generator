@@ -14,7 +14,6 @@ def parse_cp(lines, verbose=True):
     cp_bond, cp_atom = False, False
     cp_name = "null"
     cp_dict = {}
-
     if "(3,-3)" in lines_split[0]:
         cp_atom = True
         if verbose:
@@ -222,7 +221,7 @@ def only_atom_cps(qtaim_descs):
     return ret_dict, ret_dict_bonds
 
 
-def find_cp(atom_dict, atom_cp_dict):
+def find_cp(atom_dict, atom_cp_dict, margin=0.5):
     """
     From a dictionary of atom ind, position, and element, find the corresponding cp in the atom_cp_dict
     Takes:
@@ -241,11 +240,11 @@ def find_cp(atom_dict, atom_cp_dict):
         distance = np.linalg.norm(np.array(v["pos_ang"]) - np.array(atom_dict["pos"]))
         if v["cp_num"] == atom_dict["ind"]:
             element_cond_initial = v["element"] == atom_dict["element"]
-            distance_cond_initial = distance < 0.5
+            distance_cond_initial = distance < margin
             return k, v
 
         else:
-            dist_cond = distance < 0.5
+            dist_cond = distance < margin
             element_cond = v["element"] == atom_dict["element"]
             if dist_cond and element_cond:
                 return k, v
@@ -253,7 +252,7 @@ def find_cp(atom_dict, atom_cp_dict):
     return False, {}
 
 
-def find_cp_map(dft_dict, atom_cp_dict):
+def find_cp_map(dft_dict, atom_cp_dict, margin=0.5):
     """
     Iterate through dft dict and find nearest cp in atom_cp_dict
     Takes:
@@ -272,7 +271,7 @@ def find_cp_map(dft_dict, atom_cp_dict):
         v_send = {"element": v["element"], "pos": v["pos"], "ind": k}
 
         ret_key, dict_ret = find_cp(
-            v_send, atom_cp_dict
+            v_send, atom_cp_dict, margin=margin
         )  # find_cp returns cp_key, cp_dict
 
         if ret_key != False:
@@ -305,7 +304,7 @@ def find_bond_cp(i, bonds_cps):
     return False
 
 
-def add_closest_atoms_to_bond(bond_cps, dft_dict):
+def add_closest_atoms_to_bond(bond_cps, dft_dict, margin=1.0):
     """
     Takes in bonds cps and adds the index of the closest atoms to the bond
     Takes:
@@ -326,12 +325,14 @@ def add_closest_atoms_to_bond(bond_cps, dft_dict):
                         np.array(v["pos_ang"]) - np.array(dft_dict[j]["pos"])
                     )
                 )
-
+            # yell if the two closest atoms are further than margin
+            if np.sort(dists)[:2].tolist()[1] > margin:
+                print("Warning: bond cp is far from bond")
             bond_cps[k]["atom_inds"] = np.argsort(dists)[:2].tolist()
     return bond_cps
 
 
-def bond_cp(bond_cps, bond_list, dft_dict):
+def bond_cp(bond_cps, bond_list, dft_dict, margin=2.0):
     """
     Takes in bond cps and finds the closest atoms to the bond
     Takes:
@@ -344,7 +345,9 @@ def bond_cp(bond_cps, bond_list, dft_dict):
 
     ret_dict = {}
 
-    bond_cps = add_closest_atoms_to_bond(bond_cps, dft_dict)  # gets atoms from bond cps
+    bond_cps = add_closest_atoms_to_bond(
+        bond_cps, dft_dict, margin=margin
+    )  # gets atoms from bond cps
 
     for i in bond_list:
         dict_cp_bond = find_bond_cp(i, bond_cps)
@@ -358,7 +361,7 @@ def bond_cp(bond_cps, bond_list, dft_dict):
     return ret_dict
 
 
-def merge_qtaim_inds(qtaim_descs, bond_list, dft_inp_file):
+def merge_qtaim_inds(qtaim_descs, bond_list, dft_inp_file, margin=2.0):
     """
     Gets mapping of qtaim indices to atom indices and remaps atom CP descriptors
 
@@ -378,7 +381,7 @@ def merge_qtaim_inds(qtaim_descs, bond_list, dft_inp_file):
         dft_dict, atom_only_cps
     )
     # remapping bonds
-    bond_cps = bond_cp(bonds_only_cps, bond_list, dft_dict)
+    bond_cps = bond_cp(bonds_only_cps, bond_list, dft_dict, margin=margin)
     # merge dictionaries
     ret_dict = {**atom_cps_remapped, **bond_cps}
     return ret_dict
@@ -402,7 +405,7 @@ def gather_imputation(
     Returns:
         impute_dict (dict): dictionary of imputation values
     """
-    
+
     impute_dict = {"atom": {}, "bond": {}}
     for i in features_atom:
         impute_dict["atom"][i] = []

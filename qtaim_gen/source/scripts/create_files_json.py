@@ -42,6 +42,8 @@ def main():
 
             # row = pandas_file.iloc[ind_random]
             reaction_id = row["reaction_id"]
+            # print("reaction_id: {}".format(reaction_id))
+            # print("bonds: {}".format(row["reactant_bonds"]))
             # create folder in json directory for each reaction
             QTAIM_loc = root + "QTAIM/"
             QTAIM_loc_reactant = root + "QTAIM/" + str(reaction_id) + "/reactants/"

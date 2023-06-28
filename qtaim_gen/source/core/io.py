@@ -28,7 +28,7 @@ def write_input_file(folder, lines, n_atoms, options):
 
 def write_input_file_from_pmg_molecule(folder, molecule, options):
     n_atoms = int(len(molecule["sites"]))
-    print(options)
+    # print(options)
     with open(folder + "/input.in", "w") as f:
         f.write("!{} {} AIM\n\n".format(options["functional"], options["basis"]))
         f.write("%SCF\n")
