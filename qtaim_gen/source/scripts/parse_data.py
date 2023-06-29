@@ -27,12 +27,12 @@ def main():
     )
     parser.add_argument(
         "--impute",
-        type=int,
-        default=1,
+        action="store_true",
         help="impute values",
     )
+
     parser.add_argument(
-        "--pandas_out",
+        "--file_out",
         type=str,
         default="qtaim_nonimputed.json",
         help="output json file",
@@ -40,8 +40,7 @@ def main():
 
     parser.add_argument(
         "--reaction",
-        type=int,
-        default=1,
+        action="store_true",
         help="reaction or not",
     )
 
@@ -50,11 +49,11 @@ def main():
     json_file = args.json_file
     impute = bool(args.impute)
     reaction = bool(args.reaction)
-    pandas_out = args.pandas_out
+    file_out = args.pandasfile_out_out
     print("impute: {}".format(impute))
     print("json_loc: {}".format(json_loc))
     print("json_file: {}".format(json_file))
-    print("pandas_out: {}".format(pandas_out))
+    print("file_out: {}".format(file_out))
 
     print("reading file from: {}".format(json_loc + json_file))
 
@@ -490,7 +489,7 @@ def main():
     print("done gathering and imputing features...")
     # save the pandas file
     print(pandas_file.shape)
-    pandas_file.to_json(json_loc + pandas_out)
+    pandas_file.to_json(json_loc + file_out)
 
 
 main()

@@ -10,7 +10,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("-redo_qtaim", "--redo_qtaim", action="store_true")
     parser.add_argument("-just_dft", "--just_dft", action="store_true")
-    parser.add_argument("-reactions", type=bool, default=True)
+    parser.add_argument("--reactions", action="store_true")
     parser.add_argument("-dir_active", type=str, default="./")
     parser.add_argument(
         "-folders_to_crawl", help="number of folders to check", type=int, default=20000

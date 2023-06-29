@@ -14,9 +14,7 @@ class ThreadWithResult(threading.Thread):
         super().__init__(group=group, target=function, name=name, daemon=daemon)
 
 
-def controller_single(
-    dir_active, redo_qtaim=False, just_dft=False, reaction=True
-):
+def controller_single(dir_active, redo_qtaim=False, just_dft=False, reaction=True):
     """
     Runs, with the option of parallelization, the DFT and QTAIM calculations for a single random folder in the active directory.
 
