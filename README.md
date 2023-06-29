@@ -1,11 +1,8 @@
 # qtaim_generator
-
-Todo
-
-[ ] - single molecule generator/handler
-
-[ ] - full printout of errors by keytype
+A simple package to do qtaim on molecules, reactions, and (soon) surfaces. Oriented towards building datasets for ML on/with QTAIM.
 
 [ ] - fix weird multiwfn errors on concurrent jobs
 
-[ ] - json for inputs
+[ ] - critic2 integration 
+
+[ ] - solid-state integration 
