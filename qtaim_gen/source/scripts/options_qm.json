@@ -1,4 +1,6 @@
 {
-  "functional": "TPSS",
-  "basis": "def2-SVP"
+  "functional": "TPSS ZORA",
+  "basis": "ZORA-def2-TZVP SARC/J",
+  "relativistic": true,
+  "basis_atoms": [{ "element": "Pt", "basis": "SARC-DKH-TZVP" }]
 }

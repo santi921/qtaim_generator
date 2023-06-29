@@ -28,9 +28,23 @@ def write_input_file(folder, lines, n_atoms, options):
 
 def write_input_file_from_pmg_molecule(folder, molecule, options):
     n_atoms = int(len(molecule["sites"]))
-    #print(folder)
+    # print(folder)
     with open(folder + "/input.in", "w") as f:
+        # for relativistic set functional to "TPSS ZORA" and basis to "ZORA-def2-TZVP SARC/J"
         f.write("!{} {} AIM\n\n".format(options["functional"], options["basis"]))
+        if "basis_atoms" in options:
+            f.write("%basis\n")
+            for atom in options["basis_atoms"]:
+                f.write(
+                    'NewGTO    {} "{}" end\n'.format(atom["element"], atom["basis"])
+                )
+            f.write("end\n")
+        if "relativistic" in options:
+            if options["relativistic"] == True:
+                f.write("%rel\n")
+                f.write("picturechange  true\n")
+                f.write("end\n")
+
         f.write("%SCF\n")
         f.write("    MaxIter 1000\n")
         f.write("END\n")
