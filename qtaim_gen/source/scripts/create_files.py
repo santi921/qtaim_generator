@@ -149,7 +149,8 @@ def main():
                 folder=folder, molecule=molecule_dict, options=options_qm
             )
 
-            with open(folder + "/props.sh", "w") as f:
+            multi_wfn_file = folder + "props.sh"
+            with open(multi_wfn_file, "w") as f:
                 f.write("#!/bin/bash\n")
                 f.write(
                     "./Multiwfn/Multiwfn "
@@ -158,6 +159,8 @@ def main():
                     + folder
                     + "out \n"
                 )
+            st = os.stat(multi_wfn_file)
+            os.chmod(multi_wfn_file, st.st_mode | stat.S_IEXEC)
 
 
 main()
