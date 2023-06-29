@@ -16,7 +16,7 @@ def main():
     parser.add_argument(
         "--json_loc",
         type=str,
-        default="../data/rapter/",
+        default="../../data/rapter/",
         help="location of json file",
     )
     parser.add_argument(

@@ -1,38 +1,46 @@
 import pandas as pd
-from glob import glob
 import os, argparse, stat, json, bson
+from qtaim_gen.source.core.io import write_input_file_from_pmg_molecule
 
-from qtaim_gen.source.core.io import (
-    write_input_file,
-    write_input_file_from_pmg_molecule,
-)
+
+def convert_graph_info(site_info):
+    return {
+        "name": site_info[1]["specie"],
+        "species": [{"element": site_info[1]["specie"], "occu": 1}],
+        "xyz": site_info[1]["coords"],
+        "properties": site_info[1]["properties"],
+    }
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("-json_tf", type=bool, default=True)
-    parser.add_argument("-json_file", type=str, default="20230512_mpreact_assoc.bson")
+    parser.add_argument("-reaction", action="store_true")
+    parser.add_argument("-file", type=str, default="20230512_mpreact_assoc.bson")
     parser.add_argument("-root", type=str, default="../data/rapter/")
     parser.add_argument("-options_qm_file", default="options_qm.json")
     args = parser.parse_args()
 
-    json_tf = args.json_tf
-    json_file = args.json_file
+    reaction_tf = bool(args.reaction)
+    file = args.file
     root = args.root
+    print("root: {}".format(root))
+    print("file: {}".format(file))
+    print("reaction_tf: {}".format(reaction_tf))
     options_qm_file = args.options_qm_file
     # read json from options_qm_file
     with open(options_qm_file, "r") as f:
         options_qm = json.load(f)
 
-    json_file = root + json_file
+    file = root + file
 
-    if json_tf:
-        print("reading file from: {}".format(json_file))
-        if json_file.endswith(".json"):
-            path_json = json_file
+    if reaction_tf:
+        print("reading file from: {}".format(file))
+
+        if file.endswith(".json"):
+            path_json = file
             pandas_file = pd.read_json(path_json)
         else:
-            path_bson = json_file
+            path_bson = file
             with open(path_bson, "rb") as f:
                 data = bson.decode_all(f.read())
             pandas_file = pd.DataFrame(data)
@@ -112,32 +120,43 @@ def main():
             os.chmod(QTAIM_loc_reactant + "/props.sh", st.st_mode | stat.S_IEXEC)
 
     else:
-        dir_source = "./"
-        files = glob(
-            dir_source + "*xyz"
-        )  # xyz file names, would need to change for pandas
-        for i in files:
-            folder = i.split("_")[1].split(".")[0]
-            try:
+        assert file.endswith(
+            ".pkl"
+        ), "molecules require a .pkl file, you can process it with the script: folder_xyz_molecules_to_pkl.py"
+        # pandas_file = pd.read_json(path_json)
+        pkl_df = pd.read_pickle(file)
+        # print(pkl_df.keys())
+        molecule_graphs = pkl_df["molecule_graph"]
+        molecules = pkl_df["molecule"]
+        molecule_ids = pkl_df["ids"]
+
+        folder = root + "QTAIM/"
+        if not os.path.exists(folder):
+            os.mkdir(folder)
+
+        for ind, molecule in enumerate(molecule_graphs):
+            # if folder already exists, skip
+            folder = root + "QTAIM/" + str(molecule_ids[ind]) + "/"
+            if not os.path.exists(folder):
                 os.mkdir(folder)
-            except:
-                pass
 
-            with open(i) as xyz:
-                lines = xyz.readlines()
+            graph_info = molecule.graph.nodes(data=True)
 
-            atoms = int(lines[0])
+            sites = [convert_graph_info(item) for item in graph_info]
+            molecule_dict = {"spin_multiplicity": 1, "charge": 0, "sites": sites}
 
-            write_input_file(options_qm_file, folder)
+            write_input_file_from_pmg_molecule(
+                folder=folder, molecule=molecule_dict, options=options_qm
+            )
 
             with open(folder + "/props.sh", "w") as f:
                 f.write("#!/bin/bash\n")
                 f.write(
                     "./Multiwfn/Multiwfn "
                     + folder
-                    + "/input.wfn < ./Multiwfn/data.txt | tee ./"
+                    + "input.wfn < ./Multiwfn/data.txt | tee ./"
                     + folder
-                    + "/out \n"
+                    + "out \n"
                 )
 
 
