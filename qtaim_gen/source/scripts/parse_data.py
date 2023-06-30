@@ -14,13 +14,13 @@ def main():
 
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--json_loc",
+        "--root",
         type=str,
         default="../../data/rapter/",
         help="location of json file",
     )
     parser.add_argument(
-        "--json_file",
+        "--file_in",
         type=str,
         default="20230512_mpreact_assoc.bson",
         help="json file",
@@ -45,23 +45,26 @@ def main():
     )
 
     args = parser.parse_args()
-    json_loc = args.json_loc
-    json_file = args.json_file
+    root = args.root
+    file_in = args.file_in
     impute = bool(args.impute)
     reaction = bool(args.reaction)
     file_out = args.pandasfile_out_out
     print("impute: {}".format(impute))
-    print("json_loc: {}".format(json_loc))
-    print("json_file: {}".format(json_file))
+    print("root: {}".format(root))
+    print("file_in: {}".format(file_in))
     print("file_out: {}".format(file_out))
 
-    print("reading file from: {}".format(json_loc + json_file))
+    print("reading file from: {}".format(root + file_in))
 
-    if json_file.endswith(".json"):
-        path_json = json_loc + json_file
+    if file_in.endswith(".json"):
+        path_json = root + file_in
         pandas_file = pd.read_json(path_json)
+    elif file_in.endswith(".pkl"):
+        path_pkl = root + file_in
+        pandas_file = pd.read_pickle(path_pkl)
     else:
-        path_bson = json_loc + json_file
+        path_bson = root + file_in
         with open(path_bson, "rb") as f:
             data = bson.decode_all(f.read())
         pandas_file = pd.DataFrame(data)
@@ -69,7 +72,7 @@ def main():
     print(pandas_file.shape)
 
     if impute:
-        imputed_file = json_loc + "impute_vals.json"
+        imputed_file = root + "impute_vals.json"
 
     features_atom = [
         "Lagrangian_K",
@@ -116,7 +119,7 @@ def main():
             pandas_file,
             features_atom,
             features_bond,
-            root_dir=json_loc,
+            root_dir=root,
             json_file_imputed=imputed_file,
         )
         for i in impute_dict.keys():
@@ -157,16 +160,12 @@ def main():
             try:
                 reaction_id = row["reaction_id"]
                 bonds_reactants = row["reactant_bonds"]
-                QTAIM_loc_reactant = (
-                    json_loc + "QTAIM/" + str(reaction_id) + "/reactants/"
-                )
+                QTAIM_loc_reactant = root + "QTAIM/" + str(reaction_id) + "/reactants/"
                 cp_file_reactants = QTAIM_loc_reactant + "CPprop.txt"
                 dft_inp_file_reactant = QTAIM_loc_reactant + "input.in"
 
                 bonds_products = row["product_bonds"]
-                QTAIM_loc_product = (
-                    json_loc + "QTAIM/" + str(reaction_id) + "/products/"
-                )
+                QTAIM_loc_product = root + "QTAIM/" + str(reaction_id) + "/products/"
                 cp_file_products = QTAIM_loc_product + "CPprop.txt"
                 dft_inp_file_product = QTAIM_loc_product + "input.in"
 
@@ -360,7 +359,7 @@ def main():
                 impute_count_products_bond[k] = v + tf_count_products_bond[k]
 
         # save the impute counts to a file
-        with open(json_loc + "impute_counts.txt", "w") as f:
+        with open(root + "impute_counts.txt", "w") as f:
             f.write("---------- impute_count_products ---------- \n")
             f.write(str(impute_count_products))
             f.write("\n")
@@ -390,7 +389,7 @@ def main():
                 bonds = []
                 id = row["id"]
                 bonds = row["bonds"]
-                QTAIM_loc = json_loc + "QTAIM/" + str(id)
+                QTAIM_loc = root + "QTAIM/" + str(id)
                 cp_file = QTAIM_loc + "CPprop.txt"
                 dft_inp_file = QTAIM_loc + "input.in"
 
@@ -489,7 +488,7 @@ def main():
     print("done gathering and imputing features...")
     # save the pandas file
     print(pandas_file.shape)
-    pandas_file.to_json(json_loc + file_out)
+    pandas_file.to_json(root + file_out)
 
 
 main()

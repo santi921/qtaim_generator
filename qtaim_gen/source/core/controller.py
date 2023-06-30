@@ -117,4 +117,11 @@ def controller_single(dir_active, redo_qtaim=False, just_dft=False, reaction=Tru
 
             else:
                 subprocess.run(dir_active + folder_choice + "/props.sh")
-                os.system("mv " + "./CPprop.txt " + dir_active + folder_choice)
+                os.system("mv ./CPprop.txt " + dir_active + folder_choice)
+2
+2
+3
+7
+0
+q
+
