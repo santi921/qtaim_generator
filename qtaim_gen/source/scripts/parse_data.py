@@ -64,6 +64,9 @@ def main():
     elif file_in.endswith(".pkl"):
         path_pkl = root + file_in
         pandas_file = pd.read_pickle(path_pkl)
+        # if pandas file is a dict convert to dataframe
+        if type(pandas_file) == dict:
+            pandas_file = pd.DataFrame(pandas_file)
         print(len(pandas_file["ids"]))
     else:
         path_bson = root + file_in
@@ -74,7 +77,7 @@ def main():
 
     if impute:
         imputed_file = root + "impute_vals.json"
-
+    print("df type {}".format(type(pandas_file)))
     features_atom = [
         "Lagrangian_K",
         "Hamiltonian_K",
