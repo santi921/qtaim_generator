@@ -119,8 +119,10 @@ def main():
         "ids": identifier,
         "names": xyz_files_completed,
     }
-
+    # convert to pandas dataframe and save as pickle
+    df = pd.DataFrame(df)
     pd.to_pickle(df, pkl_file)
+
     df_pkl = pd.read_pickle(pkl_file)
 
 
