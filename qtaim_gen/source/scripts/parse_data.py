@@ -125,6 +125,7 @@ def main():
             features_bond,
             root_dir=root,
             json_file_imputed=imputed_file,
+            reaction=reaction,
         )
         for i in impute_dict.keys():
             print("-" * 20 + i + "-" * 20)
@@ -376,8 +377,14 @@ def main():
             f.write("---------- impute_count_reactants_bond ---------- \n")
             f.write(str(impute_count_reactants_bond))
             f.write("\n")
+
+        pandas_file["extra_feat_bond_reactant_indices_qtaim"] = bond_list_reactants
+        pandas_file["extra_feat_bond_product_indices_qtaim"] = bond_list_products
+
     else:
         bond_list = []
+        impute_count = {i: 0 for i in features_atom}
+        impute_count_bond = {i: 0 for i in features_bond}
 
         for i in features_atom:
             str_atom = "extra_feat_atom_" + i
@@ -389,43 +396,51 @@ def main():
 
         fail_count = 0
         for ind, row in pandas_file.iterrows():
+            tf_count = {i: 0 for i in features_atom}
+            tf_count_bond = {i: 0 for i in features_bond}
+
             try:
                 bonds = []
-                id = row["id"]
-                bonds = row["bonds"]
-                QTAIM_loc = root + "QTAIM/" + str(id)
+                id = row["ids"]
+                bond_dict = row["bonds"]
+                QTAIM_loc = root + "QTAIM/" + str(id) + "/"
                 cp_file = QTAIM_loc + "CPprop.txt"
                 dft_inp_file = QTAIM_loc + "input.in"
 
                 qtaim_descs = get_qtaim_descs(cp_file, verbose=False)
-                mapped_descs = merge_qtaim_inds(qtaim_descs, bonds, dft_inp_file)
+                mapped_descs = merge_qtaim_inds(qtaim_descs, bond_dict, dft_inp_file)
 
                 # print(mapped_descs_products)
                 # fill in imputation values
                 for k, v in mapped_descs.items():
                     if v == {}:
-                        # print(mapped_descs_reactants)
                         if type(k) == tuple:
                             bonds.append(list(k))
                             for i in features_bond:
+                                if (
+                                    tf_count_bond[i] == 0
+                                ):  # track if this feature is missing
+                                    tf_count_bond[i] = 1
+
                                 if impute:
                                     mapped_descs[k][i] = impute_dict["bond"][i][
                                         "median"
                                     ]
                                 else:
-                                    # print("feature missing, {}, {}".format(ind,i))
                                     mapped_descs[k][i] = -1
                                     if ind not in drop_list:
                                         drop_list.append(ind)
 
                         else:
                             for i in features_atom:
+                                if tf_count[i] == 0:  # track if this feature is missing
+                                    tf_count[i] = 1
+
                                 if impute:
                                     mapped_descs[k][i] = impute_dict["atom"][i][
                                         "median"
                                     ]
                                 else:
-                                    # print("feature missing, {}, {}".format(ind,i))
                                     mapped_descs[k][i] = -1
                                     if ind not in drop_list:
                                         drop_list.append(ind)
@@ -433,8 +448,7 @@ def main():
                 # get all the values of a certain key for every dictionary in the dicitonary
                 cps = mapped_descs.keys()
                 flat = {}
-
-                for cp in cps_reactants:
+                for cp in cps:
                     for i in features_atom:
                         if type(cp) != tuple:
                             # check if the key exists
@@ -452,7 +466,7 @@ def main():
                             flat[name].append(mapped_descs[cp][i])
 
                 # update the pandas file with the new values
-                for k, v in flat_reactants.items():
+                for k, v in flat.items():
                     if "bond" in k:
                         pandas_file.at[ind, k] = [v]
                     else:
@@ -479,9 +493,12 @@ def main():
                 print(reaction_id)
                 fail_count += 1
 
+        for k, v in impute_count.items():
+            impute_count[k] = v + tf_count[k]
+        for k, v in impute_count_bond.items():
+            impute_count_bond[k] = v + tf_count_bond[k]
+
     print(fail_count / ind)
-    pandas_file["extra_feat_bond_reactant_indices_qtaim"] = bond_list_reactants
-    pandas_file["extra_feat_bond_product_indices_qtaim"] = bond_list_products
 
     # if impute false then drop the rows that have -1 values
     if not impute:
@@ -493,14 +510,16 @@ def main():
     # save the pandas file
     print(pandas_file.shape)
 
-    pandas_file.to_json(root + file_out)
+    # pandas_file.to_json(root + file_out)
 
     if file_in.endswith(".json"):
         path_json = root + file_out
         pandas_file.to_json(root + file_out)
+
     elif file_in.endswith(".pkl"):
         path_pkl = root + file_out
         pandas_file.to_pickle(path_pkl)
+
     else:
         print("file format not supported")
 

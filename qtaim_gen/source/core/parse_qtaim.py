@@ -396,6 +396,7 @@ def gather_imputation(
     features_bond,
     root_dir="../data/hydro/",
     json_file_imputed="./imputed_vals.json",
+    reaction=False,
 ):
     """
     Takes in dataframe and features and returns dictionary of imputation values
@@ -423,61 +424,89 @@ def gather_imputation(
 
     else:
         for ind, row in df.iterrows():
-            try:
-                reaction_id = row["reaction_id"]
-                bonds_reactants = row["reactant_bonds"]
-                QTAIM_loc_reactant = (
-                    root_dir + "QTAIM/" + str(reaction_id) + "/reactants/"
-                )
-                cp_file_reactants = QTAIM_loc_reactant + "CPprop.txt"
-                dft_inp_file_reactant = QTAIM_loc_reactant + "input.in"
+            if reaction:
+                try:
+                    reaction_id = row["reaction_id"]
+                    bonds_reactants = row["reactant_bonds"]
+                    QTAIM_loc_reactant = (
+                        root_dir + "QTAIM/" + str(reaction_id) + "/reactants/"
+                    )
+                    cp_file_reactants = QTAIM_loc_reactant + "CPprop.txt"
+                    dft_inp_file_reactant = QTAIM_loc_reactant + "input.in"
 
-                qtaim_descs_reactants = get_qtaim_descs(
-                    cp_file_reactants, verbose=False
-                )
+                    qtaim_descs_reactants = get_qtaim_descs(
+                        cp_file_reactants, verbose=False
+                    )
 
-                bonds_products = row["product_bonds"]
-                QTAIM_loc_product = (
-                    root_dir + "QTAIM/" + str(reaction_id) + "/products/"
-                )
-                cp_file_products = QTAIM_loc_product + "CPprop.txt"
-                dft_inp_file_product = QTAIM_loc_product + "input.in"
-                qtaim_descs_products = get_qtaim_descs(cp_file_products, verbose=False)
+                    bonds_products = row["product_bonds"]
+                    QTAIM_loc_product = (
+                        root_dir + "QTAIM/" + str(reaction_id) + "/products/"
+                    )
+                    cp_file_products = QTAIM_loc_product + "CPprop.txt"
+                    dft_inp_file_product = QTAIM_loc_product + "input.in"
+                    qtaim_descs_products = get_qtaim_descs(
+                        cp_file_products, verbose=False
+                    )
 
-                mapped_descs_reactants = merge_qtaim_inds(
-                    qtaim_descs_reactants, bonds_reactants, dft_inp_file_reactant
-                )
+                    mapped_descs_reactants = merge_qtaim_inds(
+                        qtaim_descs_reactants, bonds_reactants, dft_inp_file_reactant
+                    )
 
-                mapped_descs_products = merge_qtaim_inds(
-                    qtaim_descs_products, bonds_products, dft_inp_file_product
-                )
+                    mapped_descs_products = merge_qtaim_inds(
+                        qtaim_descs_products, bonds_products, dft_inp_file_product
+                    )
 
-                for k, v in mapped_descs_reactants.items():
-                    if v == {}:
-                        pass
-                    elif type(k) == tuple:
-                        for i in features_bond:
-                            impute_dict["bond"][i].append(v[i])
-                    elif type(k) == int:
-                        for i in features_atom:
-                            impute_dict["atom"][i].append(v[i])
-                    else:
-                        pass
+                    for k, v in mapped_descs_reactants.items():
+                        if v == {}:
+                            pass
+                        elif type(k) == tuple:
+                            for i in features_bond:
+                                impute_dict["bond"][i].append(v[i])
+                        elif type(k) == int:
+                            for i in features_atom:
+                                impute_dict["atom"][i].append(v[i])
+                        else:
+                            pass
 
-                for k, v in mapped_descs_products.items():
-                    if v == {}:
-                        pass
-                    elif type(k) == tuple:
-                        for i in features_bond:
-                            impute_dict["bond"][i].append(v[i])
-                    elif type(k) == int:
-                        for i in features_atom:
-                            impute_dict["atom"][i].append(v[i])
-                    else:
-                        pass
+                    for k, v in mapped_descs_products.items():
+                        if v == {}:
+                            pass
+                        elif type(k) == tuple:
+                            for i in features_bond:
+                                impute_dict["bond"][i].append(v[i])
+                        elif type(k) == int:
+                            for i in features_atom:
+                                impute_dict["atom"][i].append(v[i])
+                        else:
+                            pass
 
-            except:
-                print(reaction_id)
+                except:
+                    print(reaction_id)
+            else:  # for single molecules
+                try:
+                    bonds = []
+                    id = row["ids"]
+                    bonds = row["bonds"]
+                    QTAIM_loc = root_dir + "QTAIM/" + str(id) + "/"
+                    cp_file = QTAIM_loc + "CPprop.txt"
+                    dft_inp_file = QTAIM_loc + "input.in"
+
+                    qtaim_descs = get_qtaim_descs(cp_file, verbose=False)
+                    mapped_descs = merge_qtaim_inds(qtaim_descs, bonds, dft_inp_file)
+                    for k, v in mapped_descs.items():
+                        if v == {}:
+                            pass
+                        elif type(k) == tuple:
+                            for i in features_bond:
+                                impute_dict["bond"][i].append(v[i])
+                        elif type(k) == int:
+                            for i in features_atom:
+                                impute_dict["atom"][i].append(v[i])
+                        else:
+                            pass
+
+                except:
+                    print("error, id: ", id)
 
     # get the mean and median of each feature
     for k, v in impute_dict.items():
