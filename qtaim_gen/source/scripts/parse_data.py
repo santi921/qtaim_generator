@@ -488,7 +488,17 @@ def main():
     print("done gathering and imputing features...")
     # save the pandas file
     print(pandas_file.shape)
+
     pandas_file.to_json(root + file_out)
+
+    if file_in.endswith(".json"):
+        path_json = root + file_out
+        pandas_file.to_json(root + file_out)
+    elif file_in.endswith(".pkl"):
+        path_pkl = root + file_out
+        pandas_file.to_pickle(path_pkl)
+    else:
+        print("file format not supported")
 
 
 main()
