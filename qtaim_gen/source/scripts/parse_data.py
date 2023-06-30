@@ -49,7 +49,7 @@ def main():
     file_in = args.file_in
     impute = bool(args.impute)
     reaction = bool(args.reaction)
-    file_out = args.pandasfile_out_out
+    file_out = args.file_out
     print("impute: {}".format(impute))
     print("root: {}".format(root))
     print("file_in: {}".format(file_in))
@@ -60,16 +60,17 @@ def main():
     if file_in.endswith(".json"):
         path_json = root + file_in
         pandas_file = pd.read_json(path_json)
+        print(pandas_file.shape)
     elif file_in.endswith(".pkl"):
         path_pkl = root + file_in
         pandas_file = pd.read_pickle(path_pkl)
+        print(len(pandas_file["ids"]))
     else:
         path_bson = root + file_in
         with open(path_bson, "rb") as f:
             data = bson.decode_all(f.read())
         pandas_file = pd.DataFrame(data)
-
-    print(pandas_file.shape)
+        print(pandas_file.shape)
 
     if impute:
         imputed_file = root + "impute_vals.json"
