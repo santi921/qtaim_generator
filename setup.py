@@ -14,5 +14,6 @@ setup(
         "./qtaim_gen/source/scripts/helpers/clean_failed_files.py",
         "./qtaim_gen/source/scripts/helpers/check_res_wfn.py",
         "./qtaim_gen/source/scripts/helpers/check_res_rxn_json.py",
+        "./qtaim_gen/source/scripts/helpers/folder_xyz_molecules_to_pkl.py",
     ],
 )

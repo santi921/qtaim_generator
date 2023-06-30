@@ -99,9 +99,10 @@ def main():
     for ind, xyz_file in enumerate(xyz_files):
         # print(xyz_folder + xyz_file)
         molecule = Molecule.from_file(xyz_folder + xyz_file)
-        bond_cutoff_bonds = connectedMatrix(
-            molecule, {"H,H": 1.2, "Pt,Pt": 1.5, "Pt,H": 1.2}
-        )
+
+        # bond_cutoff_bonds = connectedMatrix(
+        #    molecule, {"H,H": 1.2, "Pt,Pt": 1.5, "Pt,H": 1.2}
+        # )
         bonds_rdkit = get_bonds_from_rdkit(xyz_folder + xyz_file)
 
         bond_list.append(bonds_rdkit)
@@ -121,8 +122,8 @@ def main():
     }
     # convert to pandas dataframe and save as pickle
     df = pd.DataFrame(df)
-    pd.to_pickle(df, pkl_file)
-    df_pkl = pd.read_pickle(pkl_file)
+    pd.to_pickle(df, xyz_folder + pkl_file)
+    df_pkl = pd.read_pickle(xyz_folder + pkl_file)
 
 
 main()
