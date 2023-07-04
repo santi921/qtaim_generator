@@ -498,6 +498,16 @@ def main():
         for k, v in impute_count_bond.items():
             impute_count_bond[k] = v + tf_count_bond[k]
 
+        with open(root + "impute_counts.txt", "w") as f:
+            f.write("---------- impute_count ---------- \n")
+            f.write(str(impute_count))
+            f.write("\n")
+            f.write("---------- impute_count_bond ---------- \n")
+            f.write(str(impute_count_bond))
+            f.write("\n")
+
+        pandas_file["extra_feat_bond_indices_qtaim"] = bond_list
+
     print(fail_count / ind)
 
     # if impute false then drop the rows that have -1 values
