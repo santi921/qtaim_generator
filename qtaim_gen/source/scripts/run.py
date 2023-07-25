@@ -26,6 +26,7 @@ def main():
     print("active dir: {}".format(dir_active))
 
     for _ in range(folders_to_crawl):
+
         t1 = ThreadWithResult(
             target=controller_single,
             kwargs={
@@ -35,6 +36,7 @@ def main():
                 "reaction": reactions,
             },
         )
+        
         t1.start()
         t1.join()
 

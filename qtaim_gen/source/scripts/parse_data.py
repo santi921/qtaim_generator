@@ -490,7 +490,6 @@ def main():
                     name = "extra_feat_bond_" + i
                     pandas_file.at[ind, name] = -1
 
-                print(reaction_id)
                 fail_count += 1
 
         for k, v in impute_count.items():

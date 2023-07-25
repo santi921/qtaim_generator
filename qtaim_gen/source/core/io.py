@@ -50,8 +50,8 @@ def write_input_file_from_pmg_molecule(folder, molecule, options):
         f.write("END\n")
         f.write(
             "* xyz {} {}\n".format(
-                molecule["charge"],
-                molecule["spin_multiplicity"],
+                int(molecule["charge"]),
+                int(molecule["spin_multiplicity"]),
             )
         )
         for ind in range(n_atoms):
