@@ -105,17 +105,6 @@ def controller_single(dir_active, redo_qtaim=False, just_dft=False, reaction=Tru
                 + "/output.out"
             )
 
-            os.system(
-                "orca "
-                + dir_active
-                + folder_choice
-                + "/products"
-                + "/input.in > "
-                + dir_active
-                + folder_choice
-                + "/products/output.out"
-            )
-
         if not just_dft:
             if (
                 len(
