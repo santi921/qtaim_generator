@@ -2,5 +2,7 @@
   "functional": "TPSS DKH",
   "basis": "DKH-def2-TZVP SARC/J",
   "relativistic": true,
-  "basis_atoms": [{ "element": "Pt", "basis": "SARC-DKH-TZVP" }]
+  "basis_atoms": [{ "element": "Pt", "basis": "SARC-DKH-TZVP" }],
+  "multiwfn_cmd": "Multiwfn_NoGUI",
+  "multiwfn_options_file": "./data.txt"
 }

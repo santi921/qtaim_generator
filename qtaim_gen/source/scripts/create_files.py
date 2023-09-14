@@ -31,6 +31,9 @@ def main():
     with open(options_qm_file, "r") as f:
         options_qm = json.load(f)
 
+    multi_wfn_cmd = options_qm["multiwfn_cmd"]
+    multi_wfn_options_file = options_qm["multiwfn_options_file"]
+
     file = root + file
 
     if reaction_tf:
@@ -95,9 +98,9 @@ def main():
             with open(QTAIM_loc_reactant + "/props.sh", "w") as f:
                 f.write("#!/bin/bash\n")
                 f.write(
-                    "./Multiwfn/Multiwfn "
+                    "{} ".format(multi_wfn_cmd)
                     + QTAIM_loc_reactant
-                    + "/input.wfn < ./Multiwfn/data.txt | tee ./"
+                    + "/input.wfn < {} | tee ./".format(multi_wfn_options_file)
                     + QTAIM_loc_reactant
                     + "out \n"
                 )
@@ -106,9 +109,9 @@ def main():
             with open(QTAIM_loc_product + "/props.sh", "w") as f:
                 f.write("#!/bin/bash\n")
                 f.write(
-                    "./Multiwfn/Multiwfn "
+                    "{} ".format(multi_wfn_cmd)
                     + QTAIM_loc_product
-                    + "/input.wfn < ./Multiwfn/data.txt | tee ./"
+                    + "/input.wfn < {} | tee ./".format(multi_wfn_options_file)
                     + QTAIM_loc_product
                     + "out \n"
                 )
@@ -153,9 +156,9 @@ def main():
             with open(multi_wfn_file, "w") as f:
                 f.write("#!/bin/bash\n")
                 f.write(
-                    "./Multiwfn/Multiwfn "
+                    "{} ".format(multi_wfn_cmd)
                     + folder
-                    + "input.wfn < ./Multiwfn/data.txt | tee ./"
+                    + "input.wfn < {} | tee ./".format(multi_wfn_options_file)
                     + folder
                     + "out \n"
                 )
