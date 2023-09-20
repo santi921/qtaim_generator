@@ -107,11 +107,8 @@ def controller_single(dir_active, redo_qtaim=False, just_dft=False, reaction=Tru
 
         if not just_dft:
             if (
-                len(
-                    glob(dir_active + folder_choice + "/*.CPprop.txt")
-                    and not redo_qtaim
-                )
-                > 0
+                len(glob(dir_active + folder_choice + "/*.CPprop.txt")) > 0
+                and not redo_qtaim
             ):
                 print("cp calc already done - reactants")
 
