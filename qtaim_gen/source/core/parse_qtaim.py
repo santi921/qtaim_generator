@@ -54,6 +54,7 @@ def parse_cp(lines, verbose=True):
 
     cp_bond_conditionals = {
         "cp_num": ["----------------"],
+        "connected_bond_paths": ["Connected", "atoms:"],
         "pos_ang": ["Position", "(Angstrom):"],
         "Lagrangian_K": ["Lagrangian", "kinetic", "energy"],
         "Hamiltonian_K": ["Hamiltonian", "kinetic", "energy"],
@@ -119,6 +120,11 @@ def parse_cp(lines, verbose=True):
                     if k == "cp_num":
                         cp_dict[k] = int(i[2][:-1])
                         cp_name = str(cp_dict[k]) + "_bond"
+                    elif k == "connected_bond_paths":
+                        list_raw = [x for x in i[2:]]
+                        list_raw = [list_raw[0], list_raw[-2]]
+                        list_raw = [int(x.split("(")[0]) for x in list_raw]
+                        cp_dict[k] = list_raw
                     elif k == "pos_ang":
                         cp_dict[k] = [float(x) for x in i[2:]]
                     elif k == "esp_total":
@@ -335,12 +341,13 @@ def add_closest_atoms_to_bond(bond_cps, dft_dict, margin=1.0):
     return bond_cps
 
 
-def bond_cp(bond_cps, bond_list, dft_dict, margin=2.0):
+def bond_cp_distance(bond_cps, bond_list, dft_dict, margin=2.0):
     """
     Takes in bond cps and finds the closest atoms to the bond
     Takes:
         bond_cps (dict): dictionary of bond cps
         bond_list (list): list of bonds
+        bond_defn (str): bond definition, either "distance" or "qtaim"
         dft_dict (dict): dictionary of dft atoms
     Returns:
         ret_dict (dict): dictionary of bond cps with closest atoms added
@@ -353,9 +360,10 @@ def bond_cp(bond_cps, bond_list, dft_dict, margin=2.0):
     )  # gets atoms from bond cps
 
     for i in bond_list:
-        dict_cp_bond = find_bond_cp(i, bond_cps)
-
-        if dict_cp_bond != False:
+        dict_cp_bond = find_bond_cp(
+            i, bond_cps
+        )  # gets bond cp dictionary from bond_cps
+        if dict_cp_bond != False:  # remaps to [atom1, atom2] : qtaim_dict
             ret_dict[tuple(i)] = dict_cp_bond
         else:
             # print("No bond found for ", i)
@@ -384,7 +392,7 @@ def merge_qtaim_inds(qtaim_descs, bond_list, dft_inp_file, margin=2.0):
         dft_dict, atom_only_cps
     )
     # remapping bonds
-    bond_cps = bond_cp(bonds_only_cps, bond_list, dft_dict, margin=margin)
+    bond_cps = bond_cp_distance(bonds_only_cps, bond_list, dft_dict, margin=margin)
     # merge dictionaries
     ret_dict = {**atom_cps_remapped, **bond_cps}
     return ret_dict
