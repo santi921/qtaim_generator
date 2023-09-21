@@ -32,7 +32,6 @@ def main():
         t1 = ThreadWithResult(
             target=controller_single,
             kwargs={
-                "dir_active": dir_active,
                 "folder_choice": folder_choice,
                 "redo_qtaim": redo_qtaim,
                 "just_dft": just_dft,
