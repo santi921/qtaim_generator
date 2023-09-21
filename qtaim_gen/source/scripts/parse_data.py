@@ -44,12 +44,18 @@ def main():
         help="reaction or not",
     )
 
+    parser.add_argument(
+        "-define_bonds", choices=["distances", "qtaim"], default="qtaim"
+    )
+
     args = parser.parse_args()
     root = args.root
     file_in = args.file_in
     impute = bool(args.impute)
     reaction = bool(args.reaction)
     file_out = args.file_out
+    define_bonds = args.define_bonds
+    print("define_bonds: {}".format(define_bonds))
     print("impute: {}".format(impute))
     print("root: {}".format(root))
     print("file_in: {}".format(file_in))
@@ -126,6 +132,7 @@ def main():
             root_dir=root,
             json_file_imputed=imputed_file,
             reaction=reaction,
+            define_bonds=define_bonds,
         )
         for i in impute_dict.keys():
             print("-" * 20 + i + "-" * 20)
@@ -184,6 +191,7 @@ def main():
                     bonds_reactants,
                     dft_inp_file_reactant,
                     margin=2.0,
+                    bond_def=define_bonds,
                 )
 
                 mapped_descs_products = merge_qtaim_inds(
@@ -191,6 +199,7 @@ def main():
                     bonds_products,
                     dft_inp_file_product,
                     margin=2.0,
+                    bond_def=define_bonds,
                 )
 
                 bonds_products, bonds_reactants = [], []
@@ -262,11 +271,6 @@ def main():
                                     if ind not in drop_list:
                                         drop_list.append(ind)
 
-                # print("Reactants: ", tf_count_reactants)
-                # print("Products: ", tf_count_products)
-                # print("Reactants Bonds: ", tf_count_reactants_bond)
-                # print("Products Bonds: ", tf_count_products_bond)
-                # get all the values of a certain key for every dictionary in the dicitonary
                 cps_reactants = mapped_descs_reactants.keys()
                 cps_products = mapped_descs_products.keys()
                 flat_reactants, flat_products = {}, {}
@@ -408,7 +412,13 @@ def main():
                 dft_inp_file = QTAIM_loc + "input.in"
 
                 qtaim_descs = get_qtaim_descs(cp_file, verbose=False)
-                mapped_descs = merge_qtaim_inds(qtaim_descs, bond_dict, dft_inp_file)
+                mapped_descs = merge_qtaim_inds(
+                    qtaim_descs,
+                    bond_dict,
+                    dft_inp_file,
+                    margin=2.0,
+                    bond_def=define_bonds,
+                )
 
                 # print(mapped_descs_products)
                 # fill in imputation values

@@ -119,10 +119,6 @@ def test_find_cp_map():
     assert len(missing_atoms) == 1, "should have one atom missing"
 
 
-def test_add_closest_atoms_to_bond():
-    pass
-
-
 def test_merge_qtaim_inds():
     bonds = [
         [0, 9],
@@ -156,3 +152,36 @@ def test_merge_qtaim_inds():
     print("number of bonds: ", count_tuple)
     assert count_int == 17, "wrong number of atom CP"
     assert count_tuple == 16, "wrong number of bond CP"
+
+
+# test_merge_qtaim_inds()
+
+
+def test_bond_cp_via_qtaim():
+    qtaim_dict = get_qtaim_descs("./test_files/CPprop_w_paths.txt")
+    # assert that any key with "bond" in it has a path under the key connected_bond_paths
+
+    for key in qtaim_dict.keys():
+        if "bond" in key:
+            assert (
+                "connected_bond_paths" in qtaim_dict[key].keys()
+            ), "no path in bond CP"
+
+
+def test_bond_cp_via_qtaim_bond_defns():
+    qtaim_dict = get_qtaim_descs("./test_files/CPprop_w_paths.txt")
+    atom_dict, bond_cps = only_atom_cps(qtaim_dict)
+    # dict_dft = dft_inp_to_dict("./test_files/input.in")
+    bond_cps_qtaim = {}
+    for k, v in bond_cps.items():
+        bond_list_unsorted = v["connected_bond_paths"]
+        bond_list_unsorted.sort()
+        bond_cps_qtaim[tuple(bond_list_unsorted)] = v
+
+    count_tuple = 0
+    for i in bond_cps_qtaim:
+        if type(i) == tuple:
+            count_tuple += 1
+
+    print("number of bonds: ", count_tuple)
+    assert count_tuple == 17, "wrong number of bond CP"

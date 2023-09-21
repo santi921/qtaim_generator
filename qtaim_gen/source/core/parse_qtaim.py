@@ -372,7 +372,9 @@ def bond_cp_distance(bond_cps, bond_list, dft_dict, margin=2.0):
     return ret_dict
 
 
-def merge_qtaim_inds(qtaim_descs, bond_list, dft_inp_file, margin=2.0):
+def merge_qtaim_inds(
+    qtaim_descs, bond_list, dft_inp_file, define_bonds="qtaim", margin=2.0
+):
     """
     Gets mapping of qtaim indices to atom indices and remaps atom CP descriptors
 
@@ -392,7 +394,16 @@ def merge_qtaim_inds(qtaim_descs, bond_list, dft_inp_file, margin=2.0):
         dft_dict, atom_only_cps
     )
     # remapping bonds
-    bond_cps = bond_cp_distance(bonds_only_cps, bond_list, dft_dict, margin=margin)
+    if define_bonds == "qtaim":
+        bond_cps_qtaim = {}
+        for k, v in bond_cps.items():
+            bond_list_unsorted = v["connected_bond_paths"]
+            bond_list_unsorted.sort()
+            bond_cps_qtaim[tuple(bond_list_unsorted)] = v
+        bond_cps = bond_cps_qtaim
+
+    else:
+        bond_cps = bond_cp_distance(bonds_only_cps, bond_list, dft_dict, margin=margin)
     # merge dictionaries
     ret_dict = {**atom_cps_remapped, **bond_cps}
     return ret_dict
@@ -405,6 +416,7 @@ def gather_imputation(
     root_dir="../data/hydro/",
     json_file_imputed="./imputed_vals.json",
     reaction=False,
+    define_bonds="qtaim",
 ):
     """
     Takes in dataframe and features and returns dictionary of imputation values
@@ -414,6 +426,7 @@ def gather_imputation(
         features_bond (list): list of bond features
         root_dir (str): root directory of data
         json_file_imputed (str): json file to store imputation values
+        define_bonds (str): bond definition, either "distance" or "qtaim"
     Returns:
         impute_dict (dict): dictionary of imputation values
     """
