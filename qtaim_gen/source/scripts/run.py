@@ -25,8 +25,8 @@ def main():
 
     print("active dir: {}".format(dir_active))
     # folders_to_crawl_len = len(folders_to_crawl)
+    folders_in_dir = os.listdir(dir_active)
     for _ in range(folders_to_crawl):
-        folders_in_dir = os.listdir(dir_active)
         choice_sub = random.choice(folders_in_dir)
         folder_choice = dir_active + "/" + choice_sub
         t1 = ThreadWithResult(
@@ -43,7 +43,7 @@ def main():
         t1.start()
         t1.join()
         # remove folder from list
-        folders_to_crawl.remove(choice_sub)
+        folders_in_dir.remove(choice_sub)
         #
         # remove
 
