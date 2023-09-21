@@ -395,6 +395,9 @@ def merge_qtaim_inds(
     bond_list_ret = []
     if define_bonds == "qtaim":
         bond_cps_qtaim = {}
+        bond_cps = {
+            k: v for k, v in bond_cps.items() if "connected_bond_paths" in v.keys()
+        }
         for k, v in bond_cps.items():
             bond_list_unsorted = v["connected_bond_paths"]
             bond_list_unsorted = [
