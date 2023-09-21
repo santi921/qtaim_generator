@@ -24,21 +24,27 @@ def main():
     folders_to_crawl = int(args.folders_to_crawl)
 
     print("active dir: {}".format(dir_active))
-
-    for _ in range(folders_to_crawl):
-
+    folders_to_crawl_len = len(folders_to_crawl)
+    for _ in range(folders_to_crawl_len):
+        choice_sub = random.choice(folders_to_crawl)
+        folder_choice = dir_active + "/" + choice_sub
         t1 = ThreadWithResult(
             target=controller_single,
             kwargs={
                 "dir_active": dir_active,
+                "folder_choice": folder_choice,
                 "redo_qtaim": redo_qtaim,
                 "just_dft": just_dft,
                 "reaction": reactions,
             },
         )
-        
+
         t1.start()
         t1.join()
+        # remove folder from list
+        folders_to_crawl.remove(choice_sub)
+        #
+        # remove
 
 
 main()
