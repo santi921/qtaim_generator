@@ -386,7 +386,7 @@ def merge_qtaim_inds(
     # open dft input file
     dft_dict = dft_inp_to_dict(dft_inp_file)
     # find only atom cps to map
-    atom_only_cps, bonds_only_cps = only_atom_cps(qtaim_descs)
+    atom_only_cps, bond_cps = only_atom_cps(qtaim_descs)
     # remap qtaim indices to atom indices
     atom_cps_remapped, qtaim_to_dft, missing_atoms = find_cp_map(
         dft_dict, atom_only_cps, margin=0.5
@@ -407,7 +407,7 @@ def merge_qtaim_inds(
         bond_cps = bond_cps_qtaim
 
     else:
-        bond_cps = bond_cp_distance(bonds_only_cps, bond_list, dft_dict, margin=margin)
+        bond_cps = bond_cp_distance(bond_cps, bond_list, dft_dict, margin=margin)
     # merge dictionaries
     ret_dict = {**atom_cps_remapped, **bond_cps}
     return ret_dict

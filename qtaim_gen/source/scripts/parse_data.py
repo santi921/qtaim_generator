@@ -201,14 +201,14 @@ def main():
                     bond_list=bonds_reactants,
                     dft_inp_file=dft_inp_file_reactant,
                     margin=2.0,
-                    bond_def=define_bonds,
+                    define_bonds=define_bonds,
                 )
                 mapped_descs_products = merge_qtaim_inds(
                     qtaim_descs=qtaim_descs_products,
                     bond_list=bonds_products,
                     dft_inp_file=dft_inp_file_product,
                     margin=2.0,
-                    bond_def=define_bonds,
+                    define_bonds=define_bonds,
                 )
 
                 bonds_products, bonds_reactants = [], []
@@ -397,6 +397,7 @@ def main():
         if update_bonds_w_qtaim:
             pandas_file["reactant_bonds"] = bond_list_reactants
             pandas_file["product_bonds"] = bond_list_products
+
     else:
         bond_list = []
         impute_count = {i: 0 for i in features_atom}
@@ -425,11 +426,11 @@ def main():
 
                 qtaim_descs = get_qtaim_descs(cp_file, verbose=False)
                 mapped_descs = merge_qtaim_inds(
-                    qtaim_descs,
-                    bond_dict,
-                    dft_inp_file,
+                    qtaim_descs=qtaim_descs,
+                    bond_list=bond_dict,
+                    dft_inp_file=dft_inp_file,
                     margin=2.0,
-                    bond_def=define_bonds,
+                    define_bonds=define_bonds,
                 )
 
                 # print(mapped_descs_products)
