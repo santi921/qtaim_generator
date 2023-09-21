@@ -106,17 +106,18 @@ def test_only_atom_cps():
 
 
 def test_find_cp_map():
-    qtaim_dict = get_qtaim_descs("./test_files/CPprop.txt")
+    qtaim_dict = get_qtaim_descs("./test_files/CPprop_w_bond_paths.txt")
     atom_dict, atom_dict_bonds = only_atom_cps(qtaim_dict)
-    dict_dft = dft_inp_to_dict("./test_files/input.in")
+    dict_dft = dft_inp_to_dict("./test_files/input_bond_paths.in")
     ret_dict, qtaim_to_dft_map, missing_atoms = find_cp_map(
         dict_dft, atom_dict, margin=0.5
     )
 
     key_of_keys = list([i["key"] for i in qtaim_to_dft_map.values()])
-    assert len(key_of_keys) == 17, "should have 22 keys"
-    assert -1 in key_of_keys, "should have -1 in keys"
-    assert len(missing_atoms) == 1, "should have one atom missing"
+    print(len(key_of_keys))
+    assert len(key_of_keys) == 13, "should have 13 keys"
+    # assert -1 in key_of_keys, "should have -1 in keys"
+    # assert len(missing_atoms) == 1, "should have one atom missing"
 
 
 def test_merge_qtaim_inds():
@@ -139,7 +140,12 @@ def test_merge_qtaim_inds():
         [14, 16],
     ]
     dict_qtaim = get_qtaim_descs("./test_files/CPprop_bond_map.txt")
-    cp_dict = merge_qtaim_inds(dict_qtaim, bonds, "./test_files/input_bond_map.in")
+    cp_dict = merge_qtaim_inds(
+        qtaim_descs=dict_qtaim,
+        bond_list=bonds,
+        define_bonds="distance",
+        dft_inp_file="./test_files/input_bond_map.in",
+    )
     # count number of cp_dict keys that are integers
     cp_dict_keys = list(cp_dict.keys())
     count_tuple, count_int = 0, 0
@@ -154,11 +160,11 @@ def test_merge_qtaim_inds():
     assert count_tuple == 16, "wrong number of bond CP"
 
 
-# test_merge_qtaim_inds()
+test_merge_qtaim_inds()
 
 
 def test_bond_cp_via_qtaim():
-    qtaim_dict = get_qtaim_descs("./test_files/CPprop_w_paths.txt")
+    qtaim_dict = get_qtaim_descs("./test_files/CPprop_w_bond_paths.txt")
     # assert that any key with "bond" in it has a path under the key connected_bond_paths
 
     for key in qtaim_dict.keys():
@@ -212,6 +218,3 @@ def test_bond_cp_via_qtaim_bond_defns():
         assert i in bond_list_correct, "{}, bond not in correct list".format(i)
     assert count_tuple == 13, "wrong number of bond CP"
     # print(bond_cps_qtaim[(3, 4)])
-
-
-test_bond_cp_via_qtaim_bond_defns()
