@@ -45,6 +45,12 @@ def main():
     )
 
     parser.add_argument(
+        "--update_bonds_w_qtaim",
+        action="store_true",
+        help="update bonds with qtaim bond path definitions",
+    )
+
+    parser.add_argument(
         "-define_bonds", choices=["distances", "qtaim"], default="qtaim"
     )
 
@@ -55,11 +61,13 @@ def main():
     reaction = bool(args.reaction)
     file_out = args.file_out
     define_bonds = args.define_bonds
+    update_bonds_w_qtaim = args.update_bonds_w_qtaim
     print("define_bonds: {}".format(define_bonds))
     print("impute: {}".format(impute))
     print("root: {}".format(root))
     print("file_in: {}".format(file_in))
     print("file_out: {}".format(file_out))
+    print("reaction: {}".format(reaction))
 
     print("reading file from: {}".format(root + file_in))
 
@@ -171,12 +179,14 @@ def main():
 
             try:
                 reaction_id = row["reaction_id"]
+
                 bonds_reactants = row["reactant_bonds"]
+                bonds_products = row["product_bonds"]
+
                 QTAIM_loc_reactant = root + "QTAIM/" + str(reaction_id) + "/reactants/"
                 cp_file_reactants = QTAIM_loc_reactant + "CPprop.txt"
                 dft_inp_file_reactant = QTAIM_loc_reactant + "input.in"
 
-                bonds_products = row["product_bonds"]
                 QTAIM_loc_product = root + "QTAIM/" + str(reaction_id) + "/products/"
                 cp_file_products = QTAIM_loc_product + "CPprop.txt"
                 dft_inp_file_product = QTAIM_loc_product + "input.in"
@@ -187,17 +197,16 @@ def main():
                 qtaim_descs_products = get_qtaim_descs(cp_file_products, verbose=False)
 
                 mapped_descs_reactants = merge_qtaim_inds(
-                    qtaim_descs_reactants,
-                    bonds_reactants,
-                    dft_inp_file_reactant,
+                    qtaim_descs=qtaim_descs_reactants,
+                    bond_list=bonds_reactants,
+                    dft_inp_file=dft_inp_file_reactant,
                     margin=2.0,
                     bond_def=define_bonds,
                 )
-
                 mapped_descs_products = merge_qtaim_inds(
-                    qtaim_descs_products,
-                    bonds_products,
-                    dft_inp_file_product,
+                    qtaim_descs=qtaim_descs_products,
+                    bond_list=bonds_products,
+                    dft_inp_file=dft_inp_file_product,
                     margin=2.0,
                     bond_def=define_bonds,
                 )
@@ -385,6 +394,9 @@ def main():
         pandas_file["extra_feat_bond_reactant_indices_qtaim"] = bond_list_reactants
         pandas_file["extra_feat_bond_product_indices_qtaim"] = bond_list_products
 
+        if update_bonds_w_qtaim:
+            pandas_file["reactant_bonds"] = bond_list_reactants
+            pandas_file["product_bonds"] = bond_list_products
     else:
         bond_list = []
         impute_count = {i: 0 for i in features_atom}
@@ -516,6 +528,8 @@ def main():
             f.write("\n")
 
         pandas_file["extra_feat_bond_indices_qtaim"] = bond_list
+        if update_bonds_w_qtaim:
+            pandas_file["bonds"] = bond_list
 
     print(fail_count / ind)
 

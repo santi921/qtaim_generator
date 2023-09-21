@@ -169,13 +169,23 @@ def test_bond_cp_via_qtaim():
 
 
 def test_bond_cp_via_qtaim_bond_defns():
-    qtaim_dict = get_qtaim_descs("./test_files/CPprop_w_paths.txt")
-    atom_dict, bond_cps = only_atom_cps(qtaim_dict)
-    # dict_dft = dft_inp_to_dict("./test_files/input.in")
+    qtaim_dict = get_qtaim_descs("./test_files/CPprop_w_bond_paths.txt")
+    dft_dict = dft_inp_to_dict("./test_files/input_bond_paths.in")
+    atom_cp, bond_cps = only_atom_cps(qtaim_dict)
+    # [print(k, v["cp_num"]) for k, v in atom_cp.items()]
+    atom_cp, qtaim_to_dft, missing_atoms = find_cp_map(dft_dict, atom_cp, margin=0.5)
     bond_cps_qtaim = {}
+    # print(qtaim_to_dft)
     for k, v in bond_cps.items():
         bond_list_unsorted = v["connected_bond_paths"]
-        bond_list_unsorted.sort()
+        # print(bond_list_unsorted)
+
+        bond_list_unsorted = [
+            int(qtaim_to_dft[i - 1]["key"].split("_")[0]) - 1
+            for i in bond_list_unsorted
+        ]
+        bond_list_unsorted = sorted(bond_list_unsorted)
+        # print(bond_list_unsorted)
         bond_cps_qtaim[tuple(bond_list_unsorted)] = v
 
     count_tuple = 0
@@ -183,5 +193,25 @@ def test_bond_cp_via_qtaim_bond_defns():
         if type(i) == tuple:
             count_tuple += 1
 
-    print("number of bonds: ", count_tuple)
-    assert count_tuple == 17, "wrong number of bond CP"
+    bond_list_correct = [
+        (6, 7),
+        (5, 6),
+        (6, 12),
+        (2, 6),
+        (3, 5),
+        (1, 2),
+        (1, 3),
+        (4, 11),
+        (3, 4),
+        (0, 1),
+        (0, 8),
+        (0, 10),
+        (0, 9),
+    ]
+    for i in bond_cps_qtaim.keys():
+        assert i in bond_list_correct, "{}, bond not in correct list".format(i)
+    assert count_tuple == 13, "wrong number of bond CP"
+    # print(bond_cps_qtaim[(3, 4)])
+
+
+test_bond_cp_via_qtaim_bond_defns()

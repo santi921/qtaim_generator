@@ -246,16 +246,14 @@ def find_cp(atom_dict, atom_cp_dict, margin=0.5):
     """
 
     for k, v in atom_cp_dict.items():
-        distance = np.linalg.norm(np.array(v["pos_ang"]) - np.array(atom_dict["pos"]))
-        if v["cp_num"] == atom_dict["ind"]:
-            element_cond_initial = v["element"] == atom_dict["element"]
-            distance_cond_initial = distance < margin
-            return k, v
-
-        else:
+        element_cond = v["element"] == atom_dict["element"]
+        # print(v["element"], atom_dict["element"])
+        if element_cond:
+            distance = np.linalg.norm(
+                np.array(v["pos_ang"]) - np.array(atom_dict["pos"])
+            )
             dist_cond = distance < margin
-            element_cond = v["element"] == atom_dict["element"]
-            if dist_cond and element_cond:
+            if dist_cond:
                 return k, v
 
     return False, {}
@@ -373,7 +371,7 @@ def bond_cp_distance(bond_cps, bond_list, dft_dict, margin=2.0):
 
 
 def merge_qtaim_inds(
-    qtaim_descs, bond_list, dft_inp_file, define_bonds="qtaim", margin=2.0
+    qtaim_descs, dft_inp_file, bond_list=None, define_bonds="qtaim", margin=2.0
 ):
     """
     Gets mapping of qtaim indices to atom indices and remaps atom CP descriptors
@@ -391,15 +389,21 @@ def merge_qtaim_inds(
     atom_only_cps, bonds_only_cps = only_atom_cps(qtaim_descs)
     # remap qtaim indices to atom indices
     atom_cps_remapped, qtaim_to_dft, missing_atoms = find_cp_map(
-        dft_dict, atom_only_cps
+        dft_dict, atom_only_cps, margin=0.5
     )
     # remapping bonds
+    bond_list_ret = []
     if define_bonds == "qtaim":
         bond_cps_qtaim = {}
         for k, v in bond_cps.items():
             bond_list_unsorted = v["connected_bond_paths"]
-            bond_list_unsorted.sort()
+            bond_list_unsorted = [
+                int(qtaim_to_dft[i - 1]["key"].split("_")[0]) - 1
+                for i in bond_list_unsorted
+            ]
+            bond_list_unsorted = sorted(bond_list_unsorted)
             bond_cps_qtaim[tuple(bond_list_unsorted)] = v
+            bond_list_ret.append(bond_list_unsorted)
         bond_cps = bond_cps_qtaim
 
     else:
@@ -470,11 +474,17 @@ def gather_imputation(
                     )
 
                     mapped_descs_reactants = merge_qtaim_inds(
-                        qtaim_descs_reactants, bonds_reactants, dft_inp_file_reactant
+                        qtaim_descs_reactants,
+                        bonds_reactants,
+                        dft_inp_file_reactant,
+                        define_bonds=define_bonds,
                     )
 
                     mapped_descs_products = merge_qtaim_inds(
-                        qtaim_descs_products, bonds_products, dft_inp_file_product
+                        qtaim_descs_products,
+                        bonds_products,
+                        dft_inp_file_product,
+                        define_bonds=define_bonds,
                     )
 
                     for k, v in mapped_descs_reactants.items():
@@ -513,7 +523,9 @@ def gather_imputation(
                     dft_inp_file = QTAIM_loc + "input.in"
 
                     qtaim_descs = get_qtaim_descs(cp_file, verbose=False)
-                    mapped_descs = merge_qtaim_inds(qtaim_descs, bonds, dft_inp_file)
+                    mapped_descs = merge_qtaim_inds(
+                        qtaim_descs, bonds, dft_inp_file, define_bonds=define_bonds
+                    )
                     for k, v in mapped_descs.items():
                         if v == {}:
                             pass
