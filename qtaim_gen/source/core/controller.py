@@ -55,8 +55,7 @@ def controller_single(folder_choice, redo_qtaim=False, just_dft=False, reaction=
 
         if not just_dft:
             if (
-                len(glob(folder_choice + "/reactants/CPprop.txt") and not redo_qtaim)
-                > 0
+                len(glob(folder_choice + "/reactants/CPprop.txt")) > 0 and not redo_qtaim
             ):
                 print("cp calc already done - reactants")
 
@@ -64,7 +63,9 @@ def controller_single(folder_choice, redo_qtaim=False, just_dft=False, reaction=
                 subprocess.run(folder_choice + "/reactants/props.sh")
                 os.system("mv " + "./CPprop.txt " + folder_choice + "/reactants/")
 
-            if len(glob(folder_choice + "/products/CPprop.txt") and not redo_qtaim) > 0:
+            if (
+                len(glob(folder_choice + "/products/CPprop.txt")) > 0 and not redo_qtaim
+            ):
                 print("cp calc already done - products")
 
             else:
