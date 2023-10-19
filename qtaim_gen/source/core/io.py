@@ -27,7 +27,19 @@ def write_input_file(folder, lines, n_atoms, options):
 
 
 def write_input_file_from_pmg_molecule(folder, molecule, options):
-    n_atoms = int(len(molecule["sites"]))
+    try:
+        sites = molecule.sites
+        charge = molecule.charge
+        spin = molecule.spin_multiplicity
+        pmg = True
+    except:
+        sites = molecule["sites"]
+        charge = molecule["charge"]
+        spin = molecule["spin_multiplicity"]
+        pmg = False
+
+    n_atoms = int(len(sites))
+
     # print(folder)
     with open(folder + "/input.in", "w") as f:
         # for relativistic set functional to "TPSS ZORA" and basis to "ZORA-def2-TZVP SARC/J"
@@ -50,13 +62,17 @@ def write_input_file_from_pmg_molecule(folder, molecule, options):
         f.write("END\n")
         f.write(
             "* xyz {} {}\n".format(
-                int(molecule["charge"]),
-                int(molecule["spin_multiplicity"]),
+                int(charge),
+                int(spin),
             )
         )
         for ind in range(n_atoms):
-            xyz = molecule["sites"][ind]["xyz"]
-            atom = molecule["sites"][ind]["species"][0]["element"]
+            if pmg:
+                xyz = sites[ind].coords
+                atom = sites[ind].specie.symbol
+            else:
+                xyz = sites[ind]["xyz"]
+                atom = sites[ind]["element"]
             f.write(
                 "{}\t{: .4f}\t{: .4f}\t{: .4f}\n".format(atom, xyz[0], xyz[1], xyz[2])
             )

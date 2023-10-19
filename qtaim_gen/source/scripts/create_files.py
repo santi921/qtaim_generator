@@ -18,15 +18,18 @@ def main():
     parser.add_argument("-file", type=str, default="20230512_mpreact_assoc.bson")
     parser.add_argument("-root", type=str, default="../data/rapter/")
     parser.add_argument("-options_qm_file", default="options_qm.json")
+
     args = parser.parse_args()
 
     reaction_tf = bool(args.reaction)
     file = args.file
     root = args.root
+    options_qm_file = args.options_qm_file
+
     print("root: {}".format(root))
     print("file: {}".format(file))
     print("reaction_tf: {}".format(reaction_tf))
-    options_qm_file = args.options_qm_file
+    print("options_qm_file: {}".format(options_qm_file))
     # read json from options_qm_file
     with open(options_qm_file, "r") as f:
         options_qm = json.load(f)
@@ -137,19 +140,21 @@ def main():
         if not os.path.exists(folder):
             os.mkdir(folder)
 
-        for ind, molecule in enumerate(molecule_graphs):
+        for ind, row in pkl_df.iterrows():
             # if folder already exists, skip
             folder = root + "QTAIM/" + str(molecule_ids[ind]) + "/"
             if not os.path.exists(folder):
                 os.mkdir(folder)
 
-            graph_info = molecule.graph.nodes(data=True)
+            # graph_info = molecule.graph.nodes(data=True)
 
-            sites = [convert_graph_info(item) for item in graph_info]
-            molecule_dict = {"spin_multiplicity": 1, "charge": 0, "sites": sites}
-
+            # sites = [convert_graph_info(item) for item in graph_info]
+            molecule = row["molecule"]
+            molecule_graph = row["molecule_graph"]
+            # print(molecule.sites)
+            # print(molecule.molecule)
             write_input_file_from_pmg_molecule(
-                folder=folder, molecule=molecule_dict, options=options_qm
+                folder=folder, molecule=molecule_graph.molecule, options=options_qm
             )
 
             multi_wfn_file = folder + "props.sh"
