@@ -424,7 +424,7 @@ def main():
                 bonds = []
                 id = row["ids"]
                 if define_bonds == "distances":
-                    bond_dict = row["bonds"]
+                    bonds = row["bonds"]
                 QTAIM_loc = root + "QTAIM/" + str(id) + "/"
                 cp_file = QTAIM_loc + "CPprop.txt"
                 dft_inp_file = QTAIM_loc + "input.in"
@@ -432,7 +432,7 @@ def main():
                 qtaim_descs = get_qtaim_descs(cp_file, verbose=False)
                 mapped_descs = merge_qtaim_inds(
                     qtaim_descs=qtaim_descs,
-                    bond_list=bond_dict,
+                    bond_list=bonds,
                     dft_inp_file=dft_inp_file,
                     margin=2.0,
                     define_bonds=define_bonds,
