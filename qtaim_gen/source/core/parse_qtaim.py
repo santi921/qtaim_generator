@@ -93,8 +93,12 @@ def parse_cp(lines, verbose=True):
                             cp_dict["ele"] = "Unknown"
                             unknown_id += 1
                         else:
-                            cp_dict["element"] = i[2].split("(")[1]
-                            cp_dict["number"] = i[2].split("(")[0]
+                            if len(i) == 3:
+                                cp_dict["element"] = i[2].split("(")[1][:-1]
+                                cp_dict["number"] = i[2].split("(")[0]
+                            else:
+                                cp_dict["element"] = i[2].split("(")[1]
+                                cp_dict["number"] = i[2].split("(")[0]
                             cp_name = cp_dict["number"] + "_" + cp_dict["element"]
 
                     elif k == "esp_total":
@@ -122,9 +126,11 @@ def parse_cp(lines, verbose=True):
                         cp_name = str(cp_dict[k]) + "_bond"
                     elif k == "connected_bond_paths":
                         list_raw = [x for x in i[2:]]
-                        # save only items that contain a number 
-                        list_raw = [x for x in list_raw if any(char.isdigit() for char in x)]
-                        #list_raw = [list_raw[0], list_raw[-2]]
+                        # save only items that contain a number
+                        list_raw = [
+                            x for x in list_raw if any(char.isdigit() for char in x)
+                        ]
+                        # list_raw = [list_raw[0], list_raw[-2]]
                         list_raw = [int(x.split("(")[0]) for x in list_raw]
                         cp_dict[k] = list_raw
                     elif k == "pos_ang":
@@ -252,27 +258,37 @@ def find_cp(atom_dict, atom_cp_dict, margin=0.5):
     """
 
     for k, v in atom_cp_dict.items():
-        element_cond = v["element"] == atom_dict["element"]
-        # print(v["element"], atom_dict["element"])
-        if element_cond:
-            distance = np.linalg.norm(
-                np.array(v["pos_ang"]) - np.array(atom_dict["pos"])
-            )
-            dist_cond = distance < margin
-            if dist_cond:
-                return k, v
+        print(k.split)
+        if (
+            int(k.split("_")[0]) == atom_dict["ind"] + 1
+            and v["element"] == atom_dict["element"]
+        ):
+            print("match found")
+            print(k["element"], k["cp_num"], v)
+            return k, v
+
+        else:
+            element_cond = v["element"] == atom_dict["element"]
+            # print(v["element"], atom_dict["element"])
+            if element_cond:
+                distance = np.linalg.norm(
+                    np.array(v["pos_ang"]) - np.array(atom_dict["pos"])
+                )
+                dist_cond = distance < margin
+                if dist_cond:
+                    return k, v
 
     return False, {}
 
 
 def find_cp_map(dft_dict, atom_cp_dict, margin=0.5):
     """
-    Iterate through dft dict and find nearest cp in atom_cp_dict
+    Iterate through dft dict corresponding cp in atom_cp_dict
     Takes:
         dft_dict: dict
             dictionary of dft atoms
         atom_cp_dict: dict
-            dictionary of qtaim atoms
+            dictionary of qtaim atom cps
     Returns:
         ret_dict (dict): dictionary with dft atoms as keys and cp_dict as values
         qtaim_to_dft (dict): dictionary with qtaim atoms as keys and dft atoms as values
@@ -283,13 +299,15 @@ def find_cp_map(dft_dict, atom_cp_dict, margin=0.5):
     for k, v in dft_dict.items():
         v_send = {"element": v["element"], "pos": v["pos"], "ind": k}
 
+        # if k.split("_")[0].isdigit():
+        # finds cp by distance and naming scheme from CPprop.txt
         ret_key, dict_ret = find_cp(
             v_send, atom_cp_dict, margin=margin
         )  # find_cp returns cp_key, cp_dict
-
         if ret_key != False:
             ret_dict[k] = dict_ret
             qtaim_to_dft[k] = {"key": ret_key, "pos": dict_ret["pos_ang"]}
+
         else:
             # print("CP no match found in dft")
             ret_dict[k] = {}
@@ -395,7 +413,7 @@ def merge_qtaim_inds(
     atom_only_cps, bond_cps = only_atom_cps(qtaim_descs)
     # remap qtaim indices to atom indices
     atom_cps_remapped, qtaim_to_dft, missing_atoms = find_cp_map(
-        dft_dict, atom_only_cps, margin=0.5
+        dft_dict, atom_only_cps, margin=margin
     )
     # remapping bonds
     bond_list_ret = []
@@ -485,16 +503,16 @@ def gather_imputation(
                     )
 
                     mapped_descs_reactants = merge_qtaim_inds(
-                        qtaim_descs_reactants,
-                        bonds_reactants,
-                        dft_inp_file_reactant,
+                        qtaim_descs=qtaim_descs_reactants,
+                        bond_list=bonds_reactants,
+                        dft_inp_file=dft_inp_file_reactant,
                         define_bonds=define_bonds,
                     )
 
                     mapped_descs_products = merge_qtaim_inds(
-                        qtaim_descs_products,
-                        bonds_products,
-                        dft_inp_file_product,
+                        qtaim_descs=qtaim_descs_products,
+                        bond_list=bonds_products,
+                        dft_inp_file=dft_inp_file_product,
                         define_bonds=define_bonds,
                     )
 
@@ -537,7 +555,10 @@ def gather_imputation(
 
                     qtaim_descs = get_qtaim_descs(cp_file, verbose=False)
                     mapped_descs = merge_qtaim_inds(
-                        qtaim_descs, bonds, dft_inp_file, define_bonds=define_bonds
+                        qtaim_descs=qtaim_descs,
+                        bond_list=bonds,
+                        dft_inp_file=dft_inp_file,
+                        define_bonds=define_bonds,
                     )
                     for k, v in mapped_descs.items():
                         if v == {}:
