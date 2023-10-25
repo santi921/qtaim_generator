@@ -122,7 +122,9 @@ def parse_cp(lines, verbose=True):
                         cp_name = str(cp_dict[k]) + "_bond"
                     elif k == "connected_bond_paths":
                         list_raw = [x for x in i[2:]]
-                        list_raw = [list_raw[0], list_raw[-2]]
+                        # save only items that contain a number 
+                        list_raw = [x for x in list_raw if any(char.isdigit() for char in x)]
+                        #list_raw = [list_raw[0], list_raw[-2]]
                         list_raw = [int(x.split("(")[0]) for x in list_raw]
                         cp_dict[k] = list_raw
                     elif k == "pos_ang":
@@ -145,6 +147,10 @@ def parse_cp(lines, verbose=True):
         print("error")
 
     return cp_name, cp_dict
+
+
+#  Connected atoms:     4(O )   --     7(Li)
+#  Connected atoms:     8(O )   --     7(C )
 
 
 def get_qtaim_descs(file="./CPprop_1157_1118_1158.txt", verbose=False):
