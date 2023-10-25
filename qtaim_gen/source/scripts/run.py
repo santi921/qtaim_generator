@@ -28,7 +28,7 @@ def main():
     folders_in_dir = os.listdir(dir_active)
     for _ in range(folders_to_crawl):
         choice_sub = random.choice(folders_in_dir)
-        folder_choice = dir_active + "/" + choice_sub
+        folder_choice = dir_active + choice_sub
         t1 = ThreadWithResult(
             target=controller_single,
             kwargs={

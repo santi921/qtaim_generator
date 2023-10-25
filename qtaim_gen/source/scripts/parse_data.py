@@ -395,6 +395,10 @@ def main():
         pandas_file["extra_feat_bond_product_indices_qtaim"] = bond_list_products
 
         if update_bonds_w_qtaim:
+            if "reactant_bonds" in pandas_file.columns:
+                pandas_file["reactant_bonds_original"] = pandas_file["reactant_bonds"]
+            if "product_bonds" in pandas_file.columns:
+                pandas_file["product_bonds_original"] = pandas_file["product_bonds"]
             pandas_file["reactant_bonds"] = bond_list_reactants
             pandas_file["product_bonds"] = bond_list_products
 
@@ -530,6 +534,8 @@ def main():
 
         pandas_file["extra_feat_bond_indices_qtaim"] = bond_list
         if update_bonds_w_qtaim:
+            if "bonds" in pandas_file.columns:
+                pandas_file["bonds_original"] = pandas_file["bonds"]
             pandas_file["bonds"] = bond_list
 
     print(fail_count / ind)

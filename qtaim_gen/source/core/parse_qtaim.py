@@ -455,7 +455,8 @@ def gather_imputation(
             if reaction:
                 try:
                     reaction_id = row["reaction_id"]
-                    bonds_reactants = row["reactant_bonds"]
+                    if define_bonds == "distances":
+                        bonds_reactants = row["reactant_bonds"]
                     QTAIM_loc_reactant = (
                         root_dir + "QTAIM/" + str(reaction_id) + "/reactants/"
                     )
@@ -465,8 +466,9 @@ def gather_imputation(
                     qtaim_descs_reactants = get_qtaim_descs(
                         cp_file_reactants, verbose=False
                     )
+                    if define_bonds == "distances":
+                        bonds_products = row["product_bonds"]
 
-                    bonds_products = row["product_bonds"]
                     QTAIM_loc_product = (
                         root_dir + "QTAIM/" + str(reaction_id) + "/products/"
                     )
@@ -520,7 +522,9 @@ def gather_imputation(
                 try:
                     bonds = []
                     id = row["ids"]
-                    bonds = row["bonds"]
+                    if define_bonds == "distances":
+                        bonds = row["bonds"]
+                    # bonds = row["bonds"]
                     QTAIM_loc = root_dir + "QTAIM/" + str(id) + "/"
                     cp_file = QTAIM_loc + "CPprop.txt"
                     dft_inp_file = QTAIM_loc + "input.in"

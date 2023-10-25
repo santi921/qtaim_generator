@@ -62,6 +62,25 @@ def main():
             QTAIM_loc = root + "QTAIM/"
             QTAIM_loc_reactant = root + "QTAIM/" + str(reaction_id) + "/reactants/"
             QTAIM_loc_product = root + "QTAIM/" + str(reaction_id) + "/products/"
+
+            if not os.path.exists(root + "QTAIM/" + str(reaction_id)):
+                os.mkdir(root + "QTAIM/" + str(reaction_id))
+            if not os.path.exists(QTAIM_loc_reactant):
+                os.mkdir(QTAIM_loc_reactant)
+            if not os.path.exists(QTAIM_loc_product):
+                os.mkdir(QTAIM_loc_product)
+
+            # check if QTAIM_loc_reactant + "/props.sh, QTAIM_loc_product + "/props.sh" exists and are not empty
+            # if so, skip
+            reactant_prop_tf = (
+                os.path.exists(QTAIM_loc_reactant + "/props.sh")
+                and os.path.getsize(QTAIM_loc_reactant + "/props.sh") > 0
+            )
+            product_prop_tf = (
+                os.path.exists(QTAIM_loc_product + "/props.sh")
+                and os.path.getsize(QTAIM_loc_product + "/props.sh") > 0
+            )
+
             # create folder for each reaction + reactants + products
 
             if not os.path.exists(QTAIM_loc):
@@ -73,57 +92,61 @@ def main():
             if not os.path.exists(QTAIM_loc_product):
                 os.mkdir(QTAIM_loc_product)
 
-            # reactants
-            try:
-                reactants = row["combined_reactants_graph"]
-            except:
-                reactants = row["reactant_molecule_graph"]
+            if not reactant_prop_tf and not product_prop_tf:
+                # reactants
+                try:
+                    reactants = row["combined_reactants_graph"]
+                except:
+                    reactants = row["reactant_molecule_graph"]
 
-            # products
-            write_input_file_from_pmg_molecule(
-                folder=QTAIM_loc_reactant,
-                molecule=reactants["molecule"],
-                options=options_qm,
-            )
-
-            try:
-                products = row["combined_products_graph"]
-            except:
-                products = row["product_molecule_graph"]
-
-            write_input_file_from_pmg_molecule(
-                folder=QTAIM_loc_product,
-                molecule=products["molecule"],
-                options=options_qm,
-            )
-
-            # run QTAIM on reactants
-            with open(QTAIM_loc_reactant + "/props.sh", "w") as f:
-                f.write("#!/bin/bash\n")
-                f.write(
-                    "{} ".format(multi_wfn_cmd)
-                    + QTAIM_loc_reactant
-                    + "/input.wfn < {} | tee ./".format(multi_wfn_options_file)
-                    + QTAIM_loc_reactant
-                    + "out \n"
+                # products
+                write_input_file_from_pmg_molecule(
+                    folder=QTAIM_loc_reactant,
+                    molecule=reactants["molecule"],
+                    options=options_qm,
                 )
 
-            # run QTAIM on products
-            with open(QTAIM_loc_product + "/props.sh", "w") as f:
-                f.write("#!/bin/bash\n")
-                f.write(
-                    "{} ".format(multi_wfn_cmd)
-                    + QTAIM_loc_product
-                    + "/input.wfn < {} | tee ./".format(multi_wfn_options_file)
-                    + QTAIM_loc_product
-                    + "out \n"
+                try:
+                    products = row["combined_products_graph"]
+                except:
+                    products = row["product_molecule_graph"]
+
+                write_input_file_from_pmg_molecule(
+                    folder=QTAIM_loc_product,
+                    molecule=products["molecule"],
+                    options=options_qm,
                 )
 
-            st = os.stat(QTAIM_loc_product + "/props.sh")
-            os.chmod(QTAIM_loc_product + "/props.sh", st.st_mode | stat.S_IEXEC)
+                # run QTAIM on reactants
+                with open(QTAIM_loc_reactant + "/props.sh", "w") as f:
+                    f.write("#!/bin/bash\n")
+                    f.write(
+                        "{} ".format(multi_wfn_cmd)
+                        + QTAIM_loc_reactant
+                        + "/input.wfn < {} | tee ./".format(multi_wfn_options_file)
+                        + QTAIM_loc_reactant
+                        + "out \n"
+                    )
 
-            st = os.stat(QTAIM_loc_reactant + "/props.sh")
-            os.chmod(QTAIM_loc_reactant + "/props.sh", st.st_mode | stat.S_IEXEC)
+                # run QTAIM on products
+                with open(QTAIM_loc_product + "/props.sh", "w") as f:
+                    f.write("#!/bin/bash\n")
+                    f.write(
+                        "{} ".format(multi_wfn_cmd)
+                        + QTAIM_loc_product
+                        + "/input.wfn < {} | tee ./".format(multi_wfn_options_file)
+                        + QTAIM_loc_product
+                        + "out \n"
+                    )
+
+                st = os.stat(QTAIM_loc_product + "/props.sh")
+                os.chmod(QTAIM_loc_product + "/props.sh", st.st_mode | stat.S_IEXEC)
+
+                st = os.stat(QTAIM_loc_reactant + "/props.sh")
+                os.chmod(QTAIM_loc_reactant + "/props.sh", st.st_mode | stat.S_IEXEC)
+
+            else:
+                print("skipping reaction_id: {}".format(reaction_id))
 
     else:
         assert file.endswith(
@@ -143,32 +166,33 @@ def main():
         for ind, row in pkl_df.iterrows():
             # if folder already exists, skip
             folder = root + "QTAIM/" + str(molecule_ids[ind]) + "/"
-            if not os.path.exists(folder):
-                os.mkdir(folder)
-
-            # graph_info = molecule.graph.nodes(data=True)
-
-            # sites = [convert_graph_info(item) for item in graph_info]
-            molecule = row["molecule"]
-            molecule_graph = row["molecule_graph"]
-            # print(molecule.sites)
-            # print(molecule.molecule)
-            write_input_file_from_pmg_molecule(
-                folder=folder, molecule=molecule_graph.molecule, options=options_qm
+            completed_tf = (
+                os.path.exists(folder + "props.sh")
+                and os.path.getsize(folder + "props.sh") > 0
             )
-
-            multi_wfn_file = folder + "props.sh"
-            with open(multi_wfn_file, "w") as f:
-                f.write("#!/bin/bash\n")
-                f.write(
-                    "{} ".format(multi_wfn_cmd)
-                    + folder
-                    + "input.wfn < {} | tee ./".format(multi_wfn_options_file)
-                    + folder
-                    + "out \n"
+            if not completed_tf:
+                # graph_info = molecule.graph.nodes(data=True)
+                # sites = [convert_graph_info(item) for item in graph_info]
+                molecule = row["molecule"]
+                molecule_graph = row["molecule_graph"]
+                # print(molecule.sites)
+                # print(molecule.molecule)
+                write_input_file_from_pmg_molecule(
+                    folder=folder, molecule=molecule_graph.molecule, options=options_qm
                 )
-            st = os.stat(multi_wfn_file)
-            os.chmod(multi_wfn_file, st.st_mode | stat.S_IEXEC)
+
+                multi_wfn_file = folder + "props.sh"
+                with open(multi_wfn_file, "w") as f:
+                    f.write("#!/bin/bash\n")
+                    f.write(
+                        "{} ".format(multi_wfn_cmd)
+                        + folder
+                        + "input.wfn < {} | tee ./".format(multi_wfn_options_file)
+                        + folder
+                        + "out \n"
+                    )
+                st = os.stat(multi_wfn_file)
+                os.chmod(multi_wfn_file, st.st_mode | stat.S_IEXEC)
 
 
 main()
