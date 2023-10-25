@@ -179,9 +179,9 @@ def main():
 
             try:
                 reaction_id = row["reaction_id"]
-
-                bonds_reactants = row["reactant_bonds"]
-                bonds_products = row["product_bonds"]
+                if define_bonds == "distances":
+                    bonds_reactants = row["reactant_bonds"]
+                    bonds_products = row["product_bonds"]
 
                 QTAIM_loc_reactant = root + "QTAIM/" + str(reaction_id) + "/reactants/"
                 cp_file_reactants = QTAIM_loc_reactant + "CPprop.txt"
@@ -423,7 +423,8 @@ def main():
             try:
                 bonds = []
                 id = row["ids"]
-                bond_dict = row["bonds"]
+                if define_bonds == "distances":
+                    bond_dict = row["bonds"]
                 QTAIM_loc = root + "QTAIM/" + str(id) + "/"
                 cp_file = QTAIM_loc + "CPprop.txt"
                 dft_inp_file = QTAIM_loc + "input.in"
