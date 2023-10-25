@@ -258,13 +258,10 @@ def find_cp(atom_dict, atom_cp_dict, margin=0.5):
     """
 
     for k, v in atom_cp_dict.items():
-        print(k.split)
         if (
             int(k.split("_")[0]) == atom_dict["ind"] + 1
             and v["element"] == atom_dict["element"]
         ):
-            print("match found")
-            print(k["element"], k["cp_num"], v)
             return k, v
 
         else:
