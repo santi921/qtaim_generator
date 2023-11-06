@@ -4,7 +4,4 @@ A simple package to do qtaim on molecules, reactions, and (soon) surfaces. Orien
 TODOS
 
 [ ] - fix weird multiwfn errors on concurrent jobs
-
-[ ] - critic2 integration 
-
 [ ] - solid-state integration 
