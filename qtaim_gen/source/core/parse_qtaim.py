@@ -155,10 +155,6 @@ def parse_cp(lines, verbose=True):
     return cp_name, cp_dict
 
 
-#  Connected atoms:     4(O )   --     7(Li)
-#  Connected atoms:     8(O )   --     7(C )
-
-
 def get_qtaim_descs(file="./CPprop_1157_1118_1158.txt", verbose=False):
     """
     helper function to parse CPprop file from multiwfn.
@@ -474,30 +470,36 @@ def gather_imputation(
     else:
         for ind, row in df.iterrows():
             if reaction:
+
                 try:
                     reaction_id = row["reaction_id"]
+                    bonds_products = []
+                    bonds_reactants = []
+                    if define_bonds == "distances":
+                        bonds_products = row["product_bonds"]
                     if define_bonds == "distances":
                         bonds_reactants = row["reactant_bonds"]
+
                     QTAIM_loc_reactant = (
                         root_dir + "QTAIM/" + str(reaction_id) + "/reactants/"
                     )
+                    QTAIM_loc_product = (
+                        root_dir + "QTAIM/" + str(reaction_id) + "/products/"
+                    )
+
                     cp_file_reactants = QTAIM_loc_reactant + "CPprop.txt"
                     dft_inp_file_reactant = QTAIM_loc_reactant + "input.in"
+                    cp_file_products = QTAIM_loc_product + "CPprop.txt"
+                    dft_inp_file_product = QTAIM_loc_product + "input.in"
+
 
                     qtaim_descs_reactants = get_qtaim_descs(
                         cp_file_reactants, verbose=False
                     )
-                    if define_bonds == "distances":
-                        bonds_products = row["product_bonds"]
-
-                    QTAIM_loc_product = (
-                        root_dir + "QTAIM/" + str(reaction_id) + "/products/"
-                    )
-                    cp_file_products = QTAIM_loc_product + "CPprop.txt"
-                    dft_inp_file_product = QTAIM_loc_product + "input.in"
                     qtaim_descs_products = get_qtaim_descs(
                         cp_file_products, verbose=False
                     )
+
 
                     mapped_descs_reactants = merge_qtaim_inds(
                         qtaim_descs=qtaim_descs_reactants,
@@ -505,13 +507,13 @@ def gather_imputation(
                         dft_inp_file=dft_inp_file_reactant,
                         define_bonds=define_bonds,
                     )
-
                     mapped_descs_products = merge_qtaim_inds(
                         qtaim_descs=qtaim_descs_products,
                         bond_list=bonds_products,
                         dft_inp_file=dft_inp_file_product,
                         define_bonds=define_bonds,
                     )
+
 
                     for k, v in mapped_descs_reactants.items():
                         if v == {}:
@@ -539,14 +541,15 @@ def gather_imputation(
 
                 except:
                     print(reaction_id)
+            
             else:  # for single molecules
                 try:
                     bonds = []
-                    id = row["ids"]
+                    ids = row["ids"]
                     if define_bonds == "distances":
                         bonds = row["bonds"]
                     # bonds = row["bonds"]
-                    QTAIM_loc = root_dir + "QTAIM/" + str(id) + "/"
+                    QTAIM_loc = root_dir + "QTAIM/" + str(ids) + "/"
                     cp_file = QTAIM_loc + "CPprop.txt"
                     dft_inp_file = QTAIM_loc + "input.in"
 
@@ -570,7 +573,7 @@ def gather_imputation(
                             pass
 
                 except:
-                    print("error, id: ", id)
+                    print("error, id: ", ids)
 
     # get the mean and median of each feature
     for k, v in impute_dict.items():
