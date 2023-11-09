@@ -148,7 +148,7 @@ def main():
 
         print("Done gathering imputation data...")
 
-    pandas_file = gather_qtaim_features(
+    pandas_file, drop_list = gather_qtaim_features(
         pandas_file=pandas_file,
         root=root,
         features_atom=features_atom,
