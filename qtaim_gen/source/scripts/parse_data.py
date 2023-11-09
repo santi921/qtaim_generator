@@ -133,9 +133,9 @@ def main():
 
     if impute:
         impute_dict = gather_imputation(
-            pandas_file,
-            features_atom,
-            features_bond,
+            df=pandas_file,
+            features_atom=features_atom,
+            features_bond=features_bond,
             root_dir=root,
             json_file_imputed=imputed_file,
             reaction=reaction,
@@ -149,12 +149,11 @@ def main():
         print("Done gathering imputation data...")
 
     pandas_file = gather_qtaim_features(
-        pandas_file,
-        root,
-        features_atom,
-        features_bond,
-        reaction,
-        drop_list,
+        pandas_file=pandas_file,
+        root=root,
+        features_atom=features_atom,
+        features_bond=features_bond,
+        reaction=reaction,
         define_bonds=define_bonds,
         update_bonds_w_qtaim=update_bonds_w_qtaim,
         impute=impute,
