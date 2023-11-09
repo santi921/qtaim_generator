@@ -15,8 +15,7 @@ def test_gather_imputation_reaction():
     ]
     features_bond = [
         "Lagrangian_K",
-        "eta",
-        "connected_bond_paths"
+        "eta"
     ]
     
     reaction = True
