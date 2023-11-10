@@ -114,7 +114,6 @@ def test_find_cp_map():
     )
 
     key_of_keys = list([i["key"] for i in qtaim_to_dft_map.values()])
-    print(len(key_of_keys))
     assert len(key_of_keys) == 13, "should have 13 keys"
     # assert -1 in key_of_keys, "should have -1 in keys"
     # assert len(missing_atoms) == 1, "should have one atom missing"
@@ -160,7 +159,6 @@ def test_merge_qtaim_inds():
     assert count_tuple == 16, "wrong number of bond CP"
 
 
-test_merge_qtaim_inds()
 
 
 def test_bond_cp_via_qtaim():

@@ -52,7 +52,19 @@ class TestParser:
             impute=True,
             impute_dict=impute_dict,
         )
-
+        #print(pandas_file.iloc[0]["reactant_bonds_original"])
+        #print(pandas_file.iloc[0]["reactant_bonds"])
+        #print(pandas_file.iloc[0]["extra_feat_reactant_bond_indices_qtaim"])
+        #print(pandas_file.columns)
+        #for ind, row in pandas_file.iterrows():
+        #    print(row["reactant_bonds"])
+        #    print(row["extra_feat_bond_reactant_indices_qtaim"])
+        #    print()
+        #    print(row["product_bonds"])
+        #    print(row["extra_feat_bond_product_indices_qtaim"])
+        #    #assert len(row["bonds_original"]) == len(row["bonds"]), "bonds not same length"
+        #    #assert len(row["bonds_original"]) == len(row["extra_feat_bond_indices_qtaim"]), "bonds not same length"
+        
         assert len(drop_list) == 0, "drop list not empty"   
         
 
@@ -85,5 +97,19 @@ class TestParser:
             impute=True,
             impute_dict=impute_dict,
         )
-        assert len(drop_list) == 0, "drop list not empty"   
 
+        #print(pandas_file.iloc[0]["bonds_original"])
+        #print(pandas_file.iloc[0]["bonds"])
+        #print(pandas_file.iloc[0]["extra_feat_bond_indices_qtaim"])
+        for ind, row in pandas_file.iterrows():
+            #print(row["bonds"])
+            #print(row["extra_feat_bond_indices_qtaim"])
+            #assert len(row["bonds_original"]) == len(row["bonds"]), "bonds not same length"
+            assert len(row["bonds"]) == len(row["extra_feat_bond_indices_qtaim"]), "bonds not same length"
+        
+        assert len(drop_list) == 0, "drop list not empty"   
+        #print("---"*20)
+
+#tester=TestParser()
+#tester.test_reaction_parsing()
+#tester.test_molecule_parsing()

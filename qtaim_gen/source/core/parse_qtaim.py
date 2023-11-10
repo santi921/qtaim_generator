@@ -125,13 +125,16 @@ def parse_cp(lines, verbose=True):
                         cp_dict[k] = int(i[2][:-1])
                         cp_name = str(cp_dict[k]) + "_bond"
                     elif k == "connected_bond_paths":
+                        
                         list_raw = [x for x in i[2:]]
                         # save only items that contain a number
                         list_raw = [
                             x for x in list_raw if any(char.isdigit() for char in x)
                         ]
+                        #print("list raw connected: ", list_raw)
                         # list_raw = [list_raw[0], list_raw[-2]]
                         list_raw = [int(x.split("(")[0]) for x in list_raw]
+                        #print("list raw connected: ", list_raw)
                         cp_dict[k] = list_raw
                     elif k == "pos_ang":
                         cp_dict[k] = [float(x) for x in i[2:]]
@@ -415,13 +418,20 @@ def merge_qtaim_inds(
         bond_cps = {
             k: v for k, v in bond_cps.items() if "connected_bond_paths" in v.keys()
         }
+        #print("bond cps: ", bond_cps)
+
         for k, v in bond_cps.items():
             bond_list_unsorted = v["connected_bond_paths"]
+            #print(bond_list_unsorted)
             bond_list_unsorted = [
                 int(qtaim_to_dft[i - 1]["key"].split("_")[0]) - 1
                 for i in bond_list_unsorted
             ]
+            #print(bond_list_unsorted)
             bond_list_unsorted = sorted(bond_list_unsorted)
+            #print(bond_list_unsorted)
+            #assert len(bond_list_unsorted) == 2, "bond list not length 2"
+            #assert bond_list_unsorted[0] != bond_list_unsorted[1], "bond list same"
             bond_cps_qtaim[tuple(bond_list_unsorted)] = v
             bond_list_ret.append(bond_list_unsorted)
         bond_cps = bond_cps_qtaim
@@ -661,22 +671,26 @@ def gather_qtaim_features(
                     cp_file_reactants, verbose=False
                 )
                 qtaim_descs_products = get_qtaim_descs(cp_file_products, verbose=False)
+                
+                #for k, v in qtaim_descs_reactants.items():
+                #    if "bond" in k:
+                #        print("connected paths: ", v["connected_bond_paths"])
 
                 mapped_descs_reactants = merge_qtaim_inds(
                     qtaim_descs=qtaim_descs_reactants,
                     bond_list=bonds_reactants,
                     dft_inp_file=dft_inp_file_reactant,
-                    margin=2.0,
+                    margin=1.0,
                     define_bonds=define_bonds,
                 )
                 mapped_descs_products = merge_qtaim_inds(
                     qtaim_descs=qtaim_descs_products,
                     bond_list=bonds_products,
                     dft_inp_file=dft_inp_file_product,
-                    margin=2.0,
+                    margin=1.0,
                     define_bonds=define_bonds,
                 )
-
+                #print("mapped_descs_reactants: ", mapped_descs_reactants)
                 bonds_products, bonds_reactants = [], []
 
                 for k, v in mapped_descs_reactants.items():
@@ -810,8 +824,8 @@ def gather_qtaim_features(
                 # filter keys that aren't tuples
                 keys_products = [x for x in keys_products if type(x) == tuple]
                 keys_reactants = [x for x in keys_reactants if type(x) == tuple]
-                bond_list_reactants.append([keys_reactants])
-                bond_list_products.append([keys_products])
+                bond_list_reactants.append(keys_reactants)
+                bond_list_products.append(keys_products)
 
             except:
                 drop_list.append(ind)
@@ -859,7 +873,8 @@ def gather_qtaim_features(
 
         pandas_file["extra_feat_bond_reactant_indices_qtaim"] = bond_list_reactants
         pandas_file["extra_feat_bond_product_indices_qtaim"] = bond_list_products
-
+        print(bond_list_reactants[0])
+        print(pandas_file["reactant_bonds"].tolist()[0])
         if update_bonds_w_qtaim:
             if "reactant_bonds" in pandas_file.columns:
                 pandas_file["reactant_bonds_original"] = pandas_file["reactant_bonds"]
