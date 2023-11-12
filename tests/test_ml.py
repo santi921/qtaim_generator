@@ -142,3 +142,10 @@ class TestML:
         assert 'extra_feat_bond_esp_total' in qtaim_embed_dataset.exclude_names['bond'], "extra bond feature not parsed correctly"
         assert qtaim_embed_dataset.include_names == {"global": ["shifted_rrho_ev_free_energy"]}, "targets not parsed correctly"
 
+
+
+#tester = TestML()
+#print("running qtaim embed test")
+#tester.test_qtaim_embed()
+#print("running bondnet test")
+#tester.test_bondnet()

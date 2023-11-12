@@ -870,11 +870,13 @@ def gather_qtaim_features(
             f.write("---------- impute_count_reactants_bond ---------- \n")
             f.write(str(impute_count_reactants_bond))
             f.write("\n")
-
+        #print("line 873 reactant bond list test: ", bond_list_reactants[0])
+        #pandas_file["extra_feat_bond_reactant_indices_qtaim"] = [[i] for i in bond_list_reactants]
         pandas_file["extra_feat_bond_reactant_indices_qtaim"] = bond_list_reactants
         pandas_file["extra_feat_bond_product_indices_qtaim"] = bond_list_products
-        print(bond_list_reactants[0])
-        print(pandas_file["reactant_bonds"].tolist()[0])
+        #pandas_file["extra_feat_bond_product_indices_qtaim"] = [[i] for i in bond_list_products]
+        #print(bond_list_reactants[0])
+        #print(pandas_file["reactant_bonds"].tolist()[0])
         if update_bonds_w_qtaim:
             if "reactant_bonds" in pandas_file.columns:
                 pandas_file["reactant_bonds_original"] = pandas_file["reactant_bonds"]
@@ -1013,9 +1015,10 @@ def gather_qtaim_features(
             f.write("---------- impute_count_bond ---------- \n")
             f.write(str(impute_count_bond))
             f.write("\n")
-
-        pandas_file["extra_feat_bond_indices_qtaim"] = bond_list
-        if update_bonds_w_qtaim:
+        #print("line qtaim embed bond list test: ", bond_list[0])
+        pandas_file["extra_feat_bond_indices_qtaim"] = [i[0] for i in bond_list]
+        #print("line qtaim embed bond list test: ", bond_list[0])
+        if update_bonds_w_qtaim: 
             if "bonds" in pandas_file.columns:
                 pandas_file["bonds_original"] = pandas_file["bonds"]
             pandas_file["bonds"] = bond_list

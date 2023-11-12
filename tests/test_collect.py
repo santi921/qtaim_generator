@@ -105,7 +105,7 @@ class TestParser:
             #print(row["bonds"])
             #print(row["extra_feat_bond_indices_qtaim"])
             #assert len(row["bonds_original"]) == len(row["bonds"]), "bonds not same length"
-            assert len(row["bonds"]) == len(row["extra_feat_bond_indices_qtaim"]), "bonds not same length"
+            assert len(row["bonds"][0]) == len(row["extra_feat_bond_indices_qtaim"]), "bonds not same length"
         
         assert len(drop_list) == 0, "drop list not empty"   
         #print("---"*20)
