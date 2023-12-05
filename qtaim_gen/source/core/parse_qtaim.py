@@ -33,9 +33,13 @@ def parse_cp(lines, verbose=True):
         "cp_num": ["----------------"],
         "ele_info": ["Corresponding", "nucleus:"],
         "pos_ang": ["Position", "(Angstrom):"],
+        "density_alpha": ["Density", "of", "Alpha", "electrons:"],
+        "density_beta": ["Density", "of", "Beta", "electrons:"],
+        "spin_density": ["Spin", "density", "of", "electrons:"],
+        "lol": ["Localized", "orbital", "locator"],
+        "energy_density": ["Energy", "density", "E(r)"],
         "Lagrangian_K": ["Lagrangian", "kinetic", "energy"],
         "Hamiltonian_K": ["Hamiltonian", "kinetic", "energy"],
-        "e_density": ["Energy", "density", "E(r)"],
         "lap_e_density": ["Laplacian", "electron", "density:"],
         "e_loc_func": ["Electron", "localization", "function"],
         "ave_loc_ion_E": ["Average", "local", "ionization", "energy"],
@@ -56,9 +60,13 @@ def parse_cp(lines, verbose=True):
         "cp_num": ["----------------"],
         "connected_bond_paths": ["Connected", "atoms:"],
         "pos_ang": ["Position", "(Angstrom):"],
+        "density_alpha": ["Density", "of", "Alpha", "electrons:"],
+        "density_beta": ["Density", "of", "Beta", "electrons:"],
+        "spin_density": ["Spin", "density", "of", "electrons:"],
+        "lol": ["Localized", "orbital", "locator"],
+        "energy_density": ["Energy", "density", "E(r)"],
         "Lagrangian_K": ["Lagrangian", "kinetic", "energy"],
         "Hamiltonian_K": ["Hamiltonian", "kinetic", "energy"],
-        "e_density": ["Energy", "density", "E(r)"],
         "lap_e_density": ["Laplacian", "electron", "density:"],
         "e_loc_func": ["Electron", "localization", "function"],
         "ave_loc_ion_E": ["Average", "local", "ionization", "energy"],
@@ -153,7 +161,7 @@ def parse_cp(lines, verbose=True):
                     break
 
     else:
-        print("error")
+        print("error - ring and cage critical points not implemented")
 
     return cp_name, cp_dict
 

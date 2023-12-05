@@ -6,20 +6,26 @@ from qtaim_gen.source.core.parse_qtaim import (
 class TestParser:
     features_atom = [
         "Lagrangian_K",
-        "e_density",
+        "energy_density",
         "e_loc_func",
         "esp_total",
         "ellip_e_dens",
         "eta",
+        "lol",
+        "density_alpha",
+        "density_beta",
     ]
 
     features_bond = [
         "Lagrangian_K",
-        "e_density",
+        "energy_density",
         "e_loc_func",
         "esp_total",
         "ellip_e_dens",
         "eta",
+        "lol",
+        "density_alpha",
+        "density_beta",
     ]
 
     def test_reaction_parsing(self):
@@ -40,7 +46,7 @@ class TestParser:
             define_bonds=define_bonds,
         )
 
-
+        
         pandas_file, drop_list = gather_qtaim_features(
             df,
             test_root,
@@ -98,9 +104,7 @@ class TestParser:
             impute_dict=impute_dict,
         )
 
-        #print(pandas_file.iloc[0]["bonds_original"])
-        #print(pandas_file.iloc[0]["bonds"])
-        #print(pandas_file.iloc[0]["extra_feat_bond_indices_qtaim"])
+
         for ind, row in pandas_file.iterrows():
             #print(row["bonds"])
             #print(row["extra_feat_bond_indices_qtaim"])

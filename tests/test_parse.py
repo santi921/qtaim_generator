@@ -69,6 +69,7 @@ def test_parse_full_cp():
     count_atoms = 0
     count_bonds = 0
     list_keys = list(dict_qtaim.keys())
+    
     for key in list_keys:
         if "bond" in key:
             count_bonds += 1
@@ -80,10 +81,19 @@ def test_parse_full_cp():
 
     print("number of atoms: ", count_atoms)
     print("number of bonds: ", count_bonds)
-
+    atom_cp_test = dict_qtaim["14_H"]
+    bond_cp_test = dict_qtaim["23_bond"]
+    
+    atom_cp_keys_check=['cp_num',"element", "number", 'pos_ang', 'density_alpha', 'density_beta', 'spin_density', 'lol', 'energy_density', 'Lagrangian_K', 'Hamiltonian_K', 'lap_e_density', 'e_loc_func', 'ave_loc_ion_E', 'delta_g_promolecular', 'delta_g_hirsh', 'esp_nuc', 'esp_e', 'esp_total', 'grad_norm', 'lap_norm', 'eig_hess', 'det_hessian', 'ellip_e_dens', 'eta']
+    bond_cp_keys_check=['cp_num', 'pos_ang', 'density_alpha', 'density_beta', 'spin_density', 'lol', 'energy_density', 'Lagrangian_K', 'Hamiltonian_K', 'lap_e_density', 'e_loc_func', 'ave_loc_ion_E', 'delta_g_promolecular', 'delta_g_hirsh', 'esp_nuc', 'esp_e', 'esp_total', 'grad_norm', 'lap_norm', 'eig_hess', 'det_hessian', 'ellip_e_dens', 'eta']
+    for i in atom_cp_keys_check:
+        assert i in atom_cp_test.keys(), "key not in atom CP: {}".format(i)
+    for i in bond_cp_keys_check:
+        assert i in bond_cp_test.keys(), "key not in bond CP: {}".format(i)
     assert count_atoms == 20, "wrong number of atom CP"
     assert count_bonds == 21, "wrong number of bond CP"
 
+test_parse_full_cp()
 
 def test_parse_dft_inp():
     dict_dft = dft_inp_to_dict("./test_files/test_dft.in")
@@ -159,8 +169,6 @@ def test_merge_qtaim_inds():
     assert count_tuple == 16, "wrong number of bond CP"
 
 
-
-
 def test_bond_cp_via_qtaim():
     qtaim_dict = get_qtaim_descs("./test_files/CPprop_w_bond_paths.txt")
     # assert that any key with "bond" in it has a path under the key connected_bond_paths
@@ -216,3 +224,10 @@ def test_bond_cp_via_qtaim_bond_defns():
         assert i in bond_list_correct, "{}, bond not in correct list".format(i)
     assert count_tuple == 13, "wrong number of bond CP"
     # print(bond_cps_qtaim[(3, 4)])
+
+
+
+#test_bond_cp_via_qtaim_bond_defns()
+#test_bond_cp_via_qtaim()
+#test_only_atom_cps()
+#test_parse_full_cp()

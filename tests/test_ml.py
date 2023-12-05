@@ -9,7 +9,7 @@ from qtaim_gen.source.core.parse_qtaim import (
 class TestML:
     features_atom = [
         "Lagrangian_K",
-        "e_density",
+        "energy_density",
         "e_loc_func",
         "esp_total",
         "ellip_e_dens",
@@ -18,7 +18,7 @@ class TestML:
 
     features_bond = [
         "Lagrangian_K",
-        "e_density",
+        "energy_density",
         "e_loc_func",
         "esp_total",
         "ellip_e_dens",
@@ -87,6 +87,7 @@ class TestML:
         impute=True,
         impute_dict=impute_dict,
     )
+    print("length drop list: ", len(drop_list))
 
     mol_df = pandas_file
     # save
