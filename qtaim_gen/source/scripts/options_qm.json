@@ -2,7 +2,6 @@
   "functional": "PBE0 D3BJ DKH",
   "basis": "DKH-def2-TZVP SARC/J",
   "relativistic": true,
-  "parallel_procs": "%PAL NPROCS 24 END",
   "basis_atoms": [{"element": "Y", "basis": "SARC-DKH-TZVP"},
           {"element": "Zr", "basis": "SARC-DKH-TZVP"},
           {"element": "Nb", "basis": "SARC-DKH-TZVP"},
@@ -24,7 +23,8 @@
           {"element": "Pt", "basis": "SARC-DKH-TZVP"},
           {"element": "Au", "basis": "SARC-DKH-TZVP"},
           {"element": "Hg", "basis": "SARC-DKH-TZVP"}],
+  "parallel_procs": "%PAL NPROCS 24 END",
+  "orca_path": "/path/to/orca_5_0_4/orca",
   "multiwfn_cmd": "Multiwfn_noGUI",
-  "multiwfn_options_file": "../../data.txt",
-  "orca_path": "/p/home/wgee/Software/orca_5_0_4/orca"
+  "multiwfn_options_file": "/path/to/qtaim_generator/qtaim_gen/source/scripts/data.txt"
 }
