@@ -139,7 +139,9 @@ def main():
         "lol",
 
     ]
-
+    
+    impute_dict={}
+    
     if impute:
         impute_dict = gather_imputation(
             df=pandas_file,
