@@ -22,7 +22,7 @@ def controller_single(folder_choice, redo_qtaim=False, just_dft=False, reaction=
         redo_qtaim: whether to redo the QTAIM calculations
         just_dft: whether to just do the DFT calculations
         reaction: whether to do a reaction or not
-        orca_path: path to orca
+        orca_path: absolute path to orca (required for parallel calculations)
 
     """
 
