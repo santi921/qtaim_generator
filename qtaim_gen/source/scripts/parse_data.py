@@ -94,7 +94,7 @@ def main():
     features_atom = [
         "Lagrangian_K",
         "Hamiltonian_K",
-        "e_density",
+        "energy_density",
         "lap_e_density",
         "e_loc_func",
         "ave_loc_ion_E",
@@ -109,12 +109,16 @@ def main():
         "det_hessian",
         "ellip_e_dens",
         "eta",
+        "density_beta",
+        "density_alpha",
+        "spin_density",
+        "lol",
     ]
 
     features_bond = [
         "Lagrangian_K",
         "Hamiltonian_K",
-        "e_density",
+        "energy_density",
         "lap_e_density",
         "e_loc_func",
         "ave_loc_ion_E",
@@ -129,6 +133,11 @@ def main():
         "det_hessian",
         "ellip_e_dens",
         "eta",
+        "density_beta",
+        "density_alpha",
+        "spin_density",
+        "lol",
+
     ]
 
     if impute:
