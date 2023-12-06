@@ -37,5 +37,5 @@ def write_critical_points_to_json(path: str, potcar_path: str):
         json.dump(data, f, indent=4)
 
 # Example usage:
-# write_critical_points_to_json("tests/test_files/solidstate", "tests/test_files/solidstate/pot")
+# write_critical_points_to_json("/Users/wladerer/github/qtaim_generator/tests/test_files/solidstate", "/Users/wladerer/github/qtaim_generator/tests/test_files/solidstate/pot")
 
