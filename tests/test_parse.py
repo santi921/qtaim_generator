@@ -7,6 +7,7 @@ from qtaim_gen.source.core.parse_qtaim import (
     merge_qtaim_inds,
 )
 
+from qtaim_gen.source.core.parse_critic import parse_critic2
 
 def get_full_qtaim():
     # read full qtaim file from multiwfn out
@@ -93,7 +94,6 @@ def test_parse_full_cp():
     assert count_atoms == 20, "wrong number of atom CP"
     assert count_bonds == 21, "wrong number of bond CP"
 
-test_parse_full_cp()
 
 def test_parse_dft_inp():
     dict_dft = dft_inp_to_dict("./test_files/test_dft.in")
@@ -113,7 +113,7 @@ def test_only_atom_cps():
     for i in ret_dict.values():
         assert "element" in i.keys(), "element not in dict"
         assert "pos_ang" in i.keys(), "xyz not in dict"
-
+    #print(ret_dict_bonds.keys())
 
 def test_find_cp_map():
     qtaim_dict = get_qtaim_descs("./test_files/CPprop_w_bond_paths.txt")
@@ -226,8 +226,16 @@ def test_bond_cp_via_qtaim_bond_defns():
     # print(bond_cps_qtaim[(3, 4)])
 
 
+def test_parse_critic2():
+    cro = "./test_files/critic2/molecule/phenol_phenol.json"
+    features = {
+        "atom": ['field', 'gradient_norm', 'laplacian', 'hessian_eigenvalues', 'ellipticity'], 
+        "bond": ['field', 'gradient_norm', 'laplacian', 'hessian_eigenvalues', 'ellipticity']
+    }
+    ret_dict = parse_critic2(cro, features=features)
+    probe_bond_cp = ret_dict["bond_cps"]["55_bond"]
+    probe_atom_cp = ret_dict["atom_cps"]["16_H"]
 
-#test_bond_cp_via_qtaim_bond_defns()
-#test_bond_cp_via_qtaim()
-#test_only_atom_cps()
-#test_parse_full_cp()
+    assert len(probe_atom_cp.keys()) == 5, "wrong number of atoms"
+    assert len(probe_bond_cp.keys()) == 8, "wrong number of bonds"
+
