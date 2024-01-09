@@ -96,7 +96,11 @@ class TestML:
     def test_bondnet(self):
         from bondnet.data.dataset import ReactionNetworkDatasetGraphs
         from bondnet.model.training_utils import get_grapher
-        extra_features = ["bond_length", "esp_total", "bond_esp_total", "indices_qtaim"]
+        extra_features = {
+            "bond": ["bond_length", "esp_total"], 
+            "atom": ["esp_total"],
+            "mappings": ["indices_qtaim"]
+        }
         
         dataset_bondnet = ReactionNetworkDatasetGraphs(
             grapher=get_grapher(extra_features),
