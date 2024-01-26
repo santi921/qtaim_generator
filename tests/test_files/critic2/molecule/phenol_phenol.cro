@@ -1,0 +1,1487 @@
+                  _   _     _          ___     
+                 (_) | |   (_)        |__ \    
+     ___   _ __   _  | |_   _    ___     ) |   
+    / __| | '__| | | | __| | |  / __|   / /    
+   | (__  | |    | | | |_  | | | (__   / /_    
+    \___| |_|    |_|  \__| |_|  \___| |____|   
+
+* CRITIC2: analysis of real-space scalar fields in solids and molecules.
+  (c) 1996-2019 A. Otero-de-la-Roza, A. Martin-Pendas, V. Lua~na
+  Distributed under GNU GPL v.3 (see COPYING for details)
+  Bugs, requests, and rants: aoterodelaroza@gmail.com 
+  Website: https://aoterodelaroza.github.io/critic2/
+  If you find this software useful, please cite:
+  A. Otero-de-la-Roza et al., Comput. Phys. Commun. 185 (2014) 1007-1018.
+  A. Otero-de-la-Roza et al., Comput. Phys. Commun. 180 (2009) 157-166.
+
++ critic2 (development), version 1.0 (git:1.1dev-193-g99d9058) 
+         host: Linux-5.17.0-1-amd64
+         date: Mon 06 Jun 2022 11:00:09
+ compiled dat: /usr/local/share/critic2
+      datadir: /home/alberto/git/critic2/dat
+     dic file: /home/alberto/git/critic2/dat/cif/cif_core.dic
+...was found?: T
+       spglib: 1.13.0
+        libxc: <unavailable>
+
+CRITIC2--2022/6/15, 14:15:27.383
+
+%% molecule phenol_phenol.cube
+
+* Molecular structure
+  From: phenol_phenol.cube
+  Encompassing cell dimensions (bohr): 33.055357  24.306162  22.644867
+  Encompassing cell dimensions (ang): 17.492142  12.862267  11.983147
+  Empirical formula: C_(6) O_(1) H_(6) 
+  Number of atoms: 26
+  Number of atomic species: 3
+  Number of electrons (with zero atomic charge): 100
+  Molar mass (amu): 188.222
+
++ List of atomic species: 
+# spc = atomic species. Z = atomic number. name = atomic name (symbol).
+# Q = charge. ZPSP = pseudopotential charge.
+# spc  Z   name      Q    ZPSP
+   1   6    C_     0.0000  -- 
+   2   8    O_     0.0000  -- 
+   3   1    H_     0.0000  -- 
+
++ List of atoms in Cartesian coordinates (ang_): 
+# at = complete list atomic ID. xyz = Cartesian coordinates. spc = atomic species.
+# name = atomic name (symbol). Z = atomic number. dnn = nearest-neighbor distance.
+# nat = non-equivalent atom id. mol = molecular fragment.
+# at         x                y                z         spc  name    Z     dnn     nat mol
+   1     2.0123544523     0.7845383105     0.1095392854   1    C_     6    1.3617    1   1 
+   2     1.3940208769     1.9460302338     0.4601233794   2    O_     8    0.9693    2   1 
+   3     0.5266729844     1.9840153903     0.0290314722   3    H_     1    0.9693    3   1 
+   4     1.4642967281    -0.1226260097    -0.8000163395   1    C_     6    1.0820    4   1 
+   5     2.1487918236    -1.2960356287    -1.1097233784   1    C_     6    1.0817    5   1 
+   6     3.3795140817    -1.5739605116    -0.5211739896   1    C_     6    1.0806    6   1 
+   7     3.9235656484    -0.6632238984     0.3837877912   1    C_     6    1.0816    7   1 
+   8     3.2462894996     0.5093407929     0.7005783420   1    C_     6    1.0810    8   1 
+   9     0.5087562945     0.0893205518    -1.2613757317   3    H_     1    1.0820    9   1 
+  10     1.7131942598    -1.9920351979    -1.8138729493   3    H_     1    1.0817   10   1 
+  11     3.9076426778    -2.4849327910    -0.7640423572   3    H_     1    1.0806   11   1 
+  12     4.8793780443    -0.8650698604     0.8480166029   3    H_     1    1.0816   12   1 
+  13     3.6554919893     1.2231705320     1.4017438910   3    H_     1    1.0810   13   1 
+  14    -1.3530528519     1.9596781259    -0.4387517608   2    O_     8    0.9634   14   2 
+  15    -2.0332298558     0.8035464379    -0.1239075788   1    C_     6    1.3778   15   2 
+  16    -1.7893735838     2.3773343188    -1.1892422089   3    H_     1    0.9634   16   2 
+  17    -1.5789473358     0.0759546724     0.9728434852   1    C_     6    1.0811   17   2 
+  18    -2.2263679619    -1.1053584836     1.3198630750   1    C_     6    1.0810   18   2 
+  19    -3.3199144303    -1.5589485051     0.5837063079   1    C_     6    1.0804   19   2 
+  20    -3.7657357817    -0.8213281090    -0.5095340715   1    C_     6    1.0811   20   2 
+  21    -3.1225231003     0.3614807957    -0.8685232221   1    C_     6    1.0834   21   2 
+  22    -0.7302774711     0.4385007665     1.5360057284   3    H_     1    1.0811   22   2 
+  23    -1.8708014970    -1.6716929578     2.1692745260   3    H_     1    1.0810   23   2 
+  24    -3.8182945972    -2.4772070649     0.8589695499   3    H_     1    1.0804   24   2 
+  25    -4.6127634929    -1.1619121005    -1.0886555153   3    H_     1    1.0811   25   2 
+  26    -3.4659324152     0.9345623564    -1.7214641981   3    H_     1    1.0834   26   2 
+
++ Limits of the molecular cell (in fractions of the unit cell).
+# The part of the unit cell outside the molecular cell represents
+# infinity (no CPs or gradient paths in it).
+  x-axis: 0.0457 -> 0.9543
+  y-axis: 0.0622 -> 0.9378
+  z-axis: 0.0668 -> 0.9332
+
++ List of fragments in the system (2)
+# Id = fragment ID. nat = number of atoms in fragment. C-o-m = center of mass (ang_).
+# Discrete = is this fragment finite?
+# Id  nat           Center of mass            Discrete
+  1    13     2.463957    0.007488   -0.096360   Yes
+  2    13    -2.452386    0.029975    0.106870   Yes
+
++ Atomic environment
+  Number of atoms (reduced cell/environment): 26 / 26
+  Radius of (unit cell/environment) circumscribed sphere (ang_): 12.3997 / 5.6923
+  Maximum interaction distance (ang_): 12.4050 
+  Covering regions: 
+    Total number of regions: 24 (4 3 2)
+    Minimum region ID: 4 3 3
+    Maximum region ID: 7 5 4
+    Region side (ang_): 2.9200
+    Transformation origin (ang_): -8.7461,-6.4311,-5.9916
+    Search offsets: 1331
+    Maximum search offset: 5
+    Average number of atoms per region: 1.0833
+    Maximum number of atoms in a region: 4
+
+* List of scalar fields
++ Field number 0
+  Name: <promolecular>
+  Source: <generated>
+  Type: promolecular
+  Atoms in the environment: 26
+  Use core densities? F
+  Numerical derivatives? F
+  Nuclear CP signature: -3
+  Number of non-equivalent critical points: 26
+  Number of critical points in the unit cell: 26
+  Alias for this field (2): $0, $rho0
+  This is the REFERENCE field.
+
+* List of integrable properties (2)
+#  Id  Type  Field  Name
+    1  fval      0  Pop  
+    2  lval      0  Lap  
+
+* List of additional properties at critical points (0)
+
+* List of core and pseudopotential charges for each field
+# id  type   core?  ZPSP
+  0  promol   no  
+
+%% load phenol_phenol.cube smoothrho
+
++ Field number 1
+  Source: phenol_phenol.cube
+  Type: grid
+  Grid dimensions : 141  104  97
+  Max. length Voronoi-relevant vector (ang_):  0.12406
+  First elements... 7.722911416316E-15  1.130529773555E-14  1.638546838635E-14
+  Last elements... 1.871936574235E-15  1.297881671492E-15  8.913417075911E-16
+  Sum of elements... 7.878090831789E+03
+  Sum of squares of elements... 4.911790692034E+04
+  Cell integral (grid SUM) = 100.76850504
+  Min: 4.82627879E-18
+  Average: 5.53855914E-03
+  Max: 9.55038251E+01
+  Interpolation mode (1=nearest,2=linear,3=spline,4=tricubic,5=smoothrho): 5
+    smoothrho with 512 stencil nodes and smoothing dmax factor = 1.7500
+  Use core densities? F
+  Numerical derivatives? F
+  Nuclear CP signature: -3
+  Number of non-equivalent critical points: 26
+  Number of critical points in the unit cell: 26
+  Alias for this field (1): $1
+
+* Field number 1 is now REFERENCE.
+
+%% auto discard "$1 < 1e-5"
+
+Start AUTO--2022/6/15, 14:15:30.073
+
+* Automatic determination of CPs
+  Discard new CPs if another CP was found at a distance less than: 1.365E-01 ang_
+  Discard new CPs if a nucleus was found at a distance less than: 1.365E-01 ang_
+  Discard new CPs if a hydrogen was found at a distance less than: 1.365E-01 ang_
+  CPs are degenerate if any Hessian element abs value is less than: 1.000E-08
+  Discard CP expression: $1 < 1e-5
+  Discard CPs if grad(f) is above: 1.000E-12
++ List of seeding actions
+  Id nseed     Type           Description
+  1 3110    Atom pairs      dist=7.9377, npts=5
++ Number of seeds before pruning and clipping: 3110
++ Number of seeds: 3110
++ Searching for CPs
+  CP localization progress:
+  [1/3110]
+  [125/3110]
+  [249/3110]
+  [373/3110]
+  [497/3110]
+  [621/3110]
+  [745/3110]
+  [869/3110]
+  [993/3110]
+  [1117/3110]
+  [1241/3110]
+  [1365/3110]
+  [1489/3110]
+  [1613/3110]
+  [1737/3110]
+  [1861/3110]
+  [1985/3110]
+  [2109/3110]
+  [2233/3110]
+  [2357/3110]
+  [2481/3110]
+  [2605/3110]
+  [2729/3110]
+  [2853/3110]
+  [2977/3110]
+  [3101/3110]
++ Sorting the CPs
+
+* Critical point list, final report (non-equivalent cps)
+  Topological class (n|b|r|c): 26(26) 29(29) 5(5) 1(1) 
+  Poincare-Hopf sum: 1
+# ncp   type   CPname              position (ang_)               name            f             |grad|           lap
+  1    (3,-3) nucleus   2.01235445   0.78453831   0.10953929      C_      1.25935592E+02  0.00000000E+00 -4.24043708E+06
+  2    (3,-3) nucleus   1.39402088   1.94603023   0.46012338      O_      3.15423322E+02  0.00000000E+00 -3.35975327E+07
+  3    (3,-3) nucleus   0.52667298   1.98401539   0.02903147      H_      4.32048894E-01  0.00000000E+00 -1.16427385E+01
+  4    (3,-3) nucleus   1.46429673  -0.12262601  -0.80001634      C_      1.25849865E+02  0.00000000E+00 -4.23750844E+06
+  5    (3,-3) nucleus   2.14879182  -1.29603563  -1.10972338      C_      1.25726847E+02  0.00000000E+00 -4.23339830E+06
+  6    (3,-3) nucleus   3.37951408  -1.57396051  -0.52117399      C_      1.26142304E+02  0.00000000E+00 -4.24743298E+06
+  7    (3,-3) nucleus   3.92356565  -0.66322390   0.38378779      C_      1.25841908E+02  0.00000000E+00 -4.23729260E+06
+  8    (3,-3) nucleus   3.24628950   0.50934079   0.70057834      C_      1.25988460E+02  0.00000000E+00 -4.24218345E+06
+  9    (3,-3) nucleus   0.50875629   0.08932055  -1.26137573      H_      4.82150095E-01  0.00000000E+00 -1.28723823E+01
+  10   (3,-3) nucleus   1.71319426  -1.99203520  -1.81387295      H_      4.86927800E-01  0.00000000E+00 -1.33044458E+01
+  11   (3,-3) nucleus   3.90764268  -2.48493279  -0.76404236      H_      4.77472440E-01  0.00000000E+00 -1.15105319E+01
+  12   (3,-3) nucleus   4.87937804  -0.86506986   0.84801660      H_      4.84738502E-01  0.00000000E+00 -1.30146987E+01
+  13   (3,-3) nucleus   3.65549199   1.22317053   1.40174389      H_      4.81660419E-01  0.00000000E+00 -1.30369979E+01
+  14   (3,-3) nucleus  -1.35305285   1.95967813  -0.43875176      O_      3.15473555E+02  0.00000000E+00 -3.36030670E+07
+  15   (3,-3) nucleus  -2.03322986   0.80354644  -0.12390758      C_      1.25053153E+02  0.00000000E+00 -4.21051225E+06
+  16   (3,-3) nucleus  -1.78937358   2.37733432  -1.18924221      H_      4.41782121E-01  0.00000000E+00 -1.18957033E+01
+  17   (3,-3) nucleus  -1.57894734   0.07595467   0.97284349      C_      1.25692926E+02  0.00000000E+00 -4.23225415E+06
+  18   (3,-3) nucleus  -2.22636796  -1.10535848   1.31986308      C_      1.25859306E+02  0.00000000E+00 -4.23780383E+06
+  19   (3,-3) nucleus  -3.31991443  -1.55894851   0.58370631      C_      1.26057528E+02  0.00000000E+00 -4.24457241E+06
+  20   (3,-3) nucleus  -3.76573578  -0.82132811  -0.50953407      C_      1.25837687E+02  0.00000000E+00 -4.23715206E+06
+  21   (3,-3) nucleus  -3.12252310   0.36148080  -0.86852322      C_      1.26082666E+02  0.00000000E+00 -4.24543741E+06
+  22   (3,-3) nucleus  -0.73027747   0.43850077   1.53600573      H_      4.80934719E-01  0.00000000E+00 -1.33146582E+01
+  23   (3,-3) nucleus  -1.87080150  -1.67169296   2.16927453      H_      4.84130628E-01  0.00000000E+00 -1.30650551E+01
+  24   (3,-3) nucleus  -3.81829460  -2.47720706   0.85896955      H_      4.84826336E-01  0.00000000E+00 -1.31681604E+01
+  25   (3,-3) nucleus  -4.61276349  -1.16191210  -1.08865552      H_      4.75391683E-01  0.00000000E+00 -1.11126734E+01
+  26   (3,-3) nucleus  -3.46593242   0.93456236  -1.72146420      H_      4.79804268E-01  0.00000000E+00 -1.26664466E+01
+  27   (3,-1)   bond   -1.70466495   2.28909128  -1.03861965     b22      3.51657709E-01  9.52972589E-15 -2.12502232E+00
+  28   (3,-1)   bond    0.69763925   1.97188212   0.11363505      b8      3.43658241E-01  4.31778870E-15 -1.84621122E+00
+  29   (3,-1)   bond   -1.78820016   0.42889028   0.45199802     b17      3.17576545E-01  4.73198365E-14 -8.96911097E-01
+  30   (3,-1)   bond    2.65313831   0.64817414   0.42093993      b6      3.16836097E-01  2.14580601E-14 -9.01178033E-01
+  31   (3,-1)   bond   -2.59834940   0.58430679  -0.51949347     b19      3.16753829E-01  2.05682429E-14 -8.83601282E-01
+  32   (3,-1)   bond    1.71895296   0.32191041  -0.36297659     b10      3.14230257E-01  7.62620322E-14 -8.66187012E-01
+  33   (3,-1)   bond   -3.54099682  -1.19400422   0.04251887     b21      3.13891040E-01  2.12955900E-14 -8.63254995E-01
+  34   (3,-1)   bond    2.77003500  -1.43749119  -0.81294383      b7      3.13694036E-01  1.55103848E-14 -8.68050776E-01
+  35   (3,-1)   bond    3.58393849  -0.07738432   0.54101994      b1      3.13624095E-01  7.29434294E-14 -8.56128314E-01
+  36   (3,-1)   bond   -1.90554883  -0.51697764   1.14533789     b24      3.13468111E-01  2.77631287E-14 -8.59089108E-01
+  37   (3,-1)   bond   -2.77622775  -1.33368510   0.94964644     b23      3.13031425E-01  1.03504953E-14 -8.58501162E-01
+  38   (3,-1)   bond    3.65060037  -1.12267288  -0.07192918      b4      3.12542579E-01  2.12955343E-14 -8.62443220E-01
+  39   (3,-1)   bond    1.80851192  -0.71066371  -0.95435685     b15      3.11680480E-01  1.56412900E-14 -8.47641845E-01
+  40   (3,-1)   bond   -3.44663865  -0.23502538  -0.68674878     b18      3.11502431E-01  2.22904121E-14 -8.49810704E-01
+  41   (3,-1)   bond    1.79853013   1.16709984   0.21845224      b2      2.89418116E-01  5.04805449E-13 -3.41977377E-01
+  42   (3,-1)   bond   -1.99770932  -1.46992469   1.86654799     b26      2.81643625E-01  1.01534158E-14 -1.01321988E+00
+  43   (3,-1)   bond   -4.30964763  -1.03919145  -0.88117419     b28      2.81193304E-01  9.31353579E-13 -1.00681502E+00
+  44   (3,-1)   bond   -3.64018082  -2.14813225   0.76061012     b27      2.80849947E-01  5.27984327E-15 -1.00593782E+00
+  45   (3,-1)   bond   -1.02961340   0.31107703   1.33637879     b25      2.80675257E-01  4.66692000E-15 -1.00459236E+00
+  46   (3,-1)   bond    4.53622413  -0.79274468   0.68195532     b14      2.80624408E-01  5.43383884E-15 -1.01686166E+00
+  47   (3,-1)   bond    1.86965560  -1.74109026  -1.56048371      b9      2.80498046E-01  1.10969021E-14 -1.02148981E+00
+  48   (3,-1)   bond    3.71782620  -2.15639902  -0.67667146     b11      2.79942722E-01  7.66437059E-15 -9.95518969E-01
+  49   (3,-1)   bond    3.50936385   0.96796996   1.15148110     b16      2.79584505E-01  2.38945801E-14 -9.98316954E-01
+  50   (3,-1)   bond    0.85378971   0.01471627  -1.09451243      b3      2.78634742E-01  6.00215365E-15 -1.00908121E+00
+  51   (3,-1)   bond   -3.33942143   0.72835317  -1.41177274     b29      2.76525732E-01  8.49469845E-15 -9.70184385E-01
+  52   (3,-1)   bond   -1.81533948   1.18792793  -0.23781332     b20      2.74938328E-01  6.74679938E-15 -2.96319952E-01
+  53   (3,-1)   bond   -0.15604772   1.96871237  -0.14942025      b5      2.54462615E-02  7.77600418E-16  8.48744210E-02
+  54   (3,-1)   bond   -0.20139932   0.89671439  -0.86791213     b13      6.09677385E-03  1.53848023E-13  2.29978928E-02
+  55   (3,-1)   bond    0.09803488   1.07271540   0.98520480     b12      5.03766192E-03  2.71174400E-17  2.04039286E-02
+  56   (3,1 )   ring   -2.67130211  -0.36565160   0.22568465      r4      2.05060514E-02  9.57090734E-16  1.62439806E-01
+  57   (3,1 )   ring    2.69119325  -0.38591017  -0.20532629      r1      2.03893366E-02  1.35473267E-15  1.61555865E-01
+  58   (3,1 )   ring    0.08795652   1.08663523  -0.65715822      r2      5.63114225E-03  8.39923064E-17  2.43691142E-02
+  59   (3,1 )   ring   -0.15252065   1.19902202   0.69838437      r5      4.73960975E-03  4.12508515E-13  2.25789189E-02
+  60   (3,1 )   ring    0.24516930   0.45893247   0.56651892      r3      3.77135539E-03  4.51448748E-17  1.43266770E-02
+  61   (3,3 )   cage   -0.00325636   0.69703915   0.16513243      c1      3.50592491E-03  4.80880447E-17  1.49277437E-02
+
+* Analysis of system bonds
+# ncp is the bond from the non-equivalent CP list.
+# End-1 and End-2 are the bond path terminator from the non-equivalent
+#   CP list (index in parentheses).
+# r1 and r2 are the geometric distances between bond and terminators.
+# r1-B-r2 is the geometric angle between bond and terminators (angle).
+# p1 and p2 are the bond path lengths.
+# ncp  End-1    End-2   r1(ang_) r2(ang_)  r1/r2  r1-B-r2  p1(ang_) p2(ang_)
+ 27   O_ (14)  H_ (16)   0.7694   0.1940   3.9653  178.07   0.7695   0.1941 
+ 28    O_ (2)   H_ (3)   0.7782   0.1911   4.0716  178.26   0.7785   0.1911 
+ 29   C_ (17)  C_ (15)   0.6630   0.7294   0.9090  178.40   0.6631   0.7298 
+ 30    C_ (8)   C_ (1)   0.6703   0.7254   0.9241  178.70   0.6703   0.7256 
+ 31   C_ (21)  C_ (15)   0.6680   0.7238   0.9229  177.76   0.6680   0.7245 
+ 32    C_ (4)   C_ (1)   0.6734   0.7235   0.9308  178.02   0.6734   0.7240 
+ 33   C_ (19)  C_ (20)   0.6892   0.7030   0.9804  179.93   0.6892   0.7030 
+ 34    C_ (6)   C_ (5)   0.6894   0.7029   0.9808  179.80   0.6894   0.7029 
+ 35    C_ (7)   C_ (8)   0.6952   0.6955   0.9995  179.74   0.6952   0.6955 
+ 36   C_ (17)  C_ (18)   0.6986   0.6925   1.0087  179.62   0.6986   0.6925 
+ 37   C_ (19)  C_ (18)   0.6930   0.7011   0.9885  179.96   0.6930   0.7011 
+ 38    C_ (6)   C_ (7)   0.6921   0.7023   0.9854  179.79   0.6921   0.7023 
+ 39    C_ (5)   C_ (4)   0.6947   0.6986   0.9943  179.77   0.6947   0.6987 
+ 40   C_ (21)  C_ (20)   0.7028   0.6906   1.0176  179.87   0.7028   0.6906 
+ 41    C_ (1)   O_ (2)   0.4516   0.9104   0.4961  177.77   0.4516   0.9106 
+ 42   H_ (23)  C_ (18)   0.3853   0.6957   0.5538  179.95   0.3853   0.6957 
+ 43   C_ (20)  H_ (25)   0.6938   0.3873   1.7916  179.82   0.6939   0.3873 
+ 44   C_ (19)  H_ (24)   0.6935   0.3869   1.7926  179.89   0.6935   0.3869 
+ 45   H_ (22)  C_ (17)   0.3817   0.6994   0.5457  179.76   0.3817   0.6994 
+ 46   H_ (12)   C_ (7)   0.3880   0.6936   0.5595  179.87   0.3881   0.6936 
+ 47    C_ (5)  H_ (10)   0.6922   0.3894   1.7775  179.88   0.6922   0.3894 
+ 48   H_ (11)   C_ (6)   0.3894   0.6913   0.5632  179.87   0.3894   0.6913 
+ 49    C_ (8)  H_ (13)   0.6949   0.3862   1.7995  179.93   0.6949   0.3862 
+ 50    H_ (9)   C_ (4)   0.3905   0.6916   0.5646  179.56   0.3905   0.6916 
+ 51   C_ (21)  H_ (26)   0.6905   0.3930   1.7570  179.41   0.6905   0.3930 
+ 52   O_ (14)  C_ (15)   0.9218   0.4563   2.0202  177.71   0.9220   0.4563 
+ 53    H_ (3)  O_ (14)   0.7058   1.2315   0.5731  178.66   0.7063   1.2319 
+ 54   O_ (14)   H_ (9)   1.6249   1.1450   1.4192  172.58   1.6266   1.1637 
+ 55    O_ (2)  H_ (22)   1.6486   1.1797   1.3975  170.21   1.6535   1.2061 
+
+* Analysis of system rings
+# ncp is the ring from the non-equivalent CP list.
+# End-1 and End-2 are the ring path terminator from the non-equivalent
+#   CP list (index in parentheses).
+# r1 and r2 are the geometric distances between ring and terminators.
+# r1-B-r2 is the geometric angle between bond and terminators (angle).
+# p1 and p2 are the ring path lengths.
+# ncp  End-1    End-2   r1(ang_) r2(ang_)  r1/r2  r1-B-r2  p1(ang_) p2(ang_)
+ 56   c1 (61)  c1 (61)   5.9566   5.2970   1.1245  156.91   6.2636   5.3035 
+ 57   c1 (61)  c1 (61)   5.8263   5.3943   1.0801  166.48   5.9807   5.4056 
+ 58   c1 (61)  c1 (61)   0.9145   4.8147   0.1899  164.78   0.9498   4.8970 
+ 59   c1 (61)  c1 (61)   4.7112   0.7474   6.3034  173.00   4.7619   0.7728 
+ 60   c1 (61)  c1 (61)   0.5287   5.4636   0.0968  159.76   0.5307   5.5654 
+
+* Attractor connectivity matrix
+  to be read: each cp in a row i connects to mij cps in column j
+              n(1)  n(2)  n(3)  n(4)  n(5)  n(6) 
+               C_    O_    H_    C_    C_    C_  
+ n(1)    C_     0     1     0     1     0     0   
+ n(2)    O_     1     0     1     0     0     0   
+ n(3)    H_     0     1     0     0     0     0   
+ n(4)    C_     1     0     0     0     1     0   
+ n(5)    C_     0     0     0     1     0     1   
+ n(6)    C_     0     0     0     0     1     0   
+ n(7)    C_     0     0     0     0     0     1   
+ n(8)    C_     1     0     0     0     0     0   
+ n(9)    H_     0     0     0     1     0     0   
+n(10)    H_     0     0     0     0     1     0   
+n(11)    H_     0     0     0     0     0     1   
+n(12)    H_     0     0     0     0     0     0   
+n(13)    H_     0     0     0     0     0     0   
+n(14)    O_     0     0     1     0     0     0   
+n(15)    C_     0     0     0     0     0     0   
+n(16)    H_     0     0     0     0     0     0   
+n(17)    C_     0     0     0     0     0     0   
+n(18)    C_     0     0     0     0     0     0   
+n(19)    C_     0     0     0     0     0     0   
+n(20)    C_     0     0     0     0     0     0   
+n(21)    C_     0     0     0     0     0     0   
+n(22)    H_     0     1     0     0     0     0   
+n(23)    H_     0     0     0     0     0     0   
+n(24)    H_     0     0     0     0     0     0   
+n(25)    H_     0     0     0     0     0     0   
+n(26)    H_     0     0     0     0     0     0   
+              n(7)  n(8)  n(9) n(10) n(11) n(12) 
+               C_    C_    H_    H_    H_    H_  
+ n(1)    C_     0     1     0     0     0     0   
+ n(2)    O_     0     0     0     0     0     0   
+ n(3)    H_     0     0     0     0     0     0   
+ n(4)    C_     0     0     1     0     0     0   
+ n(5)    C_     0     0     0     1     0     0   
+ n(6)    C_     1     0     0     0     1     0   
+ n(7)    C_     0     1     0     0     0     1   
+ n(8)    C_     1     0     0     0     0     0   
+ n(9)    H_     0     0     0     0     0     0   
+n(10)    H_     0     0     0     0     0     0   
+n(11)    H_     0     0     0     0     0     0   
+n(12)    H_     1     0     0     0     0     0   
+n(13)    H_     0     1     0     0     0     0   
+n(14)    O_     0     0     1     0     0     0   
+n(15)    C_     0     0     0     0     0     0   
+n(16)    H_     0     0     0     0     0     0   
+n(17)    C_     0     0     0     0     0     0   
+n(18)    C_     0     0     0     0     0     0   
+n(19)    C_     0     0     0     0     0     0   
+n(20)    C_     0     0     0     0     0     0   
+n(21)    C_     0     0     0     0     0     0   
+n(22)    H_     0     0     0     0     0     0   
+n(23)    H_     0     0     0     0     0     0   
+n(24)    H_     0     0     0     0     0     0   
+n(25)    H_     0     0     0     0     0     0   
+n(26)    H_     0     0     0     0     0     0   
+             n(13) n(14) n(15) n(16) n(17) n(18) 
+               H_    O_    C_    H_    C_    C_  
+ n(1)    C_     0     0     0     0     0     0   
+ n(2)    O_     0     0     0     0     0     0   
+ n(3)    H_     0     1     0     0     0     0   
+ n(4)    C_     0     0     0     0     0     0   
+ n(5)    C_     0     0     0     0     0     0   
+ n(6)    C_     0     0     0     0     0     0   
+ n(7)    C_     0     0     0     0     0     0   
+ n(8)    C_     1     0     0     0     0     0   
+ n(9)    H_     0     1     0     0     0     0   
+n(10)    H_     0     0     0     0     0     0   
+n(11)    H_     0     0     0     0     0     0   
+n(12)    H_     0     0     0     0     0     0   
+n(13)    H_     0     0     0     0     0     0   
+n(14)    O_     0     0     1     1     0     0   
+n(15)    C_     0     1     0     0     1     0   
+n(16)    H_     0     1     0     0     0     0   
+n(17)    C_     0     0     1     0     0     1   
+n(18)    C_     0     0     0     0     1     0   
+n(19)    C_     0     0     0     0     0     1   
+n(20)    C_     0     0     0     0     0     0   
+n(21)    C_     0     0     1     0     0     0   
+n(22)    H_     0     0     0     0     1     0   
+n(23)    H_     0     0     0     0     0     1   
+n(24)    H_     0     0     0     0     0     0   
+n(25)    H_     0     0     0     0     0     0   
+n(26)    H_     0     0     0     0     0     0   
+             n(19) n(20) n(21) n(22) n(23) n(24) 
+               C_    C_    C_    H_    H_    H_  
+ n(1)    C_     0     0     0     0     0     0   
+ n(2)    O_     0     0     0     1     0     0   
+ n(3)    H_     0     0     0     0     0     0   
+ n(4)    C_     0     0     0     0     0     0   
+ n(5)    C_     0     0     0     0     0     0   
+ n(6)    C_     0     0     0     0     0     0   
+ n(7)    C_     0     0     0     0     0     0   
+ n(8)    C_     0     0     0     0     0     0   
+ n(9)    H_     0     0     0     0     0     0   
+n(10)    H_     0     0     0     0     0     0   
+n(11)    H_     0     0     0     0     0     0   
+n(12)    H_     0     0     0     0     0     0   
+n(13)    H_     0     0     0     0     0     0   
+n(14)    O_     0     0     0     0     0     0   
+n(15)    C_     0     0     1     0     0     0   
+n(16)    H_     0     0     0     0     0     0   
+n(17)    C_     0     0     0     1     0     0   
+n(18)    C_     1     0     0     0     1     0   
+n(19)    C_     0     1     0     0     0     1   
+n(20)    C_     1     0     1     0     0     0   
+n(21)    C_     0     1     0     0     0     0   
+n(22)    H_     0     0     0     0     0     0   
+n(23)    H_     0     0     0     0     0     0   
+n(24)    H_     1     0     0     0     0     0   
+n(25)    H_     0     1     0     0     0     0   
+n(26)    H_     0     0     1     0     0     0   
+             n(25) n(26) 
+               H_    H_  
+ n(1)    C_     0     0   
+ n(2)    O_     0     0   
+ n(3)    H_     0     0   
+ n(4)    C_     0     0   
+ n(5)    C_     0     0   
+ n(6)    C_     0     0   
+ n(7)    C_     0     0   
+ n(8)    C_     0     0   
+ n(9)    H_     0     0   
+n(10)    H_     0     0   
+n(11)    H_     0     0   
+n(12)    H_     0     0   
+n(13)    H_     0     0   
+n(14)    O_     0     0   
+n(15)    C_     0     0   
+n(16)    H_     0     0   
+n(17)    C_     0     0   
+n(18)    C_     0     0   
+n(19)    C_     0     0   
+n(20)    C_     1     0   
+n(21)    C_     0     1   
+n(22)    H_     0     0   
+n(23)    H_     0     0   
+n(24)    H_     0     0   
+n(25)    H_     0     0   
+n(26)    H_     0     0   
+
+* Additional properties at the critical points
++ Critical point no. 1
+  Coordinates (ang_): 2.0123544523 0.7845383105 0.1095392854
+  Type : nucleus
+  Field value (f): 1.259355923E+02
+  Field value, valence (fval): 1.259355923E+02
+  Gradient (grad f): 0.000000000E+00  0.000000000E+00  0.000000000E+00
+  Gradient norm (|grad f|): 0.000000000E+00
+  Gradient norm, valence: 0.000000000E+00
+  Laplacian (del2 f): -4.240437082E+06
+  Laplacian, valence (del2 fval): -4.240437082E+06
+  Hessian:
+    -1.413470700E+06   1.376731754E+01  -1.805712357E+01
+     1.376731754E+01  -1.413442389E+06  -1.286298195E+01
+    -1.805712357E+01  -1.286298195E+01  -1.413523994E+06
+  Hessian eigenvalues: -1.413530352E+06  -1.413473915E+06  -1.413432816E+06
+  Field 0 (f,|grad|,lap): 1.286856460E+02  0.000000000E+00  -4.333195913E+06
++ Critical point no. 2
+  Coordinates (ang_): 1.3940208769 1.9460302338 0.4601233794
+  Type : nucleus
+  Field value (f): 3.154233216E+02
+  Field value, valence (fval): 3.154233216E+02
+  Gradient (grad f): 0.000000000E+00  0.000000000E+00  0.000000000E+00
+  Gradient norm (|grad f|): 0.000000000E+00
+  Gradient norm, valence: 0.000000000E+00
+  Laplacian (del2 f): -3.359753275E+07
+  Laplacian, valence (del2 fval): -3.359753275E+07
+  Hessian:
+    -1.119943696E+07   1.294072168E+02  -1.462468310E+01
+     1.294072168E+02  -1.119907111E+07  -5.909613364E+01
+    -1.462468310E+01  -5.909613364E+01  -1.119902468E+07
+  Hessian eigenvalues: -1.119947814E+07  -1.119908811E+07  -1.119896650E+07
+  Field 0 (f,|grad|,lap): 3.170374476E+02  0.000000000E+00  -3.377008609E+07
++ Critical point no. 3
+  Coordinates (ang_): 0.5266729844 1.9840153903 0.0290314722
+  Type : nucleus
+  Field value (f): 4.320488938E-01
+  Field value, valence (fval): 4.320488938E-01
+  Gradient (grad f): 0.000000000E+00  0.000000000E+00  0.000000000E+00
+  Gradient norm (|grad f|): 0.000000000E+00
+  Gradient norm, valence: 0.000000000E+00
+  Laplacian (del2 f): -1.164273849E+01
+  Laplacian, valence (del2 fval): -1.164273849E+01
+  Hessian:
+    -3.429256798E+00  -3.295905767E-02   3.821176543E-01
+    -3.295905767E-02  -4.132459417E+00  -4.021435587E-02
+     3.821176543E-01  -4.021435587E-02  -4.081022271E+00
+  Hessian eigenvalues: -4.261414144E+00  -4.130875506E+00  -3.250448836E+00
+  Field 0 (f,|grad|,lap): 3.293315844E-01  0.000000000E+00  -7.145664170E+00
++ Critical point no. 4
+  Coordinates (ang_): 1.4642967281 -0.1226260097 -0.8000163395
+  Type : nucleus
+  Field value (f): 1.258498647E+02
+  Field value, valence (fval): 1.258498647E+02
+  Gradient (grad f): 0.000000000E+00  0.000000000E+00  0.000000000E+00
+  Gradient norm (|grad f|): 0.000000000E+00
+  Gradient norm, valence: 0.000000000E+00
+  Laplacian (del2 f): -4.237508444E+06
+  Laplacian, valence (del2 fval): -4.237508444E+06
+  Hessian:
+    -1.412543311E+06   4.087581425E+00  -3.859433141E+00
+     4.087581425E+00  -1.412493259E+06  -3.435925106E+00
+    -3.859433141E+00  -3.435925106E+00  -1.412471874E+06
+  Hessian eigenvalues: -1.412543820E+06  -1.412493564E+06  -1.412471060E+06
+  Field 0 (f,|grad|,lap): 1.286854189E+02  0.000000000E+00  -4.333195928E+06
++ Critical point no. 5
+  Coordinates (ang_): 2.1487918236 -1.2960356287 -1.1097233784
+  Type : nucleus
+  Field value (f): 1.257268469E+02
+  Field value, valence (fval): 1.257268469E+02
+  Gradient (grad f): 0.000000000E+00  0.000000000E+00  0.000000000E+00
+  Gradient norm (|grad f|): 0.000000000E+00
+  Gradient norm, valence: 0.000000000E+00
+  Laplacian (del2 f): -4.233398296E+06
+  Laplacian, valence (del2 fval): -4.233398296E+06
+  Hessian:
+    -1.411117051E+06   1.109359810E+01  -1.765457823E+01
+     1.109359810E+01  -1.411145092E+06  -1.938424296E+01
+    -1.765457823E+01  -1.938424296E+01  -1.411136153E+06
+  Hessian eigenvalues: -1.411160678E+06  -1.411139578E+06  -1.411098040E+06
+  Field 0 (f,|grad|,lap): 1.286855727E+02  0.000000000E+00  -4.333195928E+06
++ Critical point no. 6
+  Coordinates (ang_): 3.3795140817 -1.5739605116 -0.5211739896
+  Type : nucleus
+  Field value (f): 1.261423036E+02
+  Field value, valence (fval): 1.261423036E+02
+  Gradient (grad f): 0.000000000E+00  0.000000000E+00  0.000000000E+00
+  Gradient norm (|grad f|): 0.000000000E+00
+  Gradient norm, valence: 0.000000000E+00
+  Laplacian (del2 f): -4.247432983E+06
+  Laplacian, valence (del2 fval): -4.247432983E+06
+  Hessian:
+    -1.415791031E+06   1.568189920E+01  -4.057133231E+00
+     1.568189920E+01  -1.415801790E+06  -1.103991919E+01
+    -4.057133231E+00  -1.103991919E+01  -1.415840161E+06
+  Hessian eigenvalues: -1.415843111E+06  -1.415811598E+06  -1.415778274E+06
+  Field 0 (f,|grad|,lap): 1.286855464E+02  0.000000000E+00  -4.333195928E+06
++ Critical point no. 7
+  Coordinates (ang_): 3.9235656484 -0.6632238984 0.3837877912
+  Type : nucleus
+  Field value (f): 1.258419080E+02
+  Field value, valence (fval): 1.258419080E+02
+  Gradient (grad f): 0.000000000E+00  0.000000000E+00  0.000000000E+00
+  Gradient norm (|grad f|): 0.000000000E+00
+  Gradient norm, valence: 0.000000000E+00
+  Laplacian (del2 f): -4.237292596E+06
+  Laplacian, valence (del2 fval): -4.237292596E+06
+  Hessian:
+    -1.412439496E+06   1.132478485E+01  -1.655814254E+01
+     1.132478485E+01  -1.412435786E+06  -1.788507120E+01
+    -1.655814254E+01  -1.788507120E+01  -1.412417315E+06
+  Hessian eigenvalues: -1.412449287E+06  -1.412446331E+06  -1.412396978E+06
+  Field 0 (f,|grad|,lap): 1.286855828E+02  0.000000000E+00  -4.333195928E+06
++ Critical point no. 8
+  Coordinates (ang_): 3.2462894996 0.5093407929 0.7005783420
+  Type : nucleus
+  Field value (f): 1.259884601E+02
+  Field value, valence (fval): 1.259884601E+02
+  Gradient (grad f): 0.000000000E+00  0.000000000E+00  0.000000000E+00
+  Gradient norm (|grad f|): 0.000000000E+00
+  Gradient norm, valence: 0.000000000E+00
+  Laplacian (del2 f): -4.242183452E+06
+  Laplacian, valence (del2 fval): -4.242183452E+06
+  Hessian:
+    -1.414053957E+06   2.832664829E+00  -4.777887394E+00
+     2.832664829E+00  -1.414050715E+06  -5.668753326E+00
+    -4.777887394E+00  -5.668753326E+00  -1.414078779E+06
+  Hessian eigenvalues: -1.414080539E+06  -1.414055547E+06  -1.414047365E+06
+  Field 0 (f,|grad|,lap): 1.286854923E+02  0.000000000E+00  -4.333195928E+06
++ Critical point no. 9
+  Coordinates (ang_): 0.5087562945 0.0893205518 -1.2613757317
+  Type : nucleus
+  Field value (f): 4.821500949E-01
+  Field value, valence (fval): 4.821500949E-01
+  Gradient (grad f): 0.000000000E+00  0.000000000E+00  0.000000000E+00
+  Gradient norm (|grad f|): 0.000000000E+00
+  Gradient norm, valence: 0.000000000E+00
+  Laplacian (del2 f): -1.287238229E+01
+  Laplacian, valence (del2 fval): -1.287238229E+01
+  Hessian:
+    -4.052755185E+00  -2.893855082E-02   1.218120969E-01
+    -2.893855082E-02  -4.443659665E+00   9.906782683E-03
+     1.218120969E-01   9.906782683E-03  -4.375967439E+00
+  Hessian eigenvalues: -4.454206178E+00  -4.407553649E+00  -4.010622463E+00
+  Field 0 (f,|grad|,lap): 3.174183699E-01  0.000000000E+00  -7.261259902E+00
++ Critical point no. 10
+  Coordinates (ang_): 1.7131942598 -1.9920351979 -1.8138729493
+  Type : nucleus
+  Field value (f): 4.869278005E-01
+  Field value, valence (fval): 4.869278005E-01
+  Gradient (grad f): 0.000000000E+00  0.000000000E+00  0.000000000E+00
+  Gradient norm (|grad f|): 0.000000000E+00
+  Gradient norm, valence: 0.000000000E+00
+  Laplacian (del2 f): -1.330444580E+01
+  Laplacian, valence (del2 fval): -1.330444580E+01
+  Hessian:
+    -4.578444817E+00   6.035396742E-02   5.726032523E-02
+     6.035396742E-02  -4.381597209E+00   1.132972085E-01
+     5.726032523E-02   1.132972085E-01  -4.344403776E+00
+  Hessian eigenvalues: -4.598628468E+00  -4.477204498E+00  -4.228612836E+00
+  Field 0 (f,|grad|,lap): 3.172943252E-01  0.000000000E+00  -7.261588339E+00
++ Critical point no. 11
+  Coordinates (ang_): 3.9076426778 -2.4849327910 -0.7640423572
+  Type : nucleus
+  Field value (f): 4.774724398E-01
+  Field value, valence (fval): 4.774724398E-01
+  Gradient (grad f): 0.000000000E+00  0.000000000E+00  0.000000000E+00
+  Gradient norm (|grad f|): 0.000000000E+00
+  Gradient norm, valence: 0.000000000E+00
+  Laplacian (del2 f): -1.151053187E+01
+  Laplacian, valence (del2 fval): -1.151053187E+01
+  Hessian:
+    -3.862555118E+00  -9.418568198E-02  -9.243809393E-02
+    -9.418568198E-02  -3.724681718E+00   2.602344193E-01
+    -9.243809393E-02   2.602344193E-01  -3.923295031E+00
+  Hessian eigenvalues: -4.104956484E+00  -3.906704491E+00  -3.498870892E+00
+  Field 0 (f,|grad|,lap): 3.173690689E-01  0.000000000E+00  -7.261510785E+00
++ Critical point no. 12
+  Coordinates (ang_): 4.8793780443 -0.8650698604 0.8480166029
+  Type : nucleus
+  Field value (f): 4.847385023E-01
+  Field value, valence (fval): 4.847385023E-01
+  Gradient (grad f): 0.000000000E+00  0.000000000E+00  0.000000000E+00
+  Gradient norm (|grad f|): 0.000000000E+00
+  Gradient norm, valence: 0.000000000E+00
+  Laplacian (del2 f): -1.301469871E+01
+  Laplacian, valence (del2 fval): -1.301469871E+01
+  Hessian:
+    -4.116199641E+00   3.151348031E-03   1.500883199E-01
+     3.151348031E-03  -4.402421652E+00  -1.760447931E-02
+     1.500883199E-01  -1.760447931E-02  -4.496077417E+00
+  Hessian eigenvalues: -4.550329378E+00  -4.400335177E+00  -4.064034155E+00
+  Field 0 (f,|grad|,lap): 3.172991925E-01  0.000000000E+00  -7.261582271E+00
++ Critical point no. 13
+  Coordinates (ang_): 3.6554919893 1.2231705320 1.4017438910
+  Type : nucleus
+  Field value (f): 4.816604195E-01
+  Field value, valence (fval): 4.816604195E-01
+  Gradient (grad f): 0.000000000E+00  0.000000000E+00  0.000000000E+00
+  Gradient norm (|grad f|): 0.000000000E+00
+  Gradient norm, valence: 0.000000000E+00
+  Laplacian (del2 f): -1.303699787E+01
+  Laplacian, valence (del2 fval): -1.303699787E+01
+  Hessian:
+    -4.578490389E+00   1.587839325E-01   1.481561108E-01
+     1.587839325E-01  -4.229055168E+00   6.327628263E-02
+     1.481561108E-01   6.327628263E-02  -4.229452310E+00
+  Hessian eigenvalues: -4.671769309E+00  -4.292452171E+00  -4.072776387E+00
+  Field 0 (f,|grad|,lap): 3.173289221E-01  0.000000000E+00  -7.261511220E+00
++ Critical point no. 14
+  Coordinates (ang_): -1.3530528519 1.9596781259 -0.4387517608
+  Type : nucleus
+  Field value (f): 3.154735548E+02
+  Field value, valence (fval): 3.154735548E+02
+  Gradient (grad f): 0.000000000E+00  0.000000000E+00  0.000000000E+00
+  Gradient norm (|grad f|): 0.000000000E+00
+  Gradient norm, valence: 0.000000000E+00
+  Laplacian (del2 f): -3.360306698E+07
+  Laplacian, valence (del2 fval): -3.360306698E+07
+  Hessian:
+    -1.120094346E+07  -5.567632745E+01   4.225991663E+01
+    -5.567632745E+01  -1.120105865E+07  -1.127404264E+01
+     4.225991663E+01  -1.127404264E+01  -1.120106487E+07
+  Hessian eigenvalues: -1.120108467E+07  -1.120107346E+07  -1.120090886E+07
+  Field 0 (f,|grad|,lap): 3.170374192E+02  0.000000000E+00  -3.377008609E+07
++ Critical point no. 15
+  Coordinates (ang_): -2.0332298558 0.8035464379 -0.1239075788
+  Type : nucleus
+  Field value (f): 1.250531527E+02
+  Field value, valence (fval): 1.250531527E+02
+  Gradient (grad f): 0.000000000E+00  0.000000000E+00  0.000000000E+00
+  Gradient norm (|grad f|): 0.000000000E+00
+  Gradient norm, valence: 0.000000000E+00
+  Laplacian (del2 f): -4.210512245E+06
+  Laplacian, valence (del2 fval): -4.210512245E+06
+  Hessian:
+    -1.403515020E+06   7.665186209E+00  -3.200147365E+01
+     7.665186209E+00  -1.403486092E+06   1.089415235E+01
+    -3.200147365E+01   1.089415235E+01  -1.403511133E+06
+  Hessian eigenvalues: -1.403547897E+06  -1.403485043E+06  -1.403479306E+06
+  Field 0 (f,|grad|,lap): 1.286855368E+02  0.000000000E+00  -4.333195914E+06
++ Critical point no. 16
+  Coordinates (ang_): -1.7893735838 2.3773343188 -1.1892422089
+  Type : nucleus
+  Field value (f): 4.417821210E-01
+  Field value, valence (fval): 4.417821210E-01
+  Gradient (grad f): 0.000000000E+00  0.000000000E+00  0.000000000E+00
+  Gradient norm (|grad f|): 0.000000000E+00
+  Gradient norm, valence: 0.000000000E+00
+  Laplacian (del2 f): -1.189570330E+01
+  Laplacian, valence (del2 fval): -1.189570330E+01
+  Hessian:
+    -4.257265779E+00  -1.865167955E-01   2.998279799E-01
+    -1.865167955E-01  -4.010693653E+00  -2.597211686E-01
+     2.998279799E-01  -2.597211686E-01  -3.627743869E+00
+  Hessian eigenvalues: -4.398273207E+00  -4.138744339E+00  -3.358685756E+00
+  Field 0 (f,|grad|,lap): 3.298759442E-01  0.000000000E+00  -7.142686284E+00
++ Critical point no. 17
+  Coordinates (ang_): -1.5789473358 0.0759546724 0.9728434852
+  Type : nucleus
+  Field value (f): 1.256929262E+02
+  Field value, valence (fval): 1.256929262E+02
+  Gradient (grad f): 0.000000000E+00  0.000000000E+00  0.000000000E+00
+  Gradient norm (|grad f|): 0.000000000E+00
+  Gradient norm, valence: 0.000000000E+00
+  Laplacian (del2 f): -4.232254146E+06
+  Laplacian, valence (del2 fval): -4.232254146E+06
+  Hessian:
+    -1.410718693E+06  -1.333529759E+01  -1.228455805E+01
+    -1.333529759E+01  -1.410769796E+06   1.407602559E+01
+    -1.228455805E+01   1.407602559E+01  -1.410765658E+06
+  Hessian eigenvalues: -1.410782036E+06  -1.410761112E+06  -1.410710998E+06
+  Field 0 (f,|grad|,lap): 1.286855955E+02  0.000000000E+00  -4.333195927E+06
++ Critical point no. 18
+  Coordinates (ang_): -2.2263679619 -1.1053584836 1.3198630750
+  Type : nucleus
+  Field value (f): 1.258593062E+02
+  Field value, valence (fval): 1.258593062E+02
+  Gradient (grad f): 0.000000000E+00  0.000000000E+00  0.000000000E+00
+  Gradient norm (|grad f|): 0.000000000E+00
+  Gradient norm, valence: 0.000000000E+00
+  Laplacian (del2 f): -4.237803835E+06
+  Laplacian, valence (del2 fval): -4.237803835E+06
+  Hessian:
+    -1.412580235E+06   2.126791572E+00  -5.578469505E+00
+     2.126791572E+00  -1.412589548E+06   7.030291782E+00
+    -5.578469505E+00   7.030291782E+00  -1.412634052E+06
+  Hessian eigenvalues: -1.412635750E+06  -1.412588635E+06  -1.412579449E+06
+  Field 0 (f,|grad|,lap): 1.286855987E+02  0.000000000E+00  -4.333195928E+06
++ Critical point no. 19
+  Coordinates (ang_): -3.3199144303 -1.5589485051 0.5837063079
+  Type : nucleus
+  Field value (f): 1.260575276E+02
+  Field value, valence (fval): 1.260575276E+02
+  Gradient (grad f): 0.000000000E+00  0.000000000E+00  0.000000000E+00
+  Gradient norm (|grad f|): 0.000000000E+00
+  Gradient norm, valence: 0.000000000E+00
+  Laplacian (del2 f): -4.244572406E+06
+  Laplacian, valence (del2 fval): -4.244572406E+06
+  Hessian:
+    -1.414826309E+06   9.764538546E-01   2.909071698E+00
+     9.764538546E-01  -1.414881191E+06   7.323706199E+00
+     2.909071698E+00   7.323706199E+00  -1.414864907E+06
+  Hessian eigenvalues: -1.414884000E+06  -1.414862358E+06  -1.414826048E+06
+  Field 0 (f,|grad|,lap): 1.286855668E+02  0.000000000E+00  -4.333195928E+06
++ Critical point no. 20
+  Coordinates (ang_): -3.7657357817 -0.8213281090 -0.5095340715
+  Type : nucleus
+  Field value (f): 1.258376874E+02
+  Field value, valence (fval): 1.258376874E+02
+  Gradient (grad f): 0.000000000E+00  0.000000000E+00  0.000000000E+00
+  Gradient norm (|grad f|): 0.000000000E+00
+  Gradient norm, valence: 0.000000000E+00
+  Laplacian (del2 f): -4.237152058E+06
+  Laplacian, valence (del2 fval): -4.237152058E+06
+  Hessian:
+    -1.412391234E+06  -1.759207326E+01  -2.271620765E+01
+    -1.759207326E+01  -1.412367001E+06   1.719693923E+01
+    -2.271620765E+01   1.719693923E+01  -1.412393823E+06
+  Hessian eigenvalues: -1.412415287E+06  -1.412393021E+06  -1.412343750E+06
+  Field 0 (f,|grad|,lap): 1.286855843E+02  0.000000000E+00  -4.333195928E+06
++ Critical point no. 21
+  Coordinates (ang_): -3.1225231003 0.3614807957 -0.8685232221
+  Type : nucleus
+  Field value (f): 1.260826661E+02
+  Field value, valence (fval): 1.260826661E+02
+  Gradient (grad f): 0.000000000E+00  0.000000000E+00  0.000000000E+00
+  Gradient norm (|grad f|): 0.000000000E+00
+  Gradient norm, valence: 0.000000000E+00
+  Laplacian (del2 f): -4.245437407E+06
+  Laplacian, valence (del2 fval): -4.245437407E+06
+  Hessian:
+    -1.415135267E+06   1.272283184E+01  -9.615532266E+00
+     1.272283184E+01  -1.415111146E+06   8.721017912E+00
+    -9.615532266E+00   8.721017912E+00  -1.415190995E+06
+  Hessian eigenvalues: -1.415194025E+06  -1.415137925E+06  -1.415105457E+06
+  Field 0 (f,|grad|,lap): 1.286855195E+02  0.000000000E+00  -4.333195928E+06
++ Critical point no. 22
+  Coordinates (ang_): -0.7302774711 0.4385007665 1.5360057284
+  Type : nucleus
+  Field value (f): 4.809347193E-01
+  Field value, valence (fval): 4.809347193E-01
+  Gradient (grad f): 0.000000000E+00  0.000000000E+00  0.000000000E+00
+  Gradient norm (|grad f|): 0.000000000E+00
+  Gradient norm, valence: 0.000000000E+00
+  Laplacian (del2 f): -1.331465823E+01
+  Laplacian, valence (del2 fval): -1.331465823E+01
+  Hessian:
+    -4.197682059E+00   1.184645129E-01   1.864664859E-01
+     1.184645129E-01  -4.770169806E+00   8.342278825E-02
+     1.864664859E-01   8.342278825E-02  -4.346806365E+00
+  Hessian eigenvalues: -4.799033984E+00  -4.473045483E+00  -4.042578764E+00
+  Field 0 (f,|grad|,lap): 3.174229407E-01  0.000000000E+00  -7.261298602E+00
++ Critical point no. 23
+  Coordinates (ang_): -1.8708014970 -1.6716929578 2.1692745260
+  Type : nucleus
+  Field value (f): 4.841306277E-01
+  Field value, valence (fval): 4.841306277E-01
+  Gradient (grad f): 0.000000000E+00  0.000000000E+00  0.000000000E+00
+  Gradient norm (|grad f|): 0.000000000E+00
+  Gradient norm, valence: 0.000000000E+00
+  Laplacian (del2 f): -1.306505511E+01
+  Laplacian, valence (del2 fval): -1.306505511E+01
+  Hessian:
+    -4.381388247E+00  -3.655126639E-02   2.361746832E-01
+    -3.655126639E-02  -4.509550586E+00  -2.239261836E-01
+     2.361746832E-01  -2.239261836E-01  -4.174116281E+00
+  Hessian eigenvalues: -4.650947615E+00  -4.472058269E+00  -3.942049231E+00
+  Field 0 (f,|grad|,lap): 3.173565400E-01  0.000000000E+00  -7.261496362E+00
++ Critical point no. 24
+  Coordinates (ang_): -3.8182945972 -2.4772070649 0.8589695499
+  Type : nucleus
+  Field value (f): 4.848263361E-01
+  Field value, valence (fval): 4.848263361E-01
+  Gradient (grad f): 0.000000000E+00  0.000000000E+00  0.000000000E+00
+  Gradient norm (|grad f|): 0.000000000E+00
+  Gradient norm, valence: 0.000000000E+00
+  Laplacian (del2 f): -1.316816039E+01
+  Laplacian, valence (del2 fval): -1.316816039E+01
+  Hessian:
+    -4.349221672E+00   2.713385308E-01  -4.785460859E-02
+     2.713385308E-01  -4.142459753E+00  -1.030372640E-01
+    -4.785460859E-02  -1.030372640E-01  -4.676478968E+00
+  Hessian eigenvalues: -4.695702535E+00  -4.533992929E+00  -3.938464929E+00
+  Field 0 (f,|grad|,lap): 3.173957443E-01  0.000000000E+00  -7.261464665E+00
++ Critical point no. 25
+  Coordinates (ang_): -4.6127634929 -1.1619121005 -1.0886555153
+  Type : nucleus
+  Field value (f): 4.753916826E-01
+  Field value, valence (fval): 4.753916826E-01
+  Gradient (grad f): 0.000000000E+00  0.000000000E+00  0.000000000E+00
+  Gradient norm (|grad f|): 0.000000000E+00
+  Gradient norm, valence: 0.000000000E+00
+  Laplacian (del2 f): -1.111267344E+01
+  Laplacian, valence (del2 fval): -1.111267344E+01
+  Hessian:
+    -3.586741843E+00   6.982896993E-02  -1.049328195E-01
+     6.982896993E-02  -3.792612331E+00   3.702679579E-02
+    -1.049328195E-01   3.702679579E-02  -3.733319261E+00
+  Hessian eigenvalues: -3.858724131E+00  -3.729862467E+00  -3.524086837E+00
+  Field 0 (f,|grad|,lap): 3.173422268E-01  0.000000000E+00  -7.261524899E+00
++ Critical point no. 26
+  Coordinates (ang_): -3.4659324152 0.9345623564 -1.7214641981
+  Type : nucleus
+  Field value (f): 4.798042683E-01
+  Field value, valence (fval): 4.798042683E-01
+  Gradient (grad f): 0.000000000E+00  0.000000000E+00  0.000000000E+00
+  Gradient norm (|grad f|): 0.000000000E+00
+  Gradient norm, valence: 0.000000000E+00
+  Laplacian (del2 f): -1.266644655E+01
+  Laplacian, valence (del2 fval): -1.266644655E+01
+  Hessian:
+    -4.297098557E+00  -7.773778912E-02   1.008618298E-01
+    -7.773778912E-02  -4.276016344E+00  -1.859197691E-01
+     1.008618298E-01  -1.859197691E-01  -4.093331650E+00
+  Hessian eigenvalues: -4.394539280E+00  -4.338561893E+00  -3.933345378E+00
+  Field 0 (f,|grad|,lap): 3.171698848E-01  0.000000000E+00  -7.261715468E+00
++ Critical point no. 27
+  Coordinates (ang_): -1.7046649534 2.2890912775 -1.0386196532
+  Type : (3,-1)
+  Field value (f): 3.516577088E-01
+  Field value, valence (fval): 3.516577088E-01
+  Gradient (grad f): 1.621343630E-15  -7.071839845E-16  -9.364123625E-15
+  Gradient norm (|grad f|): 9.529725894E-15
+  Gradient norm, valence: 0.000000000E+00
+  Laplacian (del2 f): -2.125022322E+00
+  Laplacian, valence (del2 fval): -2.125022322E+00
+  Hessian:
+    -1.131349050E+00  -6.330456875E-01   1.156932527E+00
+    -6.330456875E-01  -1.110876344E+00  -1.100009585E+00
+     1.156932527E+00  -1.100009585E+00   1.172030728E-01
+  Hessian eigenvalues: -1.825579820E+00  -1.738538500E+00  1.439095998E+00
+  Ellipticity (l_1/l_2 - 1): 5.006579954E-02
+  Field 0 (f,|grad|,lap): 2.439763118E-01  8.413421027E-03  -5.400981192E-01
++ Critical point no. 28
+  Coordinates (ang_): 0.6976392537 1.9718821177 0.1136350500
+  Type : (3,-1)
+  Field value (f): 3.436582414E-01
+  Field value, valence (fval): 3.436582414E-01
+  Gradient (grad f): 2.330334552E-15  9.611500193E-16  3.505571393E-15
+  Gradient norm (|grad f|): 4.317788703E-15
+  Gradient norm, valence: 0.000000000E+00
+  Laplacian (del2 f): -1.846211218E+00
+  Laplacian, valence (del2 fval): -1.846211218E+00
+  Hessian:
+     9.298282514E-01  -1.574692104E-01   1.225122159E+00
+    -1.574692104E-01  -1.713365040E+00  -8.601891393E-02
+     1.225122159E+00  -8.601891393E-02  -1.062674430E+00
+  Hessian eigenvalues: -1.724552145E+00  -1.644217824E+00  1.522558750E+00
+  Ellipticity (l_1/l_2 - 1): 4.885868502E-02
+  Field 0 (f,|grad|,lap): 2.411543105E-01  1.288972787E-02  -5.869811050E-01
++ Critical point no. 29
+  Coordinates (ang_): -1.7882001649 0.4288902755 0.4519980233
+  Type : (3,-1)
+  Field value (f): 3.175765451E-01
+  Field value, valence (fval): 3.175765451E-01
+  Gradient (grad f): -1.070483043E-14  1.741612733E-14  -4.267612960E-14
+  Gradient norm (|grad f|): 4.731983647E-14
+  Gradient norm, valence: 0.000000000E+00
+  Laplacian (del2 f): -8.969110966E-01
+  Laplacian, valence (del2 fval): -8.969110966E-01
+  Hessian:
+    -5.255813497E-01  -2.108921877E-01   2.032715429E-01
+    -2.108921877E-01  -3.620054777E-01  -3.769996256E-01
+     2.032715429E-01  -3.769996256E-01  -9.324269302E-03
+  Hessian eigenvalues: -6.774805365E-01  -5.456986545E-01  3.262680944E-01
+  Ellipticity (l_1/l_2 - 1): 2.414920413E-01
+  Field 0 (f,|grad|,lap): 2.195572085E-01  3.126653609E-02  -1.047557749E-01
++ Critical point no. 30
+  Coordinates (ang_): 2.6531383097 0.6481741390 0.4209399289
+  Type : (3,-1)
+  Field value (f): 3.168360974E-01
+  Field value, valence (fval): 3.168360974E-01
+  Gradient (grad f): 1.293854253E-14  9.824290521E-15  -1.401876511E-14
+  Gradient norm (|grad f|): 2.145806007E-14
+  Gradient norm, valence: 0.000000000E+00
+  Laplacian (del2 f): -9.011780331E-01
+  Laplacian, valence (del2 fval): -9.011780331E-01
+  Hessian:
+     1.343424009E-01  -1.540799703E-01   3.312994728E-01
+    -1.540799703E-01  -6.069662434E-01  -1.319996722E-01
+     3.312994728E-01  -1.319996722E-01  -4.285541907E-01
+  Hessian eigenvalues: -6.780202732E-01  -5.516647776E-01  3.285070177E-01
+  Ellipticity (l_1/l_2 - 1): 2.290439788E-01
+  Field 0 (f,|grad|,lap): 2.181001026E-01  2.607115982E-02  -9.535294240E-02
++ Critical point no. 31
+  Coordinates (ang_): -2.5983493966 0.5843067907 -0.5194934651
+  Type : (3,-1)
+  Field value (f): 3.167538287E-01
+  Field value, valence (fval): 3.167538287E-01
+  Gradient (grad f): -1.769993713E-14  1.027665194E-14  -2.038447192E-15
+  Gradient norm (|grad f|): 2.056824291E-14
+  Gradient norm, valence: 0.000000000E+00
+  Laplacian (del2 f): -8.836012818E-01
+  Laplacian, valence (del2 fval): -8.836012818E-01
+  Hessian:
+    -8.223285412E-03   2.147833863E-01   3.645000661E-01
+     2.147833863E-01  -5.288448326E-01   2.161634253E-01
+     3.645000661E-01   2.161634253E-01  -3.465331638E-01
+  Hessian eigenvalues: -6.740628451E-01  -5.377550558E-01  3.282166191E-01
+  Ellipticity (l_1/l_2 - 1): 2.534756072E-01
+  Field 0 (f,|grad|,lap): 2.194579931E-01  2.726910099E-02  -1.019260380E-01
++ Critical point no. 32
+  Coordinates (ang_): 1.7189529642 0.3219104103 -0.3629765916
+  Type : (3,-1)
+  Field value (f): 3.142302568E-01
+  Field value, valence (fval): 3.142302568E-01
+  Gradient (grad f): -6.801013857E-15  5.005827765E-14  5.712978738E-14
+  Gradient norm (|grad f|): 7.626203221E-14
+  Gradient norm, valence: 0.000000000E+00
+  Laplacian (del2 f): -8.661870124E-01
+  Laplacian, valence (del2 fval): -8.661870124E-01
+  Hessian:
+    -4.927515618E-01   2.790668049E-01   2.018331687E-01
+     2.790668049E-01  -2.055198922E-01   3.810808726E-01
+     2.018331687E-01   3.810808726E-01  -1.679155584E-01
+  Hessian eigenvalues: -6.663284073E-01  -5.340652071E-01  3.342066020E-01
+  Ellipticity (l_1/l_2 - 1): 2.476536543E-01
+  Field 0 (f,|grad|,lap): 2.175373397E-01  2.455329711E-02  -9.218426356E-02
++ Critical point no. 33
+  Coordinates (ang_): -3.5409968186 -1.1940042227 0.0425188673
+  Type : (3,-1)
+  Field value (f): 3.138910402E-01
+  Field value, valence (fval): 3.138910402E-01
+  Gradient (grad f): 9.939176495E-15  -5.820522639E-15  1.791190779E-14
+  Gradient norm (|grad f|): 2.129559001E-14
+  Gradient norm, valence: 0.000000000E+00
+  Laplacian (del2 f): -8.632549950E-01
+  Laplacian, valence (del2 fval): -8.632549950E-01
+  Hessian:
+    -5.102658717E-01  -2.021332636E-01   2.066102457E-01
+    -2.021332636E-01  -3.458037224E-01  -3.766217866E-01
+     2.066102457E-01  -3.766217866E-01  -7.185400879E-03
+  Hessian eigenvalues: -6.527356735E-01  -5.426149469E-01  3.320956253E-01
+  Ellipticity (l_1/l_2 - 1): 2.029445139E-01
+  Field 0 (f,|grad|,lap): 2.189997782E-01  6.653562874E-03  -9.246027459E-02
++ Critical point no. 34
+  Coordinates (ang_): 2.7700350021 -1.4374911852 -0.8129438279
+  Type : (3,-1)
+  Field value (f): 3.136940362E-01
+  Field value, valence (fval): 3.136940362E-01
+  Gradient (grad f): -9.666458420E-15  7.938831950E-15  -9.170963141E-15
+  Gradient norm (|grad f|): 1.551038478E-14
+  Gradient norm, valence: 0.000000000E+00
+  Laplacian (del2 f): -8.680507759E-01
+  Laplacian, valence (del2 fval): -8.680507759E-01
+  Hessian:
+     1.367311119E-01  -1.497781057E-01   3.284377489E-01
+    -1.497781057E-01  -5.896734431E-01  -1.226077098E-01
+     3.284377489E-01  -1.226077098E-01  -4.151084446E-01
+  Hessian eigenvalues: -6.537342170E-01  -5.425121239E-01  3.281955650E-01
+  Ellipticity (l_1/l_2 - 1): 2.050131015E-01
+  Field 0 (f,|grad|,lap): 2.189489883E-01  6.675102181E-03  -9.229574194E-02
++ Critical point no. 35
+  Coordinates (ang_): 3.5839384889 -0.0773843171 0.5410199354
+  Type : (3,-1)
+  Field value (f): 3.136240949E-01
+  Field value, valence (fval): 3.136240949E-01
+  Gradient (grad f): 4.083676962E-14  -5.954249676E-14  -1.038235099E-14
+  Gradient norm (|grad f|): 7.294342936E-14
+  Gradient norm, valence: 0.000000000E+00
+  Laplacian (del2 f): -8.561283137E-01
+  Laplacian, valence (del2 fval): -8.561283137E-01
+  Hessian:
+    -3.926524316E-01  -3.771027254E-01  -1.495641462E-01
+    -3.771027254E-01   7.113255544E-02   1.474350139E-01
+    -1.495641462E-01   1.474350139E-01  -5.346084376E-01
+  Hessian eigenvalues: -6.507890687E-01  -5.345604679E-01  3.292212228E-01
+  Ellipticity (l_1/l_2 - 1): 2.174283505E-01
+  Field 0 (f,|grad|,lap): 2.194383626E-01  8.759773385E-04  -9.415841491E-02
++ Critical point no. 36
+  Coordinates (ang_): -1.9055488327 -0.5169776417 1.1453378887
+  Type : (3,-1)
+  Field value (f): 3.134681111E-01
+  Field value, valence (fval): 3.134681111E-01
+  Gradient (grad f): 1.951691449E-14  1.222403449E-14  1.550659034E-14
+  Gradient norm (|grad f|): 2.776312868E-14
+  Gradient norm, valence: 0.000000000E+00
+  Laplacian (del2 f): -8.590891081E-01
+  Laplacian, valence (del2 fval): -8.590891081E-01
+  Hessian:
+    -3.951010979E-01   3.512364320E-01  -1.559032562E-01
+     3.512364320E-01   8.519336003E-02  -1.741703000E-01
+    -1.559032562E-01  -1.741703000E-01  -5.491813702E-01
+  Hessian eigenvalues: -6.506500196E-01  -5.377575405E-01  3.293184520E-01
+  Ellipticity (l_1/l_2 - 1): 2.099319313E-01
+  Field 0 (f,|grad|,lap): 2.193559128E-01  2.818534160E-03  -9.351113397E-02
++ Critical point no. 37
+  Coordinates (ang_): -2.7762277541 -1.3336850969 0.9496464449
+  Type : (3,-1)
+  Field value (f): 3.130314245E-01
+  Field value, valence (fval): 3.130314245E-01
+  Gradient (grad f): -2.538553559E-15  -8.360073504E-15  5.549564847E-15
+  Gradient norm (|grad f|): 1.035049531E-14
+  Gradient norm, valence: 0.000000000E+00
+  Laplacian (del2 f): -8.585011622E-01
+  Laplacian, valence (del2 fval): -8.585011622E-01
+  Hessian:
+    -4.916297037E-03   2.165592807E-01   3.656147216E-01
+     2.165592807E-01  -5.171996063E-01   2.020558538E-01
+     3.656147216E-01   2.020558538E-01  -3.363852589E-01
+  Hessian eigenvalues: -6.493807631E-01  -5.403989475E-01  3.312785485E-01
+  Ellipticity (l_1/l_2 - 1): 2.016691855E-01
+  Field 0 (f,|grad|,lap): 2.182618287E-01  4.177219496E-03  -8.904526428E-02
++ Critical point no. 38
+  Coordinates (ang_): 3.6506003682 -1.1226728786 -0.0719291807
+  Type : (3,-1)
+  Field value (f): 3.125425785E-01
+  Field value, valence (fval): 3.125425785E-01
+  Gradient (grad f): 3.010967387E-15  3.302560656E-15  2.082130997E-14
+  Gradient norm (|grad f|): 2.129553428E-14
+  Gradient norm, valence: 0.000000000E+00
+  Laplacian (del2 f): -8.624432198E-01
+  Laplacian, valence (del2 fval): -8.624432198E-01
+  Hessian:
+    -4.768378598E-01   2.738593505E-01   2.102720284E-01
+     2.738593505E-01  -2.065525337E-01   3.780600459E-01
+     2.102720284E-01   3.780600459E-01  -1.790528263E-01
+  Hessian eigenvalues: -6.497407955E-01  -5.431573949E-01  3.304549706E-01
+  Ellipticity (l_1/l_2 - 1): 1.962293096E-01
+  Field 0 (f,|grad|,lap): 2.181556155E-01  5.351310459E-03  -8.869577525E-02
++ Critical point no. 39
+  Coordinates (ang_): 1.8085119175 -0.7106637060 -0.9543568500
+  Type : (3,-1)
+  Field value (f): 3.116804802E-01
+  Field value, valence (fval): 3.116804802E-01
+  Gradient (grad f): 6.892386405E-16  -7.458288560E-15  -1.373130856E-14
+  Gradient norm (|grad f|): 1.564129000E-14
+  Gradient norm, valence: 0.000000000E+00
+  Laplacian (del2 f): -8.476418449E-01
+  Laplacian, valence (del2 fval): -8.476418449E-01
+  Hessian:
+    -3.855549067E-01  -3.784992796E-01  -1.471772637E-01
+    -3.784992796E-01   7.129752702E-02   1.440389334E-01
+    -1.471772637E-01   1.440389334E-01  -5.333844652E-01
+  Hessian eigenvalues: -6.458941045E-01  -5.321769965E-01  3.304292561E-01
+  Ellipticity (l_1/l_2 - 1): 2.136828702E-01
+  Field 0 (f,|grad|,lap): 2.185132906E-01  2.063127807E-03  -9.011068707E-02
++ Critical point no. 40
+  Coordinates (ang_): -3.4466386492 -0.2350253761 -0.6867487811
+  Type : (3,-1)
+  Field value (f): 3.115024315E-01
+  Field value, valence (fval): 3.115024315E-01
+  Gradient (grad f): 3.473460128E-15  -1.303789144E-14  -1.774291217E-14
+  Gradient norm (|grad f|): 2.229041208E-14
+  Gradient norm, valence: 0.000000000E+00
+  Laplacian (del2 f): -8.498107036E-01
+  Laplacian, valence (del2 fval): -8.498107036E-01
+  Hessian:
+    -3.939610983E-01   3.470298493E-01  -1.580179552E-01
+     3.470298493E-01   8.430194933E-02  -1.783065872E-01
+    -1.580179552E-01  -1.783065872E-01  -5.401515547E-01
+  Hessian eigenvalues: -6.456134579E-01  -5.326773799E-01  3.284801342E-01
+  Ellipticity (l_1/l_2 - 1): 2.120159072E-01
+  Field 0 (f,|grad|,lap): 2.185371705E-01  5.759467270E-03  -9.028757170E-02
++ Critical point no. 41
+  Coordinates (ang_): 1.7985301282 1.1670998386 0.2184522370
+  Type : (3,-1)
+  Field value (f): 2.894181164E-01
+  Field value, valence (fval): 2.894181164E-01
+  Gradient (grad f): 2.435835225E-13  -4.266452110E-13  -1.160580599E-13
+  Gradient norm (|grad f|): 5.048054495E-13
+  Gradient norm, valence: 0.000000000E+00
+  Laplacian (del2 f): -3.419773768E-01
+  Laplacian, valence (del2 fval): -3.419773768E-01
+  Hessian:
+    -2.762664692E-01  -5.875530819E-01  -1.668689356E-01
+    -5.875530819E-01   4.373672453E-01   3.113310179E-01
+    -1.668689356E-01   3.113310179E-01  -5.030781529E-01
+  Hessian eigenvalues: -6.100464826E-01  -5.914292300E-01  8.594983357E-01
+  Ellipticity (l_1/l_2 - 1): 3.147841140E-02
+  Field 0 (f,|grad|,lap): 2.675156421E-01  1.188822396E-01  -5.647835613E-02
++ Critical point no. 42
+  Coordinates (ang_): -1.9977093154 -1.4699246947 1.8665479919
+  Type : (3,-1)
+  Field value (f): 2.816436254E-01
+  Field value, valence (fval): 2.816436254E-01
+  Gradient (grad f): -1.663816002E-15  -1.001616357E-14  5.935513766E-18
+  Gradient norm (|grad f|): 1.015341576E-14
+  Gradient norm, valence: 0.000000000E+00
+  Laplacian (del2 f): -1.013219880E+00
+  Laplacian, valence (del2 fval): -1.013219880E+00
+  Hessian:
+    -6.258662233E-01  -2.218851865E-01   3.190998360E-01
+    -2.218851865E-01  -4.172478952E-01  -5.162019282E-01
+     3.190998360E-01  -5.162019282E-01   2.989423875E-02
+  Hessian eigenvalues: -7.678326030E-01  -7.480207452E-01  5.026334684E-01
+  Ellipticity (l_1/l_2 - 1): 2.648570629E-02
+  Field 0 (f,|grad|,lap): 1.773122723E-01  6.171052818E-02  -1.371559601E-01
++ Critical point no. 43
+  Coordinates (ang_): -4.3096476302 -1.0391914549 -0.8811741870
+  Type : (3,-1)
+  Field value (f): 2.811933037E-01
+  Field value, valence (fval): 2.811933037E-01
+  Gradient (grad f): -1.730177163E-13  5.291372749E-13  7.466579558E-13
+  Gradient norm (|grad f|): 9.313535788E-13
+  Gradient norm, valence: 0.000000000E+00
+  Laplacian (del2 f): -1.006815015E+00
+  Laplacian, valence (del2 fval): -1.006815015E+00
+  Hessian:
+     2.401012695E-02   3.121373093E-01   5.241476972E-01
+     3.121373093E-01  -6.353081585E-01   2.152398637E-01
+     5.241476972E-01   2.152398637E-01  -3.955169837E-01
+  Hessian eigenvalues: -7.621930726E-01  -7.495054444E-01  5.048835017E-01
+  Ellipticity (l_1/l_2 - 1): 1.692800008E-02
+  Field 0 (f,|grad|,lap): 1.775011199E-01  6.358917341E-02  -1.375770081E-01
++ Critical point no. 44
+  Coordinates (ang_): -3.6401808246 -2.1481322523 0.7606101210
+  Type : (3,-1)
+  Field value (f): 2.808499467E-01
+  Field value, valence (fval): 2.808499467E-01
+  Gradient (grad f): -3.691961891E-15  1.785710140E-15  3.325267148E-15
+  Gradient norm (|grad f|): 5.279843266E-15
+  Gradient norm, valence: 0.000000000E+00
+  Laplacian (del2 f): -1.005937825E+00
+  Laplacian, valence (del2 fval): -1.005937825E+00
+  Hessian:
+    -4.878707018E-01   4.835941078E-01  -1.548413768E-01
+     4.835941078E-01   1.568941932E-01  -2.651338720E-01
+    -1.548413768E-01  -2.651338720E-01  -6.749613160E-01
+  Hessian eigenvalues: -7.628799044E-01  -7.391664870E-01  4.961085667E-01
+  Ellipticity (l_1/l_2 - 1): 3.208129406E-02
+  Field 0 (f,|grad|,lap): 1.776734241E-01  6.349289382E-02  -1.386233111E-01
++ Critical point no. 45
+  Coordinates (ang_): -1.0296133982 0.3110770345 1.3363787928
+  Type : (3,-1)
+  Field value (f): 2.806752569E-01
+  Field value, valence (fval): 2.806752569E-01
+  Gradient (grad f): 2.006535744E-15  2.475416330E-15  3.409731748E-15
+  Gradient norm (|grad f|): 4.666920001E-15
+  Gradient norm, valence: 0.000000000E+00
+  Laplacian (del2 f): -1.004592359E+00
+  Laplacian, valence (del2 fval): -1.004592359E+00
+  Hessian:
+     3.218127800E-02   3.264168114E-01   5.120338846E-01
+     3.264168114E-01  -6.220184722E-01   2.259254787E-01
+     5.120338846E-01   2.259254787E-01  -4.147551649E-01
+  Hessian eigenvalues: -7.669978685E-01  -7.444932863E-01  5.068987956E-01
+  Ellipticity (l_1/l_2 - 1): 3.022805259E-02
+  Field 0 (f,|grad|,lap): 1.768682191E-01  5.800700031E-02  -1.363476029E-01
++ Critical point no. 46
+  Coordinates (ang_): 4.5362241277 -0.7927446752 0.6819553155
+  Type : (3,-1)
+  Field value (f): 2.806244083E-01
+  Field value, valence (fval): 2.806244083E-01
+  Gradient (grad f): 3.831893562E-16  2.023724705E-15  5.028350501E-15
+  Gradient norm (|grad f|): 5.433838839E-15
+  Gradient norm, valence: 0.000000000E+00
+  Laplacian (del2 f): -1.016861658E+00
+  Laplacian, valence (del2 fval): -1.016861658E+00
+  Hessian:
+     2.287381509E-01  -2.014310053E-01   4.663399296E-01
+    -2.014310053E-01  -7.183767793E-01  -1.052111601E-01
+     4.663399296E-01  -1.052111601E-01  -5.272230294E-01
+  Hessian eigenvalues: -7.651786541E-01  -7.452821599E-01  4.935991562E-01
+  Ellipticity (l_1/l_2 - 1): 2.669659264E-02
+  Field 0 (f,|grad|,lap): 1.774306639E-01  6.411057481E-02  -1.370531751E-01
++ Critical point no. 47
+  Coordinates (ang_): 1.8696556023 -1.7410902640 -1.5604837055
+  Type : (3,-1)
+  Field value (f): 2.804980457E-01
+  Field value, valence (fval): 2.804980457E-01
+  Gradient (grad f): 9.617200567E-15  5.004695271E-15  -2.367216801E-15
+  Gradient norm (|grad f|): 1.109690213E-14
+  Gradient norm, valence: 0.000000000E+00
+  Laplacian (del2 f): -1.021489811E+00
+  Laplacian, valence (del2 fval): -1.021489811E+00
+  Hessian:
+    -5.534110076E-01   3.320496018E-01   3.310615681E-01
+     3.320496018E-01  -2.419178950E-01   5.323650404E-01
+     3.310615681E-01   5.323650404E-01  -2.261609079E-01
+  Hessian eigenvalues: -7.684097598E-01  -7.589959230E-01  5.059158722E-01
+  Ellipticity (l_1/l_2 - 1): 1.240301365E-02
+  Field 0 (f,|grad|,lap): 1.775785717E-01  6.544331119E-02  -1.373744829E-01
++ Critical point no. 48
+  Coordinates (ang_): 3.7178261954 -2.1563990249 -0.6766714599
+  Type : (3,-1)
+  Field value (f): 2.799427220E-01
+  Field value, valence (fval): 2.799427220E-01
+  Gradient (grad f): 5.417428968E-15  2.903086178E-15  -4.578878737E-15
+  Gradient norm (|grad f|): 7.664370585E-15
+  Gradient norm, valence: 0.000000000E+00
+  Laplacian (del2 f): -9.955189690E-01
+  Laplacian, valence (del2 fval): -9.955189690E-01
+  Hessian:
+    -4.529464318E-01  -5.039096086E-01  -1.440676609E-01
+    -5.039096086E-01   1.423391637E-01   2.271626852E-01
+    -1.440676609E-01   2.271626852E-01  -6.849117009E-01
+  Hessian eigenvalues: -7.559641456E-01  -7.308896926E-01  4.913348692E-01
+  Ellipticity (l_1/l_2 - 1): 3.430675421E-02
+  Field 0 (f,|grad|,lap): 1.778852212E-01  6.577403017E-02  -1.391209868E-01
++ Critical point no. 49
+  Coordinates (ang_): 3.5093638503 0.9679699557 1.1514811049
+  Type : (3,-1)
+  Field value (f): 2.795845053E-01
+  Field value, valence (fval): 2.795845053E-01
+  Gradient (grad f): -4.599511644E-15  2.734792302E-15  2.328768689E-14
+  Gradient norm (|grad f|): 2.389458007E-14
+  Gradient norm, valence: 0.000000000E+00
+  Laplacian (del2 f): -9.983169538E-01
+  Laplacian, valence (del2 fval): -9.983169538E-01
+  Hessian:
+    -5.776719735E-01   3.184217949E-01   3.080004703E-01
+     3.184217949E-01  -2.012369402E-01   5.311698790E-01
+     3.080004703E-01   5.311698790E-01  -2.194080401E-01
+  Hessian eigenvalues: -7.599332722E-01  -7.409737455E-01  5.025900640E-01
+  Ellipticity (l_1/l_2 - 1): 2.558731238E-02
+  Field 0 (f,|grad|,lap): 1.773559936E-01  6.248798831E-02  -1.374396626E-01
++ Critical point no. 50
+  Coordinates (ang_): 0.8537897062 0.0147162684 -1.0945124349
+  Type : (3,-1)
+  Field value (f): 2.786347421E-01
+  Field value, valence (fval): 2.786347421E-01
+  Gradient (grad f): -5.606944851E-15  -1.867041071E-15  -1.049845449E-15
+  Gradient norm (|grad f|): 6.002153646E-15
+  Gradient norm, valence: 0.000000000E+00
+  Laplacian (del2 f): -1.009081210E+00
+  Laplacian, valence (del2 fval): -1.009081210E+00
+  Hessian:
+     2.042299079E-01  -2.118855268E-01   4.689828496E-01
+    -2.118855268E-01  -6.987419649E-01  -1.113621753E-01
+     4.689828496E-01  -1.113621753E-01  -5.145691533E-01
+  Hessian eigenvalues: -7.525838017E-01  -7.405956693E-01  4.840982607E-01
+  Ellipticity (l_1/l_2 - 1): 1.618714899E-02
+  Field 0 (f,|grad|,lap): 1.776146342E-01  6.609858343E-02  -1.369539219E-01
++ Critical point no. 51
+  Coordinates (ang_): -3.3394214277 0.7283531695 -1.4117727401
+  Type : (3,-1)
+  Field value (f): 2.765257318E-01
+  Field value, valence (fval): 2.765257318E-01
+  Gradient (grad f): 6.332461502E-15  -5.183220295E-15  2.279048141E-15
+  Gradient norm (|grad f|): 8.494698448E-15
+  Gradient norm, valence: 0.000000000E+00
+  Laplacian (del2 f): -9.701843845E-01
+  Laplacian, valence (del2 fval): -9.701843845E-01
+  Hessian:
+    -6.094952104E-01  -2.113378046E-01   3.082181885E-01
+    -2.113378046E-01  -3.924138000E-01  -5.092587924E-01
+     3.082181885E-01  -5.092587924E-01   3.172462593E-02
+  Hessian eigenvalues: -7.387517376E-01  -7.288876140E-01  4.974549671E-01
+  Ellipticity (l_1/l_2 - 1): 1.353312002E-02
+  Field 0 (f,|grad|,lap): 1.773656484E-01  6.796854041E-02  -1.357856444E-01
++ Critical point no. 52
+  Coordinates (ang_): -1.8153394772 1.1879279341 -0.2378133191
+  Type : (3,-1)
+  Field value (f): 2.749383281E-01
+  Field value, valence (fval): 2.749383281E-01
+  Gradient (grad f): -4.517583251E-15  2.027479978E-15  4.582583152E-15
+  Gradient norm (|grad f|): 6.746799377E-15
+  Gradient norm, valence: 0.000000000E+00
+  Laplacian (del2 f): -2.963199516E-01
+  Laplacian, valence (del2 fval): -2.963199516E-01
+  Hessian:
+    -2.293716497E-01   5.710893910E-01  -1.585071509E-01
+     5.710893910E-01   3.934346748E-01  -2.867346024E-01
+    -1.585071509E-01  -2.867346024E-01  -4.603829768E-01
+  Hessian eigenvalues: -5.719137939E-01  -5.409010953E-01  8.164949376E-01
+  Ellipticity (l_1/l_2 - 1): 5.733524825E-02
+  Field 0 (f,|grad|,lap): 2.626598382E-01  1.245545506E-01  -1.094989893E-01
++ Critical point no. 53
+  Coordinates (ang_): -0.1560477156 1.9687123676 -0.1494202461
+  Type : (3,-1)
+  Field value (f): 2.544626147E-02
+  Field value, valence (fval): 2.544626147E-02
+  Gradient (grad f): 6.364754245E-16  -4.366728949E-16  9.422433992E-17
+  Gradient norm (|grad f|): 7.776004176E-16
+  Gradient norm, valence: 0.000000000E+00
+  Laplacian (del2 f): 8.487442099E-02
+  Laplacian, valence (del2 fval): 8.487442099E-02
+  Hessian:
+     1.414543501E-01   9.344139389E-04   4.882957438E-02
+     9.344139389E-04  -3.594826588E-02   1.491418018E-03
+     4.882957438E-02   1.491418018E-03  -2.063166325E-02
+  Hessian eigenvalues: -3.655609649E-02  -3.360624629E-02  1.550367638E-01
+  Ellipticity (l_1/l_2 - 1): 8.777684284E-02
+  Field 0 (f,|grad|,lap): 3.322982865E-02  1.666295554E-02  7.257747063E-02
++ Critical point no. 54
+  Coordinates (ang_): -0.2013993176 0.8967143858 -0.8679121333
+  Type : (3,-1)
+  Field value (f): 6.096773847E-03
+  Field value, valence (fval): 6.096773847E-03
+  Gradient (grad f): 3.568223131E-14  9.168267207E-14  1.182805150E-13
+  Gradient norm (|grad f|): 1.538480231E-13
+  Gradient norm, valence: 0.000000000E+00
+  Laplacian (del2 f): 2.299789281E-02
+  Laplacian, valence (del2 fval): 2.299789281E-02
+  Hessian:
+     1.282018844E-02  -1.605888674E-02  -5.926638429E-03
+    -1.605888674E-02   1.239622292E-02   6.287006084E-03
+    -5.926638429E-03   6.287006084E-03  -2.218518552E-03
+  Hessian eigenvalues: -4.551248452E-03  -3.369416769E-03  3.091855803E-02
+  Ellipticity (l_1/l_2 - 1): 3.507525973E-01
+  Field 0 (f,|grad|,lap): 9.645588515E-03  4.300201111E-03  2.287013532E-02
++ Critical point no. 55
+  Coordinates (ang_): 0.0980348839 1.0727154045 0.9852048010
+  Type : (3,-1)
+  Field value (f): 5.037661915E-03
+  Field value, valence (fval): 5.037661915E-03
+  Gradient (grad f): 1.121076140E-17  2.141326901E-17  1.229415684E-17
+  Gradient norm (|grad f|): 2.711744002E-17
+  Gradient norm, valence: 0.000000000E+00
+  Laplacian (del2 f): 2.040392862E-02
+  Laplacian, valence (del2 fval): 2.040392862E-02
+  Hessian:
+     1.403090231E-02   1.239729536E-02  -7.457918780E-03
+     1.239729536E-02   5.618348337E-03  -5.996295765E-03
+    -7.457918780E-03  -5.996295765E-03   7.546779746E-04
+  Hessian eigenvalues: -3.581378440E-03  -2.482600233E-03  2.646790730E-02
+  Ellipticity (l_1/l_2 - 1): 4.425916795E-01
+  Field 0 (f,|grad|,lap): 9.420826253E-03  2.721271104E-03  2.195595655E-02
++ Critical point no. 56
+  Coordinates (ang_): -2.6713021108 -0.3656516045 0.2256846452
+  Type : (3,1)
+  Field value (f): 2.050605138E-02
+  Field value, valence (fval): 2.050605138E-02
+  Gradient (grad f): 2.316804436E-16  8.684875031E-16  3.287496037E-16
+  Gradient norm (|grad f|): 9.570907339E-16
+  Gradient norm, valence: 0.000000000E+00
+  Laplacian (del2 f): 1.624398056E-01
+  Laplacian, valence (del2 fval): 1.624398056E-01
+  Hessian:
+     4.982458981E-02   3.188904186E-02   4.006538137E-02
+     3.188904186E-02   5.922018413E-02  -3.214121927E-02
+     4.006538137E-02  -3.214121927E-02   5.339503168E-02
+  Hessian eigenvalues: -1.580505611E-02  8.633480608E-02  9.191005566E-02
+  Field 0 (f,|grad|,lap): 4.586736220E-02  1.475808029E-03  1.227376713E-01
++ Critical point no. 57
+  Coordinates (ang_): 2.6911932515 -0.3859101690 -0.2053262926
+  Type : (3,1)
+  Field value (f): 2.038933662E-02
+  Field value, valence (fval): 2.038933662E-02
+  Gradient (grad f): -7.632337068E-17  1.213094106E-15  5.982290836E-16
+  Gradient norm (|grad f|): 1.354732668E-15
+  Gradient norm, valence: 0.000000000E+00
+  Laplacian (del2 f): 1.615558646E-01
+  Laplacian, valence (del2 fval): 1.615558646E-01
+  Hessian:
+     6.739050543E-02  -2.020300352E-02   3.865701681E-02
+    -2.020300352E-02   6.297366286E-02   3.678135065E-02
+     3.865701681E-02   3.678135065E-02   3.119169634E-02
+  Hessian eigenvalues: -1.570330805E-02  8.451428357E-02  9.274488912E-02
+  Field 0 (f,|grad|,lap): 4.562001875E-02  1.058276304E-03  1.221133436E-01
++ Critical point no. 58
+  Coordinates (ang_): 0.0879565180 1.0866352273 -0.6571582214
+  Type : (3,1)
+  Field value (f): 5.631142249E-03
+  Field value, valence (fval): 5.631142249E-03
+  Gradient (grad f): 4.235275729E-17  2.069492002E-17  6.951742064E-17
+  Gradient norm (|grad f|): 8.399230642E-17
+  Gradient norm, valence: 0.000000000E+00
+  Laplacian (del2 f): 2.436911424E-02
+  Laplacian, valence (del2 fval): 2.436911424E-02
+  Hessian:
+     1.064144540E-02  -8.676298834E-03  -6.051388694E-04
+    -8.676298834E-03   1.274911010E-02   8.451157236E-03
+    -6.051388694E-04   8.451157236E-03   9.785587379E-04
+  Hessian eigenvalues: -4.432709242E-03  6.141095072E-03  2.266072841E-02
+  Field 0 (f,|grad|,lap): 1.115558657E-02  5.229758004E-03  2.566852414E-02
++ Critical point no. 59
+  Coordinates (ang_): -0.1525206472 1.1990220167 0.6983843679
+  Type : (3,1)
+  Field value (f): 4.739609748E-03
+  Field value, valence (fval): 4.739609748E-03
+  Gradient (grad f): -2.708387512E-13  -3.047591649E-13  -6.270165169E-14
+  Gradient norm (|grad f|): 4.125085149E-13
+  Gradient norm, valence: 0.000000000E+00
+  Laplacian (del2 f): 2.257891894E-02
+  Laplacian, valence (del2 fval): 2.257891894E-02
+  Hessian:
+     1.169990193E-02   8.859004380E-03  -3.994550696E-03
+     8.859004380E-03   6.749444061E-03  -7.832824949E-03
+    -3.994550696E-03  -7.832824949E-03   4.129572944E-03
+  Hessian eigenvalues: -3.240946381E-03  3.765461703E-03  2.205440362E-02
+  Field 0 (f,|grad|,lap): 1.051254457E-02  1.621091041E-03  2.469272877E-02
++ Critical point no. 60
+  Coordinates (ang_): 0.2451692977 0.4589324692 0.5665189215
+  Type : (3,1)
+  Field value (f): 3.771355388E-03
+  Field value, valence (fval): 3.771355388E-03
+  Gradient (grad f): -4.159738340E-17  8.470952621E-18  -1.536100176E-17
+  Gradient norm (|grad f|): 4.514487479E-17
+  Gradient norm, valence: 0.000000000E+00
+  Laplacian (del2 f): 1.432667704E-02
+  Laplacian, valence (del2 fval): 1.432667704E-02
+  Hessian:
+     1.018008194E-02   2.042794682E-03  -5.616564669E-03
+     2.042794682E-03   1.501219153E-03   7.027138474E-04
+    -5.616564669E-03   7.027138474E-04   2.645375947E-03
+  Hessian eigenvalues: -1.295184191E-03  2.260606482E-03  1.336125475E-02
+  Field 0 (f,|grad|,lap): 7.773226275E-03  1.682392018E-03  1.865744152E-02
++ Critical point no. 61
+  Coordinates (ang_): -0.0032563633 0.6970391458 0.1651324291
+  Type : (3,3)
+  Field value (f): 3.505924906E-03
+  Field value, valence (fval): 3.505924906E-03
+  Gradient (grad f): -2.750991283E-17  3.095156708E-18  -3.932028415E-17
+  Gradient norm (|grad f|): 4.808804472E-17
+  Gradient norm, valence: 0.000000000E+00
+  Laplacian (del2 f): 1.492774372E-02
+  Laplacian, valence (del2 fval): 1.492774372E-02
+  Hessian:
+     7.724081403E-03   1.444820285E-03  -2.503382938E-03
+     1.444820285E-03   4.395556706E-03  -1.769908870E-04
+    -2.503382938E-03  -1.769908870E-04   2.808105608E-03
+  Hessian eigenvalues: 1.693134516E-03  4.048727206E-03  9.185881995E-03
+  Field 0 (f,|grad|,lap): 8.566483635E-03  2.158241486E-03  2.070765842E-02
+
+End AUTO--2022/6/15, 14:16:40.877
+
+%% cpreport phenol_phenol.vmd graph
+
+* WRITE xyz file: phenol_phenol.xyz
+
+* Writing vmd script file : phenol_phenol.vmd
+
+CRITIC2 ended successfully (0 WARNINGS, 0 COMMENTS)
+
+Elapsed wall time: 1m 18s
+Elapsed CPU time: 4m 28s
+CRITIC2--2022/6/15, 14:16:46.231

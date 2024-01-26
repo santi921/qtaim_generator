@@ -1,0 +1,6 @@
+molecule phenol_phenol.cube
+load phenol_phenol.cube smoothrho
+auto discard "$1 < 1e-5"
+cpreport phenol_phenol.json 
+YT JSON yt.json
+end
