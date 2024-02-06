@@ -25,11 +25,18 @@ def main():
         help="debug",
     )
 
+    parser.add_argument(
+        "--pull_end_only",
+        action="store_true",
+        help="end only pull",
+    )
+
 
     args = parser.parse_args()
     xyz_folder = args.xyz_folder
     pkl_file = args.pkl_file
     debug = bool(args.debug)
+    pull_end_only = bool(args.pull_end_only)
     determine_bonds = bool(args.determine_bonds)
 
     # get a list of all xyz files in the folder
@@ -57,53 +64,56 @@ def main():
     # create a list of pmg molecules from the xyz files
     for ind, xyz_file in enumerate(xyz_files):
         # print(xyz_folder + xyz_file)
-        molecule = Molecule.from_file(xyz_folder + xyz_file)
-
-        if determine_bonds:
-            try:
-                bonds_rdkit = get_bonds_from_rdkit(xyz_folder + xyz_file)
-            except:
-                bonds_rdkit = []
-            bond_list.append(bonds_rdkit)
-        identifier.append(ind)
-
-        if determine_bonds:
-            [molecule_graph.add_edge(bond[0], bond[1]) for bond in bonds_rdkit]
-        xyz_files_completed.append(xyz_file)
-
     
         with open(xyz_folder + xyz_file, "r") as f:
             lines = f.readlines()
+        
         comment = lines[1].strip()
-        #print(comment)
-
-        temp_spin = int(comment.split()[3].split("=")[1])
-        spin.append(temp_spin)
-
-        charge_temp = int(comment.split()[2].split("=")[1])
-        charge.append(charge_temp)
-
-        
-        partial_charges_temp = comment.split("partial_charge")[1].split("\"")[1][6:]
-        partial_charges_temp = ast.literal_eval(partial_charges_temp)
-        partial_charges.append(partial_charges_temp)
-        
-        partial_spins_temp = comment.split("partial_spin")[1].split("\"")[1][6:]
-        partial_spins_temp = ast.literal_eval(partial_spins_temp)
-        partial_spins.append(partial_spins_temp)
-        
-        energy = comment.split()[1].split("=")[1]
-        energies.append(float(energy))
-        
-        mol_id_temp = comment.split()[-5].split("=")[1]
-        mol_ids.append(mol_id_temp)
-        
         position_type = comment.split()[-4].split("=")[1]
-        position_types.append(position_type)
         
-        molecule_graph = MoleculeGraph.with_empty_graph(molecule)
-        molecule_graphs.append(molecule_graph)
-        molecules.append(molecule)
+        
+        if pull_end_only:
+
+            molecule = Molecule.from_file(xyz_folder + xyz_file)
+
+            if determine_bonds:
+                try:
+                    bonds_rdkit = get_bonds_from_rdkit(xyz_folder + xyz_file)
+                except:
+                    bonds_rdkit = []
+                bond_list.append(bonds_rdkit)
+            identifier.append(ind)
+
+            if determine_bonds:
+                [molecule_graph.add_edge(bond[0], bond[1]) for bond in bonds_rdkit]
+            
+            xyz_files_completed.append(xyz_file)
+            position_types.append(position_type)
+            
+            temp_spin = int(comment.split()[3].split("=")[1])
+            spin.append(temp_spin)
+
+            charge_temp = int(comment.split()[2].split("=")[1])
+            charge.append(charge_temp)
+
+            
+            partial_charges_temp = comment.split("partial_charge")[1].split("\"")[1][6:]
+            partial_charges_temp = ast.literal_eval(partial_charges_temp)
+            partial_charges.append(partial_charges_temp)
+            
+            partial_spins_temp = comment.split("partial_spin")[1].split("\"")[1][6:]
+            partial_spins_temp = ast.literal_eval(partial_spins_temp)
+            partial_spins.append(partial_spins_temp)
+            
+            energy = comment.split()[1].split("=")[1]
+            energies.append(float(energy))
+            
+            mol_id_temp = comment.split()[-5].split("=")[1]
+            mol_ids.append(mol_id_temp)
+        
+            molecule_graph = MoleculeGraph.with_empty_graph(molecule)
+            molecule_graphs.append(molecule_graph)
+            molecules.append(molecule)
 
     df = {
         "molecule": molecules,
