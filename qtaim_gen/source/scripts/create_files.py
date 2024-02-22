@@ -15,6 +15,7 @@ def convert_graph_info(site_info):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("-reaction", action="store_true")
+    parser.add_argument("-parser",  type=str, default="Multiwfn")
     parser.add_argument("-file", type=str, default="20230512_mpreact_assoc.bson")
     parser.add_argument("-root", type=str, default="../data/rapter/")
     parser.add_argument("-options_qm_file", default="options_qm.json")
@@ -24,6 +25,7 @@ def main():
     reaction_tf = bool(args.reaction)
     file = args.file
     root = args.root
+    parser = args.parser
     options_qm_file = args.options_qm_file
 
     print("root: {}".format(root))
@@ -34,9 +36,12 @@ def main():
     with open(options_qm_file, "r") as f:
         options_qm = json.load(f)
 
-    multi_wfn_cmd = options_qm["multiwfn_cmd"]
-    multi_wfn_options_file = options_qm["multiwfn_options_file"]
-
+    if parser == "Multiwfn":
+        multi_wfn_cmd = options_qm["multiwfn_cmd"]
+        multi_wfn_options_file = options_qm["multiwfn_options_file"]
+    else: 
+        critic2_cmd = options_qm["critic2_cmd"]
+    
     file = root + file
 
     if reaction_tf:
