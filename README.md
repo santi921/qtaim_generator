@@ -1,4 +1,4 @@
-# qtaim_generator
+# (QTAIM) Generator
 
 <img src="https://github.com/santi921/qtaim_generator/blob/main/qtaim_gen/notebooks/TOC.png" width=50% height=50%>
 
