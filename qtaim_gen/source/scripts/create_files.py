@@ -152,7 +152,7 @@ def main():
                     f.write(
                         "{} ".format(multi_wfn_cmd)
                         + str(Path.home().joinpath(QTAIM_loc_product, str(reaction_id), "input.wfn"))
-                        + " < {} | tee ./".format(multi_wfn_options_file)
+                        + " < {} | tee ".format(multi_wfn_options_file)
                         #+ QTAIM_loc_product
                         #+ "out \n"
                         + str(Path.home().joinpath(QTAIM_loc_product, "out"))
@@ -213,7 +213,7 @@ def main():
                         + str(Path.home().joinpath(folder, "input.wfn"))
                         #+ folder
                         #+ "input.wfn < {} | tee ./".format(multi_wfn_options_file)
-                        + " < {} | tee ./".format(multi_wfn_options_file)
+                        + " < {} | tee ".format(multi_wfn_options_file)
                         + str(Path.home().joinpath(folder, "out"))
                         #+ folder
                         + "\n"
