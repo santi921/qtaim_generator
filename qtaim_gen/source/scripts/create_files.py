@@ -170,7 +170,9 @@ def main():
 
         for ind, row in pkl_df.iterrows():
             # if folder already exists, skip
-            folder = root + "QTAIM/" + str(molecule_ids[ind]) + "/"
+            folder = root + "QTAIM/" + str(molecule_ids[ind]) 
+            if not os.path.exists(folder):
+                os.mkdir(folder)
             completed_tf = (
                 os.path.exists(folder + "props.sh")
                 and os.path.getsize(folder + "props.sh") > 0
