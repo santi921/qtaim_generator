@@ -174,8 +174,8 @@ def main():
             if not os.path.exists(folder):
                 os.mkdir(folder)
             completed_tf = (
-                os.path.exists(folder + "props.sh")
-                and os.path.getsize(folder + "props.sh") > 0
+                os.path.exists(folder + "/props.sh")
+                and os.path.getsize(folder + "/props.sh") > 0
             )
             if not completed_tf:
                 # graph_info = molecule.graph.nodes(data=True)
@@ -188,7 +188,7 @@ def main():
                     folder=folder, molecule=molecule_graph.molecule, options=options_qm
                 )
 
-                multi_wfn_file = folder + "props.sh"
+                multi_wfn_file = folder + "/props.sh"
                 with open(multi_wfn_file, "w") as f:
                     f.write("#!/bin/bash\n")
                     f.write(
