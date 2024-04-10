@@ -57,7 +57,7 @@ def write_input_file_from_pmg_molecule(folder, molecule, options):
                 f.write("picturechange  true\n")
                 f.write("end\n")
         if "parallel_procs" in options:
-            f.write("{}/n".format(options["parallel_procs"]))
+            f.write("{}\n".format(options["parallel_procs"]))
 
         f.write("%SCF\n")
         f.write("    MaxIter 1000\n")
@@ -81,11 +81,3 @@ def write_input_file_from_pmg_molecule(folder, molecule, options):
         f.write("*\n")
 
 
-def complete_folder_molecule_to_json(folder):
-    """
-    Takes:
-        folder: folder to complete
-    Returns:
-        row: row of pandas dataframe - contains all information molecule in folder
-    """
-    # TODO
