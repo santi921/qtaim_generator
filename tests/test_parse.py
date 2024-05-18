@@ -115,6 +115,7 @@ def test_only_atom_cps():
         assert "pos_ang" in i.keys(), "xyz not in dict"
     #print(ret_dict_bonds.keys())
 
+
 def test_find_cp_map():
     qtaim_dict = get_qtaim_descs("./test_files/CPprop_w_bond_paths.txt")
     atom_dict, atom_dict_bonds = only_atom_cps(qtaim_dict)
