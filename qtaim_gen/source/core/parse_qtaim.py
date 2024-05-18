@@ -399,7 +399,7 @@ def bond_cp_distance(bond_cps, bond_list, dft_dict, margin=2.0):
 
 
 def merge_qtaim_inds(
-    qtaim_descs, dft_inp_file, bond_list=None, define_bonds="qtaim", margin=2.0
+    qtaim_descs, dft_inp_file, bond_list=None, define_bonds="qtaim", margin=1.0
 ):
     """
     Gets mapping of qtaim indices to atom indices and remaps atom CP descriptors
