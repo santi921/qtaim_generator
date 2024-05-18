@@ -49,10 +49,10 @@ def main():
                 }
             )
 
-        for thread in threads:
+        for key, thread in threads.items():
             thread.start()
 
-        for thread in threads:
+        for key, thread in threads.items():
             thread.join()
 
 main()
