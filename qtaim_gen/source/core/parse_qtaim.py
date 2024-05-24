@@ -925,7 +925,7 @@ def gather_qtaim_features(
                     qtaim_descs=qtaim_descs,
                     bond_list=bonds,
                     dft_inp_file=dft_inp_file,
-                    margin=1.0.0,
+                    margin=1.0,
                     define_bonds=define_bonds,
                 )
 
