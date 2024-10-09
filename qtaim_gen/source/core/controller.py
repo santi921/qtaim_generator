@@ -83,7 +83,7 @@ def controller_single(folder_choice, redo_qtaim=False, just_dft=False, reaction=
 
     else:
         if len(glob(folder_choice + "/*.wfn")) > 0:
-            print("dft calc already done ")
+            print("dft calc already done!")
 
         else:
             os.system(

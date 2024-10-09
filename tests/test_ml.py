@@ -94,7 +94,7 @@ class TestML:
     mol_df.to_pickle("./test_files/molecule/libe_qtaim_test.pkl")
 
     def test_bondnet(self):
-        from bondnet.data.dataset import ReactionNetworkDatasetGraphs
+        from bondnet.data.dataset import ReactionDatasetGraphs
         from bondnet.model.training_utils import get_grapher
         extra_features = {
             "bond": ["bond_length", "esp_total"], 
@@ -102,7 +102,7 @@ class TestML:
             "mappings": ["indices_qtaim"]
         }
         
-        dataset_bondnet = ReactionNetworkDatasetGraphs(
+        dataset_bondnet = ReactionDatasetGraphs(
             grapher=get_grapher(extra_features),
             file="./test_files/reaction/libe_qtaim_test.pkl",
             feature_filter=False, 

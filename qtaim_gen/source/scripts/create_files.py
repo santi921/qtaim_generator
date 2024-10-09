@@ -19,10 +19,12 @@ def main():
     parser.add_argument("-file", type=str, default="20230512_mpreact_assoc.bson")
     parser.add_argument("-root", type=str, default="../data/rapter/")
     parser.add_argument("-options_qm_file", default="options_qm.json")
+    parser.add_argument("--molden_sub", action="store_true", help="molden subroutine")
 
     args = parser.parse_args()
 
     reaction_tf = bool(args.reaction)
+    molden_tf = bool(args.molden_sub)
     file = args.file
     root = args.root
     parser = args.parser
@@ -32,6 +34,8 @@ def main():
     print("file: {}".format(file))
     print("reaction_tf: {}".format(reaction_tf))
     print("options_qm_file: {}".format(options_qm_file))
+    print("molden tf: {}".format(molden_tf))
+
     # read json from options_qm_file
     with open(options_qm_file, "r") as f:
         options_qm = json.load(f)
@@ -134,12 +138,22 @@ def main():
                 )
 
                 # run QTAIM on reactants
+                if molden_tf: 
+                    input_file_name = "input.molden.input"
+                else:
+                    input_file_name = "input.wfn" 
+
+
                 with open(reactant_prop, "w") as f:
                     f.write("#!/bin/bash\n")
+                    
+                    if molden_tf: 
+                        f.write("orca_2mkl "+ str(Path.home().joinpath(folder, "input -molden")) + "\n")
+
                     f.write(
                         "{} ".format(multi_wfn_cmd)
-                        + str(Path.home().joinpath(QTAIM_loc_reactant, str(reaction_id), "input.wfn"))
-                        + " < {} | tee ./".format(multi_wfn_options_file)
+                        + str(Path.home().joinpath(QTAIM_loc_reactant, str(reaction_id), input_file_name))
+                        + " < {} | tee ".format(multi_wfn_options_file)
                         #+ QTAIM_loc_reactant
                         #+ "out \n"
                         + str(Path.home().joinpath(QTAIM_loc_reactant, "out"))
@@ -149,9 +163,13 @@ def main():
                 # run QTAIM on products
                 with open(product_prop, "w") as f:
                     f.write("#!/bin/bash\n")
+
+                    if molden_tf: 
+                        f.write("orca_2mkl "+ str(Path.home().joinpath(folder, "input -molden")) + "\n")
+
                     f.write(
                         "{} ".format(multi_wfn_cmd)
-                        + str(Path.home().joinpath(QTAIM_loc_product, str(reaction_id), "input.wfn"))
+                        + str(Path.home().joinpath(QTAIM_loc_product, str(reaction_id), input_file_name))
                         + " < {} | tee ".format(multi_wfn_options_file)
                         #+ QTAIM_loc_product
                         #+ "out \n"
@@ -204,13 +222,21 @@ def main():
                 write_input_file_from_pmg_molecule(
                     folder=folder, molecule=molecule_graph.molecule, options=options_qm
                 )
-
+                
+                if molden_tf: 
+                    input_file_name = "input.molden.input"
+                else:
+                    input_file_name = "input.wfn" 
+                
                 #multi_wfn_file = folder + "/props.sh"
                 with open(props_file, "w") as f:
                     f.write("#!/bin/bash\n")
+                    if molden_tf: 
+                        f.write("orca_2mkl "+ str(Path.home().joinpath(folder, "input -molden")) + "\n")
+
                     f.write(
                         "{} ".format(multi_wfn_cmd)
-                        + str(Path.home().joinpath(folder, "input.wfn"))
+                        + str(Path.home().joinpath(folder, input_file_name))
                         #+ folder
                         #+ "input.wfn < {} | tee ./".format(multi_wfn_options_file)
                         + " < {} | tee ".format(multi_wfn_options_file)
@@ -218,6 +244,8 @@ def main():
                         #+ folder
                         + "\n"
                     )
+
+
                 st = os.stat(props_file)
                 os.chmod(props_file, st.st_mode | stat.S_IEXEC)
 
