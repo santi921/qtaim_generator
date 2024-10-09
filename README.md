@@ -24,6 +24,7 @@ Three scripts will be needed to generate QTAIM features readily formatted for yo
     - <code> -file </code> specifies the dataset file
     - <code> -root </code> specifies where to write job files
     - <code> -options_qm_file </code> options for your electronic structure job
+    - <code> --molden_sub </code> whether to use <code> orca_2mkl </code> to convert the a gbw to a .molden.input file prior to Multiwfn. Use this if you intend on using ECPs.
 2) <code> run.py </code> - runs DFT and QTAIM jobs in selected folder
     - <code> -redo_qtaim </code> - whether to clear QTAIM results file and redo 
     - <code> -just_dft </code> - whether to scriptly run DFT jobs
