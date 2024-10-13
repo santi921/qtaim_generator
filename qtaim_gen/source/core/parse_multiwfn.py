@@ -115,3 +115,146 @@ def parse_charge_doc(charge_out_txt):
                 atomic_dipole_dict = {}
 
     return charge_dict_overall, atomic_dipole_dict_overall, dipole_info
+
+def parse_bond_order_doc(bond_order_txt): 
+    """
+    Method to parse the bond order out from multiwfn
+    Takes: 
+        bond_out_txt: str, path to the bond out file
+    Returns: 
+        bond_dict: dict, dictionary with the bond orders
+    """
+
+    fuzzy_trigger = "The total bond order >=  0.050000"
+    laplace_trigger = "The bond orders >=  0.050000"
+    ibsi_trigger = "Note: \"Dist\""
+    ibsi_detrigger = "---------- Intrinsic bond strength index (IBSI) ----------"
+    fuzzy_bool, laplace_bool, ibsi_bool = False, False, False
+    fuzzy_bond_dict, laplace_bond_dict, ibsi_bond_dict = [], {}, {}
+
+    with open(bond_order_txt, 'r') as f:
+        for line in f:
+            if fuzzy_bool:
+                if line.strip() == "":
+                    fuzzy_bool = False
+                else:
+                    split_list = line.split()
+                    a, b, order = split_list[2].replace("(", "_"), split_list[4].replace("(", "_"), float(split_list[-1])
+                    fuzzy_bond_dict.append((a, b, order))
+
+            if laplace_bool:
+                if line.strip() == "":
+                    laplace_bool = False
+                else:
+                    split_list = line.split()
+                    a, b, order = split_list[2].replace("(", "_"), split_list[4].replace("(", "_"), float(split_list[-1])
+                    laplace_bond_dict[(a, b)] = order
+
+            if ibsi_bool:
+                if ibsi_detrigger in line:
+                    ibsi_bool = False
+                else:
+                    if line.strip() == "":
+                        continue
+                    split_list = line.split()
+                    a, b, ibsi = split_list[0].replace("(", "_"), split_list[2].replace("(", "_"), split_list[-1]
+                    ibsi_bond_dict[(a, b)] = float(ibsi)
+
+            if fuzzy_trigger in line:
+                fuzzy_bool = True
+            
+            if laplace_trigger in line:
+                laplace_bool = True
+
+            if ibsi_trigger in line:
+                if ibsi_bool:
+                    # stop parsing the file
+                    break
+                ibsi_bool = True
+
+    bond_dict = {
+        "fuzzy": fuzzy_bond_dict,
+        "laplace": laplace_bond_dict,
+        "ibsi": ibsi_bond_dict
+    } 
+
+    return bond_dict
+
+def parse_other_doc(other_txt): 
+    """
+    Method to parse other info from multiwfn
+    Takes: 
+        other_info_txt: str, path to the bond out file
+    Returns: 
+        other_info_dict: dict, dictionary with the bond orders
+    """
+    dict_other = {}
+    bool_trigger_surface_summary = False
+    ind_planarity = 0
+    ind_surface_prefix = "ESP"
+
+    trigger_mpp = "Molecular planarity parameter (MPP) is"
+    trigger_sdp = "Span of deviation from plane (SDP) is"
+    trigger_surface_summary = "================= Summary of surface analysis ================="
+    trigger_surface_summary_end = "Surface analysis finished!"
+
+    trigger_dict_surface = {
+        "Volume:" : {"name": "Volume", "data_ind": 1},
+        "Estimated density according to mass and volume (M/V):" : {"name": "Surface_Density", "data_ind": -2},
+        "Minimal value:" : {"name": ["Minimal_value", "Maximal_value"], "data_ind": [2, -2]},
+        "Overall surface area:" : {"name": "Overall_surface_area", "data_ind": 3},
+        "Positive surface area:" : {"name": "Positive_surface_area", "data_ind": 3},
+        "Negative surface area:" : {"name": "Negative_surface_area", "data_ind": 3},
+        "Overall average value:" : {"name": "Overall_average_value", "data_ind": 3},
+        "Positive average value:" : {"name": "Positive_average_value", "data_ind": 3},
+        "Negative average value:" : {"name": "Negative_average_value", "data_ind": 3},
+        "Overall variance (sigma^2_tot):" : {"name": "Overall_variance", "data_ind": 3},
+        "Positive variance:" : {"name": "Positive_variance", "data_ind": 2},
+        "Negative variance:" : {"name": "Negative_variance", "data_ind": 2},
+        "Balance of charges (nu):" : {"name": "Balance_of_charges", "data_ind": 4},
+        "Product of sigma^2_tot and nu:" : {"name": "Product_of_sigma", "data_ind": 5},
+        "Internal charge separation (Pi):" : {"name": "Internal_charge_separation", "data_ind": 4},
+        "Molecular polarity index (MPI):" : {"name": "Molecular_polarity_index", "data_ind": 4},
+        "Nonpolar surface area (|ESP| <= 10 kcal/mol):" : {"name": "Nonpolar_surface_area", "data_ind": 7},
+        "Polar surface area (|ESP| > 10 kcal/mol):" : {"name": "Polar_surface_area", "data_ind": 7},
+        "Overall skewness:" : {"name": "Overall_skewness", "data_ind": -1},
+        "Positive skewness:" : {"name": "Positive_skewness", "data_ind": -1},
+        "Negative skewness:" : {"name": "Negative_skewness", "data_ind": -1}
+    }
+
+    surface_trigger_keys = trigger_dict_surface.keys()
+
+    with open(other_txt, 'r') as f:
+        for line in f:
+            if trigger_mpp in line:
+                if ind_planarity == 0:
+                    dict_other["mpp_full"] = float(line.split()[-2])
+                else: 
+                    dict_other["mpp_heavy"] = float(line.split()[-2])
+            if trigger_sdp in line:
+                if ind_planarity == 0:
+                    dict_other["sdp_full"] = float(line.split()[-2])
+                    ind_planarity += 1
+                else: 
+                    dict_other["sdp_heavy"] = float(line.split()[-2])
+            
+            if trigger_surface_summary in line:
+                bool_trigger_surface_summary = True
+
+            if bool_trigger_surface_summary:
+                if trigger_surface_summary_end in line:
+                    bool_trigger_surface_summary = False
+                    ind_surface_prefix = "ALIE"
+                
+            if bool_trigger_surface_summary:
+                for key in surface_trigger_keys:
+                    if key in line:
+                        name = trigger_dict_surface[key]["name"]
+                        data_ind = trigger_dict_surface[key]["data_ind"]
+                        if isinstance(name, list):
+                            for i, n in enumerate(name):
+                                dict_other[ind_surface_prefix+"_"+n] = float(line.split()[data_ind[i]])
+                        else:
+                            dict_other[ind_surface_prefix+"_"+name] = float(line.split()[data_ind])
+
+    return dict_other
