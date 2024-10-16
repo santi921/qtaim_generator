@@ -1,11 +1,11 @@
+import numpy as np 
+
 from qtaim_gen.source.core.parse_multiwfn import (
     parse_bond_order_doc,
     parse_other_doc,
-    parse_charge_doc
+    parse_charge_doc, 
+    parse_fuzzy_doc
 )
-
-import numpy as np 
-
 
 
 def test_bond_info():
@@ -85,6 +85,21 @@ def test_parse_charge():
     assert np.isclose(dipole_info['vdd']['mag'], 0.123382, atol=1e-3), "vdd dipole is not right"
     assert np.isclose(dipole_info['vdd']['xyz'][1], 0.123263, atol=1e-3), "vdd dipole is not right"
 
-#test_bond_info()
-test_parse_charge()
-#test_other_info()
+def test_fuzzy_parse(): 
+    file_fuzzy_info = "./test_files/multiwfn/fuzzy_out.txt"
+    dict_fuzzy = parse_fuzzy_doc(file_fuzzy_info)
+    probe_atom = "5_C"
+    probe_values = []
+    ground_values = np.array([6.20602588, 27.71346755, 0.31558365, 24.10015000, 4.015])
+    for key in dict_fuzzy["real_space"].keys():
+        for key2 in dict_fuzzy["real_space"][key].keys():
+            if key2 == probe_atom:
+                probe_values.append(dict_fuzzy["real_space"][key][key2])
+    probe_values.append(dict_fuzzy["localization"][probe_atom])
+    assert len(dict_fuzzy.keys()) == 2, "incorrect number of keys in the dictionary"
+    assert len(dict_fuzzy["real_space"].keys()) == 4, "incorrect number of atoms in real space"
+    assert len(dict_fuzzy["localization"].keys()) == 21, "incorrect number of atoms in localization"
+    assert len(dict_fuzzy["real_space"]["density"].keys()) == 23, "incorrect number of atoms in localization"
+    
+    probe_values = np.array(probe_values)
+    assert np.allclose(probe_values, ground_values, atol=1e-3), "fuzzy values are not right"

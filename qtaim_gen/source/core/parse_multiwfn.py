@@ -258,3 +258,67 @@ def parse_other_doc(other_txt):
                             dict_other[ind_surface_prefix+"_"+name] = float(line.split()[data_ind])
 
     return dict_other
+
+
+
+def parse_fuzzy_doc(fuzzy_loc):
+    """
+    Function to parse fuzzy doc. 
+    Takes: 
+        fuzzy_loc(str): location of fuzzy analysis output from multiwfn 
+    Returns:
+        ret_dict(dictionary): dictionary with real-space values and localization indices
+    """
+
+    ret_dict = {"real_space": {}}    
+    data_order = ["density", "grad_norm", "laplacian", "elf"]
+    trigger_data_block = "Atomic space"
+    trigger_local_block = " Localization index:"
+
+    data_ind = 0 
+    trigger_bool_real = False
+    trigger_bool_local_block = False
+
+    # iterate over lines of the file and print line if trigger is found
+    with open(fuzzy_loc, 'r') as f:
+        for line in f:
+
+            if trigger_bool_real:
+                if line == "\n" or len(line)<3:
+                    trigger_bool_real = False
+                    ret_dict["real_space"][data_order[data_ind]] = dict_data_temp
+                    data_ind += 1
+                else:
+                    line_split = line.split()
+                    if line_split[0] == "Summing": 
+                        if line_split[2] == "absolute": 
+                            dict_data_temp["abs_sum"] = float(line_split[-1])
+                        else:
+                            dict_data_temp["sum"] = float(line_split[-1])
+                    else: 
+                        name = line_split[0].replace("(", "_")
+                        dict_data_temp[name] = float(line_split[2])
+
+                
+            if trigger_bool_local_block:
+                if line == "\n" or len(line)<3:
+                    trigger_bool_local_block = False
+                    ret_dict["localization"] = local_dict_temp
+                else:
+                    line_split = line.split()
+                    # filter items that have a colon in the strings 
+                    line_split = [i for i in line_split if ":" not in i]
+                    atoms_inds = [i.replace("(", "_") for i in line_split if "(" in i]
+                    values = [float(i) for i in line_split if "(" not in i]
+                    for i, atom in enumerate(atoms_inds):
+                        local_dict_temp[atom] = values[i]
+
+            if trigger_data_block in line:
+                trigger_bool_real = True
+                dict_data_temp = {}
+
+            if trigger_local_block in line:
+                trigger_bool_local_block = True
+                local_dict_temp = {}
+    
+    return ret_dict
