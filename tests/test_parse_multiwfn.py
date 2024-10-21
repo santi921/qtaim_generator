@@ -16,9 +16,10 @@ def test_bond_info():
     assert len(bond_dict["laplace"]) == 24, "wrong number of laplace bonds"
     assert len(bond_dict["fuzzy"]) == 39, "wrong number of fuzzy bonds"
     assert len(bond_dict["ibsi"]) == 133, "wrong number of ibsi bonds"
-    assert bond_dict["fuzzy"][-2] == ('8_C', '20_H', 0.87186477)
-    assert np.isclose(bond_dict["laplace"][('9_C', '21_H')], 0.994489, atol=1e-3), "laplace bond order is not right"
-    assert np.isclose(bond_dict["ibsi"][('19_H', '20_H')], 0.00291, atol=1e-3), "ibsi bond order is not right"
+    assert np.isclose(bond_dict["fuzzy"]['8_C_to_20_H'], 0.87186477, atol=1e-3), "fuzzy bond order is not right"
+    assert np.isclose(bond_dict["laplace"]['9_C_to_21_H'], 0.994489, atol=1e-3), "laplace bond order is not right"
+    assert np.isclose(bond_dict["ibsi"]['19_H_to_20_H'], 0.00291, atol=1e-3), "ibsi bond order is not right"
+
 
 def test_other_info():
     file_other_info = "./test_files/multiwfn/other_out.txt"

@@ -130,7 +130,7 @@ def parse_bond_order_doc(bond_order_txt):
     ibsi_trigger = "Note: \"Dist\""
     ibsi_detrigger = "---------- Intrinsic bond strength index (IBSI) ----------"
     fuzzy_bool, laplace_bool, ibsi_bool = False, False, False
-    fuzzy_bond_dict, laplace_bond_dict, ibsi_bond_dict = [], {}, {}
+    fuzzy_bond_dict, laplace_bond_dict, ibsi_bond_dict = {}, {}, {}
 
     with open(bond_order_txt, 'r') as f:
         for line in f:
@@ -140,7 +140,8 @@ def parse_bond_order_doc(bond_order_txt):
                 else:
                     split_list = line.split()
                     a, b, order = split_list[2].replace("(", "_"), split_list[4].replace("(", "_"), float(split_list[-1])
-                    fuzzy_bond_dict.append((a, b, order))
+                    #fuzzy_bond_dict.append((a, b, order)) 
+                    fuzzy_bond_dict["{}_to_{}".format(a, b)] = order
 
             if laplace_bool:
                 if line.strip() == "":
@@ -148,7 +149,7 @@ def parse_bond_order_doc(bond_order_txt):
                 else:
                     split_list = line.split()
                     a, b, order = split_list[2].replace("(", "_"), split_list[4].replace("(", "_"), float(split_list[-1])
-                    laplace_bond_dict[(a, b)] = order
+                    laplace_bond_dict["{}_to_{}".format(a, b)] = order
 
             if ibsi_bool:
                 if ibsi_detrigger in line:
@@ -158,7 +159,7 @@ def parse_bond_order_doc(bond_order_txt):
                         continue
                     split_list = line.split()
                     a, b, ibsi = split_list[0].replace("(", "_"), split_list[2].replace("(", "_"), split_list[-1]
-                    ibsi_bond_dict[(a, b)] = float(ibsi)
+                    ibsi_bond_dict["{}_to_{}".format(a, b)] = float(ibsi)
 
             if fuzzy_trigger in line:
                 fuzzy_bool = True
@@ -258,8 +259,6 @@ def parse_other_doc(other_txt):
                             dict_other[ind_surface_prefix+"_"+name] = float(line.split()[data_ind])
 
     return dict_other
-
-
 
 def parse_fuzzy_doc(fuzzy_loc):
     """
