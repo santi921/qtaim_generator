@@ -202,6 +202,61 @@ def get_qtaim_descs(file="./CPprop_1157_1118_1158.txt", verbose=False):
     return ret_dict
 
 
+def get_spin_charge_from_orca_inp(dft_inp_file):
+    """
+    helper to just get spin and charge from orca file
+    """
+    with open(dft_inp_file) as f:
+        lines = f.readlines()
+        # strip tabs
+        lines = [line.strip() for line in lines]
+        
+
+    # find line starting with "* xyz"
+    for ind, line in enumerate(lines):
+        if "*xyz" in line:
+            xyz_ind = ind
+            header = lines[xyz_ind]
+            break
+
+    _, charge, spin = header.split()
+    return charge, spin
+
+
+def orca_inp_to_dict(dft_inp_file):
+    """
+    helper function to parse dft input file.
+    Takes
+        dft_inp_file (str): path to dft input file. inp file typically
+    returns: dictionary of atom positions
+    """
+    atom_dict = {}
+
+    with open(dft_inp_file) as f:
+        lines = f.readlines()
+        # strip tabs
+        lines = [line.strip() for line in lines]
+        
+
+    # find line starting with "* xyz"
+    for ind, line in enumerate(lines):
+        if "*xyz" in line:
+            xyz_ind = ind
+            break
+
+    # filter lines before and including xyz_ind
+    lines = lines[xyz_ind + 1 : -2]
+    
+    for ind, line in enumerate(lines):
+        line_split = line.split()
+        atom_dict[ind] = {
+            "element": line_split[0],
+            "pos": [float(x) for x in line_split[1:]],
+        }
+
+    return atom_dict
+
+
 def dft_inp_to_dict(dft_inp_file):
     """
     helper function to parse dft input file.
