@@ -19,6 +19,7 @@ def main():
     count_folders = 0
     while True:
         folder = choice(options_folders)
+        print(folder)
         count_folders += 1
         if count_folders > folders_to_crawl:
             break

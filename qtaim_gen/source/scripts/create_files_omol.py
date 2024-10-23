@@ -42,6 +42,7 @@ def write_multiwfn_exe(
         multiwfn_input_file, 
         convert_gbw=False, 
         overwrite=False, 
+        mv_cpprop=False, 
         name="props.mfwn"
         ): 
     """
@@ -52,6 +53,7 @@ def write_multiwfn_exe(
         multi_wfn_cmd(str): command to run multiwfn
         multiwfn_input_file(str): input file for multiwfn
         convert_gbw(bool): whether to convert the input file to a gbw file
+        mv_cpprop(bool): whether to move the cpprop file to the output folder
         overwrite(bool): whether to overwrite the file if it already exists
         name(str): name of the bash script
     """
@@ -81,6 +83,13 @@ def write_multiwfn_exe(
                 + str(Path.home().joinpath(out_folder, "{}.out".format(multiwfn_input_file_root))) # output file
                 + "\n"
             )
+
+            if mv_cpprop:
+                f.write(
+                    "mv CPprop.txt " 
+                    + str(Path.home().joinpath(out_folder, "CPprop.txt"))
+                    + "\n"
+                )
 
         st = os.stat(out_file)
         os.chmod(out_file, st.st_mode | stat.S_IEXEC)
@@ -171,6 +180,12 @@ def main():
 
                 for key, value in job_dict.items():
                     #print("key: {}".format(key))
+                    
+                    if key == "qtaim":
+                        mv_cpprop=True
+                    else: 
+                        mv_cpprop=False
+
                     write_multiwfn_exe(
                         out_folder=folder_full_path,
                         read_file=file_read, 
@@ -178,5 +193,8 @@ def main():
                         multiwfn_input_file=value, 
                         convert_gbw=False, 
                         overwrite=True, 
-                        name="props_{}.mfwn".format(key)
+                        name="props_{}.mfwn".format(key),
+                        mv_cpprop=mv_cpprop
                     )
+
+main()

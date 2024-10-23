@@ -12,7 +12,7 @@ To get started you will need to decide a few things:
 
 Simply install this package by cloning the repo and running: 
 ```
-setup.py -e .
+pip install -e .
 ```
 
 ## Usage
@@ -51,3 +51,6 @@ Three scripts will be needed to generate QTAIM features readily formatted for yo
 ## Data Structure
 Jsons, pkls, and bson can all be parsed. 
  
+
+
+## install 
