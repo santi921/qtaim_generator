@@ -1,3 +1,8 @@
+from qtaim_gen.source.core.parse_qtaim import (
+    get_qtaim_descs, 
+    merge_qtaim_inds
+)
+
 def parse_charge_doc(charge_out_txt):
     """
     Method to parse the charge out from multiwfn
@@ -21,13 +26,14 @@ def parse_charge_doc(charge_out_txt):
     dipole_key = "Total dipole moment from atomic charges:"
     dipole_xyz_key = "X/Y/Z of dipole moment vector:"
 
-    charge_ordering = ["hirshfeld", "vdd", "becke", "adch", "chelpg", "mk", "cm5", "resp", "peoe", "mbis"]
-    dipole_order = ["hirshfeld", "vdd", "becke", "hirshfeld" , "hirshfeld"]
+    #charge_ordering = ["hirshfeld", "vdd", "becke", "adch", "chelpg", "mk", "cm5", "resp", "peoe", "mbis"]
+    charge_ordering = ["hirshfeld", "vdd", "becke", "adch", "cm5", "mbis"]
+    dipole_order = ["hirshfeld", "vdd", "becke", "hirshfeld"]
     atomic_dipole_order = ['becke', 'adch']
 
     charge_dict_overall = {}
     atomic_dipole_dict_overall = {}
-    dipole_info = {"cm5": {}, "adch": {}, "hirshfeld": {}, "vdd": {}, "becke": {}}
+    dipole_info = {"adch": {}, "hirshfeld": {}, "vdd": {}, "becke": {}}
 
     # iterate over lines of the file 
     with open(charge_out_txt, 'r') as f:
@@ -54,40 +60,53 @@ def parse_charge_doc(charge_out_txt):
             if trigger or trigger2:
                 if line.split()[0] == "Atom":
                     ind, element = line.split()[1].split("(")
+                    if "):" in element:
+                        element = element[:-2]
+                    #print(ind, element)
                 elif line.strip()[0].isnumeric():        
                     ind, element = line.split()[0].split("(")
-                
+                    if "):" in element:
+                        element = element[:-2]
+                    #print(ind, element)
                 value = float(line.split()[-1])
                 charge_dict[ind + "_" + element] = value
                 
             if trigger_dipole: 
                 #print(len(line) < 3)
                 if line.strip().startswith("Atom"):
-                    #print(line)
                     ind, element = line.split()[1].split("(")
-                    dipole = line.split()[5: 8]
+                    shift=0
+                    if ")" in element:
+                        element = element[:-1]
+                        shift = -1
+                    dipole = line.split()[5+shift:8+shift]
                     #print(x, y, z)
+                    #print(line.split())
                     atomic_dipole_dict[ind + "_" + element] = [float(i) for i in dipole]
+
 
             if dipole_cm5_key in line:
                 float_dipole_cm5 = float(line.split()[-2])
                 dipole_info["cm5"]["mag"] = float_dipole_cm5
+            
             
             if dipole_cm5_xyz_key in line:
                 str_nums = line.split()[7:-1]
                 float_cm5_xyz = [float(num) for num in str_nums]
                 dipole_info["cm5"]["xyz"] = float_cm5_xyz
 
+
             if dipole_adch_key in line:
                 float_dipole_adch = float(line.split()[-3])
                 dipole_info["adch"]["mag"] = float_dipole_adch
+
 
             if dipole_adch_xyz_key in line:
                 str_nums = line.split()[8:-1]
                 float_adch_xyz = [float(num) for num in str_nums]
                 dipole_info["adch"]["xyz"] = float_adch_xyz
             
-            # logic here needs to be added to 
+            
             if dipole_index < 3:
                 if dipole_key in line:
                     float_dipole_temp = float(line.split()[-2])
@@ -115,6 +134,256 @@ def parse_charge_doc(charge_out_txt):
                 atomic_dipole_dict = {}
 
     return charge_dict_overall, atomic_dipole_dict_overall, dipole_info
+
+
+def parse_charge_base(charge_out_txt, corrected=False, dipole=True):
+    """
+    Method to parse the charge out from multiwfn
+    Takes: 
+        charge_out_txt: str, path to the charge out file
+        corrected: bool, if the charges are corrected
+        dipole: bool, if the dipole is to be parsed
+    Returns: 
+        charge_dict_overall: dict, dictionary with the charges from different methods
+        atomic_dipole_dict_overall: dict, dictionary with the atomic dipoles from different methods
+        dipole_info: dict, dictionary with the total dipoles from different methods
+    """
+
+    charge_key_3 = "Final atomic charges:"
+    if corrected:
+        dipole_xyz_key = "X/Y/Z of dipole moment from the charge (a.u.)"
+        dipole_key = "Total dipole from ADC charges (a.u.)"
+    
+    else:
+        dipole_key = "Total dipole moment from atomic charges:"
+        dipole_xyz_key = "X/Y/Z of dipole moment vector:"
+    
+    charge_dict_overall = {}
+    dipole_info = {}
+
+    # iterate over lines of the file 
+    with open(charge_out_txt, 'r') as f:
+        
+        trigger2=False
+        
+        for line in f:
+            if line == "\n" or len(line)<3:
+                if trigger2:    
+                        trigger2=False
+                        charge_dict_overall = charge_dict
+
+            if trigger2:
+                if line.split()[0] == "Atom":
+                    ind, element = line.split()[1].split("(")
+                    if "):" in element:
+                        element = element[:-2]
+                    #print(ind, element)
+                elif line.strip()[0].isnumeric():        
+                    ind, element = line.split()[0].split("(")
+                    if "):" in element:
+                        element = element[:-2]
+                    #print(ind, element)
+                value = float(line.split()[-1])
+                charge_dict[ind + "_" + element] = value
+                
+            if dipole_key in line:
+                if corrected:
+                    float_dipole_temp = float(line.split()[-3])
+                else:
+                    float_dipole_temp = float(line.split()[-2])
+                dipole_info["mag"] = float_dipole_temp
+
+            if dipole_xyz_key in line:
+                if corrected:
+                    str_nums = line.split()[-3:]
+                else:
+                    str_nums = line.split()[5:-1]
+                float_diple_xyz_temp = [float(num) for num in str_nums]
+                dipole_info["xyz"] = float_diple_xyz_temp
+              
+            if charge_key_3 in line:
+                trigger2=True
+                charge_dict = {}
+
+    #print("charge dict overall keys: ", charge_dict_overall.keys())
+    #print("dipole info keys: ", dipole_info.keys())
+    if dipole:
+        return charge_dict_overall, dipole_info
+    else:
+        return charge_dict_overall
+
+
+def parse_charge_becke(charge_out_txt):
+    """
+    Method to parse the charge out from multiwfn
+    Takes: 
+        charge_out_txt: str, path to the charge out file
+        corrected: bool, if the charges are corrected
+        dipole: bool, if the dipole is to be parsed
+    Returns: 
+        charge_dict_overall: dict, dictionary with the charges from different methods
+        atomic_dipole_dict_overall: dict, dictionary with the atomic dipoles from different methods
+        dipole_info: dict, dictionary with the total dipoles from different methods
+    """
+
+    charge_key_3 = "Final atomic charges:"
+    atomic_dipole_key = "Atomic dipole moments (a.u.):"
+    dipole_xyz_key = "X/Y/Z of dipole moment from the charge (a.u.)"
+    dipole_key = "Total dipole from ADC charges (a.u.)"
+    
+    
+    charge_dict_overall = {}
+    dipole_info = {}
+    atomic_dipole_dict_overall = {}
+
+    # iterate over lines of the file 
+    with open(charge_out_txt, 'r') as f:
+        
+        trigger2=False
+        trigger_dipole = False
+        atomic_dipole_dict = {}
+
+        for line in f:
+            if line == "\n" or len(line)<3:
+                if trigger2:    
+                        trigger2=False
+                        charge_dict_overall = charge_dict
+                
+                if trigger_dipole:                 
+                        trigger_dipole = False
+                        atomic_dipole_dict_overall = atomic_dipole_dict
+
+            if trigger2:
+                if line.split()[0] == "Atom":
+                    ind, element = line.split()[1].split("(")
+                    if "):" in element:
+                        element = element[:-2]
+                    #print(ind, element)
+                elif line.strip()[0].isnumeric():        
+                    ind, element = line.split()[0].split("(")
+                    if "):" in element:
+                        element = element[:-2]
+                    #print(ind, element)
+                value = float(line.split()[-1])
+                charge_dict[ind + "_" + element] = value
+
+            if trigger_dipole: 
+                if line.strip().startswith("Atom"):
+                    ind, element = line.split()[1].split("(")
+                    shift=0
+                    if ")" in element:
+                        element = element[:-1]
+                        shift = -1
+                    dipole = line.split()[5+shift:8+shift]
+                    atomic_dipole_dict[ind + "_" + element] = [float(i) for i in dipole]
+
+            if dipole_key in line:
+                float_dipole_temp = float(line.split()[-3])
+                dipole_info["mag"] = float_dipole_temp
+
+            if dipole_xyz_key in line:
+                str_nums = line.split()[-3:]
+                float_diple_xyz_temp = [float(num) for num in str_nums]
+                dipole_info["xyz"] = float_diple_xyz_temp
+              
+            if charge_key_3 in line:
+                trigger2=True
+                charge_dict = {}
+
+            if atomic_dipole_key in line:
+                trigger_dipole = True
+                atomic_dipole_dict = {}
+
+    #print("charge dict overall keys: ", charge_dict_overall.keys())
+    #print("dipole info keys: ", dipole_info.keys())
+    #print("atomic_dipole_dict_overall keys: ", atomic_dipole_dict_overall.keys())
+    
+    return charge_dict_overall, atomic_dipole_dict_overall, dipole_info
+
+
+    
+def parse_charge_doc_adch(charge_out_txt):
+    """
+    Method to parse the charge out from multiwfn on acdh charges.
+    Takes: 
+        charge_out_txt: str, path to the charge out file
+    Returns: 
+        charge_dict_overall: dict, dictionary with the charges from different methods
+        atomic_dipole_dict_overall: dict, dictionary with the atomic dipoles from different methods
+        dipole_info: dict, dictionary with the total dipoles from different methods
+    """
+
+    charge_key_3 = "Final atomic charges:"
+    atomic_dipole_key = "Atomic dipole moments (a.u.):"
+    dipole_adch_xyz_key = "X/Y/Z of dipole moment from the charge (a.u.)"
+    dipole_adch_key = "Total dipole from ADC charges (a.u.)"
+    
+    charge_dict_overall = {}
+    atomic_dipole_dict_overall = {}
+    dipole_info = {}
+
+    # iterate over lines of the file 
+    with open(charge_out_txt, 'r') as f:
+        trigger=False
+        trigger_dipole = False
+
+        for line in f:
+            if line == "\n" or len(line)<3:
+                if trigger:    
+                        trigger=False
+                        charge_dict_overall = charge_dict
+
+                elif trigger_dipole:                 
+                        trigger_dipole = False
+                        atomic_dipole_dict_overall = atomic_dipole_dict
+
+            if trigger:
+                if line.split()[0] == "Atom":
+                    ind, element = line.split()[1].split("(")
+                    if "):" in element:
+                        element = element[:-2]
+                    #print(ind, element)
+                elif line.strip()[0].isnumeric():        
+                    ind, element = line.split()[0].split("(")
+                    if "):" in element:
+                        element = element[:-2]
+                    #print(ind, element)
+                value = float(line.split()[-1])
+                charge_dict[ind + "_" + element] = value
+                
+            if trigger_dipole: 
+                if line.strip().startswith("Atom"):
+                    ind, element = line.split()[1].split("(")
+                    shift=0
+                    if ")" in element:
+                        element = element[:-1]
+                        shift = -1
+                    dipole = line.split()[5+shift:8+shift]
+
+                    atomic_dipole_dict[ind + "_" + element] = [float(i) for i in dipole]
+
+
+            if dipole_adch_key in line:
+                float_dipole_adch = float(line.split()[-3])
+                dipole_info["mag"] = float_dipole_adch
+
+
+            if dipole_adch_xyz_key in line:
+                str_nums = line.split()[8:]
+                float_adch_xyz = [float(num) for num in str_nums]
+                dipole_info["xyz"] = float_adch_xyz
+            
+            if charge_key_3 in line:
+                trigger=True
+                charge_dict = {}
+
+            if atomic_dipole_key in line:
+                trigger_dipole = True
+                atomic_dipole_dict = {}
+
+    return charge_dict_overall, atomic_dipole_dict_overall, dipole_info
+
+
 
 def parse_bond_order_doc(bond_order_txt): 
     """
@@ -180,6 +449,104 @@ def parse_bond_order_doc(bond_order_txt):
     } 
 
     return bond_dict
+
+
+def parse_bond_order_laplace(bond_order_txt): 
+    """
+    Method to parse the laplace bond order out from multiwfn
+    Takes: 
+        bond_out_txt: str, path to the bond out file
+    Returns: 
+        bond_dict: dict, dictionary with the bond orders
+    """
+
+    laplace_trigger = "The bond orders >=  0.050000"
+    laplace_bool = False
+    laplace_bond_dict = {}
+
+    with open(bond_order_txt, 'r') as f:
+        for line in f:
+
+            if laplace_bool:
+                if line.strip() == "":
+                    laplace_bool = False
+                else:
+                    split_list = line.split()
+                    a, b, order = split_list[2].replace("(", "_"), split_list[4].replace("(", "_"), float(split_list[-1])
+                    laplace_bond_dict["{}_to_{}".format(a, b)] = order
+            
+            if laplace_trigger in line:
+                laplace_bool = True
+
+    return laplace_bond_dict
+
+
+def parse_bond_order_ibsi(bond_order_txt): 
+    """
+    Method to parse the ibsi bond order out from multiwfn
+    Takes: 
+        bond_out_txt: str, path to the bond out file
+    Returns: 
+        bond_dict: dict, dictionary with the bond orders
+    """
+
+    ibsi_trigger = "Note: \"Dist\""
+    ibsi_detrigger = "---------- Intrinsic bond strength index (IBSI) ----------"
+    ibsi_bool = False
+    ibsi_bond_dict = {}
+
+    with open(bond_order_txt, 'r') as f:
+        for line in f:
+
+            if ibsi_bool:
+                if ibsi_detrigger in line:
+                    ibsi_bool = False
+                else:
+                    if line.strip() == "":
+                        continue
+                    split_list = line.split()
+                    a, b, ibsi = split_list[0].replace("(", "_"), split_list[2].replace("(", "_"), split_list[-1]
+                    ibsi_bond_dict["{}_to_{}".format(a, b)] = float(ibsi)
+
+            if ibsi_trigger in line:
+                if ibsi_bool:
+                    # stop parsing the file
+                    break
+                ibsi_bool = True
+
+    return ibsi_bond_dict
+
+
+def parse_bond_order_fuzzy(bond_order_txt): 
+    """
+    Method to parse the fuzzy bond order out from multiwfn
+    Takes: 
+        bond_out_txt: str, path to the bond out file
+    Returns: 
+        bond_dict: dict, dictionary with the bond orders
+    """
+
+    fuzzy_trigger = "The total bond order >=  0.050000"
+    fuzzy_bool= False
+    fuzzy_bond_dict= {}
+
+    with open(bond_order_txt, 'r') as f:
+        for line in f:
+            if fuzzy_bool:
+                if line.strip() == "":
+                    fuzzy_bool = False
+                else:
+                    split_list = line.split()
+                    a, b, order = split_list[2].replace("(", "_"), split_list[4].replace("(", "_"), float(split_list[-1])
+                    #fuzzy_bond_dict.append((a, b, order)) 
+                    fuzzy_bond_dict["{}_to_{}".format(a, b)] = order
+
+            if fuzzy_trigger in line:
+                fuzzy_bool = True
+
+
+    return fuzzy_bond_dict
+
 
 def parse_other_doc(other_txt): 
     """
@@ -260,6 +627,7 @@ def parse_other_doc(other_txt):
 
     return dict_other
 
+
 def parse_fuzzy_doc(fuzzy_loc):
     """
     Function to parse fuzzy doc. 
@@ -321,3 +689,34 @@ def parse_fuzzy_doc(fuzzy_loc):
                 local_dict_temp = {}
     
     return ret_dict
+
+
+def parse_qtaim(cprop_file, inp_loc):
+    """
+    Function to parse qtaim output from multiwfn
+    Takes: 
+        cprop_file(str): location of qtaim output from multiwfn
+        inp_loc(str): location of the input file
+    Returns:
+        qtaim_dict(dictionary): dictionary with qtaim properties
+    """
+    qtaim_descs = get_qtaim_descs(cprop_file)
+
+    ret_dict = merge_qtaim_inds(
+        dft_inp_file=inp_loc, 
+        qtaim_descs=qtaim_descs,
+        bond_list = None, 
+        define_bonds="qtaim",
+        margin=1.0
+    )
+
+    # convert tuple keys to strings 
+    clean_dict = {}
+    for key in ret_dict.keys():
+        if isinstance(key, tuple):
+            new_key = str(key[0]) + "_" + str(key[1])
+            clean_dict[new_key] = ret_dict[key]
+        else:
+            clean_dict[key] = ret_dict[key]
+
+    return clean_dict

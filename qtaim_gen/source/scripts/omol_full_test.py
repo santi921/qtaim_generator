@@ -1,0 +1,42 @@
+from qtaim_gen.source.core.omol import gbw_analysis
+
+def main():
+
+    orca_6 = "/home/santiagovargas/dev/qtaim_generator/data/orca6/"
+    orca_5 = "/home/santiagovargas/dev/qtaim_generator/data/orca5/"
+    test_folder = "/home/santiagovargas/dev/qtaim_generator/tests/test_files/omol/3/"
+    
+    orca6_2mkl = "/home/santiagovargas/orca_6_0_0/orca_2mkl" # orca --molden
+    orca5_2mkl = "/home/santiagovargas/dev/orca5/orca_2mkl"
+    
+    multiwfn_cmd = "/home/santiagovargas/dev/Multiwfn_3.8_dev_bin_Linux_noGUI/Multiwfn_noGUI" 
+
+    parse_only = True
+    separate = True
+    gbw_analysis(
+            folder=orca_6, 
+            orca_2mkl_cmd=orca6_2mkl, 
+            multiwfn_cmd=multiwfn_cmd,
+            parse_only=parse_only, 
+            separate=separate
+    ) # works!
+        
+    """
+    gbw_analysis(
+        folder=test_folder, 
+        orca_2mkl_cmd=orca6_2mkl, 
+        multiwfn_cmd=multiwfn_cmd, 
+        parse_only=parse_only, 
+        separate=separate
+    ) 
+    """
+
+    # todo: fix ecp stuff
+    #gbw_analysis(
+    #    folder=orca_5, 
+    #    orca_2mkl_cmd=orca5_2mkl, 
+    #    multiwfn_cmd=multiwfn_cmd
+    #)
+
+
+main()

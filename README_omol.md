@@ -21,3 +21,12 @@ In short, this function will create a file for converting gbws to wfn files, cre
     -multiwfn_cmd: command for multiwfn.
     -orca_2mkl_cmd: command for orca_2mkl for conversion.
 
+NOTA BENE:  orca_2mkl is sensitive to the version of orca your gbw is from, this means that there needs to be some logic to pass the correct orca_2mkl version for the current directory
+
+## Environment Settings
+
+Prior to running just set the following two variables: 
+- <code> ulimit -s unlimited </code>
+- <code> export OMP_STACKSIZE=64000000 </code>
+
+

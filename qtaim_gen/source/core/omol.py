@@ -1,9 +1,11 @@
 from pathlib import Path
-import os, stat, json
+import os, stat, json, time
 
 from qtaim_gen.source.data.multiwfn import (
     charge_data, 
+    charge_data_dict,
     bond_order_data, 
+    bond_order_dict,
     fuzzy_data, 
     other_data, 
     qtaim_data
@@ -11,9 +13,16 @@ from qtaim_gen.source.data.multiwfn import (
 
 from qtaim_gen.source.core.parse_multiwfn import ( 
     parse_charge_doc, 
+    parse_charge_base, 
+    parse_charge_becke, 
+    parse_charge_doc_adch,
     parse_bond_order_doc, 
+    parse_bond_order_fuzzy, 
+    parse_bond_order_ibsi,
+    parse_bond_order_laplace,
     parse_fuzzy_doc, 
-    parse_other_doc
+    parse_other_doc, 
+    parse_qtaim
 )
 
 def write_multiwfn_conversion(
@@ -45,7 +54,9 @@ def write_multiwfn_conversion(
     if completed_tf and not overwrite:
         with open(out_file, "w") as f:
             f.write("#!/bin/bash\n")
-            f.write("{} ".format(orca_2mkl_cmd)+ str(Path.home().joinpath(out_folder, read_file)) + "\n")
+            # remove .gbw from file name
+            read_file = read_file.split(".gbw")[0]
+            f.write("{} ".format(orca_2mkl_cmd)+ str(Path.home().joinpath(out_folder, read_file)) + " -molden\n")
 
 
 def write_multiwfn_exe(
@@ -108,27 +119,25 @@ def write_multiwfn_exe(
         os.chmod(out_file, st.st_mode | stat.S_IEXEC)
 
 
-def create_jobs(folder, multiwfn_cmd, orca_2mkl_cmd): 
+def create_jobs(folder, multiwfn_cmd, orca_2mkl_cmd, separate=False): 
     """
     Create job files for multiwfn analysis
+    Takes: 
+        folder(str): folder to create jobs in
+        multiwfn_cmd(str): command to run multiwfn
+        orca_2mkl_cmd(str): command to run orca_2mkl
+        separate(bool): whether to separate the analysis into different files
     """
-    #parser = argparse.ArgumentParser()
-    #parser.add_argument("-root_folder", type=str, default="./")
-    #parser.add_argument("-full_multiwfn", type=bool, default=True)
-    #parser.add_argument("-routine_list", type=list, default=["qtaim"])
-    #parser.add_argument("-multiwfn_cmd", type=str, default="Multiwfn"
-    #args = parser.parse_args()
-    #root_folder = args.root_folder
-    #full_multiwfn = bool(args.full_multiwfn)
-    #multiwfn_cmd = args.multiwfn_cmd
+    if separate:
+        routine_list = ["charge_separate", "bond_separate", "qtaim", "other"]
+    else:
+        routine_list = ["qtaim", "bond", "charge", "other"]
     
-    routine_list = ["qtaim", "fuzzy", "bond", "charge", "other"]
     
-    #print("root_folder: {}".format(folder))
-    #print("multiwfn_cmd: {}".format(multiwfn_cmd))
-    #print("routine_list: {}".format(routine_list))
 
     job_dict = {}
+    
+    #print("folder: {}".format(folder))
     for routine in routine_list:
         if routine == "qtaim":
             job_dict["qtaim"] = os.path.join(folder, "qtaim.txt")
@@ -137,9 +146,9 @@ def create_jobs(folder, multiwfn_cmd, orca_2mkl_cmd):
                 data = qtaim_data()
                 f.write(data)
                 
-        elif routine == "fuzzy":
-            job_dict["fuzzy"] = os.path.join(folder, "fuzzy.txt")
-            with open(os.path.join(folder, "fuzzy.txt"), "w") as f:
+        elif routine == "fuzzy_full":
+            job_dict["fuzzy_full"] = os.path.join(folder, "fuzzy_full.txt")
+            with open(os.path.join(folder, "fuzzy_full.txt"), "w") as f:
                 data = fuzzy_data()
                 f.write(data)
 
@@ -148,12 +157,26 @@ def create_jobs(folder, multiwfn_cmd, orca_2mkl_cmd):
             with open(os.path.join(folder, "bond.txt"), "w") as f:
                 data = bond_order_data()
                 f.write(data)
+        
+        elif routine == "bond_separate":
+            bond_dict = bond_order_dict()
+            for key, value in bond_dict.items():
+                job_dict[key] = os.path.join(folder, "{}.txt".format(key))
+                with open(os.path.join(folder, "{}.txt".format(key)), "w") as f:
+                    f.write(value)
 
         elif routine == "charge":
             job_dict["charge"] = os.path.join(folder, "charge.txt")
             with open(os.path.join(folder, "charge.txt"), "w") as f:
                 data = charge_data()
                 f.write(data)
+
+        elif routine == "charge_separate":
+            charge_dict = charge_data_dict()
+            for key, value in charge_dict.items():
+                job_dict[key] = os.path.join(folder, "{}.txt".format(key))
+                with open(os.path.join(folder, "{}.txt".format(key)), "w") as f:
+                    f.write(value)
 
         elif routine == "other":
             job_dict["other"] = os.path.join(folder, "other.txt")
@@ -189,29 +212,70 @@ def create_jobs(folder, multiwfn_cmd, orca_2mkl_cmd):
 
         for key, value in job_dict.items():
             if key == "qtaim":
-                cpprop_mv=True
+                mv_cpprop=True
             else: 
-                cpprop_mv=False
+                mv_cpprop=False
 
-            #print("key: {}".format(key))
-            write_multiwfn_exe(
-                out_folder=folder,
-                read_file=file_read, 
-                multi_wfn_cmd=multiwfn_cmd, 
-                multiwfn_input_file=value, 
-                convert_gbw=False, 
-                overwrite=True, 
-                name="props_{}.mfwn".format(key), 
-                orca_2mkl_cmd=orca_2mkl_cmd, 
-                cpprop_mv=cpprop_mv
-            )
+            if key == "charge_separate":
+                charge_dict = charge_data_dict()
+                for key, value in charge_dict.items():
+                    write_multiwfn_exe(
+                        out_folder=folder,
+                        read_file=file_read, 
+                        multi_wfn_cmd=multiwfn_cmd, 
+                        multiwfn_input_file=value, 
+                        convert_gbw=False, 
+                        overwrite=True, 
+                        name="props_{}.mfwn".format(key), 
+                        mv_cpprop=mv_cpprop
+                    )
+            
+            elif key == "bond_separate":
+                bond_dict = bond_order_dict()
+                for key, value in bond_dict.items():
+                    write_multiwfn_exe(
+                        out_folder=folder,
+                        read_file=file_read, 
+                        multi_wfn_cmd=multiwfn_cmd, 
+                        multiwfn_input_file=value, 
+                        convert_gbw=False, 
+                        overwrite=True, 
+                        name="props_{}.mfwn".format(key), 
+                        mv_cpprop=mv_cpprop
+                    )
+
+            else: 
+                #print("key: {}".format(key))
+                write_multiwfn_exe(
+                    out_folder=folder,
+                    read_file=file_read, 
+                    multi_wfn_cmd=multiwfn_cmd, 
+                    multiwfn_input_file=value, 
+                    convert_gbw=False, 
+                    overwrite=True, 
+                    name="props_{}.mfwn".format(key), 
+                    mv_cpprop=mv_cpprop
+                )
 
 
-def run_jobs(folder):
+def run_jobs(folder, separate=False):
     """
     Run conversion and multiwfn jobs
+    Takes: 
+        folder(str): folder to run jobs in
+        separate(bool): whether to separate the analysis into different files
     """
-    order_of_operations = ["qtaim", "fuzzy", "bond", "charge", "other"]
+    if separate:
+        order_of_operations = ["qtaim", "other"]
+        charge_dict = charge_data_dict()
+        [order_of_operations.append(i) for i in charge_dict.keys()]
+        bond_dict = bond_order_dict()
+        [order_of_operations.append(i) for i in bond_dict.keys()]
+        
+    
+    else:
+        order_of_operations = ["bond", "charge", "qtaim", "other"]
+    
     wfn_present = False
     for file in os.listdir(folder):
         if file.endswith(".wfn"): 
@@ -224,38 +288,80 @@ def run_jobs(folder):
         # run conversion script
         os.system("{}".format(conv_file))
     
+    timings = {}
     # run multiwfn scripts
     for order in order_of_operations:  
         mfwn_file = os.path.join(folder, "props_{}.mfwn".format(order))
-        os.system("{}".format(mfwn_file))
+        try:
+            start = time.time()
+            os.system("{}".format(mfwn_file))
+            end = time.time()
+            timings[order] = end-start
+        except: 
+            print("error running {}".format(mfwn_file))
+            timings[order] = -1
     
+    # save timings to file in folder
+    with open(os.path.join(folder, "timings.json"), 'w') as f:
+        json.dump(timings, f, indent=4)
 
-def parse_multiwfn(folder):
+
+def parse_multiwfn(folder, separate=False):
+    """
+    Parse multiwfn output files to jsons and save them in folder
+    Takes: 
+        folder(str): folder to parse
+        separate(bool): whether to separate the analysis into different files
+    """
+
+    if separate:
+        routine_list = ["qtaim", "other"]
+        charge_dict = charge_data_dict()
+        bond_dict = bond_order_dict()
+        [routine_list.append(i) for i in charge_dict.keys()]
+        [routine_list.append(i) for i in bond_dict.keys()]
+        
     
-    routine_list = ["fuzzy", "bond", "charge", "other", "qtaim"]
+    else:
+        routine_list = ["bond", "charge", "qtaim", "other"]
 
     for file in os.listdir(folder): 
         if file.endswith(".out"):
             file_full_path = os.path.join(folder, file)
             for routine in routine_list:
                 if routine in file:
-    
+                    #print(routine)
                     json_file = file_full_path.replace(".out", ".json")
                     
-                    if routine == "fuzzy":
+                    if routine == "fuzzy_full":
                         data=parse_fuzzy_doc(file_full_path)
                         with open(json_file, 'w') as f:
-                            json.dump(data, f)
+                            json.dump(data, f, indent=4)
                     
                     elif routine == "bond":
                         data=parse_bond_order_doc(file_full_path)
                         with open(json_file, 'w') as f:
-                            json.dump(data, f)
+                            json.dump(data, f, indent=4)
+
+                    elif routine == "ibsi":
+                        data=parse_bond_order_ibsi(file_full_path)
+                        with open(json_file, 'w') as f:
+                            json.dump(data, f, indent=4)
+                        
+                    elif routine == "laplace":
+                        data=parse_bond_order_laplace(file_full_path)
+                        with open(json_file, 'w') as f:
+                            json.dump(data, f, indent=4)
+
+                    elif routine == "fuzzy":
+                        data=parse_bond_order_fuzzy(file_full_path)
+                        with open(json_file, 'w') as f:
+                            json.dump(data, f, indent=4)
 
                     elif routine == "other":
                         data=parse_other_doc(file_full_path)
                         with open(json_file, 'w') as f:
-                            json.dump(data, f)
+                            json.dump(data, f, indent=4)
 
                     elif routine == "charge":
                         charge_dict_overall, atomic_dipole_dict_overall, dipole_info=parse_charge_doc(file_full_path)    
@@ -265,17 +371,143 @@ def parse_multiwfn(folder):
                             "atomic_dipole": atomic_dipole_dict_overall
                         }
                         with open(json_file, 'w') as f:
-                            json.dump(charge_dict_overall, f)
+                            json.dump(charge_dict_overall, f, indent=4)
+
+                    elif routine == "hirshfeld":
+                        charge_dict_overall, dipole_info=parse_charge_base(file_full_path, corrected=False)
+                        data = {
+                            "charge": charge_dict_overall,
+                            "dipole": dipole_info
+                        }
+                        with open(json_file, 'w') as f:
+                            json.dump(data, f, indent=4)
+
+
+                    elif routine == "vdd":
+                        charge_dict_overall, dipole_info=parse_charge_base(file_full_path, corrected=False)
+                        data = {
+                            "charge": charge_dict_overall,
+                            "dipole": dipole_info
+                        }
+                        with open(json_file, 'w') as f:
+                            json.dump(data, f, indent=4)
+
+                    elif routine == "mbis":
+                        charge_dict_overall=parse_charge_base(file_full_path, corrected=False, dipole=False)
+                        data = {
+                            "charge": charge_dict_overall
+                        }
+                        with open(json_file, 'w') as f:
+                            json.dump(data, f, indent=4)
+
+                    elif routine == "adch":
+                        charge_dict_overall, atomic_dipole_dict_overall, dipole_info=parse_charge_doc_adch(file_full_path)
+                        data = {
+                            "charge": charge_dict_overall, 
+                            "dipole": dipole_info,
+                            "atomic_dipole": atomic_dipole_dict_overall
+                        }
+                        with open(json_file, 'w') as f:
+                            json.dump(data, f, indent=4)
+
+
+                    elif routine == "becke": 
+                        charge_dict_overall, atomic_dipole_dict_overall, dipole_info=parse_charge_becke(file_full_path)
+                        data = {
+                            "charge": charge_dict_overall,
+                            "dipole": dipole_info, 
+                            "atomic_dipole": atomic_dipole_dict_overall
+                        }
+                        with open(json_file, 'w') as f:
+                            json.dump(data, f, indent=4)
 
                     elif routine == "qtaim":
-                        pass
-                        # TODO unify with .inp file
+                        # go through files in folder and find the one that ends in .inp
+                        for file in os.listdir(folder):
+                            if file.endswith(".inp"):
+                                inp_loc = os.path.join(folder, file)
+                            if "CPprop" in file:
+                                cp_prop_path = os.path.join(folder, file)
+                        qtaim_dict = parse_qtaim(
+                            cprop_file=cp_prop_path, 
+                            inp_loc=inp_loc)
+                        
+                        with open(json_file, 'w') as f:
+                            json.dump(qtaim_dict, f, indent=4)
 
 
-def gbw_analysis(folder, multiwfn_cmd, orca_2mkl_cmd):
-    # create jobs for conversion to wfn and multiwfn analysis
-    create_jobs(folder, multiwfn_cmd, orca_2mkl_cmd)
-    # run jobs
-    run_jobs(folder)
+    if separate:
+        charge_routines = list(charge_dict.keys())
+        bond_routines = list(bond_dict.keys())
+        charge_dict_compiled = {}
+        bond_dict_compiled = {}
+        for file in os.listdir(folder):
+            for routine in charge_routines:
+                if routine == file.split(".json")[0]:
+                    with open(os.path.join(folder, file), 'r') as f:
+                        charge_dict_compiled[routine] = json.load(f)
+                    # remove the file
+                    os.remove(os.path.join(folder, file))
+
+            for routine in bond_routines:
+                if routine == file.split(".json")[0]:
+                    with open(os.path.join(folder, file), 'r') as f:
+                        bond_dict_compiled[routine] = json.load(f)
+                    # remove the file
+                    os.remove(os.path.join(folder, file))
+
+        with open(os.path.join(folder, "charge.json"), 'w') as f:
+            json.dump(charge_dict_compiled, f, indent=4))
+        with open(os.path.join(folder, "bond.json"), 'w') as f:
+            json.dump(bond_dict_compiled, f, indent=4)
+
+
+def clean_jobs(folder, separate=False):
+    """
+    Clean up the mess of files created by the analysis
+    Takes: 
+        folder(str): folder to clean
+        separate(bool): whether to separate the analysis into different files
+    """
+    
+    if separate:
+        order_of_operations = ["qtaim", "other"]
+        charge_dict = charge_data_dict()
+        [order_of_operations.append(i) for i in charge_dict.keys()]
+        bond_dict = bond_order_dict()
+        [order_of_operations.append(i) for i in bond_dict.keys()]
+        
+    
+    else:
+        order_of_operations = ["bond", "charge", "qtaim", "other"]
+
+    txt_files = []
+    txt_files = [i+".txt" for i in order_of_operations]
+    # print all jobs ending in .mfwn
+    for file in os.listdir(folder):
+        if file.endswith(".mfwn"):
+            os.remove(os.path.join(folder, file))
+        if file.endswith(".txt"):
+            if file in txt_files:
+                os.remove(os.path.join(folder, file))
+
+
+def gbw_analysis(folder, multiwfn_cmd, orca_2mkl_cmd, separate=True, parse_only=False):
+    """
+    Run a full analysis on a folder of gbw files
+    Takes: 
+        folder(str): folder to analyze
+        multiwfn_cmd(str): command to run multiwfn
+        orca_2mkl_cmd(str): command to run orca_2mkl
+        separate(bool): whether to separate the analysis into different files
+    """
+    if not parse_only:
+        #create jobs for conversion to wfn and multiwfn analysis
+        create_jobs(folder, multiwfn_cmd, orca_2mkl_cmd, separate=separate)
+        #run jobs
+        run_jobs(folder, separate=separate)
+
     # parse those jobs to jsons for 5 categories
-    parse_multiwfn(folder)
+    #parse_multiwfn(folder, separate=separate)
+    # clean some of the mess
+    clean_jobs(folder, separate=separate)
