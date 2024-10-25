@@ -137,11 +137,10 @@ def main():
         "density_alpha",
         "spin_density",
         "lol",
-
     ]
-    
-    impute_dict={}
-    
+
+    impute_dict = {}
+
     if impute:
         impute_dict = gather_imputation(
             df=pandas_file,

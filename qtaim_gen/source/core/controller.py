@@ -1,6 +1,7 @@
 import os, threading, subprocess
 from glob import glob
 from pathlib import Path
+
 # folders = [name for name in os.listdir("./") if os.path.isdir(os.path.join("./", name))]
 
 
@@ -14,7 +15,9 @@ class ThreadWithResult(threading.Thread):
         super().__init__(group=group, target=function, name=name, daemon=daemon)
 
 
-def controller_single(folder_choice, redo_qtaim=False, just_dft=False, reaction=True, orca_path=""):
+def controller_single(
+    folder_choice, redo_qtaim=False, just_dft=False, reaction=True, orca_path=""
+):
     """
     Runs, with the option of parallelization, the DFT and QTAIM calculations for a single random folder in the active directory.
     Takes:
@@ -90,7 +93,7 @@ def controller_single(folder_choice, redo_qtaim=False, just_dft=False, reaction=
                 "{} ".format(orca)
                 + folder_choice
                 + "/input.in > "
-                + folder_choice 
+                + folder_choice
                 + "/output.out"
             )
 

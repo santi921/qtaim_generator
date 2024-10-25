@@ -79,5 +79,3 @@ def write_input_file_from_pmg_molecule(folder, molecule, options):
                 "{}\t{: .4f}\t{: .4f}\t{: .4f}\n".format(atom, xyz[0], xyz[1], xyz[2])
             )
         f.write("*\n")
-
-

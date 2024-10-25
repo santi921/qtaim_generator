@@ -1,15 +1,17 @@
 from pathlib import Path
 import os, argparse, stat
 from qtaim_gen.source.data.multiwfn import (
-    charge_data, bond_order_data, fuzzy_data, other_data, qtaim_data
+    charge_data,
+    bond_order_data,
+    fuzzy_data,
+    other_data,
+    qtaim_data,
 )
 
+
 def write_multiwfn_conversion(
-        out_folder, 
-        read_file,
-        overwrite=False, 
-        name="convert.in"
-    ): 
+    out_folder, read_file, overwrite=False, name="convert.in"
+):
     """
     Function to write a bash script that runs multiwfn on a given input file.
     Args:
@@ -23,28 +25,27 @@ def write_multiwfn_conversion(
     out_file = str(Path.home().joinpath(out_folder, name))
     if not os.path.exists(out_folder):
         os.mkdir(out_folder)
-    
-    completed_tf = (
-        os.path.exists(out_file)
-        and os.path.getsize(out_file) > 0
-    )  
+
+    completed_tf = os.path.exists(out_file) and os.path.getsize(out_file) > 0
 
     if completed_tf and not overwrite:
         with open(out_file, "w") as f:
             f.write("#!/bin/bash\n")
-            f.write("orca_2mkl "+ str(Path.home().joinpath(out_folder, read_file)) + "\n")
+            f.write(
+                "orca_2mkl " + str(Path.home().joinpath(out_folder, read_file)) + "\n"
+            )
 
 
 def write_multiwfn_exe(
-        out_folder, 
-        read_file, 
-        multi_wfn_cmd, 
-        multiwfn_input_file, 
-        convert_gbw=False, 
-        overwrite=False, 
-        mv_cpprop=False, 
-        name="props.mfwn"
-        ): 
+    out_folder,
+    read_file,
+    multi_wfn_cmd,
+    multiwfn_input_file,
+    convert_gbw=False,
+    overwrite=False,
+    mv_cpprop=False,
+    name="props.mfwn",
+):
     """
     Function to write a bash script that runs multiwfn on a given input file.
     Args:
@@ -61,32 +62,32 @@ def write_multiwfn_exe(
     out_file = str(Path.home().joinpath(out_folder, name))
     if not os.path.exists(out_folder):
         os.mkdir(out_folder)
-        
-    completed_tf = (
-        os.path.exists(out_file)
-        and os.path.getsize(out_file) > 0
-    )  
+
+    completed_tf = os.path.exists(out_file) and os.path.getsize(out_file) > 0
 
     if (not completed_tf) or overwrite:
         with open(out_file, "w") as f:
             f.write("#!/bin/bash\n")
-            if convert_gbw: 
-                f.write("orca_2mkl "+ str(Path.home().joinpath(out_folder)) + "\n")
-            
+            if convert_gbw:
+                f.write("orca_2mkl " + str(Path.home().joinpath(out_folder)) + "\n")
+
             multiwfn_input_file_root = multiwfn_input_file.split("/")[-1].split(".")[0]
 
-            
             f.write(
-                "{} ".format(multi_wfn_cmd) # multiwfn command
-                + str(Path.home().joinpath(out_folder, read_file)) # wfn/gbw file
-                + " < {} | tee ".format(multiwfn_input_file) # multiwfn input file
-                + str(Path.home().joinpath(out_folder, "{}.out".format(multiwfn_input_file_root))) # output file
+                "{} ".format(multi_wfn_cmd)  # multiwfn command
+                + str(Path.home().joinpath(out_folder, read_file))  # wfn/gbw file
+                + " < {} | tee ".format(multiwfn_input_file)  # multiwfn input file
+                + str(
+                    Path.home().joinpath(
+                        out_folder, "{}.out".format(multiwfn_input_file_root)
+                    )
+                )  # output file
                 + "\n"
             )
 
             if mv_cpprop:
                 f.write(
-                    "mv CPprop.txt " 
+                    "mv CPprop.txt "
                     + str(Path.home().joinpath(out_folder, "CPprop.txt"))
                     + "\n"
                 )
@@ -95,7 +96,7 @@ def write_multiwfn_exe(
         os.chmod(out_file, st.st_mode | stat.S_IEXEC)
 
 
-def main(): 
+def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("-root_folder", type=str, default="./")
     parser.add_argument("-full_multiwfn", type=bool, default=True)
@@ -106,12 +107,12 @@ def main():
     root_folder = args.root_folder
     full_multiwfn = bool(args.full_multiwfn)
     multiwfn_cmd = args.multiwfn_cmd
-    
-    if full_multiwfn: 
+
+    if full_multiwfn:
         routine_list = ["qtaim", "fuzzy", "bond", "charge", "other"]
     else:
         routine_list = args.routine
-    
+
     print("root_folder: {}".format(root_folder))
     print("full_multiwfn: {}".format(full_multiwfn))
     print("multiwfn_cmd: {}".format(multiwfn_cmd))
@@ -119,14 +120,14 @@ def main():
 
     job_dict = {}
     for routine in routine_list:
-        
+
         if routine == "qtaim":
             job_dict["qtaim"] = os.path.join(root_folder, "qtaim.txt")
             # write qtaim data file
             with open(os.path.join(root_folder, "qtaim.txt"), "w") as f:
                 data = qtaim_data()
                 f.write(data)
-                
+
         elif routine == "fuzzy":
             job_dict["fuzzy"] = os.path.join(root_folder, "fuzzy.txt")
             with open(os.path.join(root_folder, "fuzzy.txt"), "w") as f:
@@ -159,42 +160,43 @@ def main():
         if os.path.isdir(folder_full_path):
             wfn_present = False
             for file in os.listdir(folder_full_path):
-                if file.endswith(".wfn"): 
+                if file.endswith(".wfn"):
                     wfn_present = True
-                    file_read = os.path.join(folder_full_path, file)     
+                    file_read = os.path.join(folder_full_path, file)
                 if file.endswith(".gbw"):
                     bool_gbw = True
-                    file_gbw = os.path.join(folder_full_path, file)   
-                    
-            if not wfn_present and bool_gbw: 
-                # write conversion script 
+                    file_gbw = os.path.join(folder_full_path, file)
+
+            if not wfn_present and bool_gbw:
+                # write conversion script
                 write_multiwfn_conversion(
-                    out_folder=folder_full_path, 
-                    #out_file=file_gbw,
-                    overwrite=True, 
-                    name="convert.in"
+                    out_folder=folder_full_path,
+                    # out_file=file_gbw,
+                    overwrite=True,
+                    name="convert.in",
                 )
             else:
-                pass 
-                #print("wfn present")
+                pass
+                # print("wfn present")
 
                 for key, value in job_dict.items():
-                    #print("key: {}".format(key))
-                    
+                    # print("key: {}".format(key))
+
                     if key == "qtaim":
-                        mv_cpprop=True
-                    else: 
-                        mv_cpprop=False
+                        mv_cpprop = True
+                    else:
+                        mv_cpprop = False
 
                     write_multiwfn_exe(
                         out_folder=folder_full_path,
-                        read_file=file_read, 
-                        multi_wfn_cmd=multiwfn_cmd, 
-                        multiwfn_input_file=value, 
-                        convert_gbw=False, 
-                        overwrite=True, 
+                        read_file=file_read,
+                        multi_wfn_cmd=multiwfn_cmd,
+                        multiwfn_input_file=value,
+                        convert_gbw=False,
+                        overwrite=True,
                         name="props_{}.mfwn".format(key),
-                        mv_cpprop=mv_cpprop
+                        mv_cpprop=mv_cpprop,
                     )
+
 
 main()

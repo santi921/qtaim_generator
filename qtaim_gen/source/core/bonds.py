@@ -3,7 +3,6 @@ from rdkit import Chem
 from rdkit.Chem import rdDetermineBonds
 
 
-
 def get_bonds_from_rdkit(xyz):
     # Create an RDKit molecule from the XYZ string
     rdkit_molecule = Chem.rdmolfiles.MolFromXYZFile(xyz)

@@ -1,32 +1,33 @@
 import numpy as np
 import json
-#from pymatgen.command_line.critic2_caller import Critic2Caller
+
+# from pymatgen.command_line.critic2_caller import Critic2Caller
+
 
 def parse_critic2(cro, features={"atom": [], "bond": []}):
     """
     Parses a critic2 output file and returns a dictionary of the critical points
-    Takes: 
+    Takes:
         cro: critic2 output file
         features: dictionary of features to parse
     """
 
-
-    cp_loaded = json.load(open(cro, "r"))    
+    cp_loaded = json.load(open(cro, "r"))
     bohr_to_ang = 0.529177249
     translation = {
-        'field' : 'field',
-         'gradient_norm' : 'grad_norm',
-         'laplacian': "lap_norm",
-         'hessian_eigenvalues': 'eig_hess',
-         'ellipticity': "ellip_e_dens"
+        "field": "field",
+        "gradient_norm": "grad_norm",
+        "laplacian": "lap_norm",
+        "hessian_eigenvalues": "eig_hess",
+        "ellipticity": "ellip_e_dens",
     }
     atoms = []
     bonds = []
     species = {}
     processed_dict = {}
-    atom_dict = {} # separately parses atoms
-    bond_dict = {} # separately parses bonds
-    
+    atom_dict = {}  # separately parses atoms
+    bond_dict = {}  # separately parses bonds
+
     if (
         cp_loaded["critical_points"]["number_of_nonequivalent_cps"]
         != cp_loaded["critical_points"]["number_of_cell_cps"]
@@ -35,7 +36,6 @@ def parse_critic2(cro, features={"atom": [], "bond": []}):
             "ERROR: number_of_nonequivalent_cps should always equal number_of_cell_cps!"
         )
 
-    
     for specie in cp_loaded["structure"]["species"]:
         if specie["name"][-1] == "_":
             species[specie["id"]] = specie["name"][:-1]
@@ -61,10 +61,12 @@ def parse_critic2(cro, features={"atom": [], "bond": []}):
 
     if features["bond"] != [] or features["atom"] != []:
         cp_features = cp_loaded["critical_points"]["nonequivalent_cps"]
-    
+
     atom_dict_raw = [i.split("_")[0] for i in list(atom_dict.keys())]
-    
-    for cp_ind, cp in enumerate(cp_loaded["critical_points"]["cell_cps"]): # finds attractors to BCPs
+
+    for cp_ind, cp in enumerate(
+        cp_loaded["critical_points"]["cell_cps"]
+    ):  # finds attractors to BCPs
         if str(cp["id"]) in atom_dict_raw:
             # get the index of the id in atom_dict_raw
             atom_dict_index = atom_dict_raw.index(str(cp["id"]))
@@ -75,15 +77,23 @@ def parse_critic2(cro, features={"atom": [], "bond": []}):
                         name_atom = list(atom_dict.keys())[atom_dict_index]
 
                         if feature == "ellipticity":
-                            atom_dict[name_atom]["extra_feat_atom_" + translation[feature]] = np.abs(cp_features[cp_ind]["hessian_eigenvalues"][0]) / np.abs(cp_features[cp_ind]["hessian_eigenvalues"][1]) - 1
+                            atom_dict[name_atom][
+                                "extra_feat_atom_" + translation[feature]
+                            ] = (
+                                np.abs(cp_features[cp_ind]["hessian_eigenvalues"][0])
+                                / np.abs(cp_features[cp_ind]["hessian_eigenvalues"][1])
+                                - 1
+                            )
                         elif feature == "hessian_eigenvalues":
-                            atom_dict[name_atom]["extra_feat_atom_" + translation[feature]] = cp_features[cp_ind]["hessian_eigenvalues"][0]           
+                            atom_dict[name_atom][
+                                "extra_feat_atom_" + translation[feature]
+                            ] = cp_features[cp_ind]["hessian_eigenvalues"][0]
                         else:
                             atom_dict[name_atom][
                                 "extra_feat_atom_" + translation[feature]
                             ] = cp_features[cp_ind][feature]
 
-        if str(cp["id"]) + "_bond"  in bond_dict:
+        if str(cp["id"]) + "_bond" in bond_dict:
             # Check if any bonds include fictitious atoms
             bad_bond = False
             for entry in cp["attractors"]:
@@ -102,14 +112,15 @@ def parse_critic2(cro, features={"atom": [], "bond": []}):
                 ]
                 # get argsort of atoms_raw
                 argsort = np.argsort(bond_dict[str(cp["id"]) + "_bond"]["atom_ids"])
-                #print(bond_dict[cp["id"]]["atom_ids"], argsort)
+                # print(bond_dict[cp["id"]]["atom_ids"], argsort)
                 # sort atoms_raw
                 atoms_raw = [atoms_raw[i] for i in argsort]
                 # sort atom_ids
                 bond_dict[str(cp["id"]) + "_bond"]["atom_ids"] = [
-                    int(bond_dict[str(cp["id"]) + "_bond"]["atom_ids"][i]) - 1 for i in argsort
+                    int(bond_dict[str(cp["id"]) + "_bond"]["atom_ids"][i]) - 1
+                    for i in argsort
                 ]
-                
+
                 bond_dict[str(cp["id"]) + "_bond"]["atoms"] = atoms_raw
                 bond_dict[str(cp["id"]) + "_bond"]["distance"] = (
                     cp["attractors"][0]["distance"] * bohr_to_ang
@@ -120,16 +131,30 @@ def parse_critic2(cro, features={"atom": [], "bond": []}):
                     for feature in features["bond"]:
                         if feature in cp_features[cp_ind]:
                             if feature == "ellipticity":
-                                bond_dict[str(cp["id"]) + "_bond"]["extra_feat_bond_" + translation[feature]] = np.abs(cp_features[cp_ind]["hessian_eigenvalues"][0]) / np.abs(cp_features[cp_ind]["hessian_eigenvalues"][1]) - 1
+                                bond_dict[str(cp["id"]) + "_bond"][
+                                    "extra_feat_bond_" + translation[feature]
+                                ] = (
+                                    np.abs(
+                                        cp_features[cp_ind]["hessian_eigenvalues"][0]
+                                    )
+                                    / np.abs(
+                                        cp_features[cp_ind]["hessian_eigenvalues"][1]
+                                    )
+                                    - 1
+                                )
                             elif feature == "hessian_eigenvalues":
-                                bond_dict[str(cp["id"]) + "_bond"]["extra_feat_bond_" + translation[feature]] = cp_features[cp_ind]["hessian_eigenvalues"][0]           
+                                bond_dict[str(cp["id"]) + "_bond"][
+                                    "extra_feat_bond_" + translation[feature]
+                                ] = cp_features[cp_ind]["hessian_eigenvalues"][0]
                             else:
-                                bond_dict[str(cp["id"]) + "_bond"]["extra_feat_bond_" + translation[feature]] = cp_features[cp_ind][feature]
-                        
+                                bond_dict[str(cp["id"]) + "_bond"][
+                                    "extra_feat_bond_" + translation[feature]
+                                ] = cp_features[cp_ind][feature]
+
     for cpid in bond_dict:
         bonds.append([int(entry) for entry in bond_dict[cpid]["atom_ids"]])
 
-    processed_dict["bonds"] = bonds # bonds
-    processed_dict["bond_cps"] = bond_dict # bond info
-    processed_dict["atom_cps"] = atom_dict # atom info
+    processed_dict["bonds"] = bonds  # bonds
+    processed_dict["bond_cps"] = bond_dict  # bond info
+    processed_dict["atom_cps"] = atom_dict  # atom info
     return processed_dict

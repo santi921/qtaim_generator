@@ -133,16 +133,16 @@ def parse_cp(lines, verbose=True):
                         cp_dict[k] = int(i[2][:-1])
                         cp_name = str(cp_dict[k]) + "_bond"
                     elif k == "connected_bond_paths":
-                        
+
                         list_raw = [x for x in i[2:]]
                         # save only items that contain a number
                         list_raw = [
                             x for x in list_raw if any(char.isdigit() for char in x)
                         ]
-                        #print("list raw connected: ", list_raw)
+                        # print("list raw connected: ", list_raw)
                         # list_raw = [list_raw[0], list_raw[-2]]
                         list_raw = [int(x.split("(")[0]) for x in list_raw]
-                        #print("list raw connected: ", list_raw)
+                        # print("list raw connected: ", list_raw)
                         cp_dict[k] = list_raw
                     elif k == "pos_ang":
                         cp_dict[k] = [float(x) for x in i[2:]]
@@ -210,7 +210,6 @@ def get_spin_charge_from_orca_inp(dft_inp_file):
         lines = f.readlines()
         # strip tabs
         lines = [line.strip() for line in lines]
-        
 
     # find line starting with "* xyz"
     for ind, line in enumerate(lines):
@@ -236,7 +235,6 @@ def orca_inp_to_dict(dft_inp_file):
         lines = f.readlines()
         # strip tabs
         lines = [line.strip() for line in lines]
-        
 
     # find line starting with "* xyz"
     for ind, line in enumerate(lines):
@@ -246,7 +244,7 @@ def orca_inp_to_dict(dft_inp_file):
 
     # filter lines before and including xyz_ind
     lines = lines[xyz_ind + 1 : -2]
-    
+
     for ind, line in enumerate(lines):
         line_split = line.split()
         atom_dict[ind] = {
@@ -454,7 +452,12 @@ def bond_cp_distance(bond_cps, bond_list, dft_dict, margin=2.0):
 
 
 def merge_qtaim_inds(
-    qtaim_descs, dft_inp_file, bond_list=None, define_bonds="qtaim", margin=1.0, inp_type="orca"
+    qtaim_descs,
+    dft_inp_file,
+    bond_list=None,
+    define_bonds="qtaim",
+    margin=1.0,
+    inp_type="orca",
 ):
     """
     Gets mapping of qtaim indices to atom indices and remaps atom CP descriptors
@@ -469,7 +472,7 @@ def merge_qtaim_inds(
     # open dft input file
     if inp_type == "orca":
         dft_dict = orca_inp_to_dict(dft_inp_file)
-    else: 
+    else:
         dft_dict = dft_inp_to_dict(dft_inp_file)
     # find only atom cps to map
     atom_only_cps, bond_cps = only_atom_cps(qtaim_descs)
@@ -484,20 +487,20 @@ def merge_qtaim_inds(
         bond_cps = {
             k: v for k, v in bond_cps.items() if "connected_bond_paths" in v.keys()
         }
-        #print("bond cps: ", bond_cps)
+        # print("bond cps: ", bond_cps)
 
         for k, v in bond_cps.items():
             bond_list_unsorted = v["connected_bond_paths"]
-            #print(bond_list_unsorted)
+            # print(bond_list_unsorted)
             bond_list_unsorted = [
                 int(qtaim_to_dft[i - 1]["key"].split("_")[0]) - 1
                 for i in bond_list_unsorted
             ]
-            #print(bond_list_unsorted)
+            # print(bond_list_unsorted)
             bond_list_unsorted = sorted(bond_list_unsorted)
-            #print(bond_list_unsorted)
-            #assert len(bond_list_unsorted) == 2, "bond list not length 2"
-            #assert bond_list_unsorted[0] != bond_list_unsorted[1], "bond list same"
+            # print(bond_list_unsorted)
+            # assert len(bond_list_unsorted) == 2, "bond list not length 2"
+            # assert bond_list_unsorted[0] != bond_list_unsorted[1], "bond list same"
             bond_cps_qtaim[tuple(bond_list_unsorted)] = v
             bond_list_ret.append(bond_list_unsorted)
         bond_cps = bond_cps_qtaim
@@ -568,14 +571,12 @@ def gather_imputation(
                     cp_file_products = QTAIM_loc_product + "CPprop.txt"
                     dft_inp_file_product = QTAIM_loc_product + "input.in"
 
-
                     qtaim_descs_reactants = get_qtaim_descs(
                         cp_file_reactants, verbose=False
                     )
                     qtaim_descs_products = get_qtaim_descs(
                         cp_file_products, verbose=False
                     )
-
 
                     mapped_descs_reactants = merge_qtaim_inds(
                         qtaim_descs=qtaim_descs_reactants,
@@ -589,7 +590,6 @@ def gather_imputation(
                         dft_inp_file=dft_inp_file_product,
                         define_bonds=define_bonds,
                     )
-
 
                     for k, v in mapped_descs_reactants.items():
                         if v == {}:
@@ -617,7 +617,7 @@ def gather_imputation(
 
                 except:
                     print(reaction_id)
-            
+
             else:  # for single molecules
                 try:
                     bonds = []
@@ -666,19 +666,20 @@ def gather_imputation(
 
 
 def gather_qtaim_features(
-        pandas_file, 
-        root, 
-        features_atom, 
-        features_bond, 
-        reaction, 
-        define_bonds="qtaim", 
-        update_bonds_w_qtaim=True,
-        impute=True, 
-        impute_dict={}):
+    pandas_file,
+    root,
+    features_atom,
+    features_bond,
+    reaction,
+    define_bonds="qtaim",
+    update_bonds_w_qtaim=True,
+    impute=True,
+    impute_dict={},
+):
 
     """
-    Gather the qtaim features into the pandas file 
-    Takes: 
+    Gather the qtaim features into the pandas file
+    Takes:
         pandas_file: pandas dataframe
         features_atom: list of atom features
         features_bond: list of bond features
@@ -716,7 +717,7 @@ def gather_qtaim_features(
             tf_count_products = {i: 0 for i in features_atom}
             tf_count_reactants_bond = {i: 0 for i in features_bond}
             tf_count_products_bond = {i: 0 for i in features_bond}
-            
+
             try:
                 reaction_id = row["reaction_id"]
                 bonds_products = []
@@ -737,8 +738,8 @@ def gather_qtaim_features(
                     cp_file_reactants, verbose=False
                 )
                 qtaim_descs_products = get_qtaim_descs(cp_file_products, verbose=False)
-                
-                #for k, v in qtaim_descs_reactants.items():
+
+                # for k, v in qtaim_descs_reactants.items():
                 #    if "bond" in k:
                 #        print("connected paths: ", v["connected_bond_paths"])
 
@@ -756,7 +757,7 @@ def gather_qtaim_features(
                     margin=1.0,
                     define_bonds=define_bonds,
                 )
-                #print("mapped_descs_reactants: ", mapped_descs_reactants)
+                # print("mapped_descs_reactants: ", mapped_descs_reactants)
                 bonds_products, bonds_reactants = [], []
 
                 for k, v in mapped_descs_reactants.items():
@@ -936,13 +937,13 @@ def gather_qtaim_features(
             f.write("---------- impute_count_reactants_bond ---------- \n")
             f.write(str(impute_count_reactants_bond))
             f.write("\n")
-        #print("line 873 reactant bond list test: ", bond_list_reactants[0])
-        #pandas_file["extra_feat_bond_reactant_indices_qtaim"] = [[i] for i in bond_list_reactants]
+        # print("line 873 reactant bond list test: ", bond_list_reactants[0])
+        # pandas_file["extra_feat_bond_reactant_indices_qtaim"] = [[i] for i in bond_list_reactants]
         pandas_file["extra_feat_bond_reactant_indices_qtaim"] = bond_list_reactants
         pandas_file["extra_feat_bond_product_indices_qtaim"] = bond_list_products
-        #pandas_file["extra_feat_bond_product_indices_qtaim"] = [[i] for i in bond_list_products]
-        #print(bond_list_reactants[0])
-        #print(pandas_file["reactant_bonds"].tolist()[0])
+        # pandas_file["extra_feat_bond_product_indices_qtaim"] = [[i] for i in bond_list_products]
+        # print(bond_list_reactants[0])
+        # print(pandas_file["reactant_bonds"].tolist()[0])
         if update_bonds_w_qtaim:
             if "reactant_bonds" in pandas_file.columns:
                 pandas_file["reactant_bonds_original"] = pandas_file["reactant_bonds"]
@@ -1081,10 +1082,10 @@ def gather_qtaim_features(
             f.write("---------- impute_count_bond ---------- \n")
             f.write(str(impute_count_bond))
             f.write("\n")
-        #print("line qtaim embed bond list test: ", bond_list[0])
+        # print("line qtaim embed bond list test: ", bond_list[0])
         pandas_file["extra_feat_bond_indices_qtaim"] = [i[0] for i in bond_list]
-        #print("line qtaim embed bond list test: ", bond_list[0])
-        if update_bonds_w_qtaim: 
+        # print("line qtaim embed bond list test: ", bond_list[0])
+        if update_bonds_w_qtaim:
             if "bonds" in pandas_file.columns:
                 pandas_file["bonds_original"] = pandas_file["bonds"]
             pandas_file["bonds"] = bond_list
