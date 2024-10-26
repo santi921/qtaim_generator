@@ -393,6 +393,14 @@ def parse_multiwfn(folder, separate=False):
                         with open(json_file, "w") as f:
                             json.dump(data, f, indent=4)
 
+                    elif routine == "cm5":
+                        charge_dict_overall, dipole_info = parse_charge_base(
+                            file_full_path, corrected=False
+                        )
+                        data = {"charge": charge_dict_overall, "dipole": dipole_info}
+                        with open(json_file, "w") as f:
+                            json.dump(data, f, indent=4)
+
                     elif routine == "adch":
                         (
                             charge_dict_overall,
@@ -490,7 +498,7 @@ def clean_jobs(folder, separate=False):
                 os.remove(os.path.join(folder, file))
 
 
-def gbw_analysis(folder, multiwfn_cmd, orca_2mkl_cmd, separate=True, parse_only=False):
+def gbw_analysis(folder, multiwfn_cmd, orca_2mkl_cmd, separate=True, parse_only=False, clean=True):
     """
     Run a full analysis on a folder of gbw files
     Takes:
@@ -498,6 +506,8 @@ def gbw_analysis(folder, multiwfn_cmd, orca_2mkl_cmd, separate=True, parse_only=
         multiwfn_cmd(str): command to run multiwfn
         orca_2mkl_cmd(str): command to run orca_2mkl
         separate(bool): whether to separate the analysis into different files
+        parse_only(bool): whether to only parse the files
+        clean(bool): whether to clean
     """
     if not parse_only:
         # create jobs for conversion to wfn and multiwfn analysis
@@ -507,5 +517,8 @@ def gbw_analysis(folder, multiwfn_cmd, orca_2mkl_cmd, separate=True, parse_only=
 
     # parse those jobs to jsons for 5 categories
     parse_multiwfn(folder, separate=separate)
-    # clean some of the mess
-    clean_jobs(folder, separate=separate)
+    
+    if clean:
+        # clean some of the mess
+        clean_jobs(folder, separate=separate)
+    

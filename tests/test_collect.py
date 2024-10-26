@@ -1,8 +1,10 @@
-import pandas as pd 
+import pandas as pd
 from qtaim_gen.source.core.parse_qtaim import (
     gather_imputation,
     gather_qtaim_features,
 )
+
+
 class TestParser:
     features_atom = [
         "Lagrangian_K",
@@ -33,9 +35,8 @@ class TestParser:
         define_bonds = "qtaim"
         impute_file = "./test_files/reaction/impute.json"
         test_root = "./test_files/reaction/"
-        df = pd.read_json("./test_files/reaction/b97d3.json") 
+        df = pd.read_json("./test_files/reaction/b97d3.json")
 
-        
         impute_dict = gather_imputation(
             df,
             self.features_atom,
@@ -44,9 +45,10 @@ class TestParser:
             json_file_imputed=impute_file,
             reaction=reaction,
             define_bonds=define_bonds,
+            inp_type="xyz",
         )
+        print(impute_dict)
 
-        
         pandas_file, drop_list = gather_qtaim_features(
             df,
             test_root,
@@ -57,12 +59,14 @@ class TestParser:
             update_bonds_w_qtaim=True,
             impute=True,
             impute_dict=impute_dict,
+            inp_type="xyz",
         )
-        #print(pandas_file.iloc[0]["reactant_bonds_original"])
-        #print(pandas_file.iloc[0]["reactant_bonds"])
-        #print(pandas_file.iloc[0]["extra_feat_reactant_bond_indices_qtaim"])
-        #print(pandas_file.columns)
-        #for ind, row in pandas_file.iterrows():
+        print(drop_list)
+        # print(pandas_file.iloc[0]["reactant_bonds_original"])
+        # print(pandas_file.iloc[0]["reactant_bonds"])
+        # print(pandas_file.iloc[0]["extra_feat_reactant_bond_indices_qtaim"])
+        # print(pandas_file.columns)
+        # for ind, row in pandas_file.iterrows():
         #    print(row["reactant_bonds"])
         #    print(row["extra_feat_bond_reactant_indices_qtaim"])
         #    print()
@@ -70,10 +74,8 @@ class TestParser:
         #    print(row["extra_feat_bond_product_indices_qtaim"])
         #    #assert len(row["bonds_original"]) == len(row["bonds"]), "bonds not same length"
         #    #assert len(row["bonds_original"]) == len(row["extra_feat_bond_indices_qtaim"]), "bonds not same length"
-        
-        assert len(drop_list) == 0, "drop list not empty"   
-        
 
+        assert len(drop_list) == 0, "drop list not empty"
 
     def test_molecule_parsing(self):
         test_root = "./test_files/molecule/"
@@ -83,14 +85,16 @@ class TestParser:
         impute_file = "./test_files/molecule/impute.json"
 
         impute_dict = gather_imputation(
-            df = df,
-            features_atom = self.features_atom,
-            features_bond = self.features_bond,
+            df=df,
+            features_atom=self.features_atom,
+            features_bond=self.features_bond,
             root_dir=test_root,
             json_file_imputed=impute_file,
-            reaction = reaction,
-            define_bonds = define_bonds,
+            reaction=reaction,
+            define_bonds=define_bonds,
+            inp_type="xyz",
         )
+        print(impute_dict)
 
         pandas_file, drop_list = gather_qtaim_features(
             df,
@@ -102,18 +106,21 @@ class TestParser:
             update_bonds_w_qtaim=True,
             impute=True,
             impute_dict=impute_dict,
+            inp_type="xyz",
         )
 
-
         for ind, row in pandas_file.iterrows():
-            #print(row["bonds"])
-            #print(row["extra_feat_bond_indices_qtaim"])
-            #assert len(row["bonds_original"]) == len(row["bonds"]), "bonds not same length"
-            assert len(row["bonds"][0]) == len(row["extra_feat_bond_indices_qtaim"]), "bonds not same length"
-        
-        assert len(drop_list) == 0, "drop list not empty"   
-        #print("---"*20)
+            # print(row["bonds"])
+            # print(row["extra_feat_bond_indices_qtaim"])
+            # assert len(row["bonds_original"]) == len(row["bonds"]), "bonds not same length"
+            assert len(row["bonds"][0]) == len(
+                row["extra_feat_bond_indices_qtaim"]
+            ), "bonds not same length"
 
-#tester=TestParser()
-#tester.test_reaction_parsing()
-#tester.test_molecule_parsing()
+        assert len(drop_list) == 0, "drop list not empty"
+        # print("---"*20)
+
+
+# tester=TestParser()
+# tester.test_reaction_parsing()
+# tester.test_molecule_parsing()

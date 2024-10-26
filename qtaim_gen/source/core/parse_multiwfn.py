@@ -99,7 +99,7 @@ def parse_charge_doc(charge_out_txt):
                 dipole_info["adch"]["mag"] = float_dipole_adch
 
             if dipole_adch_xyz_key in line:
-                str_nums = line.split()[8:-1]
+                str_nums = line.split()[8:]
                 float_adch_xyz = [float(num) for num in str_nums]
                 dipole_info["adch"]["xyz"] = float_adch_xyz
 

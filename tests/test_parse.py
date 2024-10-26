@@ -9,6 +9,7 @@ from qtaim_gen.source.core.parse_qtaim import (
 
 from qtaim_gen.source.core.parse_critic import parse_critic2
 
+
 def get_full_qtaim():
     # read full qtaim file from multiwfn out
     qtaim_file = "./test_files/test_prop_full.txt"
@@ -70,7 +71,7 @@ def test_parse_full_cp():
     count_atoms = 0
     count_bonds = 0
     list_keys = list(dict_qtaim.keys())
-    
+
     for key in list_keys:
         if "bond" in key:
             count_bonds += 1
@@ -84,9 +85,59 @@ def test_parse_full_cp():
     print("number of bonds: ", count_bonds)
     atom_cp_test = dict_qtaim["14_H"]
     bond_cp_test = dict_qtaim["23_bond"]
-    
-    atom_cp_keys_check=['cp_num',"element", "number", 'pos_ang', 'density_alpha', 'density_beta', 'spin_density', 'lol', 'energy_density', 'Lagrangian_K', 'Hamiltonian_K', 'lap_e_density', 'e_loc_func', 'ave_loc_ion_E', 'delta_g_promolecular', 'delta_g_hirsh', 'esp_nuc', 'esp_e', 'esp_total', 'grad_norm', 'lap_norm', 'eig_hess', 'det_hessian', 'ellip_e_dens', 'eta']
-    bond_cp_keys_check=['cp_num', 'pos_ang', 'density_alpha', 'density_beta', 'spin_density', 'lol', 'energy_density', 'Lagrangian_K', 'Hamiltonian_K', 'lap_e_density', 'e_loc_func', 'ave_loc_ion_E', 'delta_g_promolecular', 'delta_g_hirsh', 'esp_nuc', 'esp_e', 'esp_total', 'grad_norm', 'lap_norm', 'eig_hess', 'det_hessian', 'ellip_e_dens', 'eta']
+
+    atom_cp_keys_check = [
+        "cp_num",
+        "element",
+        "number",
+        "pos_ang",
+        "density_alpha",
+        "density_beta",
+        "spin_density",
+        "lol",
+        "energy_density",
+        "Lagrangian_K",
+        "Hamiltonian_K",
+        "lap_e_density",
+        "e_loc_func",
+        "ave_loc_ion_E",
+        "delta_g_promolecular",
+        "delta_g_hirsh",
+        "esp_nuc",
+        "esp_e",
+        "esp_total",
+        "grad_norm",
+        "lap_norm",
+        "eig_hess",
+        "det_hessian",
+        "ellip_e_dens",
+        "eta",
+    ]
+    bond_cp_keys_check = [
+        "cp_num",
+        "pos_ang",
+        "density_alpha",
+        "density_beta",
+        "spin_density",
+        "lol",
+        "energy_density",
+        "Lagrangian_K",
+        "Hamiltonian_K",
+        "lap_e_density",
+        "e_loc_func",
+        "ave_loc_ion_E",
+        "delta_g_promolecular",
+        "delta_g_hirsh",
+        "esp_nuc",
+        "esp_e",
+        "esp_total",
+        "grad_norm",
+        "lap_norm",
+        "eig_hess",
+        "det_hessian",
+        "ellip_e_dens",
+        "eta",
+    ]
     for i in atom_cp_keys_check:
         assert i in atom_cp_test.keys(), "key not in atom CP: {}".format(i)
     for i in bond_cp_keys_check:
@@ -113,7 +164,7 @@ def test_only_atom_cps():
     for i in ret_dict.values():
         assert "element" in i.keys(), "element not in dict"
         assert "pos_ang" in i.keys(), "xyz not in dict"
-    #print(ret_dict_bonds.keys())
+    # print(ret_dict_bonds.keys())
 
 
 def test_find_cp_map():
@@ -155,6 +206,7 @@ def test_merge_qtaim_inds():
         bond_list=bonds,
         define_bonds="distance",
         dft_inp_file="./test_files/input_bond_map.in",
+        inp_type="xyz",
     )
     # count number of cp_dict keys that are integers
     cp_dict_keys = list(cp_dict.keys())
@@ -230,8 +282,20 @@ def test_bond_cp_via_qtaim_bond_defns():
 def test_parse_critic2():
     cro = "./test_files/critic2/molecule/phenol_phenol.json"
     features = {
-        "atom": ['field', 'gradient_norm', 'laplacian', 'hessian_eigenvalues', 'ellipticity'], 
-        "bond": ['field', 'gradient_norm', 'laplacian', 'hessian_eigenvalues', 'ellipticity']
+        "atom": [
+            "field",
+            "gradient_norm",
+            "laplacian",
+            "hessian_eigenvalues",
+            "ellipticity",
+        ],
+        "bond": [
+            "field",
+            "gradient_norm",
+            "laplacian",
+            "hessian_eigenvalues",
+            "ellipticity",
+        ],
     }
     ret_dict = parse_critic2(cro, features=features)
     probe_bond_cp = ret_dict["bond_cps"]["55_bond"]
@@ -239,4 +303,3 @@ def test_parse_critic2():
 
     assert len(probe_atom_cp.keys()) == 5, "wrong number of atoms"
     assert len(probe_bond_cp.keys()) == 8, "wrong number of bonds"
-

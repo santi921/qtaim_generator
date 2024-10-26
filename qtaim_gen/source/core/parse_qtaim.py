@@ -470,10 +470,12 @@ def merge_qtaim_inds(
     """
 
     # open dft input file
+    #print(dft_inp_file, inp_type)
     if inp_type == "orca":
         dft_dict = orca_inp_to_dict(dft_inp_file)
     else:
         dft_dict = dft_inp_to_dict(dft_inp_file)
+    
     # find only atom cps to map
     atom_only_cps, bond_cps = only_atom_cps(qtaim_descs)
     # remap qtaim indices to atom indices
@@ -520,6 +522,7 @@ def gather_imputation(
     json_file_imputed="./imputed_vals.json",
     reaction=False,
     define_bonds="qtaim",
+    inp_type="orca",
 ):
     """
     Takes in dataframe and features and returns dictionary of imputation values
@@ -583,12 +586,14 @@ def gather_imputation(
                         bond_list=bonds_reactants,
                         dft_inp_file=dft_inp_file_reactant,
                         define_bonds=define_bonds,
+                        inp_type=inp_type,
                     )
                     mapped_descs_products = merge_qtaim_inds(
                         qtaim_descs=qtaim_descs_products,
                         bond_list=bonds_products,
                         dft_inp_file=dft_inp_file_product,
                         define_bonds=define_bonds,
+                        inp_type=inp_type,
                     )
 
                     for k, v in mapped_descs_reactants.items():
@@ -635,6 +640,7 @@ def gather_imputation(
                         bond_list=bonds,
                         dft_inp_file=dft_inp_file,
                         define_bonds=define_bonds,
+                        inp_type=inp_type,
                     )
                     for k, v in mapped_descs.items():
                         if v == {}:
@@ -675,6 +681,7 @@ def gather_qtaim_features(
     update_bonds_w_qtaim=True,
     impute=True,
     impute_dict={},
+    inp_type="orca",
 ):
 
     """
@@ -749,6 +756,7 @@ def gather_qtaim_features(
                     dft_inp_file=dft_inp_file_reactant,
                     margin=1.0,
                     define_bonds=define_bonds,
+                    inp_type=inp_type,
                 )
                 mapped_descs_products = merge_qtaim_inds(
                     qtaim_descs=qtaim_descs_products,
@@ -756,6 +764,7 @@ def gather_qtaim_features(
                     dft_inp_file=dft_inp_file_product,
                     margin=1.0,
                     define_bonds=define_bonds,
+                    inp_type=inp_type,
                 )
                 # print("mapped_descs_reactants: ", mapped_descs_reactants)
                 bonds_products, bonds_reactants = [], []
@@ -986,6 +995,7 @@ def gather_qtaim_features(
                     dft_inp_file=dft_inp_file,
                     margin=1.0,
                     define_bonds=define_bonds,
+                    inp_type=inp_type,
                 )
 
                 # print(mapped_descs_products)
