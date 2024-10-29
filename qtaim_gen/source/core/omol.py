@@ -25,9 +25,15 @@ from qtaim_gen.source.core.parse_multiwfn import (
     parse_qtaim,
 )
 
+from qtaim_gen.source.core.utils import pull_ecp_dict, overwrite_molden_w_ecp
 
-def write_multiwfn_conversion(
-    out_folder, read_file, overwrite=False, name="convert.in", orca_2mkl_cmd="orca_2mkl"
+
+def write_conversion(
+    out_folder, 
+    read_file, 
+    overwrite=False, 
+    name="convert.in", 
+    orca_2mkl_cmd="orca_2mkl"
 ):
     """
     Function to write a bash script that runs multiwfn on a given input file.
@@ -117,7 +123,7 @@ def write_multiwfn_exe(
         os.chmod(out_file, st.st_mode | stat.S_IEXEC)
 
 
-def create_jobs(folder, multiwfn_cmd, orca_2mkl_cmd, separate=False):
+def create_jobs(folder, multiwfn_cmd, orca_2mkl_cmd, separate=False, overwrite=True):
     """
     Create job files for multiwfn analysis
     Takes:
@@ -125,6 +131,8 @@ def create_jobs(folder, multiwfn_cmd, orca_2mkl_cmd, separate=False):
         multiwfn_cmd(str): command to run multiwfn
         orca_2mkl_cmd(str): command to run orca_2mkl
         separate(bool): whether to separate the analysis into different files
+        overwrite(bool): whether to overwrite the output files
+        orca_6(bool): whether calc is from orca6
     """
     if separate:
         routine_list = ["charge_separate", "bond_separate", "qtaim", "other"]
@@ -132,7 +140,7 @@ def create_jobs(folder, multiwfn_cmd, orca_2mkl_cmd, separate=False):
         routine_list = ["qtaim", "bond", "charge", "other"]
 
     job_dict = {}
-
+    
     # print("folder: {}".format(folder))
     for routine in routine_list:
         if routine == "qtaim":
@@ -184,62 +192,37 @@ def create_jobs(folder, multiwfn_cmd, orca_2mkl_cmd, separate=False):
 
     wfn_present = False
     for file in os.listdir(folder):
+
         if file.endswith(".wfn"):
             wfn_present = True
             file_read = os.path.join(folder, file)
+        
         if file.endswith(".gbw"):
             bool_gbw = True
             file_gbw = os.path.join(folder, file)
 
     if not wfn_present and bool_gbw:
         # write conversion script from gbw to wfn
-        write_multiwfn_conversion(
+        write_conversion(
             out_folder=folder,
-            # out_file=file_gbw,
+            read_file=file_gbw,
             overwrite=True,
             name="convert.in",
-            orca_2mkl_cmd=orca_2mkl_cmd,
+            orca_2mkl_cmd=orca_2mkl_cmd
         )
-    else:
-        pass
-        # print("wfn present")
+        #print("wfn not present")
+    
 
-        for key, value in job_dict.items():
-            if key == "qtaim":
-                mv_cpprop = True
-            else:
-                mv_cpprop = False
+    for key, value in job_dict.items():
+        print(key, value)
+        if key == "qtaim":
+            mv_cpprop = True
+        else:
+            mv_cpprop = False
 
-            if key == "charge_separate":
-                charge_dict = charge_data_dict()
-                for key, value in charge_dict.items():
-                    write_multiwfn_exe(
-                        out_folder=folder,
-                        read_file=file_read,
-                        multi_wfn_cmd=multiwfn_cmd,
-                        multiwfn_input_file=value,
-                        convert_gbw=False,
-                        overwrite=True,
-                        name="props_{}.mfwn".format(key),
-                        mv_cpprop=mv_cpprop,
-                    )
-
-            elif key == "bond_separate":
-                bond_dict = bond_order_dict()
-                for key, value in bond_dict.items():
-                    write_multiwfn_exe(
-                        out_folder=folder,
-                        read_file=file_read,
-                        multi_wfn_cmd=multiwfn_cmd,
-                        multiwfn_input_file=value,
-                        convert_gbw=False,
-                        overwrite=True,
-                        name="props_{}.mfwn".format(key),
-                        mv_cpprop=mv_cpprop,
-                    )
-
-            else:
-                # print("key: {}".format(key))
+        if key == "charge_separate":
+            charge_dict = charge_data_dict()
+            for key, value in charge_dict.items():
                 write_multiwfn_exe(
                     out_folder=folder,
                     read_file=file_read,
@@ -251,8 +234,35 @@ def create_jobs(folder, multiwfn_cmd, orca_2mkl_cmd, separate=False):
                     mv_cpprop=mv_cpprop,
                 )
 
+        elif key == "bond_separate":
+            bond_dict = bond_order_dict()
+            for key, value in bond_dict.items():
+                write_multiwfn_exe(
+                    out_folder=folder,
+                    read_file=file_read,
+                    multi_wfn_cmd=multiwfn_cmd,
+                    multiwfn_input_file=value,
+                    convert_gbw=False,
+                    overwrite=True,
+                    name="props_{}.mfwn".format(key),
+                    mv_cpprop=mv_cpprop,
+                )
 
-def run_jobs(folder, separate=False):
+        else:
+            # print("key: {}".format(key))
+            write_multiwfn_exe(
+                out_folder=folder,
+                read_file=file_read,
+                multi_wfn_cmd=multiwfn_cmd,
+                multiwfn_input_file=value,
+                convert_gbw=False,
+                overwrite=True,
+                name="props_{}.mfwn".format(key),
+                mv_cpprop=mv_cpprop,
+            )
+
+
+def run_jobs(folder, separate=False, orca_6=True):
     """
     Run conversion and multiwfn jobs
     Takes:
@@ -280,6 +290,18 @@ def run_jobs(folder, separate=False):
     if not wfn_present:
         # run conversion script
         os.system("{}".format(conv_file))
+        if orca_6 == False: 
+            # find name of .molden file and orca.out
+            for file in os.listdir(folder):
+                if file.endswith(".molden"):
+                    molden_file = os.path.join(folder, file)
+                if file.endswith("orca.out"):
+                    orca_out = os.path.join(folder, file)
+                
+            # replace ecp values in converted molden file
+            dict_ecp = pull_ecp_dict(orca_out)
+            overwrite_molden_w_ecp(molden_file, dict_ecp)
+
 
     timings = {}
     # run multiwfn scripts
@@ -498,7 +520,16 @@ def clean_jobs(folder, separate=False):
                 os.remove(os.path.join(folder, file))
 
 
-def gbw_analysis(folder, multiwfn_cmd, orca_2mkl_cmd, separate=True, parse_only=False, clean=True):
+def gbw_analysis(
+        folder, 
+        multiwfn_cmd, 
+        orca_2mkl_cmd, 
+        separate=True, 
+        parse_only=False, 
+        clean=True, 
+        overwrite=True, 
+        orca_6=True
+    ):
     """
     Run a full analysis on a folder of gbw files
     Takes:
@@ -508,17 +539,47 @@ def gbw_analysis(folder, multiwfn_cmd, orca_2mkl_cmd, separate=True, parse_only=
         separate(bool): whether to separate the analysis into different files
         parse_only(bool): whether to only parse the files
         clean(bool): whether to clean
+        overwrite(bool): whether to overwrite the output files
+        orca_6(bool): whether calc is from orca6
+
     """
+    if not os.path.exists(folder):
+        print("Folder does not exist")
+        return
+    
+    # check if output already exists
+    if not overwrite:
+        timings_loc = os.path.join(folder, "timings.json")
+        bond_loc = os.path.join(folder, "bond.json")
+        charge_loc = os.path.join(folder, "charge.json")
+
+        tf_timings = os.path.exists(timings_loc) and os.path.getsize(timings_loc) > 0
+        tf_bond = os.path.exists(bond_loc) and os.path.getsize(bond_loc) > 0
+        tf_charge = os.path.exists(charge_loc) and os.path.getsize(charge_loc) > 0
+        # check that all files are not empty 
+        if tf_timings and tf_bond and tf_charge:
+            print("Output already exists")
+            return
+        
     if not parse_only:
         # create jobs for conversion to wfn and multiwfn analysis
-        create_jobs(folder, multiwfn_cmd, orca_2mkl_cmd, separate=separate)
+        create_jobs(
+            folder=folder, 
+            multiwfn_cmd=multiwfn_cmd, 
+            orca_2mkl_cmd=orca_2mkl_cmd, 
+            separate=separate, 
+        )
         # run jobs
-        run_jobs(folder, separate=separate)
+        run_jobs(
+            folder=folder, 
+            separate=separate,
+            orca_6=orca_6
+        )
 
     # parse those jobs to jsons for 5 categories
-    parse_multiwfn(folder, separate=separate)
+    #parse_multiwfn(folder, separate=separate)
     
     if clean:
-        # clean some of the mess
+    #    # clean some of the mess
         clean_jobs(folder, separate=separate)
     

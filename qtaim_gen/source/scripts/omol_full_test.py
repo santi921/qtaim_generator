@@ -1,7 +1,12 @@
 from qtaim_gen.source.core.omol import gbw_analysis
-
+import os 
 
 def main():
+
+    # set environment variables
+    os.environ["OMP_STACKSIZE"] = "64000000"
+    # set mem
+    os.system("ulimit -s unlimited")
 
     orca_6 = "/home/santiagovargas/dev/qtaim_generator/data/orca6/"
     orca_5 = "/home/santiagovargas/dev/qtaim_generator/data/orca5/"
@@ -14,32 +19,45 @@ def main():
         "/home/santiagovargas/dev/Multiwfn_3.8_dev_bin_Linux_noGUI/Multiwfn_noGUI"
     )
 
-    parse_only = True
-    separate = True
+    parse_only=False
+    separate=True
+    overwrite=False
+    
+    
+    """
     gbw_analysis(
         folder=orca_6,
         orca_2mkl_cmd=orca6_2mkl,
         multiwfn_cmd=multiwfn_cmd,
         parse_only=parse_only,
         separate=separate,
+        overwrite=overwrite, 
+        orca_6=True
+        
     )  # works!
-
+    """ 
     """
     gbw_analysis(
         folder=test_folder, 
         orca_2mkl_cmd=orca6_2mkl, 
         multiwfn_cmd=multiwfn_cmd, 
         parse_only=parse_only, 
-        separate=separate
+        separate=separate, 
+        orca_6=True
     ) 
     """
-
+    
     # todo: fix ecp stuff
-    # gbw_analysis(
-    #    folder=orca_5,
-    #    orca_2mkl_cmd=orca5_2mkl,
-    #    multiwfn_cmd=multiwfn_cmd
-    # )
+    gbw_analysis(
+        folder=orca_5,
+        orca_2mkl_cmd=orca5_2mkl,
+        multiwfn_cmd=multiwfn_cmd,
+        parse_only=parse_only,
+        separate=separate,
+        overwrite=overwrite, 
+        orca_6=False
+    )
+    
 
 
 main()
