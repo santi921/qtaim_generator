@@ -21,10 +21,11 @@ def main():
 
     parse_only=False
     separate=True
-    overwrite=False
+    overwrite=True
+    clean=True
     
     
-    """
+    
     gbw_analysis(
         folder=orca_6,
         orca_2mkl_cmd=orca6_2mkl,
@@ -32,10 +33,11 @@ def main():
         parse_only=parse_only,
         separate=separate,
         overwrite=overwrite, 
-        orca_6=True
+        orca_6=True,
+        clean=clean
         
     )  # works!
-    """ 
+    
     """
     gbw_analysis(
         folder=test_folder, 
@@ -47,7 +49,7 @@ def main():
     ) 
     """
     
-    # todo: fix ecp stuff
+    
     gbw_analysis(
         folder=orca_5,
         orca_2mkl_cmd=orca5_2mkl,
@@ -55,8 +57,23 @@ def main():
         parse_only=parse_only,
         separate=separate,
         overwrite=overwrite, 
-        orca_6=False
+        orca_6=False, 
+        clean=clean
     )
+    
+
+
+    gbw_analysis(
+        folder="/home/santiagovargas/dev/qtaim_generator/data/orca_convert/",
+        orca_2mkl_cmd=orca5_2mkl,
+        multiwfn_cmd=multiwfn_cmd,
+        parse_only=False,
+        separate=True,
+        overwrite=True, 
+        orca_6=False, 
+        clean=False
+    )
+    
     
 
 

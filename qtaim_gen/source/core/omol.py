@@ -50,17 +50,22 @@ def write_conversion(
         os.mkdir(out_folder)
 
     completed_tf = os.path.exists(out_file) and os.path.getsize(out_file) > 0
+    
+    if completed_tf and overwrite:
+        return 
 
-    if completed_tf and not overwrite:
-        with open(out_file, "w") as f:
-            f.write("#!/bin/bash\n")
-            # remove .gbw from file name
-            read_file = read_file.split(".gbw")[0]
-            f.write(
-                "{} ".format(orca_2mkl_cmd)
-                + str(Path.home().joinpath(out_folder, read_file))
-                + " -molden\n"
-            )
+    with open(out_file, "w") as f:
+        f.write("#!/bin/bash\n")
+        # remove .gbw from file name
+        read_file = read_file.split(".gbw")[0]
+        f.write(
+            "{} ".format(orca_2mkl_cmd)
+            + str(Path.home().joinpath(out_folder, read_file))
+            + " -molden\n"
+        )
+
+    st = os.stat(out_file)
+    os.chmod(out_file, st.st_mode | stat.S_IEXEC)
 
 
 def write_multiwfn_exe(
@@ -136,8 +141,38 @@ def create_jobs(folder, multiwfn_cmd, orca_2mkl_cmd, separate=False, overwrite=T
     """
     if separate:
         routine_list = ["charge_separate", "bond_separate", "qtaim", "other"]
+        routine_list = ["charge_separate", "bond_separate", "qtaim"]
     else:
         routine_list = ["qtaim", "bond", "charge", "other"]
+        routine_list = ["qtaim", "bond", "charge"]
+
+
+    wfn_present = False
+    for file in os.listdir(folder):
+        if file.endswith(".wfn"):
+            wfn_present = True
+            file_read = os.path.join(folder, file)
+        
+        if file.endswith(".gbw"):
+            bool_gbw = True
+            file_gbw = os.path.join(folder, file)
+            file_wfn = file.replace(".gbw", ".wfn")
+            file_read = os.path.join(folder, file_wfn)
+            file_molden = file.replace(".gbw", ".molden.input")
+            file_molden = os.path.join(folder, file_molden)
+            
+    if not wfn_present and bool_gbw:
+        # write conversion script from gbw to wfn
+        print("writing conversion script")
+        write_conversion(
+            out_folder=folder,
+            read_file=file_molden,
+            overwrite=True,
+            name="convert.in",
+            orca_2mkl_cmd=orca_2mkl_cmd
+        )
+        routine_list = ["convert"] + routine_list
+
 
     job_dict = {}
     
@@ -187,34 +222,19 @@ def create_jobs(folder, multiwfn_cmd, orca_2mkl_cmd, separate=False, overwrite=T
             with open(os.path.join(folder, "other.txt"), "w") as f:
                 data = other_data()
                 f.write(data)
+
+        elif routine == "convert":
+            job_dict["convert"] = os.path.join(folder, "convert.txt")
+            with open(os.path.join(folder, "convert.txt"), "w") as f:
+                data = "100\n2\n5\n{}\n0\nq\n".format(os.path.join(folder, "orca.wfn"))
+                f.write(data)
+
         else:
             print("routine not recognized")
-
-    wfn_present = False
-    for file in os.listdir(folder):
-
-        if file.endswith(".wfn"):
-            wfn_present = True
-            file_read = os.path.join(folder, file)
-        
-        if file.endswith(".gbw"):
-            bool_gbw = True
-            file_gbw = os.path.join(folder, file)
-
-    if not wfn_present and bool_gbw:
-        # write conversion script from gbw to wfn
-        write_conversion(
-            out_folder=folder,
-            read_file=file_gbw,
-            overwrite=True,
-            name="convert.in",
-            orca_2mkl_cmd=orca_2mkl_cmd
-        )
-        #print("wfn not present")
     
-
+    #print(job_dict)
     for key, value in job_dict.items():
-        print(key, value)
+        #print(key, value)
         if key == "qtaim":
             mv_cpprop = True
         else:
@@ -247,6 +267,17 @@ def create_jobs(folder, multiwfn_cmd, orca_2mkl_cmd, separate=False, overwrite=T
                     name="props_{}.mfwn".format(key),
                     mv_cpprop=mv_cpprop,
                 )
+        elif key == "convert":
+            write_multiwfn_exe(
+                out_folder=folder,
+                read_file=file_gbw,
+                multi_wfn_cmd=multiwfn_cmd,
+                multiwfn_input_file=value,
+                convert_gbw=False,
+                overwrite=True,
+                name="props_{}.mfwn".format(key),
+                mv_cpprop=mv_cpprop,
+            )
 
         else:
             # print("key: {}".format(key))
@@ -271,6 +302,8 @@ def run_jobs(folder, separate=False, orca_6=True):
     """
     if separate:
         order_of_operations = ["qtaim", "other"]
+        order_of_operations = ["qtaim"]
+        
         charge_dict = charge_data_dict()
         [order_of_operations.append(i) for i in charge_dict.keys()]
         bond_dict = bond_order_dict()
@@ -278,6 +311,7 @@ def run_jobs(folder, separate=False, orca_6=True):
 
     else:
         order_of_operations = ["bond", "charge", "qtaim", "other"]
+        order_of_operations = ["bond", "charge", "qtaim"]
 
     wfn_present = False
     for file in os.listdir(folder):
@@ -288,12 +322,13 @@ def run_jobs(folder, separate=False, orca_6=True):
 
     # run conversion script if wfn file is not present
     if not wfn_present:
+        print("running conversion script")
         # run conversion script
         os.system("{}".format(conv_file))
         if orca_6 == False: 
             # find name of .molden file and orca.out
             for file in os.listdir(folder):
-                if file.endswith(".molden"):
+                if file.endswith(".molden.input"):
                     molden_file = os.path.join(folder, file)
                 if file.endswith("orca.out"):
                     orca_out = os.path.join(folder, file)
@@ -301,6 +336,8 @@ def run_jobs(folder, separate=False, orca_6=True):
             # replace ecp values in converted molden file
             dict_ecp = pull_ecp_dict(orca_out)
             overwrite_molden_w_ecp(molden_file, dict_ecp)
+        
+        # conversion script should read in .molden file and use multiwfn to convert to .wfn
 
 
     timings = {}
@@ -331,6 +368,7 @@ def parse_multiwfn(folder, separate=False):
 
     if separate:
         routine_list = ["qtaim", "other"]
+        routine_list = ["qtaim"]
         charge_dict = charge_data_dict()
         bond_dict = bond_order_dict()
         [routine_list.append(i) for i in charge_dict.keys()]
@@ -338,6 +376,7 @@ def parse_multiwfn(folder, separate=False):
 
     else:
         routine_list = ["bond", "charge", "qtaim", "other"]
+        routine_list = ["bond", "charge", "qtaim"]
 
     for file in os.listdir(folder):
         if file.endswith(".out"):
@@ -510,7 +549,9 @@ def clean_jobs(folder, separate=False):
         order_of_operations = ["bond", "charge", "qtaim", "other"]
 
     txt_files = []
-    txt_files = [i + ".txt" for i in order_of_operations]
+    txt_files = [i + ".txt" for i in order_of_operations] + ["convert.txt"] 
+    txt_files += [i + ".out" for i in order_of_operations]
+    
     # print all jobs ending in .mfwn
     for file in os.listdir(folder):
         if file.endswith(".mfwn"):
@@ -518,6 +559,11 @@ def clean_jobs(folder, separate=False):
         if file.endswith(".txt"):
             if file in txt_files:
                 os.remove(os.path.join(folder, file))
+        if file.endswith(".out"):
+            if file in txt_files:
+                os.remove(os.path.join(folder, file))
+        #if file.endswith(".molden.input"):
+        #    os.remove(os.path.join(folder, file))
 
 
 def gbw_analysis(
@@ -549,6 +595,7 @@ def gbw_analysis(
     
     # check if output already exists
     if not overwrite:
+
         timings_loc = os.path.join(folder, "timings.json")
         bond_loc = os.path.join(folder, "bond.json")
         charge_loc = os.path.join(folder, "charge.json")
@@ -556,6 +603,7 @@ def gbw_analysis(
         tf_timings = os.path.exists(timings_loc) and os.path.getsize(timings_loc) > 0
         tf_bond = os.path.exists(bond_loc) and os.path.getsize(bond_loc) > 0
         tf_charge = os.path.exists(charge_loc) and os.path.getsize(charge_loc) > 0
+        
         # check that all files are not empty 
         if tf_timings and tf_bond and tf_charge:
             print("Output already exists")
@@ -577,7 +625,7 @@ def gbw_analysis(
         )
 
     # parse those jobs to jsons for 5 categories
-    #parse_multiwfn(folder, separate=separate)
+    parse_multiwfn(folder, separate=separate)
     
     if clean:
     #    # clean some of the mess
