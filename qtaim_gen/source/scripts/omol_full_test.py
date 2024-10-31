@@ -23,23 +23,24 @@ def main():
     separate=True
     overwrite=True
     clean=True
-    
-    """
-    # works!
-    gbw_analysis(
-        folder=orca_6,
-        orca_2mkl_cmd=orca6_2mkl,
-        multiwfn_cmd=multiwfn_cmd,
-        parse_only=parse_only,
-        separate=separate,
-        overwrite=overwrite, 
-        orca_6=True,
-        clean=clean
-        
-    )  # works!
-    """
 
-    """
+    try:    
+        # works!
+        gbw_analysis(
+            folder=orca_6,
+            orca_2mkl_cmd=orca6_2mkl,
+            multiwfn_cmd=multiwfn_cmd,
+            parse_only=parse_only,
+            separate=separate,
+            overwrite=overwrite, 
+            orca_6=True,
+            clean=clean
+            
+        )  # works!
+    except: 
+        print("Error in gbw_analysis - case 1")    
+
+    
     try:
         gbw_analysis(
             folder="/home/santiagovargas/dev/qtaim_generator/data/orca_convert/",
@@ -53,7 +54,7 @@ def main():
         )
     except:
         print("Error in gbw_analysis - case 3")
-    """
+    
     
     
     try:

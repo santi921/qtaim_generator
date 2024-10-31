@@ -574,8 +574,8 @@ def clean_jobs(folder, separate=False):
         if file.endswith(".out"):
             if file in txt_files:
                 os.remove(os.path.join(folder, file))
-        #if file.endswith(".molden.input"):
-        #    os.remove(os.path.join(folder, file))
+        if file.endswith(".molden.input"):
+            os.remove(os.path.join(folder, file))
 
 
 def gbw_analysis(
@@ -586,7 +586,8 @@ def gbw_analysis(
         parse_only=False, 
         clean=True, 
         overwrite=True, 
-        orca_6=True
+        orca_6=True, 
+        restart=False
     ):
     """
     Run a full analysis on a folder of gbw files
@@ -599,6 +600,7 @@ def gbw_analysis(
         clean(bool): whether to clean
         overwrite(bool): whether to overwrite the output files
         orca_6(bool): whether calc is from orca6
+        restart(bool): whether to restart from the last step using timings.json
 
     """
     if not os.path.exists(folder):
