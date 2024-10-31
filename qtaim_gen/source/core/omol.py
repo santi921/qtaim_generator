@@ -302,7 +302,7 @@ def run_jobs(folder, separate=False, orca_6=True, restart=False):
     """
     if separate:
         order_of_operations = [ "qtaim", "other"]
-        order_of_operations = ["qtaim"]
+        #order_of_operations = ["qtaim"]
         
         charge_dict = charge_data_dict()
         [order_of_operations.append(i) for i in charge_dict.keys()]
@@ -311,7 +311,7 @@ def run_jobs(folder, separate=False, orca_6=True, restart=False):
 
     else:
         order_of_operations = ["bond", "charge", "qtaim", "other"]
-        order_of_operations = ["bond", "charge", "qtaim"]
+        #order_of_operations = ["bond", "charge", "qtaim"]
 
     wfn_present = False
     for file in os.listdir(folder):
@@ -395,7 +395,7 @@ def parse_multiwfn(folder, separate=False):
             file_full_path = os.path.join(folder, file)
             for routine in routine_list:
                 if routine in file:
-                    # print(routine)
+                    #print("routine: ", routine)
                     json_file = file_full_path.replace(".out", ".json")
 
                     if routine == "fuzzy_full":
@@ -501,20 +501,22 @@ def parse_multiwfn(folder, separate=False):
                         }
                         with open(json_file, "w") as f:
                             json.dump(data, f, indent=4)
+            
+        elif "CPprop.txt" in file and "qtaim" in routine_list:
+                json_file = os.path.join(folder, "qtaim.json")
+                # go through files in folder and find the one that ends in .inp
+                cp_prop_path = os.path.join(folder, file)
+                
+                for file2 in os.listdir(folder):    
+                    if file2.endswith(".inp"):
+                        inp_loc = os.path.join(folder, file2)
+                
+                qtaim_dict = parse_qtaim(
+                    cprop_file=cp_prop_path, inp_loc=inp_loc
+                )
 
-                    elif routine == "qtaim":
-                        # go through files in folder and find the one that ends in .inp
-                        for file in os.listdir(folder):
-                            if file.endswith(".inp"):
-                                inp_loc = os.path.join(folder, file)
-                            if "CPprop" in file:
-                                cp_prop_path = os.path.join(folder, file)
-                        qtaim_dict = parse_qtaim(
-                            cprop_file=cp_prop_path, inp_loc=inp_loc
-                        )
-
-                        with open(json_file, "w") as f:
-                            json.dump(qtaim_dict, f, indent=4)
+                with open(json_file, "w") as f:
+                    json.dump(qtaim_dict, f, indent=4)
 
     if separate:
         charge_routines = list(charge_dict.keys())
@@ -535,11 +537,15 @@ def parse_multiwfn(folder, separate=False):
                         bond_dict_compiled[routine] = json.load(f)
                     # remove the file
                     os.remove(os.path.join(folder, file))
-
-        with open(os.path.join(folder, "charge.json"), "w") as f:
-            json.dump(charge_dict_compiled, f, indent=4)
-        with open(os.path.join(folder, "bond.json"), "w") as f:
-            json.dump(bond_dict_compiled, f, indent=4)
+        
+        # check that charge_dict_compiled is not {}
+        if charge_dict_compiled:
+            with open(os.path.join(folder, "charge.json"), "w") as f:
+                json.dump(charge_dict_compiled, f, indent=4)
+        # check that bond_dict_compiled is not {}
+        if bond_dict_compiled:
+            with open(os.path.join(folder, "bond.json"), "w") as f:
+                json.dump(bond_dict_compiled, f, indent=4)
 
 
 def clean_jobs(folder, separate=False):
@@ -576,6 +582,8 @@ def clean_jobs(folder, separate=False):
                 os.remove(os.path.join(folder, file))
         if file.endswith(".molden.input"):
             os.remove(os.path.join(folder, file))
+        if file.endswith(".wfn"):
+            os.remove(os.path.join(folder, file))
 
 
 def gbw_analysis(
@@ -606,10 +614,14 @@ def gbw_analysis(
     if not os.path.exists(folder):
         print("Folder does not exist")
         return
-    
+    if restart: 
+        print("Restarting from last step in timings.json")
+        # check if the timings file exists
+        if not os.path.exists(os.path.join(folder, "timings.json")):
+            print("No timings file found - starting from scratch!")
+            restart = False
     # check if output already exists
     if not overwrite:
-
         timings_loc = os.path.join(folder, "timings.json")
         bond_loc = os.path.join(folder, "bond.json")
         charge_loc = os.path.join(folder, "charge.json")
@@ -624,6 +636,7 @@ def gbw_analysis(
             return
         
     if not parse_only:
+        print("... Creating jobs")
         # create jobs for conversion to wfn and multiwfn analysis
         create_jobs(
             folder=folder, 
@@ -639,10 +652,12 @@ def gbw_analysis(
             restart=restart
         )
 
+    print("... Parsing multiwfn output")
     # parse those jobs to jsons for 5 categories
     parse_multiwfn(folder, separate=separate)
     
     if clean:
     #    # clean some of the mess
+        print("... Cleaning up")
         clean_jobs(folder, separate=separate)
     
