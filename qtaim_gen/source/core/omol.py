@@ -157,16 +157,16 @@ def create_jobs(folder, multiwfn_cmd, orca_2mkl_cmd, separate=False, overwrite=T
             bool_gbw = True
             file_gbw = os.path.join(folder, file)
             file_wfn = file.replace(".gbw", ".wfn")
-            file_read = os.path.join(folder, file_wfn)
             file_molden = file.replace(".gbw", ".molden.input")
+            file_read = os.path.join(folder, file_wfn)
             file_molden = os.path.join(folder, file_molden)
             
     if not wfn_present and bool_gbw:
         # write conversion script from gbw to wfn
-        print("writing conversion script")
+        
         write_conversion(
             out_folder=folder,
-            read_file=file_molden,
+            read_file=file_gbw,
             overwrite=True,
             name="convert.in",
             orca_2mkl_cmd=orca_2mkl_cmd
@@ -270,7 +270,7 @@ def create_jobs(folder, multiwfn_cmd, orca_2mkl_cmd, separate=False, overwrite=T
         elif key == "convert":
             write_multiwfn_exe(
                 out_folder=folder,
-                read_file=file_gbw,
+                read_file=file_molden,
                 multi_wfn_cmd=multiwfn_cmd,
                 multiwfn_input_file=value,
                 convert_gbw=False,
@@ -293,7 +293,7 @@ def create_jobs(folder, multiwfn_cmd, orca_2mkl_cmd, separate=False, overwrite=T
             )
 
 
-def run_jobs(folder, separate=False, orca_6=True):
+def run_jobs(folder, separate=False, orca_6=True, restart=False):
     """
     Run conversion and multiwfn jobs
     Takes:
@@ -301,7 +301,7 @@ def run_jobs(folder, separate=False, orca_6=True):
         separate(bool): whether to separate the analysis into different files
     """
     if separate:
-        order_of_operations = ["qtaim", "other"]
+        order_of_operations = [ "qtaim", "other"]
         order_of_operations = ["qtaim"]
         
         charge_dict = charge_data_dict()
@@ -325,37 +325,49 @@ def run_jobs(folder, separate=False, orca_6=True):
         print("running conversion script")
         # run conversion script
         os.system("{}".format(conv_file))
+        
+        for file in os.listdir(folder):
+            if file.endswith(".molden.input"):
+                molden_file = os.path.join(folder, file)
+            if file.endswith("orca.out"):
+                orca_out = os.path.join(folder, file)
+            
         if orca_6 == False: 
-            # find name of .molden file and orca.out
-            for file in os.listdir(folder):
-                if file.endswith(".molden.input"):
-                    molden_file = os.path.join(folder, file)
-                if file.endswith("orca.out"):
-                    orca_out = os.path.join(folder, file)
-                
             # replace ecp values in converted molden file
             dict_ecp = pull_ecp_dict(orca_out)
             overwrite_molden_w_ecp(molden_file, dict_ecp)
         
+        order_of_operations = ["convert"] + order_of_operations
         # conversion script should read in .molden file and use multiwfn to convert to .wfn
 
+    # create a json file to store job status
 
     timings = {}
     # run multiwfn scripts
     for order in order_of_operations:
+        # if restart, check if timing file exists
+        if restart:
+            if os.path.exists(os.path.join(folder, "timings.json")):
+                with open(os.path.join(folder, "timings.json"), "r") as f:
+                    timings = json.load(f)
+                    if order in timings.keys():
+                        continue
+
         mfwn_file = os.path.join(folder, "props_{}.mfwn".format(order))
         try:
             start = time.time()
             os.system("{}".format(mfwn_file))
             end = time.time()
             timings[order] = end - start
+            
+
         except:
             print("error running {}".format(mfwn_file))
             timings[order] = -1
 
-    # save timings to file in folder
-    with open(os.path.join(folder, "timings.json"), "w") as f:
-        json.dump(timings, f, indent=4)
+        # save timings to file in folder - at each step for check pointing
+        with open(os.path.join(folder, "timings.json"), "w") as f:
+            json.dump(timings, f, indent=4)
 
 
 def parse_multiwfn(folder, separate=False):
@@ -539,14 +551,14 @@ def clean_jobs(folder, separate=False):
     """
 
     if separate:
-        order_of_operations = ["qtaim", "other"]
+        order_of_operations = ["convert", "qtaim", "other"]
         charge_dict = charge_data_dict()
         [order_of_operations.append(i) for i in charge_dict.keys()]
         bond_dict = bond_order_dict()
         [order_of_operations.append(i) for i in bond_dict.keys()]
 
     else:
-        order_of_operations = ["bond", "charge", "qtaim", "other"]
+        order_of_operations = ["convert", "bond", "charge", "qtaim", "other"]
 
     txt_files = []
     txt_files = [i + ".txt" for i in order_of_operations] + ["convert.txt"] 
@@ -621,7 +633,8 @@ def gbw_analysis(
         run_jobs(
             folder=folder, 
             separate=separate,
-            orca_6=orca_6
+            orca_6=orca_6, 
+            restart=restart
         )
 
     # parse those jobs to jsons for 5 categories

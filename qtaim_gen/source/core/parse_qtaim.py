@@ -237,13 +237,20 @@ def orca_inp_to_dict(dft_inp_file):
         lines = [line.strip() for line in lines]
 
     # find line starting with "* xyz"
+    start_block = False
     for ind, line in enumerate(lines):
+        if start_block:
+            if "*" in line: 
+                end_block = ind
+                break
+                
         if "*xyz" in line:
             xyz_ind = ind
-            break
+            start_block = True
+
 
     # filter lines before and including xyz_ind
-    lines = lines[xyz_ind + 1 : -2]
+    lines = lines[xyz_ind + 1 : end_block]
 
     for ind, line in enumerate(lines):
         line_split = line.split()
@@ -473,11 +480,14 @@ def merge_qtaim_inds(
     #print(dft_inp_file, inp_type)
     if inp_type == "orca":
         dft_dict = orca_inp_to_dict(dft_inp_file)
+        #print("orca parse")
+        #print(dft_dict)
     else:
         dft_dict = dft_inp_to_dict(dft_inp_file)
     
     # find only atom cps to map
     atom_only_cps, bond_cps = only_atom_cps(qtaim_descs)
+    #print(sorted(list(atom_only_cps.keys())))
     # remap qtaim indices to atom indices
     atom_cps_remapped, qtaim_to_dft, missing_atoms = find_cp_map(
         dft_dict, atom_only_cps, margin=margin
