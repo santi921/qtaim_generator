@@ -517,10 +517,10 @@ def parse_multiwfn(folder, separate=False):
                 for file2 in os.listdir(folder):    
                     if file2.endswith(".inp"):
                         inp_loc = os.path.join(folder, file2)
-                        inp_orca=False
+                        inp_orca=True
                     if file2.endswith("input.in"):
                         inp_loc = os.path.join(folder, file2)
-                        inp_orca=True
+                        inp_orca=False
                 qtaim_dict = parse_qtaim(
                     cprop_file=cp_prop_path, inp_loc=inp_loc, orca_tf=inp_orca
                 )

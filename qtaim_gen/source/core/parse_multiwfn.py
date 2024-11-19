@@ -806,6 +806,7 @@ def parse_qtaim(cprop_file, inp_loc, orca_tf=False):
         qtaim_dict(dictionary): dictionary with qtaim properties
     """
     qtaim_descs = get_qtaim_descs(cprop_file)
+    
     if orca_tf:
         input_type = 'orca'
     else: 
