@@ -518,7 +518,7 @@ def parse_multiwfn(folder, separate=False):
                     if file2.endswith(".inp"):
                         inp_loc = os.path.join(folder, file2)
                         inp_orca=False
-                    if file2.endswith(".input.in"):
+                    if file2.endswith("input.in"):
                         inp_loc = os.path.join(folder, file2)
                         inp_orca=True
                 qtaim_dict = parse_qtaim(
