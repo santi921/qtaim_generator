@@ -1,8 +1,8 @@
 from qtaim_gen.source.core.omol import gbw_analysis
-import os 
+import os
+
 
 def main():
-
     # set environment variables
     os.environ["OMP_STACKSIZE"] = "64000000"
     # set mem
@@ -19,12 +19,12 @@ def main():
         "/home/santiagovargas/dev/Multiwfn_3.8_dev_bin_Linux_noGUI/Multiwfn_noGUI"
     )
 
-    parse_only=False
-    separate=True
-    overwrite=True
-    clean=True
-    
-    try:    
+    parse_only = False
+    separate = True
+    overwrite = True
+    clean = True
+
+    try:
         # works!
         gbw_analysis(
             folder=orca_6,
@@ -32,16 +32,14 @@ def main():
             multiwfn_cmd=multiwfn_cmd,
             parse_only=parse_only,
             separate=separate,
-            overwrite=overwrite, 
+            overwrite=overwrite,
             orca_6=True,
-            clean=clean, 
-            restart=False
-            
+            clean=clean,
+            restart=False,
         )  # works!
-    except: 
-        print("Error in gbw_analysis - case 1")    
+    except:
+        print("Error in gbw_analysis - case 1")
 
-    
     try:
         gbw_analysis(
             folder="/home/santiagovargas/dev/qtaim_generator/data/orca_convert/",
@@ -49,17 +47,14 @@ def main():
             multiwfn_cmd=multiwfn_cmd,
             parse_only=False,
             separate=True,
-            overwrite=True, 
-            orca_6=False, 
-            clean=True, 
-            restart=False
-
+            overwrite=True,
+            orca_6=False,
+            clean=True,
+            restart=False,
         )
     except:
         print("Error in gbw_analysis - case 3")
-    
-    
-    
+
     try:
         gbw_analysis(
             folder=orca_5,
@@ -67,14 +62,13 @@ def main():
             multiwfn_cmd=multiwfn_cmd,
             parse_only=parse_only,
             separate=separate,
-            overwrite=overwrite, 
-            orca_6=False, 
-            clean=clean, 
-            restart=False
+            overwrite=overwrite,
+            orca_6=False,
+            clean=clean,
+            restart=False,
         )
     except:
         print("Error in gbw_analysis - case 2")
-    
 
 
 main()

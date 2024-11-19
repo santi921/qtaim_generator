@@ -34,7 +34,7 @@ def bond_order_data():  # separate out into dictionary
 def bond_order_dict():
     string_dict = {}
     string_dict["fuzzy"] = "9\n7\nn\n0\nq\n"
-    #string_dict["laplacian"] = "9\n8\nn\n0\nq\n" expensive
+    # string_dict["laplacian"] = "9\n8\nn\n0\nq\n" expensive
     string_dict["ibsi"] = "9\n10\n1\n1\n0\n0\nq\n"
     return string_dict
 
@@ -52,6 +52,6 @@ def other_data():  # potentially rework?
 def qtaim_data(exhaustive=False):  # can work in one go
     if exhaustive:
         string_ret = "2\n2\n3\n4\n5\n6\n-1\n-9\n8\n7\n0\n-10\nq\n"
-    else: # skips spherical search around atoms
+    else:  # skips spherical search around atoms
         string_ret = "2\n2\n3\n4\n5\n8\n7\n0\n-10\nq\n"
     return string_ret

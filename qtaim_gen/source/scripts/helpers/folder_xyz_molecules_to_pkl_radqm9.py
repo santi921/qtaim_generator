@@ -31,7 +31,6 @@ def main():
         help="end only pull",
     )
 
-
     args = parser.parse_args()
     xyz_folder = args.xyz_folder
     pkl_file = args.pkl_file
@@ -64,16 +63,14 @@ def main():
     # create a list of pmg molecules from the xyz files
     for ind, xyz_file in enumerate(xyz_files):
         # print(xyz_folder + xyz_file)
-    
+
         with open(xyz_folder + xyz_file, "r") as f:
             lines = f.readlines()
-        
+
         comment = lines[1].strip()
         position_type = comment.split()[-4].split("=")[1]
-        
-        
-        if pull_end_only:
 
+        if pull_end_only:
             molecule = Molecule.from_file(xyz_folder + xyz_file)
 
             if determine_bonds:
@@ -86,31 +83,30 @@ def main():
 
             if determine_bonds:
                 [molecule_graph.add_edge(bond[0], bond[1]) for bond in bonds_rdkit]
-            
+
             xyz_files_completed.append(xyz_file)
             position_types.append(position_type)
-            
+
             temp_spin = int(comment.split()[3].split("=")[1])
             spin.append(temp_spin)
 
             charge_temp = int(comment.split()[2].split("=")[1])
             charge.append(charge_temp)
 
-            
-            partial_charges_temp = comment.split("partial_charge")[1].split("\"")[1][6:]
+            partial_charges_temp = comment.split("partial_charge")[1].split('"')[1][6:]
             partial_charges_temp = ast.literal_eval(partial_charges_temp)
             partial_charges.append(partial_charges_temp)
-            
-            partial_spins_temp = comment.split("partial_spin")[1].split("\"")[1][6:]
+
+            partial_spins_temp = comment.split("partial_spin")[1].split('"')[1][6:]
             partial_spins_temp = ast.literal_eval(partial_spins_temp)
             partial_spins.append(partial_spins_temp)
-            
+
             energy = comment.split()[1].split("=")[1]
             energies.append(float(energy))
-            
+
             mol_id_temp = comment.split()[-5].split("=")[1]
             mol_ids.append(mol_id_temp)
-        
+
             molecule_graph = MoleculeGraph.with_empty_graph(molecule)
             molecule_graphs.append(molecule_graph)
             molecules.append(molecule)
@@ -120,21 +116,21 @@ def main():
         "molecule_graph": molecule_graphs,
         "ids": identifier,
         "names": xyz_files_completed,
-        "partial_spin": partial_spins, 
+        "partial_spin": partial_spins,
         "partial_charges": partial_charges,
-        "mol_id": mol_ids, 
+        "mol_id": mol_ids,
         "position_type": position_types,
         "energy": energies,
     }
     if determine_bonds:
         df["bonds"] = bond_list
-    
+
     df["spin"] = spin
     df["charge"] = charge
     # convert to pandas dataframe and save as pickle
     df = pd.DataFrame(df)
     pd.to_pickle(df, xyz_folder + pkl_file)
-    #df_pkl = pd.read_pickle(xyz_folder + pkl_file)
+    # df_pkl = pd.read_pickle(xyz_folder + pkl_file)
 
 
 main()

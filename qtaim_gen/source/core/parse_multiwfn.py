@@ -35,14 +35,12 @@ def parse_charge_doc(charge_out_txt):
 
     # iterate over lines of the file
     with open(charge_out_txt, "r") as f:
-
         charge_dict_index = 0
         dipole_index = 0
         atomic_dipole_index = 0
         trigger, trigger2 = False, False
         trigger_dipole = False
         for line in f:
-
             if line == "\n" or len(line) < 3:
                 if trigger or trigger2:
                     trigger, trigger2 = False, False
@@ -161,7 +159,6 @@ def parse_charge_base(charge_out_txt, corrected=False, dipole=True):
 
     # iterate over lines of the file
     with open(charge_out_txt, "r") as f:
-
         trigger2 = False
 
         for line in f:
@@ -214,60 +211,59 @@ def parse_charge_base(charge_out_txt, corrected=False, dipole=True):
 def parse_charge_doc_bader(charge_out_txt):
     """
     Method to parse the charge out from multiwfn bader charges.
-    Takes: 
+    Takes:
         charge_out_txt: str, path to the charge out file
-    Returns: 
+    Returns:
         charge_dict_overall: dict, dictionary with the charges from different methods
         spin_dict_overall: dict, dictionary with the spin from different methods
     """
 
     charge_key_3 = "The atomic charges"
     spin_key = "Atom       Basin"
-    
+
     charge_dict = {}
     spin_dict = {}
     charge_dict_overall = {}
     spin_dict_overall = {}
-    # iterate over lines of the file 
-    with open(charge_out_txt, 'r') as f:
-        trigger=False
+    # iterate over lines of the file
+    with open(charge_out_txt, "r") as f:
+        trigger = False
         trigger_spin = False
 
         for line in f:
-            if line == "\n" or len(line)<3:
-                if trigger:    
-                        trigger=False
-                        charge_dict_overall = charge_dict
+            if line == "\n" or len(line) < 3:
+                if trigger:
+                    trigger = False
+                    charge_dict_overall = charge_dict
 
-                elif trigger_spin:                 
-                        trigger_spin = False
-                        spin_dict_overall = spin_dict
+                elif trigger_spin:
+                    trigger_spin = False
+                    spin_dict_overall = spin_dict
 
             if trigger:
                 if line.split()[0].isnumeric():
                     element = line.split()[1].split("(")[1]
                     ind = line.split()[0]
 
-                    shift=0
-                    if ")" in element:
-                        element = element[:-1]
-                        shift = -1                
-                    charge_dict[ind + "_" + element] = float(line.split()[4+shift])
-            
-            if trigger_spin: 
-                if line.split()[0].isnumeric():
-                    
-                    element = line.split()[1].split("(")[1]
-                    ind = line.split()[0]
-
-                    shift=0
+                    shift = 0
                     if ")" in element:
                         element = element[:-1]
                         shift = -1
-                    spin_dict[ind + "_" + element] = float(line.split()[4+shift])
+                    charge_dict[ind + "_" + element] = float(line.split()[4 + shift])
+
+            if trigger_spin:
+                if line.split()[0].isnumeric():
+                    element = line.split()[1].split("(")[1]
+                    ind = line.split()[0]
+
+                    shift = 0
+                    if ")" in element:
+                        element = element[:-1]
+                        shift = -1
+                    spin_dict[ind + "_" + element] = float(line.split()[4 + shift])
 
             if charge_key_3 in line:
-                trigger=True
+                trigger = True
                 charge_dict = {}
 
             if spin_key in line:
@@ -301,7 +297,6 @@ def parse_charge_becke(charge_out_txt):
 
     # iterate over lines of the file
     with open(charge_out_txt, "r") as f:
-
         trigger2 = False
         trigger_dipole = False
         atomic_dipole_dict = {}
@@ -537,7 +532,6 @@ def parse_bond_order_laplace(bond_order_txt):
 
     with open(bond_order_txt, "r") as f:
         for line in f:
-
             if laplace_bool:
                 if line.strip() == "":
                     laplace_bool = False
@@ -572,7 +566,6 @@ def parse_bond_order_ibsi(bond_order_txt):
 
     with open(bond_order_txt, "r") as f:
         for line in f:
-
             if ibsi_bool:
                 if ibsi_detrigger in line:
                     ibsi_bool = False
@@ -755,7 +748,6 @@ def parse_fuzzy_doc(fuzzy_loc):
     # iterate over lines of the file and print line if trigger is found
     with open(fuzzy_loc, "r") as f:
         for line in f:
-
             if trigger_bool_real:
                 if line == "\n" or len(line) < 3:
                     trigger_bool_real = False
@@ -806,19 +798,19 @@ def parse_qtaim(cprop_file, inp_loc, orca_tf=False):
         qtaim_dict(dictionary): dictionary with qtaim properties
     """
     qtaim_descs = get_qtaim_descs(cprop_file)
-    
+
     if orca_tf:
-        input_type = 'orca'
-    else: 
-        input_type = 'else'
+        input_type = "orca"
+    else:
+        input_type = "else"
 
     ret_dict = merge_qtaim_inds(
         dft_inp_file=inp_loc,
         qtaim_descs=qtaim_descs,
         bond_list=None,
         define_bonds="qtaim",
-        margin=1.0, 
-        inp_type=input_type
+        margin=1.0,
+        inp_type=input_type,
     )
 
     # convert tuple keys to strings

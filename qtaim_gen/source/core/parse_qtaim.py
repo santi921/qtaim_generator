@@ -135,7 +135,6 @@ def parse_cp(lines, verbose=True):
                         cp_dict[k] = int(i[2][:-1])
                         cp_name = str(cp_dict[k]) + "_bond"
                     elif k == "connected_bond_paths":
-
                         list_raw = [x for x in i[2:]]
                         # save only items that contain a number
                         list_raw = [
@@ -242,14 +241,13 @@ def orca_inp_to_dict(dft_inp_file):
     start_block = False
     for ind, line in enumerate(lines):
         if start_block:
-            if "*" in line: 
+            if "*" in line:
                 end_block = ind
                 break
-                
+
         if "*xyz" in line:
             xyz_ind = ind
             start_block = True
-
 
     # filter lines before and including xyz_ind
     lines = lines[xyz_ind + 1 : end_block]
@@ -479,17 +477,17 @@ def merge_qtaim_inds(
     """
 
     # open dft input file
-    #print(dft_inp_file, inp_type)
+    # print(dft_inp_file, inp_type)
     if inp_type == "orca":
         dft_dict = orca_inp_to_dict(dft_inp_file)
-        #print("orca parse")
-        #print(dft_dict)
+        # print("orca parse")
+        # print(dft_dict)
     else:
         dft_dict = dft_inp_to_dict(dft_inp_file)
-    
+
     # find only atom cps to map
     atom_only_cps, bond_cps = only_atom_cps(qtaim_descs)
-    #print(sorted(list(atom_only_cps.keys())))
+    # print(sorted(list(atom_only_cps.keys())))
     # remap qtaim indices to atom indices
     atom_cps_remapped, qtaim_to_dft, missing_atoms = find_cp_map(
         dft_dict, atom_only_cps, margin=margin
@@ -564,7 +562,6 @@ def gather_imputation(
     else:
         for ind, row in df.iterrows():
             if reaction:
-
                 try:
                     reaction_id = row["reaction_id"]
                     bonds_products = []
@@ -695,7 +692,6 @@ def gather_qtaim_features(
     impute_dict={},
     inp_type="orca",
 ):
-
     """
     Gather the qtaim features into the pandas file
     Takes:
