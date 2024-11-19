@@ -23,7 +23,7 @@ def main():
     separate=True
     overwrite=True
     clean=True
-    """
+    
     try:    
         # works!
         gbw_analysis(
@@ -40,7 +40,7 @@ def main():
         )  # works!
     except: 
         print("Error in gbw_analysis - case 1")    
-    """
+
     
     try:
         gbw_analysis(
@@ -51,7 +51,7 @@ def main():
             separate=True,
             overwrite=True, 
             orca_6=False, 
-            clean=False, 
+            clean=True, 
             restart=False
 
         )
@@ -59,7 +59,7 @@ def main():
         print("Error in gbw_analysis - case 3")
     
     
-    """
+    
     try:
         gbw_analysis(
             folder=orca_5,
@@ -74,7 +74,7 @@ def main():
         )
     except:
         print("Error in gbw_analysis - case 2")
-    """
+    
 
 
 main()

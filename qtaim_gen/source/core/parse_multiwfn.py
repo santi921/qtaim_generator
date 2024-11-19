@@ -211,6 +211,72 @@ def parse_charge_base(charge_out_txt, corrected=False, dipole=True):
         return charge_dict_overall
 
 
+def parse_charge_doc_bader(charge_out_txt):
+    """
+    Method to parse the charge out from multiwfn bader charges.
+    Takes: 
+        charge_out_txt: str, path to the charge out file
+    Returns: 
+        charge_dict_overall: dict, dictionary with the charges from different methods
+        spin_dict_overall: dict, dictionary with the spin from different methods
+    """
+
+    charge_key_3 = "The atomic charges"
+    spin_key = "Atom       Basin"
+    
+    charge_dict = {}
+    spin_dict = {}
+    charge_dict_overall = {}
+    spin_dict_overall = {}
+    # iterate over lines of the file 
+    with open(charge_out_txt, 'r') as f:
+        trigger=False
+        trigger_spin = False
+
+        for line in f:
+            if line == "\n" or len(line)<3:
+                if trigger:    
+                        trigger=False
+                        charge_dict_overall = charge_dict
+
+                elif trigger_spin:                 
+                        trigger_spin = False
+                        spin_dict_overall = spin_dict
+
+            if trigger:
+                if line.split()[0].isnumeric():
+                    element = line.split()[1].split("(")[1]
+                    ind = line.split()[0]
+
+                    shift=0
+                    if ")" in element:
+                        element = element[:-1]
+                        shift = -1                
+                    charge_dict[ind + "_" + element] = float(line.split()[4+shift])
+            
+            if trigger_spin: 
+                if line.split()[0].isnumeric():
+                    
+                    element = line.split()[1].split("(")[1]
+                    ind = line.split()[0]
+
+                    shift=0
+                    if ")" in element:
+                        element = element[:-1]
+                        shift = -1
+                    spin_dict[ind + "_" + element] = float(line.split()[4+shift])
+
+            if charge_key_3 in line:
+                trigger=True
+                charge_dict = {}
+
+            if spin_key in line:
+                trigger_spin = True
+                spin_dict = {}
+
+    return charge_dict_overall, spin_dict_overall
+
+
 def parse_charge_becke(charge_out_txt):
     """
     Method to parse the charge out from multiwfn
