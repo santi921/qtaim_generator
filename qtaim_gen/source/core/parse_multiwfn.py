@@ -796,7 +796,7 @@ def parse_fuzzy_doc(fuzzy_loc):
     return ret_dict
 
 
-def parse_qtaim(cprop_file, inp_loc):
+def parse_qtaim(cprop_file, inp_loc, orca_tf=False):
     """
     Function to parse qtaim output from multiwfn
     Takes:
@@ -806,13 +806,18 @@ def parse_qtaim(cprop_file, inp_loc):
         qtaim_dict(dictionary): dictionary with qtaim properties
     """
     qtaim_descs = get_qtaim_descs(cprop_file)
+    if orca_tf:
+        input_type = 'orca'
+    else: 
+        input_type = 'else'
 
     ret_dict = merge_qtaim_inds(
         dft_inp_file=inp_loc,
         qtaim_descs=qtaim_descs,
         bond_list=None,
         define_bonds="qtaim",
-        margin=1.0,
+        margin=1.0, 
+        inp_type=input_type
     )
 
     # convert tuple keys to strings
