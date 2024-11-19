@@ -142,10 +142,10 @@ def create_jobs(folder, multiwfn_cmd, orca_2mkl_cmd, separate=False, overwrite=T
     """
     if separate:
         routine_list = ["charge_separate", "bond_separate", "qtaim", "other"]
-        routine_list = ["charge_separate"]
+        #routine_list = ["charge_separate"]
     else:
         routine_list = ["qtaim", "bond", "charge", "other"]
-        routine_list = ["qtaim", "bond", "charge"]
+        #routine_list = ["qtaim", "bond", "charge"]
 
 
     wfn_present = False
@@ -303,7 +303,7 @@ def run_jobs(folder, separate=False, orca_6=True, restart=False):
     """
     if separate:
         order_of_operations = [ "qtaim", "other"]
-        order_of_operations = ["qtaim"]
+        #order_of_operations = ["qtaim"]
         charge_dict = charge_data_dict()
         [order_of_operations.append(i) for i in charge_dict.keys()]
         bond_dict = bond_order_dict()
@@ -311,7 +311,7 @@ def run_jobs(folder, separate=False, orca_6=True, restart=False):
 
     else:
         order_of_operations = ["bond", "charge", "qtaim", "other"]
-        order_of_operations = ["bond", "charge", "qtaim"]
+        #order_of_operations = ["bond", "charge", "qtaim"]
 
     wfn_present = False
     for file in os.listdir(folder):
@@ -380,7 +380,7 @@ def parse_multiwfn(folder, separate=False):
 
     if separate:
         routine_list = ["qtaim", "other"]
-        routine_list = ["qtaim"]
+        #routine_list = ["qtaim"]
         charge_dict = charge_data_dict()
         bond_dict = bond_order_dict()
 
@@ -389,7 +389,7 @@ def parse_multiwfn(folder, separate=False):
 
     else:
         routine_list = ["bond", "charge", "qtaim", "other"]
-        routine_list = ["bond", "charge", "qtaim"]
+        #routine_list = ["bond", "charge", "qtaim"]
 
     for file in os.listdir(folder):
         if file.endswith(".out"):
