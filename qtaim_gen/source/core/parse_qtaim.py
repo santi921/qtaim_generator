@@ -532,8 +532,7 @@ def gather_imputation(
     json_file_imputed="./imputed_vals.json",
     reaction=False,
     define_bonds="qtaim",
-    inp_type="orca",
-    parse_charges=False,
+    inp_type="orca"
 ):
     """
     Takes in dataframe and features and returns dictionary of imputation values
