@@ -533,6 +533,7 @@ def gather_imputation(
     reaction=False,
     define_bonds="qtaim",
     inp_type="orca",
+    parse_charges=False,
 ):
     """
     Takes in dataframe and features and returns dictionary of imputation values
@@ -691,6 +692,7 @@ def gather_qtaim_features(
     impute=True,
     impute_dict={},
     inp_type="orca",
+    parse_charges=False,
 ):
     """
     Gather the qtaim features into the pandas file
@@ -703,6 +705,7 @@ def gather_qtaim_features(
         update_bonds_w_qtaim: boolean for whether to update bonds with qtaim
         impute: boolean for whether to impute missing values
         impute_dict: dictionary of imputation values
+        parse_charges: boolean for whether to parse charges
     """
     drop_list = []
     if reaction:

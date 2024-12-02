@@ -49,6 +49,15 @@ def main():
         help="update bonds with qtaim bond path definitions",
     )
 
+
+    parser.add_argument(
+        "--charges_spin",
+        action="store_true",
+        help="whether or not to include charges & spin in the qtaim features",
+    )
+
+    
+
     parser.add_argument(
         "-define_bonds", choices=["distances", "qtaim"], default="qtaim"
     )
@@ -58,6 +67,7 @@ def main():
     file_in = args.file_in
     impute = bool(args.impute)
     reaction = bool(args.reaction)
+    parse_charges = bool(args.charges)
     file_out = args.file_out
     define_bonds = args.define_bonds
     update_bonds_w_qtaim = args.update_bonds_w_qtaim
@@ -67,13 +77,14 @@ def main():
     print("file_in: {}".format(file_in))
     print("file_out: {}".format(file_out))
     print("reaction: {}".format(reaction))
-
+    print("parse_charges_spin: {}".format(parse_charges))
     print("reading file from: {}".format(root + file_in))
 
     if file_in.endswith(".json"):
         path_json = root + file_in
         pandas_file = pd.read_json(path_json)
         print(pandas_file.shape)
+
     elif file_in.endswith(".pkl"):
         path_pkl = root + file_in
         pandas_file = pd.read_pickle(path_pkl)
@@ -81,6 +92,7 @@ def main():
         if type(pandas_file) == dict:
             pandas_file = pd.DataFrame(pandas_file)
         print(len(pandas_file["ids"]))
+
     else:
         path_bson = root + file_in
         with open(path_bson, "rb") as f:
@@ -90,7 +102,9 @@ def main():
 
     if impute:
         imputed_file = root + "impute_vals.json"
+    
     print("df type {}".format(type(pandas_file)))
+    
     features_atom = [
         "Lagrangian_K",
         "Hamiltonian_K",
@@ -150,6 +164,7 @@ def main():
             json_file_imputed=imputed_file,
             reaction=reaction,
             define_bonds=define_bonds,
+            parse_charges=parse_charges,
         )
         for i in impute_dict.keys():
             print("-" * 20 + i + "-" * 20)
@@ -168,6 +183,7 @@ def main():
         update_bonds_w_qtaim=update_bonds_w_qtaim,
         impute=impute,
         impute_dict=impute_dict,
+        parse_charges=parse_charges,
     )
 
     # if impute false then drop the rows that have -1 values
