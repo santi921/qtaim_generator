@@ -123,10 +123,7 @@ def main():
         "det_hessian",
         "ellip_e_dens",
         "eta",
-        "density_beta",
-        "density_alpha",
-        "spin_density",
-        "lol",
+        "lol"
     ]
 
     features_bond = [
@@ -147,11 +144,13 @@ def main():
         "det_hessian",
         "ellip_e_dens",
         "eta",
-        "density_beta",
-        "density_alpha",
-        "spin_density",
-        "lol",
+        "lol"
     ]
+
+    if parse_charges:
+        features_atom += ["density_beta","density_alpha","spin_density"]
+        features_bond += ["density_beta","density_alpha","spin_density"]
+
 
     impute_dict = {}
 
@@ -163,8 +162,7 @@ def main():
             root_dir=root,
             json_file_imputed=imputed_file,
             reaction=reaction,
-            define_bonds=define_bonds,
-            parse_charges=parse_charges,
+            define_bonds=define_bonds
         )
         for i in impute_dict.keys():
             print("-" * 20 + i + "-" * 20)
@@ -182,8 +180,7 @@ def main():
         define_bonds=define_bonds,
         update_bonds_w_qtaim=update_bonds_w_qtaim,
         impute=impute,
-        impute_dict=impute_dict,
-        parse_charges=parse_charges,
+        impute_dict=impute_dict
     )
 
     # if impute false then drop the rows that have -1 values

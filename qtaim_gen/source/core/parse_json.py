@@ -1,4 +1,4 @@
-from qtaim_gen.source.core.parse_qtaim import orca_inp_to_dict, dft_inp_to_dict
+
 import os 
 from glob import glob
 import numpy as np 
@@ -30,12 +30,13 @@ def get_keys_qtaim(qtaim_dict):
                 for i in v.keys():
                     if i not in ignore_list: 
                         dict_keys.append("extra_feat_bond_{}".format(i))
-                
+                bonds_tf = True
         else: 
             if not atoms_tf: 
                 for i in v.keys():
                     if i not in ignore_list: 
                         dict_keys.append("extra_feat_atom_{}".format(i))
+                atoms_tf = True
     return dict_keys
 
 
@@ -127,7 +128,7 @@ def get_qtaim_data(qtaim_dict):
     return dict_res
 
 
-def gather_impute(root, full_descriptors=False, orca=True): 
+def gather_impute(root, full_descriptors=False): 
     """
     Gather data from json files and impute missing values.
     Takes:
@@ -229,7 +230,7 @@ def parse_bond(bond_dict, cutoff=0.05):
     return bond_results
     
 
-def get_data(root, full_descriptors=False, orca=True):
+def get_data(root, full_descriptors=False):
     """
     Gather data 
     Takes:
@@ -289,6 +290,7 @@ def get_data(root, full_descriptors=False, orca=True):
                                     charge_dict_ret[key_mag] = []
 
                                 charge_dict_ret[key_xyz].extend(list(v1["xyz"]))
+                                #print(v1["mag"])
                                 charge_dict_ret[key_mag].append(v1["mag"])
                                 
                             elif k1=="spin": 
@@ -317,7 +319,10 @@ def get_data(root, full_descriptors=False, orca=True):
 
         if full_descriptors: 
             for k, v in charge_dict_ret.items():
-                ret_dict[k] = v
+                if 'mag' in k:
+                    ret_dict[k] = v[0] 
+                else:
+                    ret_dict[k] = v
             for k, v in bond_dict.items():
                 ret_dict[k] = v
             for k, v in other_dict.items():
