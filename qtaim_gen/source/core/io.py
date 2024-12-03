@@ -1,3 +1,5 @@
+from qtaim_gen.source.core.parse_qtaim import dft_inp_to_dict
+
 def write_input_file(folder, lines, n_atoms, options):
     """
     Write input file for Multiwfn.
@@ -25,6 +27,31 @@ def write_input_file(folder, lines, n_atoms, options):
             )
         f.write("*\n")
 
+def convert_inp_to_xyz(orca_path, output_path): 
+    """
+    Convert an ORCA input file to an XYZ file.
+    Takes:
+        orca_path: path to ORCA input file
+        output_path: path to write XYZ file to
+    Returns:
+        None
+    """
+
+    mol_dict = dft_inp_to_dict(orca_path, parse_charge_spin=True)
+    
+    n_atoms = len(mol_dict["mol"])
+    
+    xyz_str = "{}\n".format(n_atoms)
+    spin_charge_line = "{} {}\n".format(mol_dict["charge"], mol_dict["spin"])
+    xyz_str += spin_charge_line
+    # write the atom positions
+    for ind, atom in mol_dict["mol"].items():
+        
+        atom_line = "{} {} {} {}\n".format(atom["element"], atom["pos"][0], atom["pos"][1], atom["pos"][2])
+        xyz_str += atom_line
+    
+    with open(output_path, 'w') as f:
+        f.write(xyz_str)
 
 def write_input_file_from_pmg_molecule(folder, molecule, options):
     try:

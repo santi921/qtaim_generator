@@ -156,6 +156,7 @@ def test_parse_dft_inp():
         assert "pos" in i.keys(), "xyz not in dict"
         assert len(i["pos"]) == 3, "xyz not length 3"
 
+
 def test_parse_dft_inp_orca():
     dict_dft = orca_inp_to_dict("./test_files/orca/orca.inp")
     assert len(dict_dft.keys()) == 87, "wrong number of keys"
@@ -172,8 +173,6 @@ def test_parse_dft_inp_orca():
         assert "pos" in i.keys(), "xyz not in dict"
         assert len(i["pos"]) == 3, "xyz not length 3"
 
-
-test_parse_dft_inp_orca()
 
 def test_only_atom_cps():
     qtaim_dict = get_qtaim_descs("./test_files/CPprop.txt")

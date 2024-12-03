@@ -63,8 +63,6 @@ def main():
             bond_list.append(bonds_rdkit)
         identifier.append(ind)
 
-        if determine_bonds:
-            [molecule_graph.add_edge(bond[0], bond[1]) for bond in bonds_rdkit]
         xyz_files_completed.append(xyz_file)
 
         if pull_spin or pull_charge:
@@ -86,6 +84,10 @@ def main():
             )
 
         molecule_graph = MoleculeGraph.with_empty_graph(molecule)
+        
+        if determine_bonds:
+            [molecule_graph.add_edge(bond[0], bond[1]) for bond in bonds_rdkit]
+        
         molecule_graphs.append(molecule_graph)
         molecules.append(molecule)
 

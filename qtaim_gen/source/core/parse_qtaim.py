@@ -214,12 +214,12 @@ def get_spin_charge_from_orca_inp(dft_inp_file):
 
     # find line starting with "* xyz"
     for ind, line in enumerate(lines):
-        if "*xyz" in line:
+        if "* xyz" in line:
             xyz_ind = ind
             header = lines[xyz_ind]
             break
 
-    _, charge, spin = header.split()
+    charge, spin = header.split()[-2:]
     return charge, spin
 
 
@@ -262,7 +262,7 @@ def orca_inp_to_dict(dft_inp_file):
     return atom_dict
 
 
-def dft_inp_to_dict(dft_inp_file):
+def dft_inp_to_dict(dft_inp_file, parse_charge_spin=False):
     """
     helper function to parse dft input file.
     Takes
@@ -282,6 +282,12 @@ def dft_inp_to_dict(dft_inp_file):
             xyz_ind = ind
             break
 
+    if parse_charge_spin:
+        ret_dict = {}
+        charge, spin = get_spin_charge_from_orca_inp(dft_inp_file)
+        ret_dict["charge"] = charge
+        ret_dict["spin"] = spin
+
     # filter lines before and including xyz_ind
     lines = lines[xyz_ind + 1 : -1]
 
@@ -292,6 +298,9 @@ def dft_inp_to_dict(dft_inp_file):
             "pos": [float(x) for x in line_split[1:]],
         }
 
+    if parse_charge_spin:
+        ret_dict["mol"] = atom_dict
+        return ret_dict
     return atom_dict
 
 
