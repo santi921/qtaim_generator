@@ -20,9 +20,9 @@ from qtaim_gen.source.core.parse_json import (
 def main():
     
     parser = argparse.ArgumentParser()
-    parser.add_argument("-root_folder", type=str, default="../../../../data/xyz/")
+    parser.add_argument("-root_folder", type=str, default="./ORCA/")
     parser.add_argument(
-        "-pkl_file", type=str, default="../../../../data/xyz/molecules.pkl"
+        "-pkl_file", type=str, default="molecules.pkl"
     )
 
     parser.add_argument(
@@ -54,7 +54,7 @@ def main():
                     inp_files.append(folder + "/" + file)
                     folder_list.append(folder)
     
-    print(inp_files)
+    
     # create a list of pmg molecules from the xyz files
     for ind, in_file in enumerate(inp_files):    
         

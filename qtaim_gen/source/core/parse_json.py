@@ -228,7 +228,8 @@ def parse_bond(bond_dict, cutoff=0.05):
     bond_results["bond_list_ibsi"] = list(bond_results["ibsi_data"].keys())
     bond_results["bond_list_fuzzy"] = list(bond_results["fuzzy_data"].keys())
     return bond_results
-    
+
+
 def gather_dicts(json_list, i):
     """
     Gather data from json files and impute missing values.
@@ -307,6 +308,7 @@ def gather_dicts(json_list, i):
                 ret_dict["other"] = other_dict
 
     return  ret_dict
+
 
 def get_data(root, full_descriptors=False, root_folder_tf=True):
     """

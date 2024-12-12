@@ -263,7 +263,7 @@ def test_merge():
     
     # convert to pandas dataframe and save as pickle
     df = pd.DataFrame(df)
-    pd.to_pickle(df, root_folder + pkl_file)
+    pd.to_pickle(df, root_folder + "/" + pkl_file)
     
     # check that all the keys are in the dataframe
     assert "molecule" in df.keys(), "molecule not in df"
@@ -275,6 +275,43 @@ def test_merge():
     assert "charge" in df.keys(), "charge not in df"
     for key in keys_extra_feats:
         assert key in df.keys(), f"{key} not in df"
-    print(df)
+    
 
-test_merge()
+
+def test_output():
+    df = pd.read_pickle(root_folder + "test.pkl")
+
+
+    pmg_len_ref = [17, 17, 18, 14]
+    bonds_len_ref = [17, 17, 18, 15]
+    qtaim_bond_len_ref = [18, 17, 20, 15]
+    ibsi_len_ref = [30, 29, 28, 29]
+    bond_list_fuzzy_len_ref = [30, 33, 32, 31]
+    esp_vol_ref = [999.83204, 1109.16548, 1035.72387, 933.3622]
+    esp_bond_ref = [17.18683141, 18.18791997, 17.01855256, 16.56969813]
+    esp_atom_ref = [-30.81831798, -32.62673232, -31.07861227, -33.10112962]
+    qtaim_bond_ref = [(0, 9), (0, 10), (0, 9), (0, 10)]
+    qtaim_spin_ref = [0.0, 0.0, 0.0, 0.0]
+    qtaim_charge_ref = [0.00471, 0.100792, -0.039984, 0.506252]
+
+    vdd_mag_ref = [1.02591, 1.715927, 0.971877, 0.970232]
+    vdd_dipole_ref = [[0.128154, -0.461206, 0.90739], [-0.008995, 1.689744, 0.29848], [-0.084769, -0.967985, 0.019081], [0.064753, 0.341573, 0.905806]]
+    adch_atom_dipole_ref = [[0.042746, -0.048822, 0.136883], [-0.000284, -0.156197, -0.102598], [-0.080911, 0.011131, 0.093894], [0.011559, -0.063826, 0.193715]]
+
+    for i, row in df.iterrows():
+        assert len(df.molecule_graph[i]) == pmg_len_ref[i]
+        assert len(df.extra_feat_atom_esp_nuc[i]) == pmg_len_ref[i]
+        assert len(df.extra_feat_bond_esp_nuc[i]) == qtaim_bond_len_ref[i]
+        assert len(df.bond_list_qtaim[i]) == qtaim_bond_len_ref[i]
+        assert len(df.bond_list_ibsi[i]) == ibsi_len_ref[i]
+        assert len(df.bond_list_fuzzy[i]) == bond_list_fuzzy_len_ref[i]
+        
+        assert df.ESP_Volume[i] == esp_vol_ref[i]
+        assert df.extra_feat_bond_esp_nuc[i][1] == esp_bond_ref[i]
+        assert df.extra_feat_atom_esp_e[i][1] == esp_atom_ref[i]
+        assert df.bond_list_qtaim[i][-1] == qtaim_bond_ref[i]
+        assert df.bader_spin[i][-1] == qtaim_spin_ref[i]
+        assert df.bader_charge[i][-1] == qtaim_charge_ref[i]
+        assert df.vdd_dipole[i] == vdd_dipole_ref[i]
+        assert df.adch_atomic_dipole[i][-1] == adch_atom_dipole_ref[i]
+#test_merge()
