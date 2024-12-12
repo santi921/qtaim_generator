@@ -16,6 +16,6 @@ setup(
         "./qtaim_gen/source/scripts/helpers/check_res_rxn_json.py",
         "./qtaim_gen/source/scripts/helpers/folder_xyz_molecules_to_pkl.py",
         "./qtaim_gen/source/scripts/helpers/outcar_seek_and_convert_xyz.py",
-        "./qtaim_gen/source/scripts/helpers/folder_orca_inp_to_pkl.py"
+        "./qtaim_gen/source/scripts/helpers/folder_orca_inp_to_pkl.py",
     ],
 )

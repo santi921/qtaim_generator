@@ -49,14 +49,11 @@ def main():
         help="update bonds with qtaim bond path definitions",
     )
 
-
     parser.add_argument(
         "--charges_spin",
         action="store_true",
         help="whether or not to include charges & spin in the qtaim features",
     )
-
-    
 
     parser.add_argument(
         "-define_bonds", choices=["distances", "qtaim"], default="qtaim"
@@ -102,9 +99,9 @@ def main():
 
     if impute:
         imputed_file = root + "impute_vals.json"
-    
+
     print("df type {}".format(type(pandas_file)))
-    
+
     features_atom = [
         "Lagrangian_K",
         "Hamiltonian_K",
@@ -123,7 +120,7 @@ def main():
         "det_hessian",
         "ellip_e_dens",
         "eta",
-        "lol"
+        "lol",
     ]
 
     features_bond = [
@@ -144,13 +141,12 @@ def main():
         "det_hessian",
         "ellip_e_dens",
         "eta",
-        "lol"
+        "lol",
     ]
 
     if parse_charges:
-        features_atom += ["density_beta","density_alpha","spin_density"]
-        features_bond += ["density_beta","density_alpha","spin_density"]
-
+        features_atom += ["density_beta", "density_alpha", "spin_density"]
+        features_bond += ["density_beta", "density_alpha", "spin_density"]
 
     impute_dict = {}
 
@@ -162,7 +158,7 @@ def main():
             root_dir=root,
             json_file_imputed=imputed_file,
             reaction=reaction,
-            define_bonds=define_bonds
+            define_bonds=define_bonds,
         )
         for i in impute_dict.keys():
             print("-" * 20 + i + "-" * 20)
@@ -180,7 +176,7 @@ def main():
         define_bonds=define_bonds,
         update_bonds_w_qtaim=update_bonds_w_qtaim,
         impute=impute,
-        impute_dict=impute_dict
+        impute_dict=impute_dict,
     )
 
     # if impute false then drop the rows that have -1 values

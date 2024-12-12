@@ -38,7 +38,7 @@ def main():
             restart=False,
         )  # works!
     except:
-        
+
         print("Error in gbw_analysis - case 1")
 
     try:

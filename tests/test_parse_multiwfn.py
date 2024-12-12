@@ -57,7 +57,7 @@ class TestMultiwfnParser:
             other_info_dict["mpp_heavy"], 0.60534, atol=1e-3
         ), "mpp_heavy is not right"
         assert np.isclose(
-            other_info_dict["sdp_heavy"],  2.073794, atol=1e-3
+            other_info_dict["sdp_heavy"], 2.073794, atol=1e-3
         ), "sdp_heavy is not right"
         assert np.isclose(
             other_info_dict["sdp_full"], 4.146655, atol=1e-3
@@ -206,7 +206,7 @@ class TestMultiwfnParser:
         charge_dict_overall = parse_charge_base(
             file_mbis_info, corrected=False, dipole=False
         )
-        
+
         assert len(charge_dict_overall) == 21, "wrong number of atoms in mbis charge"
         assert np.isclose(
             charge_dict_overall["9_C"], -0.07241207, atol=1e-3
@@ -226,12 +226,11 @@ class TestMultiwfnParser:
             dipole_info["mag"], 0.064279, atol=1e-3
         ), "hirshfeld dipole is not right"
 
-
         file_vdd_info = "./test_files/multiwfn/vdd.out"
         charge_dict_overall, dipole_info = parse_charge_base(
             file_vdd_info, corrected=False, dipole=True
         )
-        
+
         assert len(charge_dict_overall) == 21, "wrong number of atoms in vdd charge"
         assert np.isclose(
             charge_dict_overall["9_C"], -0.01951698, atol=1e-3
@@ -244,7 +243,7 @@ class TestMultiwfnParser:
         charge_dict_overall, dipole_info = parse_charge_base(
             file_cm5_info, corrected=False
         )
-        
+
         assert len(charge_dict_overall) == 21, "wrong number of atoms in cm5 charge"
         assert np.isclose(
             charge_dict_overall["9_C"], -0.07136367, atol=1e-3
@@ -259,7 +258,7 @@ class TestMultiwfnParser:
             atomic_dipole_dict_overall,
             dipole_info,
         ) = parse_charge_doc_adch(file_adch_info)
-        
+
         assert len(charge_dict_overall) == 21, "wrong number of atoms in adch charge"
         assert np.isclose(
             charge_dict_overall["9_C"], -0.08840594, atol=1e-3
@@ -271,7 +270,7 @@ class TestMultiwfnParser:
             dipole_info["xyz"][-1], 0.0150, atol=1e-3
         ), "adch dipole is not right"
         assert np.isclose(
-            atomic_dipole_dict_overall["9_C"][-1],  0.001915, atol=1e-3
+            atomic_dipole_dict_overall["9_C"][-1], 0.001915, atol=1e-3
         ), "adch dipole is not right"
 
         file_becke_info = "./test_files/multiwfn/becke.out"
@@ -280,13 +279,13 @@ class TestMultiwfnParser:
             atomic_dipole_dict_overall,
             dipole_info,
         ) = parse_charge_becke(file_becke_info)
-        #print(charge_dict_overall["9_C"], dipole_info["mag"], dipole_info["xyz"][-1], atomic_dipole_dict_overall["9_C"][-1])
+        # print(charge_dict_overall["9_C"], dipole_info["mag"], dipole_info["xyz"][-1], atomic_dipole_dict_overall["9_C"][-1])
         assert len(charge_dict_overall) == 21, "wrong number of atoms in becke charge"
         assert np.isclose(
             charge_dict_overall["9_C"], 0.00267841, atol=1e-3
         ), "becke charge is not right"
         assert np.isclose(
-            dipole_info["mag"],  0.0268685, atol=1e-3
+            dipole_info["mag"], 0.0268685, atol=1e-3
         ), "becke dipole is not right"
         assert np.isclose(
             dipole_info["xyz"][-1], 0.015906, atol=1e-3
@@ -307,7 +306,7 @@ class TestMultiwfnParser:
         assert len(fuzzy_dict) == 39, "wrong number of fuzzy bonds"
         assert len(ibsi_dict) == 133, "wrong number of ibsi bonds"
         assert np.isclose(
-            fuzzy_dict["6_C_to_9_C"],  0.07468526, atol=1e-3
+            fuzzy_dict["6_C_to_9_C"], 0.07468526, atol=1e-3
         ), "fuzzy bond order is not right"
         assert np.isclose(
             laplace_dict["68_C_to_76_H"], 0.819832, atol=1e-3
@@ -315,6 +314,3 @@ class TestMultiwfnParser:
         assert np.isclose(
             ibsi_dict["6_C_to_9_C"], 0.07658, atol=1e-3
         ), "ibsi bond order is not right"
-
-
-

@@ -5,7 +5,7 @@ from qtaim_gen.source.core.parse_qtaim import (
     only_atom_cps,
     find_cp_map,
     merge_qtaim_inds,
-    orca_inp_to_dict
+    orca_inp_to_dict,
 )
 
 from qtaim_gen.source.core.parse_critic import parse_critic2
@@ -167,7 +167,7 @@ def test_parse_dft_inp_orca():
 
     dict_dft = orca_inp_to_dict("./test_files/orca/orca5.inp")
     assert len(dict_dft.keys()) == 118, "wrong number of keys"
-    
+
     for i in dict_dft.values():
         assert "element" in i.keys(), "element not in dict"
         assert "pos" in i.keys(), "xyz not in dict"
