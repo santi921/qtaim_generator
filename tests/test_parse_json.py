@@ -47,8 +47,7 @@ def test_get_qtaim_data():
 def test_get_data():
     data_full = get_data(
         root=root_folder,  
-        full_descriptors=True, 
-        root_folder=True
+        full_descriptors=True
     )
     #print(data_full.keys())
 

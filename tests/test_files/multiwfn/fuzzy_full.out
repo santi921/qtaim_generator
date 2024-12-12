@@ -1,0 +1,678 @@
+ Warning: "settings.ini" was found neither in current folder nor in the path defined by "Multiwfnpath" environment variable. Now using default settings instead
+ 
+ Multiwfn -- A Multifunctional Wavefunction Analyzer
+ Version 3.8(dev), update date: 2024-Oct-6
+ Developer: Tian Lu (Beijing Kein Research Center for Natural Sciences)
+ Multiwfn official website: http://sobereva.com/multiwfn
+ Multiwfn English forum: http://sobereva.com/wfnbbs
+ Multiwfn Chinese forum: http://bbs.keinsci.com/wfn
+ Both following papers ***MUST BE CITED IN MAIN TEXT*** if Multiwfn is used:
+          Tian Lu, Feiwu Chen, J. Comput. Chem., 33, 580-592 (2012)
+          Tian Lu, J. Chem. Phys., 161, 082503 (2024)
+ See "How to cite Multiwfn.pdf" in Multiwfn binary package for more information
+
+ ( Number of parallel threads:   4  Current date: 2024-10-21  Time: 12:34:12 )
+
+ Warning: You should set OMP_STACKSIZE environment variable as mentioned in Section 2.1.2 of Multiwfn manual!
+ 
+ Please wait...
+ 
+ Total energy:    -349.925344009951 Hartree,   Virial ratio:  2.01179794
+ Total/Alpha/Beta electrons:     66.0000     33.0000     33.0000
+ Net charge:     0.00000    Expected multiplicity:    1
+ The number of orbitals:    33,  Atoms:     21,  GTFs:    309
+ This is a restricted closed-shell single-determinant wavefunction
+ Title line of this file: Name  /ocean/projects/che160019p/santi92/qtaim_generator/data/qm9/QTAIM//999/inp
+
+ Loaded /home/santiagovargas/dev/qtaim_generator/tests/test_files/omol/2/input.wfn successfully!
+ 
+ Formula: H12 C9      Total atoms:      21
+ Molecule weight:       120.19191 Da
+ Point group: C1 
+ 
+ "q": Exit program gracefully          "r": Load a new file
+                    ************ Main function menu ************
+ 0 Show molecular structure and view orbitals
+ 1 Output all properties at a point       2 Topology analysis
+ 3 Output and plot specific property in a line
+ 4 Output and plot specific property in a plane
+ 5 Output and plot specific property within a spatial region (calc. grid data)
+ 6 Check & modify wavefunction
+ 7 Population analysis and calculation of atomic charges
+ 8 Orbital composition analysis           9 Bond order analysis
+ 10 Plot total DOS, PDOS, OPDOS, local DOS, COHP and photoelectron spectrum
+ 11 Plot IR/Raman/UV-Vis/ECD/VCD/ROA/NMR spectrum
+ 12 Quantitative analysis of molecular surface
+ 13 Process grid data (No grid data is presented currently)
+ 14 Adaptive natural density partitioning (AdNDP) analysis
+ 15 Fuzzy atomic space analysis
+ 16 Charge decomposition analysis (CDA) and plot orbital interaction diagram
+ 17 Basin analysis                       18 Electron excitation analysis
+ 19 Orbital localization analysis        20 Visual study of weak interaction
+ 21 Energy decomposition analysis        22 Conceptual DFT (CDFT) analysis
+ 23 ETS-NOCV analysis                    24 (Hyper)polarizability analysis
+ 25 Electron delocalization and aromaticity analyses
+ 26 Structure and geometry related analyses
+ 100 Other functions (Part 1)            200 Other functions (Part 2)
+ 300 Other functions (Part 3)
+ 
+                 ======== Fuzzy atomic space analysis ========
+ -10 Set X,Y,Z of reference point, current:    0.00000   0.00000   0.00000 Bohr
+ -6 Choose type of integration grid for AOM, current: Atomic grid
+ -5 Define the atoms to be considered in options 1, 2, 13, current: all atoms
+ -4 Adjust reference parameter for FLU
+ -3 Set the number of iterations for Becke partition, current:  3
+ -2 Select radius definition for Becke partition, current: Modified CSD
+ -1 Select method for partitioning atomic spaces, current: Becke
+ 0 Return
+ 1 Perform integration in fuzzy atomic spaces for a real space function
+ 2 Calculate atomic and molecular multipole moments and <r^2>
+ 3 Calculate and output atomic overlap matrix (AOM) in current folder
+ 33 Calculate and output fragment overlap matrix (FOM) in current folder
+ 4 Calculate localization (LI) and delocalization index (DI)
+ 44 Calculate fragment LI (FLI) and interfragment DI (IFDI)
+ 5 Calculate PDI (Para-delocalization index)
+ 6 Calculate FLU (Aromatic fluctuation index)
+ 7 Calculate FLU-pi
+ 8 Perform integration in fuzzy overlap region for a real space functions
+ 11 Calculate multi-center delocalization index
+ 12 Calculate information-theoretic aromaticity index (ACS Omega, 3, 18370)
+ 13 Calculate atomic effective volume, free volume, polarizability and C6 coefficient
+ -2 Deformation density
+             ----------- Available real space functions -----------
+ 1 Electron density (rho)     2 Gradient norm of rho     3 Laplacian of rho
+ 4 Value of orbital wavefunction         44 Orbital probability density
+ 5 Electron spin density
+ 6 Hamiltonian kinetic energy density K(r)
+ 7 Lagrangian kinetic energy density G(r)
+ 8 Electrostatic potential from nuclear charges
+ 9 Electron Localization Function (ELF)
+ 10 Localized orbital locator (LOL)
+ 11 Local information entropy
+ 12 Total electrostatic potential (ESP)
+ 13 Reduced density gradient (RDG)       14 RDG with promolecular approximation
+ 15 Sign(lambda2)*rho      16 Sign(lambda2)*rho with promolecular approximation
+ 17 Correlation hole for alpha, ref. point:   0.00000   0.00000   0.00000
+ 18 Average local ionization energy (ALIE)
+ 19 Source function, mode: 1, ref. point:   0.00000   0.00000   0.00000
+ 20 Electron delocal. range func. EDR(r;d)  21 Orbital overlap dist. func. D(r)
+ 22 Delta-g (promolecular approximation)    23 Delta-g (Hirshfeld partition)
+ 24 Interaction region indicator (IRI)    25 van der Waals potential (probe=C )
+ 100 User-defined function (iuserfunc=    0), see Section 2.7 of manual
+ Radial points:   75    Angular points:  434   Total:     32550 per center
+ Please wait...
+ 
+ Progress: [--------------------------------------------------]     0.0 %     -
+ Progress: [##------------------------------------------------]     4.8 %     \
+ Progress: [####----------------------------------------------]     9.5 %     |
+ Progress: [#######-------------------------------------------]    14.3 %     /
+ Progress: [#########-----------------------------------------]    19.0 %     -
+ Progress: [###########---------------------------------------]    23.8 %     \
+ Progress: [##############------------------------------------]    28.6 %     |
+ Progress: [################----------------------------------]    33.3 %     /
+ Progress: [###################-------------------------------]    38.1 %     -
+ Progress: [#####################-----------------------------]    42.9 %     \
+ Progress: [#######################---------------------------]    47.6 %     |
+ Progress: [##########################------------------------]    52.4 %     /
+ Progress: [############################----------------------]    57.1 %     -
+ Progress: [##############################--------------------]    61.9 %     \
+ Progress: [#################################-----------------]    66.7 %     |
+ Progress: [###################################---------------]    71.4 %     /
+ Progress: [######################################------------]    76.2 %     -
+ Progress: [########################################----------]    81.0 %     \
+ Progress: [##########################################--------]    85.7 %     |
+ Progress: [#############################################-----]    90.5 %     /
+ Progress: [###############################################---]    95.2 %     -
+ Progress: [##################################################]   100.0 %     \
+ 
+ Calculation took up       1 seconds wall clock time
+ 
+   Atomic space        Value                % of sum            % of sum abs
+     1(C )            6.44779435             9.769390             9.769390
+     2(C )            6.16003172             9.333386             9.333386
+     3(C )            6.33517752             9.598758             9.598758
+     4(C )            6.21043636             9.409756             9.409756
+     5(C )            6.20602588             9.403074             9.403074
+     6(C )            6.23775538             9.451149             9.451149
+     7(C )            6.34617787             9.615425             9.615425
+     8(C )            6.23774801             9.451138             9.451138
+     9(C )            6.20623558             9.403392             9.403392
+    10(H )            0.80971858             1.226847             1.226847
+    11(H )            0.80958773             1.226649             1.226649
+    12(H )            0.81042088             1.227911             1.227911
+    13(H )            0.81110100             1.228941             1.228941
+    14(H )            0.81108988             1.228925             1.228925
+    15(H )            0.79899084             1.210593             1.210593
+    16(H )            0.79173836             1.199604             1.199604
+    17(H )            0.79067502             1.197993             1.197993
+    18(H )            0.80544509             1.220372             1.220372
+    19(H )            0.79158950             1.199379             1.199379
+    20(H )            0.79061816             1.197907             1.197907
+    21(H )            0.79161200             1.199413             1.199413
+ Summing up above values:         65.99996971
+ Summing up absolute value of above values:         65.99996971
+ 
+                 ======== Fuzzy atomic space analysis ========
+ -10 Set X,Y,Z of reference point, current:    0.00000   0.00000   0.00000 Bohr
+ -6 Choose type of integration grid for AOM, current: Atomic grid
+ -5 Define the atoms to be considered in options 1, 2, 13, current: all atoms
+ -4 Adjust reference parameter for FLU
+ -3 Set the number of iterations for Becke partition, current:  3
+ -2 Select radius definition for Becke partition, current: Modified CSD
+ -1 Select method for partitioning atomic spaces, current: Becke
+ 0 Return
+ 1 Perform integration in fuzzy atomic spaces for a real space function
+ 2 Calculate atomic and molecular multipole moments and <r^2>
+ 3 Calculate and output atomic overlap matrix (AOM) in current folder
+ 33 Calculate and output fragment overlap matrix (FOM) in current folder
+ 4 Calculate localization (LI) and delocalization index (DI)
+ 44 Calculate fragment LI (FLI) and interfragment DI (IFDI)
+ 5 Calculate PDI (Para-delocalization index)
+ 6 Calculate FLU (Aromatic fluctuation index)
+ 7 Calculate FLU-pi
+ 8 Perform integration in fuzzy overlap region for a real space functions
+ 11 Calculate multi-center delocalization index
+ 12 Calculate information-theoretic aromaticity index (ACS Omega, 3, 18370)
+ 13 Calculate atomic effective volume, free volume, polarizability and C6 coefficient
+ -2 Deformation density
+             ----------- Available real space functions -----------
+ 1 Electron density (rho)     2 Gradient norm of rho     3 Laplacian of rho
+ 4 Value of orbital wavefunction         44 Orbital probability density
+ 5 Electron spin density
+ 6 Hamiltonian kinetic energy density K(r)
+ 7 Lagrangian kinetic energy density G(r)
+ 8 Electrostatic potential from nuclear charges
+ 9 Electron Localization Function (ELF)
+ 10 Localized orbital locator (LOL)
+ 11 Local information entropy
+ 12 Total electrostatic potential (ESP)
+ 13 Reduced density gradient (RDG)       14 RDG with promolecular approximation
+ 15 Sign(lambda2)*rho      16 Sign(lambda2)*rho with promolecular approximation
+ 17 Correlation hole for alpha, ref. point:   0.00000   0.00000   0.00000
+ 18 Average local ionization energy (ALIE)
+ 19 Source function, mode: 1, ref. point:   0.00000   0.00000   0.00000
+ 20 Electron delocal. range func. EDR(r;d)  21 Orbital overlap dist. func. D(r)
+ 22 Delta-g (promolecular approximation)    23 Delta-g (Hirshfeld partition)
+ 24 Interaction region indicator (IRI)    25 van der Waals potential (probe=C )
+ 100 User-defined function (iuserfunc=    0), see Section 2.7 of manual
+ Radial points:   75    Angular points:  434   Total:     32550 per center
+ Please wait...
+ 
+ Progress: [--------------------------------------------------]     0.0 %     |
+ Progress: [##------------------------------------------------]     4.8 %     /
+ Progress: [####----------------------------------------------]     9.5 %     -
+ Progress: [#######-------------------------------------------]    14.3 %     \
+ Progress: [#########-----------------------------------------]    19.0 %     |
+ Progress: [###########---------------------------------------]    23.8 %     /
+ Progress: [##############------------------------------------]    28.6 %     -
+ Progress: [################----------------------------------]    33.3 %     \
+ Progress: [###################-------------------------------]    38.1 %     |
+ Progress: [#####################-----------------------------]    42.9 %     /
+ Progress: [#######################---------------------------]    47.6 %     -
+ Progress: [##########################------------------------]    52.4 %     \
+ Progress: [############################----------------------]    57.1 %     |
+ Progress: [##############################--------------------]    61.9 %     /
+ Progress: [#################################-----------------]    66.7 %     -
+ Progress: [###################################---------------]    71.4 %     \
+ Progress: [######################################------------]    76.2 %     |
+ Progress: [########################################----------]    81.0 %     /
+ Progress: [##########################################--------]    85.7 %     -
+ Progress: [#############################################-----]    90.5 %     \
+ Progress: [###############################################---]    95.2 %     |
+ Progress: [##################################################]   100.0 %     /
+ 
+ Calculation took up       2 seconds wall clock time
+ 
+   Atomic space        Value                % of sum            % of sum abs
+     1(C )           28.51113470            10.535894            10.535894
+     2(C )           27.41924658            10.132402            10.132402
+     3(C )           28.13190719            10.395756            10.395756
+     4(C )           27.73575706            10.249364            10.249364
+     5(C )           27.71346755            10.241128            10.241128
+     6(C )           27.80273107            10.274114            10.274114
+     7(C )           28.20254239            10.421858            10.421858
+     8(C )           27.80284672            10.274156            10.274156
+     9(C )           27.71379500            10.241249            10.241249
+    10(H )            1.64914556             0.609419             0.609419
+    11(H )            1.64883219             0.609303             0.609303
+    12(H )            1.62395495             0.600110             0.600110
+    13(H )            1.64819138             0.609066             0.609066
+    14(H )            1.64813194             0.609044             0.609044
+    15(H )            1.63943223             0.605829             0.605829
+    16(H )            1.61582218             0.597105             0.597105
+    17(H )            1.62462943             0.600359             0.600359
+    18(H )            1.65594990             0.611933             0.611933
+    19(H )            1.58205951             0.584628             0.584628
+    20(H )            1.62452735             0.600322             0.600322
+    21(H )            1.61542697             0.596959             0.596959
+ Summing up above values:        270.60953185
+ Summing up absolute value of above values:        270.60953185
+ 
+                 ======== Fuzzy atomic space analysis ========
+ -10 Set X,Y,Z of reference point, current:    0.00000   0.00000   0.00000 Bohr
+ -6 Choose type of integration grid for AOM, current: Atomic grid
+ -5 Define the atoms to be considered in options 1, 2, 13, current: all atoms
+ -4 Adjust reference parameter for FLU
+ -3 Set the number of iterations for Becke partition, current:  3
+ -2 Select radius definition for Becke partition, current: Modified CSD
+ -1 Select method for partitioning atomic spaces, current: Becke
+ 0 Return
+ 1 Perform integration in fuzzy atomic spaces for a real space function
+ 2 Calculate atomic and molecular multipole moments and <r^2>
+ 3 Calculate and output atomic overlap matrix (AOM) in current folder
+ 33 Calculate and output fragment overlap matrix (FOM) in current folder
+ 4 Calculate localization (LI) and delocalization index (DI)
+ 44 Calculate fragment LI (FLI) and interfragment DI (IFDI)
+ 5 Calculate PDI (Para-delocalization index)
+ 6 Calculate FLU (Aromatic fluctuation index)
+ 7 Calculate FLU-pi
+ 8 Perform integration in fuzzy overlap region for a real space functions
+ 11 Calculate multi-center delocalization index
+ 12 Calculate information-theoretic aromaticity index (ACS Omega, 3, 18370)
+ 13 Calculate atomic effective volume, free volume, polarizability and C6 coefficient
+ -2 Deformation density
+             ----------- Available real space functions -----------
+ 1 Electron density (rho)     2 Gradient norm of rho     3 Laplacian of rho
+ 4 Value of orbital wavefunction         44 Orbital probability density
+ 5 Electron spin density
+ 6 Hamiltonian kinetic energy density K(r)
+ 7 Lagrangian kinetic energy density G(r)
+ 8 Electrostatic potential from nuclear charges
+ 9 Electron Localization Function (ELF)
+ 10 Localized orbital locator (LOL)
+ 11 Local information entropy
+ 12 Total electrostatic potential (ESP)
+ 13 Reduced density gradient (RDG)       14 RDG with promolecular approximation
+ 15 Sign(lambda2)*rho      16 Sign(lambda2)*rho with promolecular approximation
+ 17 Correlation hole for alpha, ref. point:   0.00000   0.00000   0.00000
+ 18 Average local ionization energy (ALIE)
+ 19 Source function, mode: 1, ref. point:   0.00000   0.00000   0.00000
+ 20 Electron delocal. range func. EDR(r;d)  21 Orbital overlap dist. func. D(r)
+ 22 Delta-g (promolecular approximation)    23 Delta-g (Hirshfeld partition)
+ 24 Interaction region indicator (IRI)    25 van der Waals potential (probe=C )
+ 100 User-defined function (iuserfunc=    0), see Section 2.7 of manual
+ Radial points:   75    Angular points:  434   Total:     32550 per center
+ Please wait...
+ 
+ Progress: [--------------------------------------------------]     0.0 %     -
+ Progress: [##------------------------------------------------]     4.8 %     \
+ Progress: [####----------------------------------------------]     9.5 %     |
+ Progress: [#######-------------------------------------------]    14.3 %     /
+ Progress: [#########-----------------------------------------]    19.0 %     -
+ Progress: [###########---------------------------------------]    23.8 %     \
+ Progress: [##############------------------------------------]    28.6 %     |
+ Progress: [################----------------------------------]    33.3 %     /
+ Progress: [###################-------------------------------]    38.1 %     -
+ Progress: [#####################-----------------------------]    42.9 %     \
+ Progress: [#######################---------------------------]    47.6 %     |
+ Progress: [##########################------------------------]    52.4 %     /
+ Progress: [############################----------------------]    57.1 %     -
+ Progress: [##############################--------------------]    61.9 %     \
+ Progress: [#################################-----------------]    66.7 %     |
+ Progress: [###################################---------------]    71.4 %     /
+ Progress: [######################################------------]    76.2 %     -
+ Progress: [########################################----------]    81.0 %     \
+ Progress: [##########################################--------]    85.7 %     |
+ Progress: [#############################################-----]    90.5 %     /
+ Progress: [###############################################---]    95.2 %     -
+ Progress: [##################################################]   100.0 %     \
+ 
+ Calculation took up       4 seconds wall clock time
+ 
+   Atomic space        Value                % of sum            % of sum abs
+     1(C )            0.29558580       -361092.164240             5.378777
+     2(C )            0.53634254       -655204.318032             9.759830
+     3(C )            0.30477366       -372316.201709             5.545969
+     4(C )            0.27088879       -330921.919993             4.929366
+     5(C )            0.31558365       -385521.850467             5.742678
+     6(C )            0.22137112       -270430.371199             4.028292
+     7(C )            0.26535752       -324164.841029             4.828713
+     8(C )            0.22153131       -270626.066078             4.031207
+     9(C )            0.31622904       -386310.266796             5.754423
+    10(H )           -0.21441451        261932.075616            -3.901703
+    11(H )           -0.21470188        262283.130042            -3.906932
+    12(H )           -0.22221609        271462.600748            -4.043668
+    13(H )           -0.23979798        292940.905273            -4.363606
+    14(H )           -0.23976444        292899.929869            -4.362996
+    15(H )           -0.23608437        288404.305676            -4.296029
+    16(H )           -0.26479996        323483.711171            -4.818567
+    17(H )           -0.21879054        267277.893594            -3.981333
+    18(H )           -0.18093243        221029.845086            -3.292429
+    19(H )           -0.23197712        283386.830484            -4.221290
+    20(H )           -0.21913483        267698.486249            -3.987598
+    21(H )           -0.26513114        323888.285735            -4.824594
+ Summing up above values:         -0.00008186
+ Summing up absolute value of above values:          5.49540872
+ 
+                 ======== Fuzzy atomic space analysis ========
+ -10 Set X,Y,Z of reference point, current:    0.00000   0.00000   0.00000 Bohr
+ -6 Choose type of integration grid for AOM, current: Atomic grid
+ -5 Define the atoms to be considered in options 1, 2, 13, current: all atoms
+ -4 Adjust reference parameter for FLU
+ -3 Set the number of iterations for Becke partition, current:  3
+ -2 Select radius definition for Becke partition, current: Modified CSD
+ -1 Select method for partitioning atomic spaces, current: Becke
+ 0 Return
+ 1 Perform integration in fuzzy atomic spaces for a real space function
+ 2 Calculate atomic and molecular multipole moments and <r^2>
+ 3 Calculate and output atomic overlap matrix (AOM) in current folder
+ 33 Calculate and output fragment overlap matrix (FOM) in current folder
+ 4 Calculate localization (LI) and delocalization index (DI)
+ 44 Calculate fragment LI (FLI) and interfragment DI (IFDI)
+ 5 Calculate PDI (Para-delocalization index)
+ 6 Calculate FLU (Aromatic fluctuation index)
+ 7 Calculate FLU-pi
+ 8 Perform integration in fuzzy overlap region for a real space functions
+ 11 Calculate multi-center delocalization index
+ 12 Calculate information-theoretic aromaticity index (ACS Omega, 3, 18370)
+ 13 Calculate atomic effective volume, free volume, polarizability and C6 coefficient
+ -2 Deformation density
+             ----------- Available real space functions -----------
+ 1 Electron density (rho)     2 Gradient norm of rho     3 Laplacian of rho
+ 4 Value of orbital wavefunction         44 Orbital probability density
+ 5 Electron spin density
+ 6 Hamiltonian kinetic energy density K(r)
+ 7 Lagrangian kinetic energy density G(r)
+ 8 Electrostatic potential from nuclear charges
+ 9 Electron Localization Function (ELF)
+ 10 Localized orbital locator (LOL)
+ 11 Local information entropy
+ 12 Total electrostatic potential (ESP)
+ 13 Reduced density gradient (RDG)       14 RDG with promolecular approximation
+ 15 Sign(lambda2)*rho      16 Sign(lambda2)*rho with promolecular approximation
+ 17 Correlation hole for alpha, ref. point:   0.00000   0.00000   0.00000
+ 18 Average local ionization energy (ALIE)
+ 19 Source function, mode: 1, ref. point:   0.00000   0.00000   0.00000
+ 20 Electron delocal. range func. EDR(r;d)  21 Orbital overlap dist. func. D(r)
+ 22 Delta-g (promolecular approximation)    23 Delta-g (Hirshfeld partition)
+ 24 Interaction region indicator (IRI)    25 van der Waals potential (probe=C )
+ 100 User-defined function (iuserfunc=    0), see Section 2.7 of manual
+ Radial points:   75    Angular points:  434   Total:     32550 per center
+ Please wait...
+ 
+ Progress: [--------------------------------------------------]     0.0 %     |
+ Progress: [##------------------------------------------------]     4.8 %     /
+ Progress: [####----------------------------------------------]     9.5 %     -
+ Progress: [#######-------------------------------------------]    14.3 %     \
+ Progress: [#########-----------------------------------------]    19.0 %     |
+ Progress: [###########---------------------------------------]    23.8 %     /
+ Progress: [##############------------------------------------]    28.6 %     -
+ Progress: [################----------------------------------]    33.3 %     \
+ Progress: [###################-------------------------------]    38.1 %     |
+ Progress: [#####################-----------------------------]    42.9 %     /
+ Progress: [#######################---------------------------]    47.6 %     -
+ Progress: [##########################------------------------]    52.4 %     \
+ Progress: [############################----------------------]    57.1 %     |
+ Progress: [##############################--------------------]    61.9 %     /
+ Progress: [#################################-----------------]    66.7 %     -
+ Progress: [###################################---------------]    71.4 %     \
+ Progress: [######################################------------]    76.2 %     |
+ Progress: [########################################----------]    81.0 %     /
+ Progress: [##########################################--------]    85.7 %     -
+ Progress: [#############################################-----]    90.5 %     \
+ Progress: [###############################################---]    95.2 %     |
+ Progress: [##################################################]   100.0 %     /
+ 
+ Calculation took up       2 seconds wall clock time
+ 
+   Atomic space        Value                % of sum            % of sum abs
+     1(C )           31.16702351             5.561976             5.561976
+     2(C )           20.41826556             3.643784             3.643784
+     3(C )           28.35733026             5.060566             5.060566
+     4(C )           25.61482864             4.571147             4.571147
+     5(C )           24.10015000             4.300842             4.300842
+     6(C )           26.39645631             4.710634             4.710634
+     7(C )           30.85432203             5.506172             5.506172
+     8(C )           26.39163071             4.709773             4.709773
+     9(C )           24.10566288             4.301826             4.301826
+    10(H )           29.68035783             5.296670             5.296670
+    11(H )           29.65477110             5.292103             5.292103
+    12(H )           21.00618617             3.748702             3.748702
+    13(H )           28.02099625             5.000545             5.000545
+    14(H )           28.02113576             5.000570             5.000570
+    15(H )           30.76795629             5.490759             5.490759
+    16(H )           27.24226246             4.861574             4.861574
+    17(H )           27.78629463             4.958661             4.958661
+    18(H )           28.92500097             5.161871             5.161871
+    19(H )           16.81838682             3.001360             3.001360
+    20(H )           27.78717879             4.958818             4.958818
+    21(H )           27.24267350             4.861648             4.861648
+ Summing up above values:        560.35887047
+ Summing up absolute value of above values:        560.35887047
+ 
+                 ======== Fuzzy atomic space analysis ========
+ -10 Set X,Y,Z of reference point, current:    0.00000   0.00000   0.00000 Bohr
+ -6 Choose type of integration grid for AOM, current: Atomic grid
+ -5 Define the atoms to be considered in options 1, 2, 13, current: all atoms
+ -4 Adjust reference parameter for FLU
+ -3 Set the number of iterations for Becke partition, current:  3
+ -2 Select radius definition for Becke partition, current: Modified CSD
+ -1 Select method for partitioning atomic spaces, current: Becke
+ 0 Return
+ 1 Perform integration in fuzzy atomic spaces for a real space function
+ 2 Calculate atomic and molecular multipole moments and <r^2>
+ 3 Calculate and output atomic overlap matrix (AOM) in current folder
+ 33 Calculate and output fragment overlap matrix (FOM) in current folder
+ 4 Calculate localization (LI) and delocalization index (DI)
+ 44 Calculate fragment LI (FLI) and interfragment DI (IFDI)
+ 5 Calculate PDI (Para-delocalization index)
+ 6 Calculate FLU (Aromatic fluctuation index)
+ 7 Calculate FLU-pi
+ 8 Perform integration in fuzzy overlap region for a real space functions
+ 11 Calculate multi-center delocalization index
+ 12 Calculate information-theoretic aromaticity index (ACS Omega, 3, 18370)
+ 13 Calculate atomic effective volume, free volume, polarizability and C6 coefficient
+ Allocating memory...
+ Radial points:   45    Angular points:  170   Total:      7650 per center
+ Please wait...
+ 
+ Progress: [--------------------------------------------------]     0.0 %     -
+ Progress: [##------------------------------------------------]     4.8 %     \
+ Progress: [####----------------------------------------------]     9.5 %     |
+ Progress: [#######-------------------------------------------]    14.3 %     /
+ Progress: [#########-----------------------------------------]    19.0 %     -
+ Progress: [###########---------------------------------------]    23.8 %     \
+ Progress: [##############------------------------------------]    28.6 %     |
+ Progress: [################----------------------------------]    33.3 %     /
+ Progress: [###################-------------------------------]    38.1 %     -
+ Progress: [#####################-----------------------------]    42.9 %     \
+ Progress: [#######################---------------------------]    47.6 %     |
+ Progress: [##########################------------------------]    52.4 %     /
+ Progress: [############################----------------------]    57.1 %     -
+ Progress: [##############################--------------------]    61.9 %     \
+ Progress: [#################################-----------------]    66.7 %     |
+ Progress: [###################################---------------]    71.4 %     /
+ Progress: [######################################------------]    76.2 %     -
+ Progress: [########################################----------]    81.0 %     \
+ Progress: [##########################################--------]    85.7 %     |
+ Progress: [#############################################-----]    90.5 %     /
+ Progress: [###############################################---]    95.2 %     -
+ Progress: [##################################################]   100.0 %     \
+ 
+ Calculation took up       0 seconds wall clock time
+ Error of AOM is    0.00102022
+ Maximum diagonal deviation to 1:     0.000295 at orbital    23
+ Maximum nondiagonal deviation to 0:  0.000206 between orbitals    12    23
+
+ Warning: The integration is not very accurate
+ To improve accuracy, please try one or some of following treatments:
+ (1) Enlarge "radpot" and "sphpot" in settings.ini
+ (2) Set "radcut" in settings.ini to 0
+ (3) Choose option -6 to change to much more expensive molecular grid
+ (4) If diffuse functions were heavily employed, remove them
+ 
+ Calculating LI and DI from AOM...
+ 
+ Note: Delocalization index in fuzzy atomic space is also known as fuzzy bond order
+ Note: Diagonal terms are the sum of corresponding row or column elements, for closed-shell cases, they are also known as atomic valence
+ 
+ ********************* Total delocalization index matrix *********************
+             1             2             3             4             5      
+     1    4.06073607    1.13207771    0.06279056    0.01994403    0.04903596
+     2    1.13207771    4.66185909    0.98653227    0.20796410    0.93249128
+     3    0.06279056    0.98653227    4.22111960    1.03455687    0.12533431
+     4    0.01994403    0.20796410    1.03455687    4.35821764    0.95452953
+     5    0.04903596    0.93249128    0.12533431    0.95452953    4.38546566
+     6    0.00359183    0.05300265    0.01739942    0.07011769    1.04422070
+     7    0.01923894    0.03523852    0.00506342    0.02660102    0.05837464
+     8    0.00361148    0.05310125    0.01740266    0.07014557    0.07474861
+     9    0.04903964    0.93262970    0.12532590    0.95443658    0.13645419
+    10    0.89483622    0.05244707    0.00555066    0.00173529    0.00359793
+    11    0.89535362    0.05241210    0.00563590    0.00173683    0.01324558
+    12    0.88967171    0.04543662    0.01334549    0.00200160    0.00231293
+    13    0.00249142    0.03532354    0.88278422    0.03515074    0.01624563
+    14    0.00248291    0.03530783    0.88285860    0.03514446    0.01371239
+    15    0.00864224    0.01668611    0.03302356    0.87645490    0.03096120
+    16    0.00173104    0.03078003    0.00965662    0.02952254    0.86406484
+    17    0.00059272    0.00851545    0.00137153    0.00219367    0.03419929
+    18    0.00117872    0.00195986    0.00098292    0.00327352    0.00713806
+    19    0.02210089    0.01065254    0.00051643    0.00101397    0.00546949
+    20    0.00059452    0.00851374    0.00137153    0.00219116    0.00534042
+    21    0.00172989    0.03078671    0.00961670    0.02950354    0.01398868
+             6             7             8             9            10      
+     1    0.00359183    0.01923894    0.00361148    0.04903964    0.89483622
+     2    0.05300265    0.03523852    0.05310125    0.93262970    0.05244707
+     3    0.01739942    0.00506342    0.01740266    0.12532590    0.00555066
+     4    0.07011769    0.02660102    0.07014557    0.95443658    0.00173529
+     5    1.04422070    0.05837464    0.07474861    0.13645419    0.00359793
+     6    4.34442917    1.05782224    0.98782488    0.07468524    0.00014795
+     7    1.05782224    4.16494659    1.05772415    0.05841377    0.00100154
+     8    0.98782488    1.05772415    4.34439178    1.04433504    0.00074430
+     9    0.07468524    0.05841377    1.04433504    4.38402972    0.01324749
+    10    0.00014795    0.00100154    0.00074430    0.01324749    1.01796694
+    11    0.00074599    0.00100515    0.00014719    0.00354878    0.02106571
+    12    0.00106786    0.01160247    0.00107620    0.00235649    0.02053883
+    13    0.00478644    0.00054896    0.00088310    0.01373690    0.00007745
+    14    0.00088293    0.00054870    0.00478640    0.01625805    0.00071944
+    15    0.00308910    0.00083233    0.00307785    0.03096568    0.00040055
+    16    0.03401134    0.00146484    0.00912696    0.01397936    0.00046573
+    17    0.87211953    0.03677474    0.03394933    0.00533229    0.00001439
+    18    0.03858966    0.89231660    0.03857024    0.00713619    0.00006418
+    19    0.03724257    0.86217612    0.03726454    0.00549596    0.00072728
+    20    0.03395167    0.03673394    0.87186477    0.03418231    0.00031407
+    21    0.00912947    0.00146448    0.03400725    0.86247015    0.00027085
+            11            12            13            14            15      
+     1    0.89535362    0.88967171    0.00249142    0.00248291    0.00864224
+     2    0.05241210    0.04543662    0.03532354    0.03530783    0.01668611
+     3    0.00563590    0.01334549    0.88278422    0.88285860    0.03302356
+     4    0.00173683    0.00200160    0.03515074    0.03514446    0.87645490
+     5    0.01324558    0.00231293    0.01624563    0.01371239    0.03096120
+     6    0.00074599    0.00106786    0.00478644    0.00088293    0.00308910
+     7    0.00100515    0.01160247    0.00054896    0.00054870    0.00083233
+     8    0.00014719    0.00107620    0.00088310    0.00478640    0.00307785
+     9    0.00354878    0.00235649    0.01373690    0.01625805    0.03096568
+    10    0.02106571    0.02053883    0.00007745    0.00071944    0.00040055
+    11    1.01849906    0.02053317    0.00072910    0.00007784    0.00040003
+    12    0.02053317    1.03231057    0.00026564    0.00026616    0.00059573
+    13    0.00072910    0.00026564    1.01937156    0.02158745    0.00072005
+    14    0.00007784    0.00026616    0.02158745    1.01939507    0.00071995
+    15    0.00040003    0.00059573    0.00072005    0.00071995    1.00834408
+    16    0.00027016    0.00004308    0.00036352    0.00295383    0.00062733
+    17    0.00031604    0.00013790    0.00053701    0.00005022    0.00015565
+    18    0.00006513    0.00054301    0.00010768    0.00010768    0.00013337
+    19    0.00073476    0.02033353    0.00002963    0.00002956    0.00007590
+    20    0.00001403    0.00013855    0.00005021    0.00053716    0.00015534
+    21    0.00046197    0.00004361    0.00295287    0.00036351    0.00062718
+            16            17            18            19            20      
+     1    0.00173104    0.00059272    0.00117872    0.02210089    0.00059452
+     2    0.03078003    0.00851545    0.00195986    0.01065254    0.00851374
+     3    0.00965662    0.00137153    0.00098292    0.00051643    0.00137153
+     4    0.02952254    0.00219367    0.00327352    0.00101397    0.00219116
+     5    0.86406484    0.03419929    0.00713806    0.00546949    0.00534042
+     6    0.03401134    0.87211953    0.03858966    0.03724257    0.03395167
+     7    0.00146484    0.03677474    0.89231660    0.86217612    0.03673394
+     8    0.00912696    0.03394933    0.03857024    0.03726454    0.87186477
+     9    0.01397936    0.00533229    0.00713619    0.00549596    0.03418231
+    10    0.00046573    0.00001439    0.00006418    0.00072728    0.00031407
+    11    0.00027016    0.00031604    0.00006513    0.00073476    0.00001403
+    12    0.00004308    0.00013790    0.00054301    0.02033353    0.00013855
+    13    0.00036352    0.00053701    0.00010768    0.00002963    0.00005021
+    14    0.00295383    0.00005022    0.00010768    0.00002956    0.00053716
+    15    0.00062733    0.00015565    0.00013337    0.00007590    0.00015534
+    16    1.00649123    0.00108171    0.00017276    0.00031623    0.00096316
+    17    0.00108171    1.00837161    0.00371803    0.00291140    0.00343851
+    18    0.00017276    0.00371803    1.01819705    0.01825106    0.00371582
+    19    0.00031623    0.00291140    0.01825106    1.02856922    0.00291133
+    20    0.00096316    0.00343851    0.00371582    0.00291133    1.00806468
+    21    0.00489618    0.00096221    0.00017254    0.00031605    0.00108244
+            21      
+     1    0.00172989
+     2    0.03078671
+     3    0.00961670
+     4    0.02950354
+     5    0.01398868
+     6    0.00912947
+     7    0.00146448
+     8    0.03400725
+     9    0.86247015
+    10    0.00027085
+    11    0.00046197
+    12    0.00004361
+    13    0.00295287
+    14    0.00036351
+    15    0.00062718
+    16    0.00489618
+    17    0.00096221
+    18    0.00017254
+    19    0.00031605
+    20    0.00108244
+    21    1.00484628
+ 
+ Localization index:
+    1(C ):  4.419    2(C ):  3.830    3(C ):  4.225    4(C ):  4.032
+    5(C ):  4.015    6(C ):  4.065    7(C ):  4.265    8(C ):  4.065
+    9(C ):  4.013   10(H ):  0.301   11(H ):  0.301   12(H ):  0.295
+   13(H ):  0.301   14(H ):  0.301   15(H ):  0.295   16(H ):  0.289
+   17(H ):  0.286   18(H ):  0.296   19(H ):  0.277   20(H ):  0.286
+   21(H ):  0.289
+ 
+ If also outputting LI and DI to LIDI.txt in current folder? (y/n)
+ 
+                 ======== Fuzzy atomic space analysis ========
+ -10 Set X,Y,Z of reference point, current:    0.00000   0.00000   0.00000 Bohr
+ -6 Choose type of integration grid for AOM, current: Atomic grid
+ -5 Define the atoms to be considered in options 1, 2, 13, current: all atoms
+ -4 Adjust reference parameter for FLU
+ -3 Set the number of iterations for Becke partition, current:  3
+ -2 Select radius definition for Becke partition, current: Modified CSD
+ -1 Select method for partitioning atomic spaces, current: Becke
+ 0 Return
+ 1 Perform integration in fuzzy atomic spaces for a real space function
+ 2 Calculate atomic and molecular multipole moments and <r^2>
+ 3 Calculate and output atomic overlap matrix (AOM) in current folder
+ 33 Calculate and output fragment overlap matrix (FOM) in current folder
+ 4 Calculate localization (LI) and delocalization index (DI)
+ 44 Calculate fragment LI (FLI) and interfragment DI (IFDI)
+ 5 Calculate PDI (Para-delocalization index)
+ 6 Calculate FLU (Aromatic fluctuation index)
+ 7 Calculate FLU-pi
+ 8 Perform integration in fuzzy overlap region for a real space functions
+ 11 Calculate multi-center delocalization index
+ 12 Calculate information-theoretic aromaticity index (ACS Omega, 3, 18370)
+ 13 Calculate atomic effective volume, free volume, polarizability and C6 coefficient
+ 
+ "q": Exit program gracefully          "r": Load a new file
+                    ************ Main function menu ************
+ 0 Show molecular structure and view orbitals
+ 1 Output all properties at a point       2 Topology analysis
+ 3 Output and plot specific property in a line
+ 4 Output and plot specific property in a plane
+ 5 Output and plot specific property within a spatial region (calc. grid data)
+ 6 Check & modify wavefunction
+ 7 Population analysis and calculation of atomic charges
+ 8 Orbital composition analysis           9 Bond order analysis
+ 10 Plot total DOS, PDOS, OPDOS, local DOS, COHP and photoelectron spectrum
+ 11 Plot IR/Raman/UV-Vis/ECD/VCD/ROA/NMR spectrum
+ 12 Quantitative analysis of molecular surface
+ 13 Process grid data (No grid data is presented currently)
+ 14 Adaptive natural density partitioning (AdNDP) analysis
+ 15 Fuzzy atomic space analysis
+ 16 Charge decomposition analysis (CDA) and plot orbital interaction diagram
+ 17 Basin analysis                       18 Electron excitation analysis
+ 19 Orbital localization analysis        20 Visual study of weak interaction
+ 21 Energy decomposition analysis        22 Conceptual DFT (CDFT) analysis
+ 23 ETS-NOCV analysis                    24 (Hyper)polarizability analysis
+ 25 Electron delocalization and aromaticity analyses
+ 26 Structure and geometry related analyses
+ 100 Other functions (Part 1)            200 Other functions (Part 2)
+ 300 Other functions (Part 3)
