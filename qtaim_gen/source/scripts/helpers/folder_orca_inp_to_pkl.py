@@ -11,7 +11,7 @@ from pymatgen.core import Molecule
 from pymatgen.analysis.graphs import MoleculeGraph
 from qtaim_gen.source.core.bonds import get_bonds_from_rdkit
 from qtaim_gen.source.core.io import convert_inp_to_xyz
-
+from tqdm import tqdm
 from qtaim_gen.source.core.parse_json import (
     get_data
 )
@@ -56,7 +56,10 @@ def main():
     
     
     # create a list of pmg molecules from the xyz files
-    for ind, in_file in enumerate(inp_files):    
+    #for ind, in_file in enumerate(inp_files):    
+    # rewrite for tqdm
+    ind = 0 
+    for in_file in tqdm(inp_files):
         
         if gather_tf:
             data = get_data(
@@ -105,6 +108,7 @@ def main():
         bond_list.append(bonds_rdkit)
         identifier.append(ind)
         xyz_files_completed.append(xyz_file)
+        ind += 1
         
         # append
 
