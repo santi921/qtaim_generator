@@ -159,7 +159,7 @@ def create_jobs(folder, multiwfn_cmd, orca_2mkl_cmd, separate=False, overwrite=T
 
     if not wfn_present and bool_gbw:
         # write conversion script from gbw to wfn
-
+        print("wfn not there - writing conversion script")
         write_conversion(
             out_folder=folder,
             read_file=file_gbw,
@@ -323,7 +323,7 @@ def run_jobs(folder, separate=False, orca_6=True, restart=False):
         for file in os.listdir(folder):
             if file.endswith(".molden.input"):
                 molden_file = os.path.join(folder, file)
-            if file.endswith("orca.out"):
+            if file.endswith("orca.out") or file.endswith("output.out"):
                 orca_out = os.path.join(folder, file)
 
         if orca_6 == False:
