@@ -22,6 +22,7 @@ def charge_data_dict():
     string_dict["adch"] = "7\n11\n1\nn\n0\nq\n"
     string_dict["mbis"] = "7\n20\n1\nn\n0\nq\n"
     string_dict["cm5"] = "7\n16\n1\nn\n0\nq\n"  # might cut later
+    string_dict["chelpg"] = "7\n12\n1\nn\n0\n0\nq\n"  # might cut later
 
     return string_dict
 

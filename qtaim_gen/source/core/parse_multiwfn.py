@@ -208,6 +208,53 @@ def parse_charge_base(charge_out_txt, corrected=False, dipole=True):
         return charge_dict_overall
 
 
+
+def parse_charge_chelpg(charge_out_txt):
+    """
+    Method to parse the charge out from multiwfn
+    Takes:
+        charge_out_txt: str, path to the charge out file
+    Returns:
+        charge_dict_overall: dict, dictionary with the charges from different methods
+        atomic_dipole_dict_overall: dict, dictionary with the atomic dipoles from different methods
+        dipole_info: dict, dictionary with the total dipoles from different methods
+    """
+
+    charge_key_3 = "Center       Charge"
+    charge_dict_overall = {}
+    
+    # iterate over lines of the file
+    with open(charge_out_txt, "r") as f:
+        trigger2 = False
+
+        for line in f:
+            if line == "\n" or len(line) < 3:
+                if trigger2:
+                    trigger2 = False
+                    charge_dict_overall = charge_dict
+
+            if trigger2:
+                if line.split()[0] == "Atom":
+                    ind, element = line.split()[1].split("(")
+                    if "):" in element:
+                        element = element[:-2]
+                    # print(ind, element)
+                elif line.strip()[0].isnumeric():
+                    ind, element = line.split()[0].split("(")
+                    if "):" in element:
+                        element = element[:-2]
+                    # print(ind, element)
+                value = float(line.split()[-1])
+                charge_dict[ind + "_" + element] = value
+
+
+            if charge_key_3 in line:
+                trigger2 = True
+                charge_dict = {}
+
+    return charge_dict_overall
+
+
 def parse_charge_doc_bader(charge_out_txt):
     """
     Method to parse the charge out from multiwfn bader charges.
