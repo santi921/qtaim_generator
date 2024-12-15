@@ -27,7 +27,7 @@ def main():
     separate = True
     overwrite = True
     clean = True
-    debug = True
+    debug = False
     
 
 
@@ -126,6 +126,7 @@ def main():
             orca_6=True,
             clean=clean,
             restart=False,
+            debug=debug
         )  # works!
     except:
 
@@ -143,6 +144,7 @@ def main():
             orca_6=True,
             clean=clean,
             restart=False,
+            debug=debug
         )  # works!
     except:
 
@@ -161,6 +163,7 @@ def main():
             orca_6=False,
             clean=clean,
             restart=False,
+            debug=debug
         )  # works!
     except:
 
