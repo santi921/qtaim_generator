@@ -616,6 +616,8 @@ def clean_jobs(folder, separate=False):
             os.remove(os.path.join(folder, file))
         if file.endswith(".wfn"):
             os.remove(os.path.join(folder, file))
+        if file.endswith("convert.in"):
+            os.remove(os.path.join(folder, file))
 
 
 def gbw_analysis(
