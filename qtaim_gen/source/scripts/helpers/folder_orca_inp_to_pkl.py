@@ -64,11 +64,17 @@ def main():
     for in_file in tqdm(inp_files):
         
         if gather_tf:
-            data = get_data(
-                root=root_folder + folder_list[ind] + "/",
-                full_descriptors=True,
-                root_folder_tf=False
-            )
+
+            try: 
+                data = get_data(
+                    root=root_folder + folder_list[ind] + "/",
+                    full_descriptors=True,
+                    root_folder_tf=False
+                )
+            except:
+                data = {}
+                print("Error in reading data from json file - ", in_file)
+
             if init_keys: # only need to do this once
                 keys_extra_feats = list(data.keys())
                 init_keys = False
