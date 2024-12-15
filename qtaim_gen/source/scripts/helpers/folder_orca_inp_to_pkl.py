@@ -54,7 +54,9 @@ def main():
                     inp_files.append(folder + "/" + file)
                     folder_list.append(folder)
     
-    
+    if gather_tf: 
+        init_keys = True
+
     # create a list of pmg molecules from the xyz files
     #for ind, in_file in enumerate(inp_files):    
     # rewrite for tqdm
@@ -67,12 +69,17 @@ def main():
                 full_descriptors=True,
                 root_folder_tf=False
             )
+            if init_keys: # only need to do this once
+                keys_extra_feats = list(data.keys())
+                init_keys = False
 
-            keys_extra_feats = list(data.keys())
             for key in keys_extra_feats:
                 if key not in extra_val_dict:
                     extra_val_dict[key] = []
-                extra_val_dict[key].append(data[key])
+                if key not in data:
+                    extra_val_dict[key].append(None)
+                else:
+                    extra_val_dict[key].append(data[key])
 
         
         xyz_file = in_file.replace(".in", ".xyz")
@@ -135,3 +142,7 @@ def main():
 
 
 main()
+
+
+
+
