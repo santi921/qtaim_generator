@@ -655,10 +655,16 @@ def parse_bond_order_fuzzy(bond_order_txt):
                     fuzzy_bool = False
                 else:
                     split_list = line.split()
-                    a = line[14:20].replace("(", "_").strip()
-                    b = line[23:29].replace("(", "_").strip()
                     #print("a: \'{}\' b: \'{}\'".format(a, b))
-                    
+                    # first item with (
+                    ind_1 = line.find("(")
+                    # second item with (
+                    ind_2 = line.find("(", ind_1 + 1)
+                    a = line[ind_1 - 3 : ind_1+3].strip().replace("(", "_")
+                    b = line[ind_2 - 3 : ind_2+3].strip().replace("(", "_")
+                    # remove ) if present from both 
+                    a = a.replace(")", "")
+                    b = b.replace(")", "")
                     order = float(split_list[-1])
                     # fuzzy_bond_dict.append((a, b, order))
                     fuzzy_bond_dict["{}_to_{}".format(a, b)] = order
