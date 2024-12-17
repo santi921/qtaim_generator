@@ -620,11 +620,10 @@ def parse_bond_order_ibsi(bond_order_txt):
                     if line.strip() == "":
                         continue
                     split_list = line.split()
-                    a, b, ibsi = (
-                        split_list[0].replace("(", "_"),
-                        split_list[2].replace("(", "_"),
-                        split_list[-1],
-                    )
+                    a = line[2:8].replace("(", "_").strip()
+                    b = line[11:17].replace("(", "_").strip()
+                    #print("a: \'{}\' b: \'{}\'".format(a, b))
+                    ibsi = float(split_list[-1])
                     ibsi_bond_dict["{}_to_{}".format(a, b)] = float(ibsi)
 
             if ibsi_trigger in line:
@@ -656,11 +655,11 @@ def parse_bond_order_fuzzy(bond_order_txt):
                     fuzzy_bool = False
                 else:
                     split_list = line.split()
-                    a, b, order = (
-                        split_list[2].replace("(", "_"),
-                        split_list[4].replace("(", "_"),
-                        float(split_list[-1]),
-                    )
+                    a = line[14:20].replace("(", "_").strip()
+                    b = line[23:29].replace("(", "_").strip()
+                    #print("a: \'{}\' b: \'{}\'".format(a, b))
+                    
+                    order = float(split_list[-1])
                     # fuzzy_bond_dict.append((a, b, order))
                     fuzzy_bond_dict["{}_to_{}".format(a, b)] = order
 
