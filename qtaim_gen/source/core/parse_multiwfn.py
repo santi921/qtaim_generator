@@ -243,6 +243,8 @@ def parse_charge_chelpg(charge_out_txt):
                     ind, element = line.split()[0].split("(")
                     if "):" in element:
                         element = element[:-2]
+                    if ")" in element:
+                        element = element[:-1]
                     # print(ind, element)
                 value = float(line.split()[-1])
                 charge_dict[ind + "_" + element] = value
