@@ -414,124 +414,170 @@ def parse_multiwfn(folder, separate=False, debug=False):
                     json_file = file_full_path.replace(".out", ".json")
 
                     if routine == "fuzzy_full":
-                        data = parse_fuzzy_doc(file_full_path)
-                        with open(json_file, "w") as f:
-                            json.dump(data, f, indent=4)
+                        try: 
+                            data = parse_fuzzy_doc(file_full_path)
+                            with open(json_file, "w") as f:
+                                json.dump(data, f, indent=4)
+                        except:
+                            print("error parsing fuzzy_full")
 
                     elif routine == "bond":
-                        data = parse_bond_order_doc(file_full_path)
-                        with open(json_file, "w") as f:
-                            json.dump(data, f, indent=4)
+                        try:
+                            data = parse_bond_order_doc(file_full_path)
+                            with open(json_file, "w") as f:
+                                json.dump(data, f, indent=4)
+                        except:
+                            print("error parsing bond")
 
                     elif routine == "ibsi":
-                        data = parse_bond_order_ibsi(file_full_path)
-                        with open(json_file, "w") as f:
-                            json.dump(data, f, indent=4)
+                        try: 
+                            data = parse_bond_order_ibsi(file_full_path)
+                            with open(json_file, "w") as f:
+                                json.dump(data, f, indent=4)
+                        except:
+                            print("error parsing ibsi")
 
                     elif routine == "laplace":
-                        data = parse_bond_order_laplace(file_full_path)
-                        with open(json_file, "w") as f:
-                            json.dump(data, f, indent=4)
+                        try: 
+                            data = parse_bond_order_laplace(file_full_path)
+                            with open(json_file, "w") as f:
+                                json.dump(data, f, indent=4)
+                        except:
+                            print("error parsing laplace")
 
                     elif routine == "fuzzy":
-                        data = parse_bond_order_fuzzy(file_full_path)
-                        with open(json_file, "w") as f:
-                            json.dump(data, f, indent=4)
+                        try:
+                            data = parse_bond_order_fuzzy(file_full_path)
+                            with open(json_file, "w") as f:
+                                json.dump(data, f, indent=4)
+                        except:
+                            print("error parsing fuzzy")
 
                     elif routine == "other":
-                        data = parse_other_doc(file_full_path)
-                        with open(json_file, "w") as f:
-                            json.dump(data, f, indent=4)
+                        try: 
+                            data = parse_other_doc(file_full_path)
+                            with open(json_file, "w") as f:
+                                json.dump(data, f, indent=4)
+                        except:
+                            print("error parsing other")
 
                     elif routine == "charge":
-                        (
-                            charge_dict_overall,
-                            atomic_dipole_dict_overall,
-                            dipole_info,
-                        ) = parse_charge_doc(file_full_path)
-                        charge_dict_overall = {
-                            "charge": charge_dict_overall,
-                            "dipole": dipole_info,
-                            "atomic_dipole": atomic_dipole_dict_overall,
-                        }
-                        with open(json_file, "w") as f:
-                            json.dump(charge_dict_overall, f, indent=4)
+                        try: 
+                            (
+                                charge_dict_overall,
+                                atomic_dipole_dict_overall,
+                                dipole_info,
+                            ) = parse_charge_doc(file_full_path)
+                            charge_dict_overall = {
+                                "charge": charge_dict_overall,
+                                "dipole": dipole_info,
+                                "atomic_dipole": atomic_dipole_dict_overall,
+                            }
+                            with open(json_file, "w") as f:
+                                json.dump(charge_dict_overall, f, indent=4)
+                        except:
+                            print("error parsing charge")
 
                     elif routine == "hirshfeld":
-                        charge_dict_overall, dipole_info = parse_charge_base(
-                            file_full_path, corrected=False
-                        )
-                        data = {"charge": charge_dict_overall, "dipole": dipole_info}
-                        with open(json_file, "w") as f:
-                            json.dump(data, f, indent=4)
+                        try:
+                            charge_dict_overall, dipole_info = parse_charge_base(
+                                file_full_path, corrected=False
+                            )
+                            data = {"charge": charge_dict_overall, "dipole": dipole_info}
+                            with open(json_file, "w") as f:
+                                json.dump(data, f, indent=4)
+                        except:
+                            print("error parsing hirshfeld")
 
                     elif routine == "vdd":
-                        charge_dict_overall, dipole_info = parse_charge_base(
-                            file_full_path, corrected=False
-                        )
-                        data = {"charge": charge_dict_overall, "dipole": dipole_info}
-                        with open(json_file, "w") as f:
-                            json.dump(data, f, indent=4)
+                        try:
+                            charge_dict_overall, dipole_info = parse_charge_base(
+                                file_full_path, corrected=False
+                            )
+                            data = {"charge": charge_dict_overall, "dipole": dipole_info}
+                            with open(json_file, "w") as f:
+                                json.dump(data, f, indent=4)
+                        except: 
+                            print("error parsing vdd")
 
                     elif routine == "mbis":
-                        charge_dict_overall = parse_charge_base(
-                            file_full_path, corrected=False, dipole=False
-                        )
-                        data = {"charge": charge_dict_overall}
-                        with open(json_file, "w") as f:
-                            json.dump(data, f, indent=4)
+                        try:
+                            charge_dict_overall = parse_charge_base(
+                                file_full_path, corrected=False, dipole=False
+                            )
+                            data = {"charge": charge_dict_overall}
+                            with open(json_file, "w") as f:
+                                json.dump(data, f, indent=4)
+                        except: 
+                            print("error parsing mbis")
 
                     elif routine == "bader":
-                        charge_dict_overall, spin_info = parse_charge_doc_bader(
-                            file_full_path
-                        )
-                        data = {"charge": charge_dict_overall, "spin": spin_info}
-                        with open(json_file, "w") as f:
-                            json.dump(data, f, indent=4)
+                        try: 
+                            charge_dict_overall, spin_info = parse_charge_doc_bader(
+                                file_full_path
+                            )
+                            data = {"charge": charge_dict_overall, "spin": spin_info}
+                            with open(json_file, "w") as f:
+                                json.dump(data, f, indent=4)
+                        except: 
+                            print("error parsing bader")
 
                     elif routine == "cm5":
-                        charge_dict_overall, dipole_info = parse_charge_base(
-                            file_full_path, corrected=False
-                        )
-                        data = {"charge": charge_dict_overall, "dipole": dipole_info}
-                        with open(json_file, "w") as f:
-                            json.dump(data, f, indent=4)
+                        try:
+                            charge_dict_overall, dipole_info = parse_charge_base(
+                                file_full_path, corrected=False
+                            )
+                            data = {"charge": charge_dict_overall, "dipole": dipole_info}
+                            with open(json_file, "w") as f:
+                                json.dump(data, f, indent=4)
+                        except: 
+                            print("error parsing cm5")
 
                     elif routine == "adch":
-                        (
-                            charge_dict_overall,
-                            atomic_dipole_dict_overall,
-                            dipole_info,
-                        ) = parse_charge_doc_adch(file_full_path)
-                        data = {
-                            "charge": charge_dict_overall,
-                            "dipole": dipole_info,
-                            "atomic_dipole": atomic_dipole_dict_overall,
-                        }
-                        with open(json_file, "w") as f:
-                            json.dump(data, f, indent=4)
+                        try:
+                            (
+                                charge_dict_overall,
+                                atomic_dipole_dict_overall,
+                                dipole_info,
+                            ) = parse_charge_doc_adch(file_full_path)
+                            data = {
+                                "charge": charge_dict_overall,
+                                "dipole": dipole_info,
+                                "atomic_dipole": atomic_dipole_dict_overall,
+                            }
+                            with open(json_file, "w") as f:
+                                json.dump(data, f, indent=4)
+                        except:
+                            print("error parsing adch")
 
                     elif routine == "becke":
-                        (
-                            charge_dict_overall,
-                            atomic_dipole_dict_overall,
-                            dipole_info,
-                        ) = parse_charge_becke(file_full_path)
-                        data = {
-                            "charge": charge_dict_overall,
-                            "dipole": dipole_info,
-                            "atomic_dipole": atomic_dipole_dict_overall,
-                        }
-                        with open(json_file, "w") as f:
-                            json.dump(data, f, indent=4)
+                        try:
+                            (
+                                charge_dict_overall,
+                                atomic_dipole_dict_overall,
+                                dipole_info,
+                            ) = parse_charge_becke(file_full_path)
+                            data = {
+                                "charge": charge_dict_overall,
+                                "dipole": dipole_info,
+                                "atomic_dipole": atomic_dipole_dict_overall,
+                            }
+                            with open(json_file, "w") as f:
+                                json.dump(data, f, indent=4)
+                        except:
+                            print("error parsing becke")
 
                     elif routine == "chelpg":
-                        charge_dict_overall = parse_charge_chelpg(file_full_path)
-                        data = {"charge": charge_dict_overall}
-                        with open(json_file, "w") as f:
-                            json.dump(data, f, indent=4)
+                        try:
+                            charge_dict_overall = parse_charge_chelpg(file_full_path)
+                            data = {"charge": charge_dict_overall}
+                            with open(json_file, "w") as f:
+                                json.dump(data, f, indent=4)
+                        except: 
+                            print("error parsing chelpg")
 
         elif "CPprop.txt" in file and "qtaim" in routine_list:
+
             json_file = os.path.join(folder, "qtaim.json")
             # go through files in folder and find the one that ends in .inp
             cp_prop_path = os.path.join(folder, file)
@@ -543,12 +589,15 @@ def parse_multiwfn(folder, separate=False, debug=False):
                 if file2.endswith("input.in"):
                     inp_loc = os.path.join(folder, file2)
                     inp_orca = False
-            qtaim_dict = parse_qtaim(
-                cprop_file=cp_prop_path, inp_loc=inp_loc, orca_tf=inp_orca
-            )
+            try: 
+                qtaim_dict = parse_qtaim(
+                    cprop_file=cp_prop_path, inp_loc=inp_loc, orca_tf=inp_orca
+                )
 
-            with open(json_file, "w") as f:
-                json.dump(qtaim_dict, f, indent=4)
+                with open(json_file, "w") as f:
+                    json.dump(qtaim_dict, f, indent=4)
+            except: 
+                print("error parsing qtaim")
 
     if separate:
         charge_routines = list(charge_dict.keys())
@@ -606,16 +655,21 @@ def clean_jobs(folder, separate=False):
     for file in os.listdir(folder):
         if file.endswith(".mfwn"):
             os.remove(os.path.join(folder, file))
+
         if file.endswith(".txt"):
             if file in txt_files:
                 os.remove(os.path.join(folder, file))
+
         if file.endswith(".out"):
             if file in txt_files:
                 os.remove(os.path.join(folder, file))
+
         if file.endswith(".molden.input"):
             os.remove(os.path.join(folder, file))
+
         if file.endswith(".wfn"):
             os.remove(os.path.join(folder, file))
+
         if file.endswith("convert.in"):
             os.remove(os.path.join(folder, file))
 
@@ -698,3 +752,5 @@ def gbw_analysis(
         #    # clean some of the mess
         print("... Cleaning up")
         clean_jobs(folder, separate=separate)
+
+

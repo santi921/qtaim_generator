@@ -307,8 +307,9 @@ def parse_charge_doc_bader(charge_out_txt):
                     if ")" in element:
                         element = element[:-1]
                         shift = -1
-                    spin_dict[ind + "_" + element] = float(line.split()[4 + shift])
-
+                    #spin_dict[ind + "_" + element] = float(line.split()[4 + shift])
+                    spin_dict[ind + "_" + element] = float(line[22:35].strip())
+                    #print("\'{}\'".format(line[21:34]))
             if charge_key_3 in line:
                 trigger = True
                 charge_dict = {}
