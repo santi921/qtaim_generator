@@ -15,7 +15,7 @@ def charge_data():
 def charge_data_dict():
     # cut resp and chelpg and peoe
     string_dict = {}
-    string_dict["bader"] = "17\n1\n1\n1\n7\n1\n1\n7\n1\n5\n-10\nq\n"
+    string_dict["bader"] = "17\n1\n1\n2\n7\n1\n1\n7\n1\n5\n-10\nq\n"
     string_dict["hirshfeld"] = "7\n1\n1\nn\n0\nq\n"
     string_dict["vdd"] = "7\n2\n1\nn\n0\nq\n"
     string_dict["becke"] = "7\n10\n0\nn\n0\nq\n"
