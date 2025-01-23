@@ -3,7 +3,7 @@ import pickle as pkl
 import lmdb
 import json
 import pickle
-from typing import List, Dict, Optional
+from typing import Dict, Optional
 import glob as glob
 
 

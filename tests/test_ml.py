@@ -121,7 +121,7 @@ class TestML:
 
     def test_qtaim_embed(self):
         from qtaim_embed.core.dataset import HeteroGraphGraphLabelDataset
-
+        
         qtaim_embed_dataset = HeteroGraphGraphLabelDataset(
             file="./test_files/molecule/libe_qtaim_test.pkl",
             allowed_ring_size=[5, 6, 7],
@@ -143,6 +143,8 @@ class TestML:
             log_scale_targets=False,
             standard_scale_features=False,
             standard_scale_targets=False,
+            bond_key="extra_feat_bond_indices_qtaim",
+            map_key="extra_feat_bond_indices_qtaim",
         )
 
         assert (
@@ -156,3 +158,7 @@ class TestML:
         }, "targets not parsed correctly"
 
 
+
+
+tester = TestML()
+tester.test_qtaim_embed()
