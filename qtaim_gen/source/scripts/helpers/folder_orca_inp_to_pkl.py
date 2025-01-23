@@ -144,8 +144,7 @@ def main():
     df = pd.DataFrame(df)
     #print(df)
     pd.to_pickle(df, root_folder + pkl_file)
-    df_pkl = pd.read_pickle(root_folder + pkl_file)
-
+    
 
 main()
 

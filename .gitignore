@@ -26,3 +26,5 @@
 *densities
 *wfn
 *wfx
+*.lmdb
+*.lmdb-lock
