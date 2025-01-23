@@ -76,6 +76,7 @@ def merge_lmdbs(db_paths: str, out_path: str, output_file: str):
     
     
     idx = 0
+    
     for db_path in db_paths:
         #print("merge in {}".format(db_path))
         env_in = lmdb.open(
@@ -91,7 +92,9 @@ def merge_lmdbs(db_paths: str, out_path: str, output_file: str):
         with env_out.begin(write=True) as txn_out, env_in.begin(write=False) as txn_in:
             cursor = txn_in.cursor()
             for key, value in cursor:
+                
                 if key.decode("ascii") != "length":
+                    #print(key.decode("ascii"))
                     try:
                         #int(key.decode("ascii"))
                         txn_out.put(
@@ -110,6 +113,7 @@ def merge_lmdbs(db_paths: str, out_path: str, output_file: str):
     
     #update length
     txn_out=env_out.begin(write=True)
+    #print("length: {}".format(idx))
     txn_out.put("length".encode("ascii"), pickle.dumps(idx, protocol=-1))
     txn_out.commit()
         
@@ -131,7 +135,7 @@ def cleanup_lmdb_files(directory: str, pattern: str, dry_run: Optional[bool] = F
         try:
             if not dry_run:
                 os.remove(file_path)
-                print(f"Deleted file: {file_path}")
+                #print(f"Deleted file: {file_path}")
             else: 
                 print(f"Dry run, would delete file: {file_path}")
         except OSError as e:
@@ -139,23 +143,37 @@ def cleanup_lmdb_files(directory: str, pattern: str, dry_run: Optional[bool] = F
 
 
 def split_list(lst: list, chunk_size: int):
+    """Split without overlap"""
+    #print(lst)
     if chunk_size == -1: 
         yield lst
     
     elif chunk_size < len(lst):
-        for i in range(0, len(lst), chunk_size):  
+        for i in range(0, len(lst), chunk_size):
+            #print(lst[i:i + chunk_size])
             yield lst[i:i + chunk_size]
+        #for i in range(0, len(lst), chunk_size):  
+        #    yield lst[i:i + chunk_size]
     else: 
         yield lst
     
 
-def json_2_lmdbs(root_dir: str, out_dir:str, data_type: str, out_lmdb: str, chunk_size: int, clean: Optional[bool]=False):
-    
+def json_2_lmdbs(root_dir: str, out_dir:str, data_type: str, out_lmdb: str, chunk_size: int, clean: Optional[bool]=True):
+    """Converts folders of output json files to lmdb files.
+    Args:
+        root_dir (str): Root directory containing the json files.
+        out_dir (str): Output directory for the lmdb files.
+        data_type (str): Data type to convert. Options are "charge", "bond", "other", "qtaim".
+        out_lmdb (str): Output lmdb file.
+        chunk_size (int): Size of the chunks to split the data into.
+        clean (Optional[bool], optional): If True, delete the json files. Defaults to False.
+    """
     chunk_ind = 1
     files_target = glob.glob(root_dir + "*/{}.json".format(data_type))
-    data_dict = {}
+    
     
     for chunk in split_list(files_target, chunk_size):
+        data_dict = {}
         for file in chunk: 
             with open(file, "r") as f:
                 data = json.load(f)
@@ -167,117 +185,7 @@ def json_2_lmdbs(root_dir: str, out_dir:str, data_type: str, out_lmdb: str, chun
 
     files_out = glob.glob("{}/{}_*.lmdb".format(root_dir, data_type))
     merge_lmdbs(files_out, out_dir, out_lmdb)
+    
     cleanup_lmdb_files(directory=out_dir, pattern="{}_*.lmdb".format(data_type), dry_run=not clean)
     cleanup_lmdb_files(directory=out_dir, pattern="{}_*.lmdb-lock".format(data_type), dry_run=not clean)
 
-'''
-def main():
-     
-    
-    dir_active = "/home/santiagovargas/dev/qtaim_generator/data/omol_tests/"
-    chunk_size = 3
-    json_2_lmdbs(dir_active, "./lmdb_test/", "charge", "merged_charge.lmdb", chunk_size, clean=True)
-    json_2_lmdbs(dir_active, "./lmdb_test/", "bond", "merged_bond.lmdb", chunk_size, clean=True)
-    json_2_lmdbs(dir_active, "./lmdb_test/", "other", "merged_other.lmdb", chunk_size, clean=True)
-    json_2_lmdbs(dir_active, "./lmdb_test/", "qtaim", "merged_qtaim.lmdb", chunk_size, clean=True)
-    """
-    files_charge = glob.glob(dir_active + "*/charge.json")
-    files_other = glob.glob(dir_active + "*/other.json")
-    files_bond = glob.glob(dir_active + "*/bond.json")
-    files_qtaim = glob.glob(dir_active + "*/qtaim.json")
-
-    data_dict_charge = {}
-    data_dict_other = {}
-    data_dict_bond = {}
-    data_dict_qtaim = {}
-
-    chunk_size = 2
-    chunk_ind = 1    
-
-
-    for chunk in split_list(files_charge, chunk_size):
-        data_dict_charge = {}
-        for file in chunk: 
-            with open(file, "r") as f:
-                data = json.load(f)
-                name = file.split("/")[-2]
-                data_dict_charge[name] = data
-        
-        write_lmdb(data_dict_charge, "./lmdb_test/", f"charge_{chunk_ind}.lmdb")
-        chunk_ind += 1
-        
-    chunk_ind = 1
-    for chunk in split_list(files_bond, chunk_size):
-        data_dict_bond = {}
-        for file in chunk:
-            with open(file, "r") as f:
-                data = json.load(f)
-                name = file.split("/")[-2]
-                data_dict_bond[name] = data
-
-        write_lmdb(data_dict_bond, "./lmdb_test/", f"bond_{chunk_ind}.lmdb")
-        chunk_ind += 1
-
-    chunk_ind = 1
-    for chunk in split_list(files_other, chunk_size):
-        data_dict_other = {}
-        for file in chunk:
-            with open(file, "r") as f:
-                data = json.load(f)
-                name = file.split("/")[-2]
-                data_dict_other[name] = data
-
-        write_lmdb(data_dict_other, "./lmdb_test/", f"other_{chunk_ind}.lmdb")
-        chunk_ind += 1
-
-    chunk_ind = 1   
-    for chunk in split_list(files_qtaim, chunk_size):
-        data_dict_qtaim = {}
-        for file in chunk:
-            with open(file, "r") as f:
-                data = json.load(f)
-                name = file.split("/")[-2]
-                data_dict_qtaim[name] = data
-                
-        write_lmdb(data_dict_qtaim, "./lmdb_test/", f"qtaim_{chunk_ind}.lmdb")
-        chunk_ind += 1
-
-
-
-    print("done!")
-    files_charge_out = glob.glob("./lmdb_test/charge_*.lmdb")
-    merge_lmdbs(files_charge_out, "./lmdb_test/", "merged_charge.lmdb")
-
-    # read merged file 
-    env = lmdb.open(
-        "./lmdb_test/merged_charge.lmdb",
-        subdir=False,
-        readonly=True,
-        lock=False,
-        readahead=True,
-        meminit=False,
-    )
-    #for key, value in env.begin().cursor():
-    #print(key.decode("ascii"))
-    #print(pkl.loads(value))
-    
-    
-    print("clean files")
-    cleanup_lmdb_files(directory="./lmdb_test/", pattern="bond_*.lmdb", dry_run=True)
-    cleanup_lmdb_files(directory="./lmdb_test/", pattern="charge_*.lmdb", dry_run=True)
-    cleanup_lmdb_files(directory="./lmdb_test/", pattern="other_*.lmdb", dry_run=True)
-    cleanup_lmdb_files(directory="./lmdb_test/", pattern="qtaim_*.lmdb", dry_run=True)
-    """
-
-
-main()
-
-# final global dict for qtaim-embed should have the following: 
-# - feature size 
-# - feature names 
-# - element set 
-# - ring_size_set??
-# - allow / included charges 
-# - allowed/included spins
-
-'''

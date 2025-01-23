@@ -156,8 +156,3 @@ class TestML:
         }, "targets not parsed correctly"
 
 
-# tester = TestML()
-# print("running qtaim embed test")
-# tester.test_qtaim_embed()
-# print("running bondnet test")
-# tester.test_bondnet()
