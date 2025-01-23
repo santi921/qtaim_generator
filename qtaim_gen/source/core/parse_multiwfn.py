@@ -44,9 +44,9 @@ def parse_charge_doc(charge_out_txt):
             if line == "\n" or len(line) < 3:
                 if trigger or trigger2:
                     trigger, trigger2 = False, False
-                    charge_dict_overall[
-                        charge_ordering[charge_dict_index]
-                    ] = charge_dict
+                    charge_dict_overall[charge_ordering[charge_dict_index]] = (
+                        charge_dict
+                    )
                     charge_dict_index += 1
 
                 elif trigger_dipole:
@@ -221,7 +221,7 @@ def parse_charge_chelpg(charge_out_txt):
 
     charge_key_3 = "Center       Charge"
     charge_dict_overall = {}
-    
+
     # iterate over lines of the file
     with open(charge_out_txt, "r") as f:
         trigger2 = False
@@ -247,7 +247,6 @@ def parse_charge_chelpg(charge_out_txt):
                     # print(ind, element)
                 value = float(line.split()[-1])
                 charge_dict[ind + "_" + element] = value
-
 
             if charge_key_3 in line:
                 trigger2 = True
@@ -308,9 +307,9 @@ def parse_charge_doc_bader(charge_out_txt):
                     if ")" in element:
                         element = element[:-1]
                         shift = -1
-                    #spin_dict[ind + "_" + element] = float(line.split()[4 + shift])
+                    # spin_dict[ind + "_" + element] = float(line.split()[4 + shift])
                     spin_dict[ind + "_" + element] = float(line[22:35].strip())
-                    #print("\'{}\'".format(line[21:34]))
+                    # print("\'{}\'".format(line[21:34]))
             if charge_key_3 in line:
                 trigger = True
                 charge_dict = {}
@@ -624,7 +623,7 @@ def parse_bond_order_ibsi(bond_order_txt):
                     split_list = line.split()
                     a = line[2:8].replace("(", "_").strip()
                     b = line[11:17].replace("(", "_").strip()
-                    #print("a: \'{}\' b: \'{}\'".format(a, b))
+                    # print("a: \'{}\' b: \'{}\'".format(a, b))
                     ibsi = float(split_list[-1])
                     ibsi_bond_dict["{}_to_{}".format(a, b)] = float(ibsi)
 
@@ -657,14 +656,14 @@ def parse_bond_order_fuzzy(bond_order_txt):
                     fuzzy_bool = False
                 else:
                     split_list = line.split()
-                    #print("a: \'{}\' b: \'{}\'".format(a, b))
+                    # print("a: \'{}\' b: \'{}\'".format(a, b))
                     # first item with (
                     ind_1 = line.find("(")
                     # second item with (
                     ind_2 = line.find("(", ind_1 + 1)
-                    a = line[ind_1 - 3 : ind_1+3].strip().replace("(", "_")
-                    b = line[ind_2 - 3 : ind_2+3].strip().replace("(", "_")
-                    # remove ) if present from both 
+                    a = line[ind_1 - 3 : ind_1 + 3].strip().replace("(", "_")
+                    b = line[ind_2 - 3 : ind_2 + 3].strip().replace("(", "_")
+                    # remove ) if present from both
                     a = a.replace(")", "")
                     b = b.replace(")", "")
                     order = float(split_list[-1])

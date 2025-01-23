@@ -24,7 +24,7 @@ from qtaim_gen.source.core.parse_multiwfn import (
     parse_other_doc,
     parse_qtaim,
     parse_charge_doc_bader,
-    parse_charge_chelpg
+    parse_charge_chelpg,
 )
 
 from qtaim_gen.source.core.utils import pull_ecp_dict, overwrite_molden_w_ecp
@@ -44,8 +44,8 @@ def write_conversion(
     """
 
     out_file = str(Path.home().joinpath(out_folder, name))
-    #print("out_file: {}".format(out_file))
-    
+    # print("out_file: {}".format(out_file))
+
     if not os.path.exists(out_folder):
         os.mkdir(out_folder)
 
@@ -147,25 +147,24 @@ def create_jobs(folder, multiwfn_cmd, orca_2mkl_cmd, separate=False, debug=True)
         routine_list = ["qtaim", "bond", "charge", "other"]
         # routine_list = ["qtaim", "bond", "charge"]
 
-    if debug: # just run qtaim in debug mode
+    if debug:  # just run qtaim in debug mode
         routine_list = ["qtaim"]
 
     wfn_present = False
     for file in os.listdir(folder):
-        #print(file)
+        # print(file)
         if file.endswith(".wfn"):
             wfn_present = True
             file_read = os.path.join(folder, file)
 
         if file.endswith(".gbw"):
-            
+
             bool_gbw = True
             file_gbw = os.path.join(folder, file)
             file_wfn = file.replace(".gbw", ".wfn")
             file_molden = file.replace(".gbw", ".molden.input")
             file_read = os.path.join(folder, file_wfn)
             file_molden = os.path.join(folder, file_molden)
-        
 
     if not wfn_present and bool_gbw:
         print("file_gbw: {}".format(file_gbw))
@@ -365,7 +364,7 @@ def run_jobs(folder, separate=False, orca_6=True, restart=False, debug=False):
                         continue
 
         mfwn_file = os.path.join(folder, "props_{}.mfwn".format(order))
-        
+
         try:
             start = time.time()
             os.system("{}".format(mfwn_file))
@@ -414,7 +413,7 @@ def parse_multiwfn(folder, separate=False, debug=False):
                     json_file = file_full_path.replace(".out", ".json")
 
                     if routine == "fuzzy_full":
-                        try: 
+                        try:
                             data = parse_fuzzy_doc(file_full_path)
                             with open(json_file, "w") as f:
                                 json.dump(data, f, indent=4)
@@ -430,7 +429,7 @@ def parse_multiwfn(folder, separate=False, debug=False):
                             print("error parsing bond")
 
                     elif routine == "ibsi":
-                        try: 
+                        try:
                             data = parse_bond_order_ibsi(file_full_path)
                             with open(json_file, "w") as f:
                                 json.dump(data, f, indent=4)
@@ -438,7 +437,7 @@ def parse_multiwfn(folder, separate=False, debug=False):
                             print("error parsing ibsi")
 
                     elif routine == "laplace":
-                        try: 
+                        try:
                             data = parse_bond_order_laplace(file_full_path)
                             with open(json_file, "w") as f:
                                 json.dump(data, f, indent=4)
@@ -454,7 +453,7 @@ def parse_multiwfn(folder, separate=False, debug=False):
                             print("error parsing fuzzy")
 
                     elif routine == "other":
-                        try: 
+                        try:
                             data = parse_other_doc(file_full_path)
                             with open(json_file, "w") as f:
                                 json.dump(data, f, indent=4)
@@ -462,7 +461,7 @@ def parse_multiwfn(folder, separate=False, debug=False):
                             print("error parsing other")
 
                     elif routine == "charge":
-                        try: 
+                        try:
                             (
                                 charge_dict_overall,
                                 atomic_dipole_dict_overall,
@@ -483,7 +482,10 @@ def parse_multiwfn(folder, separate=False, debug=False):
                             charge_dict_overall, dipole_info = parse_charge_base(
                                 file_full_path, corrected=False
                             )
-                            data = {"charge": charge_dict_overall, "dipole": dipole_info}
+                            data = {
+                                "charge": charge_dict_overall,
+                                "dipole": dipole_info,
+                            }
                             with open(json_file, "w") as f:
                                 json.dump(data, f, indent=4)
                         except:
@@ -494,10 +496,13 @@ def parse_multiwfn(folder, separate=False, debug=False):
                             charge_dict_overall, dipole_info = parse_charge_base(
                                 file_full_path, corrected=False
                             )
-                            data = {"charge": charge_dict_overall, "dipole": dipole_info}
+                            data = {
+                                "charge": charge_dict_overall,
+                                "dipole": dipole_info,
+                            }
                             with open(json_file, "w") as f:
                                 json.dump(data, f, indent=4)
-                        except: 
+                        except:
                             print("error parsing vdd")
 
                     elif routine == "mbis":
@@ -508,18 +513,18 @@ def parse_multiwfn(folder, separate=False, debug=False):
                             data = {"charge": charge_dict_overall}
                             with open(json_file, "w") as f:
                                 json.dump(data, f, indent=4)
-                        except: 
+                        except:
                             print("error parsing mbis")
 
                     elif routine == "bader":
-                        try: 
+                        try:
                             charge_dict_overall, spin_info = parse_charge_doc_bader(
                                 file_full_path
                             )
                             data = {"charge": charge_dict_overall, "spin": spin_info}
                             with open(json_file, "w") as f:
                                 json.dump(data, f, indent=4)
-                        except: 
+                        except:
                             print("error parsing bader")
 
                     elif routine == "cm5":
@@ -527,10 +532,13 @@ def parse_multiwfn(folder, separate=False, debug=False):
                             charge_dict_overall, dipole_info = parse_charge_base(
                                 file_full_path, corrected=False
                             )
-                            data = {"charge": charge_dict_overall, "dipole": dipole_info}
+                            data = {
+                                "charge": charge_dict_overall,
+                                "dipole": dipole_info,
+                            }
                             with open(json_file, "w") as f:
                                 json.dump(data, f, indent=4)
-                        except: 
+                        except:
                             print("error parsing cm5")
 
                     elif routine == "adch":
@@ -573,7 +581,7 @@ def parse_multiwfn(folder, separate=False, debug=False):
                             data = {"charge": charge_dict_overall}
                             with open(json_file, "w") as f:
                                 json.dump(data, f, indent=4)
-                        except: 
+                        except:
                             print("error parsing chelpg")
 
         elif "CPprop.txt" in file and "qtaim" in routine_list:
@@ -589,14 +597,14 @@ def parse_multiwfn(folder, separate=False, debug=False):
                 if file2.endswith("input.in"):
                     inp_loc = os.path.join(folder, file2)
                     inp_orca = False
-            try: 
+            try:
                 qtaim_dict = parse_qtaim(
                     cprop_file=cp_prop_path, inp_loc=inp_loc, orca_tf=inp_orca
                 )
 
                 with open(json_file, "w") as f:
                     json.dump(qtaim_dict, f, indent=4)
-            except: 
+            except:
                 print("error parsing qtaim")
 
     if separate:
@@ -737,12 +745,12 @@ def gbw_analysis(
         )
         # run jobs
         run_jobs(
-            folder=folder, 
-            separate=separate, 
-            orca_6=orca_6, 
-            restart=restart, 
-            debug=debug
-            )
+            folder=folder,
+            separate=separate,
+            orca_6=orca_6,
+            restart=restart,
+            debug=debug,
+        )
 
     print("... Parsing multiwfn output")
     # parse those jobs to jsons for 5 categories
@@ -752,5 +760,3 @@ def gbw_analysis(
         #    # clean some of the mess
         print("... Cleaning up")
         clean_jobs(folder, separate=separate)
-
-

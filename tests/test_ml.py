@@ -121,7 +121,7 @@ class TestML:
 
     def test_qtaim_embed(self):
         from qtaim_embed.core.dataset import HeteroGraphGraphLabelDataset
-        
+
         qtaim_embed_dataset = HeteroGraphGraphLabelDataset(
             file="./test_files/molecule/libe_qtaim_test.pkl",
             allowed_ring_size=[5, 6, 7],
@@ -156,8 +156,6 @@ class TestML:
         assert qtaim_embed_dataset.include_names == {
             "global": ["shifted_rrho_ev_free_energy"]
         }, "targets not parsed correctly"
-
-
 
 
 tester = TestML()
