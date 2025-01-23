@@ -90,11 +90,8 @@ def main():
         
         xyz_file = in_file.replace(".in", ".xyz")
         convert_inp_to_xyz(root_folder + in_file, root_folder + xyz_file)
-
         molecule = Molecule.from_file(root_folder + xyz_file)
 
-        # will need to bring this over
-    
         with open(root_folder + xyz_file, "r") as f:
             lines = f.readlines()
 

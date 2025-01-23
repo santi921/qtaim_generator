@@ -214,7 +214,7 @@ def get_spin_charge_from_orca_inp(dft_inp_file):
 
     # find line starting with "* xyz"
     for ind, line in enumerate(lines):
-        if "* xyz" in line:
+        if "* xyz" in line or "*xyz" in line:
             xyz_ind = ind
             header = lines[xyz_ind]
             break

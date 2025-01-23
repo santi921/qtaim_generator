@@ -4,8 +4,48 @@ import lmdb
 import json
 import pickle
 from typing import Dict, Optional
-import glob as glob
+from glob import glob
 
+from pymatgen.core import Molecule
+from pymatgen.analysis.graphs import MoleculeGraph
+
+from qtaim_gen.source.core.io import convert_inp_to_xyz
+from qtaim_gen.source.core.parse_qtaim import get_spin_charge_from_orca_inp, orca_inp_to_dict
+from qtaim_gen.source.core.bonds import get_bonds_from_rdkit
+
+def convert_inp_to_xyz(orca_path, output_path):
+    """
+    Convert an ORCA input file to an XYZ file.
+    Takes:
+        orca_path: path to ORCA input file
+        output_path: path to write XYZ file to
+    Returns:
+        None
+    """
+    charge, spin = get_spin_charge_from_orca_inp(orca_path)
+    pos = orca_inp_to_dict(orca_path)
+
+    mol_dict = {
+        "mol": pos, 
+        "charge": charge,
+        "spin": spin
+    }
+
+    n_atoms = len(mol_dict["mol"])
+
+    xyz_str = "{}\n".format(n_atoms)
+    spin_charge_line = "{} {}\n".format(mol_dict["charge"], mol_dict["spin"])
+    xyz_str += spin_charge_line
+    # write the atom positions
+    for ind, atom in mol_dict["mol"].items():
+
+        atom_line = "{} {} {} {}\n".format(
+            atom["element"], atom["pos"][0], atom["pos"][1], atom["pos"][2]
+        )
+        xyz_str += atom_line
+
+    with open(output_path, "w") as f:
+        f.write(xyz_str)
 
 
 def running_average(old_avg: float, new_value: float, n: int, n_new: Optional[int] = 1) -> float:
@@ -41,7 +81,7 @@ def write_lmdb(data: dict[dict], lmdb_dir: str, lmdb_name: str, global_values: O
 
     # write samples
     for ind, sample in data.items():
-
+        #print(ind)
         sample_index = ind
         txn = db.begin(write=True)
         txn.put(
@@ -129,7 +169,7 @@ def cleanup_lmdb_files(directory: str, pattern: str, dry_run: Optional[bool] = F
         pattern (str): Pattern to match files.
         dry_run (Optional[bool], optional): If True, do not delete files. Defaults to False.
     """
-    file_list = glob.glob(os.path.join(directory, pattern))
+    file_list = glob(os.path.join(directory, pattern))
 
     for file_path in file_list:
         try:
@@ -169,7 +209,7 @@ def json_2_lmdbs(root_dir: str, out_dir:str, data_type: str, out_lmdb: str, chun
         clean (Optional[bool], optional): If True, delete the json files. Defaults to False.
     """
     chunk_ind = 1
-    files_target = glob.glob(root_dir + "*/{}.json".format(data_type))
+    files_target = glob(root_dir + "*/{}.json".format(data_type))
     
     
     for chunk in split_list(files_target, chunk_size):
@@ -183,9 +223,67 @@ def json_2_lmdbs(root_dir: str, out_dir:str, data_type: str, out_lmdb: str, chun
         write_lmdb(data_dict, out_dir, f"{data_type}_{chunk_ind}.lmdb")
         chunk_ind += 1
 
-    files_out = glob.glob("{}/{}_*.lmdb".format(root_dir, data_type))
+    files_out = glob("{}/{}_*.lmdb".format(root_dir, data_type))
     merge_lmdbs(files_out, out_dir, out_lmdb)
     
     cleanup_lmdb_files(directory=out_dir, pattern="{}_*.lmdb".format(data_type), dry_run=not clean)
     cleanup_lmdb_files(directory=out_dir, pattern="{}_*.lmdb-lock".format(data_type), dry_run=not clean)
+
+
+def inp_files_2_lmdbs(root_dir:str, out_dir:str, out_lmdb: str, chunk_size: int, clean: Optional[bool]=True):
+    """
+    Converts orca inp files into lmdbs
+    Args:
+        root_dir (str): Root directory containing the input files.
+        out_dir (str): Output directory for the lmdb files.
+        out_lmdb (str): Output lmdb file.
+        chunk_size (int): Size of the chunks to split the data into.
+        clean (Optional[bool], optional): If True, delete the input files. Defaults to False.
+    """
+
+    files = glob(root_dir + "*/*.inp")
+
+    for chunk in split_list(files, chunk_size):  
+        chunk_ind = 1
+        data_dict = {}
+
+        for file in chunk: 
+
+            charge, spin = get_spin_charge_from_orca_inp(file)
+            xyz_file = file.replace(".inp", ".xyz")
+            convert_inp_to_xyz(file, xyz_file)
+            molecule = Molecule.from_file(xyz_file)
+            
+            molecule.set_charge_and_spin(
+                charge=int(charge), spin_multiplicity=int(spin)
+            )
+            molecule_graph = MoleculeGraph.with_empty_graph(molecule)
+                
+            identifier = file.split("/")[-2]
+            
+            try:
+                bonds_rdkit = get_bonds_from_rdkit(xyz_file)
+            except:
+                bonds_rdkit = []
+                [molecule_graph.add_edge(bond[0], bond[1]) for bond in bonds_rdkit]
+            
+            data_dict[identifier] = {
+                "molecule": molecule,
+                "molecule_graph": molecule_graph,
+                "ids": identifier,
+                "bonds": bonds_rdkit,
+                "spin": int(spin),
+                "charge": int(charge),
+            }
+
+        write_lmdb(data_dict, out_dir, f"geom_{chunk_ind}.lmdb")
+        chunk_ind += 1
+
+        
+    files_out = glob("{}/geom_*.lmdb".format(root_dir))
+    merge_lmdbs(files_out, out_dir, out_lmdb)
+
+    cleanup_lmdb_files(directory=out_dir, pattern="{}_*.lmdb".format("geom"), dry_run=not clean)
+    cleanup_lmdb_files(directory=out_dir, pattern="{}_*.lmdb-lock".format("geom"), dry_run=not clean)
+
 

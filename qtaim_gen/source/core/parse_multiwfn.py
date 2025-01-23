@@ -208,7 +208,6 @@ def parse_charge_base(charge_out_txt, corrected=False, dipole=True):
         return charge_dict_overall
 
 
-
 def parse_charge_chelpg(charge_out_txt):
     """
     Method to parse the charge out from multiwfn
