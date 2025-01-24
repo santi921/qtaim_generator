@@ -100,13 +100,3 @@ class TestLMDB:
                 if key.decode("ascii") == "length":
                     assert pkl.loads(value) == 4, f"Expected 4, got {pkl.loads(value)}"
 
-
-"""
-inp_files_2_lmdbs(
-    "/home/santiagovargas/dev/qtaim_generator/tests/test_files/lmdb_tests/", 
-    "/home/santiagovargas/dev/qtaim_generator/tests/test_files/lmdb_tests/", 
-    out_lmdb="merged_geom.lmdb",
-    chunk_size=3,
-    clean=True
-)
-"""

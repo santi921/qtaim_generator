@@ -208,6 +208,7 @@ def json_2_lmdbs(
     out_lmdb: str,
     chunk_size: int,
     clean: Optional[bool] = True,
+    merge: Optional[bool] = True,
 ):
     """Converts folders of output json files to lmdb files.
     Args:
@@ -233,14 +234,16 @@ def json_2_lmdbs(
         chunk_ind += 1
 
     files_out = glob("{}/{}_*.lmdb".format(root_dir, data_type))
-    merge_lmdbs(files_out, out_dir, out_lmdb)
+    
+    if merge:
+        merge_lmdbs(files_out, out_dir, out_lmdb)
 
-    cleanup_lmdb_files(
-        directory=out_dir, pattern="{}_*.lmdb".format(data_type), dry_run=not clean
-    )
-    cleanup_lmdb_files(
-        directory=out_dir, pattern="{}_*.lmdb-lock".format(data_type), dry_run=not clean
-    )
+        cleanup_lmdb_files(
+            directory=out_dir, pattern="{}_*.lmdb".format(data_type), dry_run=not clean
+        )
+        cleanup_lmdb_files(
+            directory=out_dir, pattern="{}_*.lmdb-lock".format(data_type), dry_run=not clean
+        )
 
 
 def inp_files_2_lmdbs(
@@ -249,6 +252,7 @@ def inp_files_2_lmdbs(
     out_lmdb: str,
     chunk_size: int,
     clean: Optional[bool] = True,
+    merge: Optional[bool] = True,
 ):
     """
     Converts orca inp files into lmdbs
@@ -299,11 +303,13 @@ def inp_files_2_lmdbs(
         chunk_ind += 1
 
     files_out = glob("{}/geom_*.lmdb".format(root_dir))
-    merge_lmdbs(files_out, out_dir, out_lmdb)
 
-    cleanup_lmdb_files(
-        directory=out_dir, pattern="{}_*.lmdb".format("geom"), dry_run=not clean
-    )
-    cleanup_lmdb_files(
-        directory=out_dir, pattern="{}_*.lmdb-lock".format("geom"), dry_run=not clean
-    )
+    if merge:
+        merge_lmdbs(files_out, out_dir, out_lmdb)
+
+        cleanup_lmdb_files(
+            directory=out_dir, pattern="{}_*.lmdb".format("geom"), dry_run=not clean
+        )
+        cleanup_lmdb_files(
+            directory=out_dir, pattern="{}_*.lmdb-lock".format("geom"), dry_run=not clean
+        )
