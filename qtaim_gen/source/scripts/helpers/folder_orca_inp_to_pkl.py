@@ -127,12 +127,11 @@ def main():
         "molecule_graph": molecule_graphs,
         "ids": identifier,
         "names": xyz_files_completed,
+        "bond": bond_list, 
+        "spin": spin,
+        "charge": charge
     }
     
-    df["bonds"] = bond_list
-    df["spin"] = spin
-    df["charge"] = charge
-
     if gather_tf:
         for key in keys_extra_feats:
             df[key] = extra_val_dict[key]

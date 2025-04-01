@@ -223,6 +223,7 @@ def json_2_lmdbs(
     files_target = glob(root_dir + "*/{}.json".format(data_type))
 
     for chunk in split_list(files_target, chunk_size):
+        #print("chunk size: {}".format(len(chunk)))
         data_dict = {}
         for file in chunk:
             with open(file, "r") as f:
