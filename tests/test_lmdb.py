@@ -1,6 +1,5 @@
 import lmdb
 import json
-from ast import literal_eval
 import pickle as pkl
 
 from qtaim_gen.source.core.lmdbs import json_2_lmdbs, inp_files_2_lmdbs
@@ -8,7 +7,7 @@ from qtaim_gen.source.core.lmdbs import json_2_lmdbs, inp_files_2_lmdbs
 
 class TestLMDB:
     dir_active = "./test_files/lmdb_tests/"
-    chunk_size = 3
+    chunk_size = 2
 
     json_2_lmdbs(
         dir_active, dir_active, "charge", "merged_charge.lmdb", chunk_size, clean=True
@@ -100,3 +99,29 @@ class TestLMDB:
                 if key.decode("ascii") == "length":
                     assert pkl.loads(value) == 4, f"Expected 4, got {pkl.loads(value)}"
 
+dir_active = "./test_files/lmdb_tests/"
+chunk_size = 2
+
+json_2_lmdbs(
+    dir_active, dir_active, "charge", "merged_charge.lmdb", chunk_size, clean=True, merge=False
+)
+json_2_lmdbs(
+    dir_active, dir_active, "bond", "merged_bond.lmdb", chunk_size, clean=True, merge=False
+)
+json_2_lmdbs(
+    dir_active, dir_active, "other", "merged_other.lmdb", chunk_size, clean=True, merge=False
+)
+json_2_lmdbs(
+    dir_active, dir_active, "qtaim", "merged_qtaim.lmdb", chunk_size, clean=True, merge=False
+)
+
+inp_files_2_lmdbs(
+    dir_active, dir_active, "merged_geom.lmdb", chunk_size, clean=True, merge=False
+)
+
+charge_lmdb = "./test_files/lmdb_tests/merged_charge.lmdb"
+bond_lmdb = "./test_files/lmdb_tests/merged_bond.lmdb"
+other_lmdb = "./test_files/lmdb_tests/merged_other.lmdb"
+qtaim_lmdb = "./test_files/lmdb_tests/merged_qtaim.lmdb"
+geom_lmdb = "./test_files/lmdb_tests/merged_geom.lmdb"
+obj = TestLMDB()
