@@ -4,6 +4,7 @@
         python create_json_from_xyz.py --xyz_folder xyz_folder --json_file json_file
     
 """
+
 import argparse
 import os, json
 import pandas as pd
@@ -84,10 +85,10 @@ def main():
             )
 
         molecule_graph = MoleculeGraph.with_empty_graph(molecule)
-        
+
         if determine_bonds:
             [molecule_graph.add_edge(bond[0], bond[1]) for bond in bonds_rdkit]
-        
+
         molecule_graphs.append(molecule_graph)
         molecules.append(molecule)
 

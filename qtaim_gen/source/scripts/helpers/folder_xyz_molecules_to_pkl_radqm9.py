@@ -4,6 +4,7 @@
         python create_json_from_xyz.py --xyz_folder xyz_folder --json_file json_file
     
 """
+
 import argparse
 import os, json, ast
 import pandas as pd

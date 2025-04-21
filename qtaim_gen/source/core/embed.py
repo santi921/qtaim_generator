@@ -1,8 +1,12 @@
 from typing import Dict, List, Tuple, Union, Any
 
-from qtaim_embed.data.processing import HeteroGraphStandardScalerIterative, HeteroGraphLogMagnitudeScaler
+from qtaim_embed.data.processing import (
+    HeteroGraphStandardScalerIterative,
+    HeteroGraphLogMagnitudeScaler,
+)
 from qtaim_embed.core.molwrapper import MoleculeWrapper
 from qtaim_embed.utils.grapher import get_grapher
+
 
 def get_include_exclude_indices(
     feat_names: Dict[str, List[str]], target_dict: Dict[str, List[str]]
@@ -61,7 +65,6 @@ def get_include_exclude_indices(
     return info_dict
 
 
-
 def split_graph_labels(
     graph: Any,
     include_names: Dict[str, List[str]],
@@ -87,20 +90,19 @@ def split_graph_labels(
         if key in include_names.keys():
             graph_features = {}
 
-            graph_features[key] = graph.ndata["feat"][key][
-                :, exclude_locs[key]
-            ]
+            graph_features[key] = graph.ndata["feat"][key][:, exclude_locs[key]]
 
             features_new.update(graph_features)
 
             labels[key] = graph.ndata["feat"][key][:, include_locs[key]]
-        
+
         graph.ndata["feat"] = features_new
         graph.ndata["labels"] = labels
 
 
-
-def initialize_grapher(grapher, element_set, atom_keys, bond_keys, global_keys, config_dict):
+def initialize_grapher(
+    grapher, element_set, atom_keys, bond_keys, global_keys, config_dict
+):
     """
     Initialize the grapher object if not already initialized.
     """

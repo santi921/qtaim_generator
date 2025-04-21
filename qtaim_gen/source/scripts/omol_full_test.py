@@ -8,9 +8,9 @@ def main():
     # set mem
     os.system("ulimit -s unlimited")
 
-    orca_base =  "/home/santiagovargas/dev/qtaim_generator/data/omol_tests/base_test/"
-    orca_6 =     "/home/santiagovargas/dev/qtaim_generator/data/omol_tests/orca6/"
-    orca_5 =     "/home/santiagovargas/dev/qtaim_generator/data/omol_tests/orca5/"
+    orca_base = "/home/santiagovargas/dev/qtaim_generator/data/omol_tests/base_test/"
+    orca_6 = "/home/santiagovargas/dev/qtaim_generator/data/omol_tests/orca6/"
+    orca_5 = "/home/santiagovargas/dev/qtaim_generator/data/omol_tests/orca5/"
     orca_6_rks = "/home/santiagovargas/dev/qtaim_generator/data/omol_tests/orca6_rks/"
     orca_6_uks = "/home/santiagovargas/dev/qtaim_generator/data/omol_tests/orca6_uks/"
     orca_5_rks = "/home/santiagovargas/dev/qtaim_generator/data/omol_tests/orca5_rks/"
@@ -28,7 +28,6 @@ def main():
     overwrite = True
     clean = False
     debug = False
-    
 
     try:
         # works!
@@ -42,7 +41,7 @@ def main():
             orca_6=True,
             clean=clean,
             restart=False,
-            debug=debug
+            debug=debug,
         )  # works!
     except:
 
@@ -157,5 +156,6 @@ def main():
         print("Error in gbw_analysis - case 4")
 
     """
+
 
 main()
