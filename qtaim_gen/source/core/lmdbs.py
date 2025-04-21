@@ -3,7 +3,7 @@ import pickle as pkl
 import lmdb
 import json
 import pickle
-from typing import Dict, Optional
+from typing import Dict, List, Tuple, Any, Optional
 from glob import glob
 
 from pymatgen.core import Molecule
@@ -314,3 +314,140 @@ def inp_files_2_lmdbs(
         cleanup_lmdb_files(
             directory=out_dir, pattern="{}_*.lmdb-lock".format("geom"), dry_run=not clean
         )
+
+
+def get_elements_from_structure_lmdb(structure_lmdb):
+    """
+    Get the elements from the structure lmdb
+    Takes:
+        structure_lmdb: lmdb file containing the structure data
+    Returns:
+        element_set: set of elements in the structure lmdb
+    """
+    element_set = set()
+    with structure_lmdb.begin(write=False) as txn_in:
+        cursor = txn_in.cursor()
+        for key, value in cursor: # first loop for gathering statistics and averages
+            if key.decode("ascii") != "length":
+                value_structure = pickle.loads(value)
+                
+
+                element_list = [str(site.species.elements).split(" ")[-1].split("]")[0] for site in value_structure["molecule"]]
+                element_set.update(element_list)
+    return element_set
+    
+
+def parse_config_gen_to_embed(config_path: str) -> Tuple[Dict[str, lmdb.Environment], Dict[str, Any]]:
+    """
+    Parse the config file for generating qtaim_embed data.
+
+    Args:
+        config_path (str): Path to the config file in JSON format.
+
+    Returns:
+        Tuple[Dict[str, lmdb.Environment], Dict[str, Any]]:
+            - A dictionary of LMDB environments keyed by their names.
+            - A dictionary containing the configuration parameters.
+    """
+    lmdb_dict = {}
+    with open(config_path, "r") as f:
+        config_dict = json.load(f)
+
+    lmdb_loc_config = config_dict["lmdb_locations"]
+    assert (
+        "structure_lmdb" in lmdb_loc_config.keys()
+    ), "The config file must contain a key 'structure_lmdb'"
+
+    for key in lmdb_loc_config.keys():
+        lmdb_path = lmdb_loc_config[key]
+        print(lmdb_path)
+
+        lmdb_env = lmdb.open(
+            lmdb_path,
+            readonly=True,
+            lock=False,
+            subdir=False,
+            readahead=True,
+            meminit=False,
+        )
+
+        lmdb_dict[key] = lmdb_env
+
+        assert (
+            lmdb_dict[key].stat()["entries"] > 0
+        ), f"The LMDB file is empty: {lmdb_dict[key]}"
+
+    return lmdb_dict, config_dict
+
+
+def parse_charge_data(value_charge, n_atoms):
+    """
+    Parse charge-related data and update atom features.
+    """
+    atom_feats_charge = {i: {} for i in range(n_atoms)}
+    global_dipole_feats = {}
+    charge_types = list(value_charge.keys())
+    for charge_type in charge_types:
+        
+        # parse out into atom_feats without for loop 
+        {atom_feats_charge[int(k.split("_")[0])-1].update({"charge_" + charge_type: v}) for k, v in value_charge[charge_type]['charge'].items()}
+        
+        if "dipole" in value_charge[charge_type].keys():
+            global_dipole_feats.update({charge_type + "_dipole_mag": value_charge[charge_type]['dipole']['mag']})
+        
+        if "spin" in value_charge[charge_type].keys():
+            {atom_feats_charge[int(k.split("_")[0])-1].update({"spin_" + charge_type: v}) for k, v in value_charge[charge_type]['spin'].items()}
+
+    return atom_feats_charge, global_dipole_feats
+
+
+def parse_qtaim_data(value_qtaim, atom_feats, bond_feats, atom_keys, bond_keys):
+    """
+    Parse QTAIM-related data and update atom and bond features.
+    """
+
+    if atom_keys is None:
+        qtaim_atoms = {k:v for k, v in value_qtaim.items() if "_" not in k}
+        atom_keys = list(qtaim_atoms[list(qtaim_atoms.keys())[0]].keys())
+        # remove "cp_num" from atom_keys
+        [atom_keys.remove(i) for i in ["cp_num", "element", "number", "pos_ang"]]
+
+    if bond_keys is None:
+        qtaim_bonds = {k:v for k, v in value_qtaim.items() if "_" in k} 
+        bond_keys = list(qtaim_bonds[list(qtaim_bonds.keys())[0]].keys())
+        # get first k, v in qtaim_bonds
+        [bond_keys.remove(i) for i in ["cp_num", "connected_bond_paths", "pos_ang"]]
+    
+    #print("*******atom keys*******: ", atom_keys)
+
+    # only get the keys that are in the qtaim_bonds and qtaim_atoms from each dictionary in value_qtaim
+    qtaim_atoms = {k: get_several_keys(v, atom_keys) for k, v in value_qtaim.items() if "_" not in k}
+    qtaim_bonds = {k: get_several_keys(v, bond_keys) for k, v in value_qtaim.items() if "_" in k}
+    
+    for key, value in atom_feats.items(): # update atom_feats with qtaim_atoms
+        atom_feats[key].update(qtaim_atoms[str(key)])
+
+    for key, value in qtaim_bonds.items(): # update bond_feats with qtaim_bonds
+        a, b = key.split("_")
+        key_conv = tuple(sorted([int(a), int(b)]))
+        bond_feats[key_conv] = qtaim_bonds[str(key)]
+        
+    bond_feats = {k: v for k, v in bond_feats.items() if k[0] != k[1]}
+    connected_bond_paths = list(bond_feats.keys())
+
+    return atom_keys, bond_keys, atom_feats, bond_feats, connected_bond_paths
+
+
+def get_several_keys(di: Dict[str, Any], keys: List[str]) -> Dict[str, Any]:
+    """
+    Get several keys from a dictionary.
+
+    Args:
+        di (Dict[str, Any]): The input dictionary.
+        keys (List[str]): List of keys to extract from the dictionary.
+
+    Returns:
+        Dict[str, Any]: A dictionary containing only the specified keys.
+    """
+    return {k: di.get(k, None) for k in keys}
+

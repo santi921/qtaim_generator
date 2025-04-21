@@ -486,17 +486,15 @@ def merge_qtaim_inds(
     """
 
     # open dft input file
-    # print(dft_inp_file, inp_type)
     if inp_type == "orca":
         dft_dict = orca_inp_to_dict(dft_inp_file)
-        # print("orca parse")
-        # print(dft_dict)
+        
     else:
         dft_dict = dft_inp_to_dict(dft_inp_file)
 
     # find only atom cps to map
     atom_only_cps, bond_cps = only_atom_cps(qtaim_descs)
-    # print(sorted(list(atom_only_cps.keys())))
+    
     # remap qtaim indices to atom indices
     atom_cps_remapped, qtaim_to_dft, missing_atoms = find_cp_map(
         dft_dict, atom_only_cps, margin=margin
