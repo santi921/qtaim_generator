@@ -64,8 +64,10 @@ class QTAIMEmbedConverter:
         # keys
         self.atom_keys_grapher_no_qtaim = None
         self.atom_keys = None
+        self.bond_keys_grapher_no_qtaim = None
         self.bond_keys = None
         self.global_keys= None
+        self.global_keys_target = None
         
         # indices of keys in graphs
         self.index_dict = {}
@@ -380,29 +382,34 @@ class QTAIMEmbedConverter:
         for key in keys_to_iterate:
             if key.decode("ascii") not in self.skip_keys:
                 try: 
-                    #value_structure = pickle.loads(value)
                     # structure keys
                     value_structure = self.__getitem__("structure_lmdb", key)
-                    mol_graph = value_structure["molecule_graph"]
-                    n_atoms = len(mol_graph)
-                    spin = value_structure["spin"]
-                    charge = value_structure["charge"]
-                    bonds = value_structure["bonds"]
+                    if value_structure != None:
+                        mol_graph = value_structure["molecule_graph"]
+                        n_atoms = len(mol_graph)
+                        spin = value_structure["spin"]
+                        charge = value_structure["charge"]
+                        bonds = value_structure["bonds"]
 
-                    id = clean_id(key)
+                        id = clean_id(key)
 
-                    # global features
-                    global_feats = {
-                        "charge": charge,
-                        "spin": spin,
-                        "n_atoms": n_atoms,
-                        "n_bonds": len(bonds),
-                    }
+                        # global features
+                        global_feats = {
+                            "charge": charge,
+                            "spin": spin,
+                            "n_atoms": n_atoms,
+                            "n_bonds": len(bonds),
+                        }
 
-                    # initialize atom_feats with dictionary whos keys are atom inds and empty dict as values
-                    atom_feats = {i: {} for i in range(n_atoms)}
-                    bond_feats = {}
-                    bond_list = {tuple(sorted(b)): None for b in bonds if b[0] != b[1]}
+
+                        # initialize atom_feats with dictionary whos keys are atom inds and empty dict as values
+                        atom_feats = {i: {} for i in range(n_atoms)}
+                        bond_feats = {}
+                        bond_list = {tuple(sorted(b)): None for b in bonds if b[0] != b[1]}
+
+                    else: 
+                        self.fail_log_dict["structure"].append(key.decode("ascii"))
+                        continue
                 except: 
                     self.fail_log_dict["structure"].append(key.decode("ascii"))
                     continue
@@ -410,43 +417,62 @@ class QTAIMEmbedConverter:
                 try: 
                     #value_charge = pickle.loads(self.lmdb_dict["charge_lmdb"].get(key))
                     value_charge = self.__getitem__("charge_lmdb", key)
-                    # parse charge data
-                    atom_feats_charge, global_dipole_feats = parse_charge_data(
-                        value_charge, n_atoms
-                    )
-                    # copy atom_feats to atom_feats_no_qtaim
-                    atom_feats_no_qtaim = deepcopy(atom_feats)
+                    if value_charge != None:
+                        # parse charge data
+                        atom_feats_charge, global_dipole_feats = parse_charge_data(
+                            value_charge, n_atoms
+                        )
+                        # copy atom_feats to atom_feats_no_qtaim
+                        atom_feats_no_qtaim = deepcopy(atom_feats)
 
-                    if self.atom_keys_grapher_no_qtaim == None:
-                        self.atom_keys_grapher_no_qtaim = list(atom_feats[0].keys())
+                        if self.atom_keys_grapher_no_qtaim == None:
+                            self.atom_keys_grapher_no_qtaim = list(atom_feats[0].keys())
 
-                    global_feats.update(global_dipole_feats)
-                    
-                    if self.global_keys == None:
-                        self.global_keys = list(global_feats.keys())
-
-                    atom_feats.update(atom_feats_charge)
+                        
+                        
+                        if self.global_keys == None:
+                            #print(" global keys: ", global_feats.keys())
+                            self.global_keys = list(global_feats.keys()) + list(global_dipole_feats.keys())
+                            self.global_keys_target = list(global_dipole_feats.keys())
+                            #print(" global keys: ", self.global_keys)
+                            #print(" global keys target: ", self.global_keys_target)
+                            
+                        global_feats.update(global_dipole_feats)
+                        atom_feats.update(atom_feats_charge)
+                    else: 
+                        self.fail_log_dict["charge"].append(key.decode("ascii"))
+                        continue
                 except:
                     self.fail_log_dict["charge"].append(key.decode("ascii"))
                     continue
 
+
                 try:
-                    
-                    #value_qtaim = pickle.loads(self.lmdb_dict["qtaim_lmdb"].get(key))
                     value_qtaim = self.__getitem__("qtaim_lmdb", key)
-                    # parse qtaim data
-                    atom_keys, bond_keys, atom_feats, bond_feats, connected_bond_paths = (
-                        parse_qtaim_data(
-                            value_qtaim, atom_feats, bond_feats, atom_keys, bond_keys
+                    if value_qtaim != None:
+                        # parse qtaim data
+                        atom_keys_qtaim, bond_keys_qtaim, atom_feats, bond_feats, connected_bond_paths = (
+                            parse_qtaim_data(
+                                value_qtaim, atom_feats, bond_feats, self.atom_keys, self.bond_keys
+                            )
                         )
-                    )
-                    atom_keys_complete = atom_keys + self.atom_keys_grapher_no_qtaim
+                        
+                        if self.atom_keys == None:
+                            self.atom_keys = atom_keys_qtaim + self.atom_keys_grapher_no_qtaim
+                        if self.bond_keys == None:
+                            self.bond_keys = bond_keys_qtaim
+                    else: 
+                        self.fail_log_dict["qtaim"].append(key.decode("ascii"))
+                        continue
                 except: 
                     self.fail_log_dict["qtaim"].append(key.decode("ascii"))
                     continue
 
                 
                 ############################# Molwrapper ####################################
+
+
+
                 try: 
                     mol_wrapper_qtaim_bonds = MoleculeWrapper(
                         mol_graph,
@@ -475,14 +501,13 @@ class QTAIMEmbedConverter:
                         original_atom_ind=None,
                         original_bond_mapping=None,
                     )
-                    # print(mol_wrapper)
 
-                    ############################# Grapher ####################################
                     if not self.grapher_qtaim:
                         self.grapher_qtaim = get_grapher(
                             element_set=self.element_set,
-                            atom_keys=self.atom_keys_complete,  # todo
-                            bond_keys=self.bond_keys,  # todo
+                            atom_keys=self.atom_keys,  # todo
+                            bond_keys=self.bond_keys,  
+                            #bond_keys=[], 
                             global_keys=self.global_keys,
                             allowed_ring_size=self.config_dict["allowed_ring_size"],
                             allowed_charges=self.config_dict["allowed_charges"],
@@ -492,6 +517,7 @@ class QTAIMEmbedConverter:
                             bond_featurizer_tf=True,
                             global_featurizer_tf=True,
                         )
+                        #print("\nbond keys qtaim: ", self.bond_keys)
 
                     if not self.grapher_no_qtaim:
                         self.grapher_no_qtaim = get_grapher(
@@ -507,7 +533,6 @@ class QTAIMEmbedConverter:
                             bond_featurizer_tf=True,
                             global_featurizer_tf=True,
                         )
-
                     # graph generation
                     graph_no_qtaim = build_and_featurize_graph(
                         self.grapher_no_qtaim, mol_wrapper
@@ -516,27 +541,25 @@ class QTAIMEmbedConverter:
                         self.grapher_qtaim, mol_wrapper_qtaim_bonds
                     )
 
-                    if self.index_dict == {}:
-                        key_target = {
-                            "atom": self.atom_keys_grapher_no_qtaim,
-                            "bond": [],
-                            "global": self.global_keys,
-                        }
-                        # print("target keys no qtaim: ", key_target)
-                        self.index_dict = get_include_exclude_indices(
-                            feat_names=self.grapher_no_qtaim.feat_names, target_dict=key_target
-                        )
-
                     if self.index_dict_qtaim == {}:
                         key_target_qtaim = {
                             "atom": self.atom_keys,
                             "bond": self.bond_keys,
-                            "global": self.global_keys,
+                            "global": self.global_keys_target,
                         }
-                        # print("target keys qtaim: ", key_target_qtaim)
                         self.index_dict_qtaim = get_include_exclude_indices(
                             feat_names=self.grapher_qtaim.feat_names,
                             target_dict=key_target_qtaim,
+                        )
+
+                    if self.index_dict == {}:
+                        key_target = {
+                            "atom": self.atom_keys_grapher_no_qtaim,
+                            "bond": [],
+                            "global": self.global_keys_target,
+                        }
+                        self.index_dict = get_include_exclude_indices(
+                            feat_names=self.grapher_no_qtaim.feat_names, target_dict=key_target
                         )
 
                     # split graph into features and labels
@@ -581,10 +604,10 @@ class QTAIMEmbedConverter:
                     self.fail_log_dict["scaler"].append(key.decode("ascii"))
                     continue
         
-            self.feature_scaler_iterative.finalize()
-            self.label_scaler_iterative.finalize()
-            self.feature_scaler_iterative_qtaim.finalize()
-            self.label_scaler_iterative_qtaim.finalize()
+        self.feature_scaler_iterative.finalize()
+        self.label_scaler_iterative.finalize()
+        self.feature_scaler_iterative_qtaim.finalize()
+        self.label_scaler_iterative_qtaim.finalize()
         
         txn = self.db_qtaim.begin(write=True)
         txn.put("scaled".encode("ascii"), pickle.dumps(False, protocol=-1))
@@ -596,7 +619,11 @@ class QTAIMEmbedConverter:
 
         self.db_qtaim.close()
         self.db_non_qtaim.close()
-
+        print("error dict stats:")
+        for key in self.fail_log_dict.keys():
+            print(f"{key}: {len(self.fail_log_dict[key])} errors")
+            if len(self.fail_log_dict[key]) > 0:
+                print(f"error keys: {self.fail_log_dict[key]}")
     
     def __getitem__(self, key_lmdb, idx):
         """
@@ -624,14 +651,24 @@ class QTAIMEmbedConverter:
                 .begin()
                 .get(f"{self.lmdb_dict[key_lmdb]['keys'][db_idx][el_idx]}")
             )
+            # handle if the key is not in the lmdb
+            if datapoint_pickled is None:
+                print(f"Key {idx} not found in LMDB {key_lmdb}.")
+                #assert False, f"Key {idx} not found in LMDB {key_lmdb}."
+                return None
+            
             data_object = pickle.loads(datapoint_pickled)
-            data_object.id = f"{db_idx}_{el_idx}"
+            #data_object.id = f"{db_idx}_{el_idx}"
 
         else:
             #value_charge = pickle.loads(self.lmdb_dict["charge_lmdb"].get(key))
-            print("index: ", idx)
             datapoint_pickled = self.lmdb_dict[key_lmdb]['env'].begin().get(idx)
             # throw 
+            # handle if the key is not in the lmdb
+            if datapoint_pickled is None:
+                print(f"Key {idx} not found in LMDB {key_lmdb}.")
+                #assert False, f"Key {idx} not found in LMDB {key_lmdb}."
+                return None
             #assert False, f"LMDB file {key_lmdb} is not a folder. Use the key directly."    
             data_object = pickle.loads(datapoint_pickled)
 
