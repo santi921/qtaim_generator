@@ -2,6 +2,7 @@ import os
 import pickle
 import lmdb
 import json
+from glob import glob
 import numpy as np
 import bisect
 import argparse
@@ -16,7 +17,7 @@ from qtaim_embed.core.molwrapper import MoleculeWrapper
 from qtaim_embed.utils.grapher import get_grapher
 
 from qtaim_embed.data.lmdb import (
-    serialize_dgl_graph, TransformMol, 
+    serialize_dgl_graph, 
     load_dgl_graph_from_serialized
 )
 
@@ -56,10 +57,12 @@ def clean_id(key: bytes) -> str:
 class QTAIMEmbedConverter:
     def __init__(
             self, 
-            config_dict: Dict[str, Any]
+            config_dict: Dict[str, Any], 
+            config_path: str = None
         ):
         self.config_dict = config_dict
         self.restart = config_dict["restart"]
+        self.config_path = config_path
         
         # keys
         self.atom_keys_grapher_no_qtaim = None
@@ -95,10 +98,10 @@ class QTAIMEmbedConverter:
             element_set = self.config_dict["element_set"]
         else:
             if self.single_lmdb:
-                element_set = get_elements_from_structure_lmdb(self.lmdb_dict["structure_lmdb"])
+                element_set = get_elements_from_structure_lmdb(self.lmdb_dict["geom_lmdb"])
             else: 
                 element_set = get_elements_from_structure_lmdb_folder_list(
-                    self.lmdb_dict["structure_lmdbs"]
+                    self.lmdb_dict["geom_lmdb"]
                 )
 
         self.element_set = sorted(list(element_set))
@@ -155,26 +158,26 @@ class QTAIMEmbedConverter:
             )
 
     
-    def pull_lmdbs(self):
+    def pull_lmdbs(self) -> Dict[str, Any]:
 
         lmdb_dict = {}
 
         assert (
-            "structure_lmdb" in config_dict["lmdb_locations"].keys()
-        ), "The config file must contain a key 'structure_lmdb'"
+            "geom_lmdb" in config_dict["lmdb_locations"].keys()
+        ), "The config file must contain a key 'geom_lmdb'"
 
-        
-
+    
         for key in config_dict["lmdb_locations"].keys():
             lmdb_path = config_dict["lmdb_locations"][key]
 
-            # chick if the path is a file or directory
+            # check if the path is a file or directory
             if not os.path.exists(lmdb_path):
                 raise ValueError(f"Path '{lmdb_path}' does not exist.")
             
             if os.path.isdir(lmdb_path):
+                #print(f"Path '{lmdb_path}' is a directory.")
                 # if the path is a directory, check if it contains lmdb files
-                lmdb_dict[key] = self.connect_folder_of_dbs(lmdb_path, key)
+                lmdb_dict[key] = self.connect_folder_of_dbs(db_path=lmdb_path, key=key.split("_")[0])
                 self.single_lmdb = False                
             else: 
                 # single lmdb file 
@@ -222,8 +225,10 @@ class QTAIMEmbedConverter:
 
     
     def connect_folder_of_dbs(self, db_path, key=None):
-        if not db_path.is_file():
-            db_paths = sorted(db_path.glob(f"*{key}*.lmdb"))
+        #print("Connecting to folder of LMDBs")
+        #print("key: ", key)
+        if os.path.isdir(db_path):
+            db_paths = sorted(glob(f"{db_path}/*{key}*.lmdb"))
             assert len(db_paths) > 0, f"No LMDBs found in '{db_path}'"
             # self.metadata_path = self.path / "metadata.npz"
 
@@ -373,17 +378,19 @@ class QTAIMEmbedConverter:
             #for key, value in cursor:  # first loop for gathering statistics and averages
                 
         if self.single_lmdb:
-            keys_to_iterate = self.lmdb_dict["structure_lmdb"]["keys"]
+            keys_to_iterate = self.lmdb_dict["geom_lmdb"]["keys"]
         else:
+            #print("geom_lmdb dict")
+            #print(self.lmdb_dict["geom_lmdb"])
             keys_to_iterate = []
-            for key in self.lmdb_dict["structure_lmdbs"]:
-                keys_to_iterate += self.lmdb_dict["structure_lmdbs"][key]["keys"]
+            for key in self.lmdb_dict["geom_lmdb"]["keys"]:
+                keys_to_iterate.append(key)
 
         for key in keys_to_iterate:
             if key.decode("ascii") not in self.skip_keys:
                 try: 
                     # structure keys
-                    value_structure = self.__getitem__("structure_lmdb", key)
+                    value_structure = self.__getitem__("geom_lmdb", key)
                     if value_structure != None:
                         mol_graph = value_structure["molecule_graph"]
                         n_atoms = len(mol_graph)
@@ -551,6 +558,8 @@ class QTAIMEmbedConverter:
                             feat_names=self.grapher_qtaim.feat_names,
                             target_dict=key_target_qtaim,
                         )
+                        self.config_dict["index_dict_qtaim"] = self.index_dict_qtaim
+                        self.overwrite_config()
 
                     if self.index_dict == {}:
                         key_target = {
@@ -561,6 +570,10 @@ class QTAIMEmbedConverter:
                         self.index_dict = get_include_exclude_indices(
                             feat_names=self.grapher_no_qtaim.feat_names, target_dict=key_target
                         )
+                        # save self.index_dict to config
+                        self.config_dict["index_dict"] = self.index_dict
+                        self.overwrite_config()
+                        
 
                     # split graph into features and labels
                     split_graph_labels(
@@ -619,12 +632,14 @@ class QTAIMEmbedConverter:
 
         self.db_qtaim.close()
         self.db_non_qtaim.close()
+
         print("error dict stats:")
         for key in self.fail_log_dict.keys():
-            print(f"{key}: {len(self.fail_log_dict[key])} errors")
+            print(f"{key}: \t\t {len(self.fail_log_dict[key])} errors")
             if len(self.fail_log_dict[key]) > 0:
-                print(f"error keys: {self.fail_log_dict[key]}")
+                print(f"error keys: \t{self.fail_log_dict[key]}")
     
+
     def __getitem__(self, key_lmdb, idx):
         """
         Get the item from the LMDB file or folder. Idx is an index for folders but a key for single lmdbs.
@@ -675,6 +690,15 @@ class QTAIMEmbedConverter:
 
         return data_object
 
+    def overwrite_config(self, file_location=None):
+        """
+        Overwrite the config file with the current config_dict.
+        """
+        if file_location is None:
+            file_location = self.config_path
+        with open(file_location, "w") as f:
+            json.dump(self.config_dict, f, indent=4)
+            print(f"Config file {file_location} overwritten.")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="LMDB to embed")
@@ -703,6 +727,6 @@ if __name__ == "__main__":
     config_path = str(args.config_path)
     
     config_dict = parse_config_gen_to_embed(args.config_path, restart=bool(args.restart))        
-    scaler = QTAIMEmbedConverter(config_dict)
+    scaler = QTAIMEmbedConverter(config_dict, config_path=config_path)
     scaler.main_loop()
     scaler.scale_graph_lmdb()
