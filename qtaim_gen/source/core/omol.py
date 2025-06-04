@@ -32,8 +32,7 @@ from qtaim_gen.source.core.utils import pull_ecp_dict, overwrite_molden_w_ecp
 
 ORDER_OF_OPERATIONS = ["fuzzy_full", "qtaim", "bond", "charge", "other"]
 ORDER_OF_OPERATIONS_separate = ["fuzzy_full", "charge_separate", "bond_separate", "qtaim", "other"]
-#ORDER_OF_OPERATIONS_separate = ["fuzzy_full"]
-#ORDER_OF_OPERATIONS_separate = ["fuzzy_full", "charge_separate"]
+
 
 
 
@@ -319,6 +318,7 @@ def run_jobs(folder, separate=False, orca_6=True, restart=False, debug=False):
         folder(str): folder to run jobs in
         separate(bool): whether to separate the analysis into different files
     """
+
     if separate:
         #order_of_operations = ORDER_OF_OPERATIONS_separate
         order_of_operations = ["qtaim"]
@@ -331,7 +331,6 @@ def run_jobs(folder, separate=False, orca_6=True, restart=False, debug=False):
 
     else:
         order_of_operations = ORDER_OF_OPERATIONS
-        # order_of_operations = ["bond", "charge", "qtaim"]
 
     if debug:
         order_of_operations = ["qtaim"]
@@ -606,7 +605,6 @@ def parse_multiwfn(folder, separate=False, debug=False):
                             print("error parsing chelpg")
 
                     elif routine in list(fuzzy_dict.keys()):
-
                         try:
                             data = parse_fuzzy_real_space(file_full_path)
                             with open(json_file, "w") as f:
@@ -725,8 +723,8 @@ def clean_jobs(folder, separate=False):
         if file.endswith(".molden.input"):
             os.remove(os.path.join(folder, file))
 
-        if file.endswith(".wfn"):
-            os.remove(os.path.join(folder, file))
+        #if file.endswith(".wfn"):
+        #    os.remove(os.path.join(folder, file))
 
         if file.endswith("convert.in"):
             os.remove(os.path.join(folder, file))

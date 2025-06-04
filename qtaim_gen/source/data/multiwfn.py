@@ -2,7 +2,6 @@
 Helpers to generate the data strings for the multiwfn program
 """
 
-
 def charge_data():
     # old string with every charge method possible with a gbw
     # string_ret = "7\n1\n1\nn\n2\n1\nn\n10\n0\nn\n11\n1\nn\n12\n1\nn\n0\n13\n1\nn\n0\n16\n1\nn\n18\n1\nn\n0\n19\nn\n20\n1\nn\n0\nq\n"
@@ -34,9 +33,9 @@ def bond_order_data():  # separate out into dictionary
 
 def bond_order_dict():
     string_dict = {}
-    string_dict["fuzzy"] = "9\n7\nn\n0\nq\n"
+    string_dict["fuzzy_bond"] = "9\n7\nn\n0\nq\n"
     # string_dict["laplacian"] = "9\n8\nn\n0\nq\n" expensive
-    string_dict["ibsi"] = "9\n10\n1\n1\n0\n0\nq\n"
+    string_dict["ibsi_bond"] = "9\n10\n1\n1\n0\n0\nq\n"
     return string_dict
 
 
@@ -44,13 +43,13 @@ def fuzzy_data():  # not being used so don't need to move to dictionary
     string_ret = "15\n1\n1\n1\n2\n1\n3\n1\n9\n4\nn\n0\nq\n"
     #string_ret = "15\n1\n1\nn1\n2\n1\n3\n1\n9\n4\nn\n0\nq\n"
     string_dict = {}
-    string_dict["esp_fuzzy"] = "15\n1\n1\n0\nq\n"
+    string_dict["becke_fuzzy_density"] = "15\n1\n1\n0\nq\n"
     string_dict["grad_norm_rho_fuzzy"] = "15\n1\n2\n0\nq\n"
     string_dict["laplacian_rho_fuzzy"] = "15\n1\n3\n0\nq\n"
     string_dict["elf_fuzzy"] = "15\n1\n9\n0\nq\n"
     string_dict["becke_fuzzy_spin"] = "15\n1\n5\n0\nq\n"
-    string_dict["mbis_fuzz_spin"] = "15\n-1\n5\n1\n1\n5\n0\nq\n" 
-    string_dict["becke_fuzzy_density"] = "15\n1\n1\n0\nq\n"
+    string_dict["mbis_fuzzy_spin"] = "15\n-1\n5\n1\n1\n5\n0\nq\n" 
+    #string_dict["becke_fuzzy_density"] = "15\n1\n1\n0\nq\n"
     string_dict["mbis_fuzzy_density"] = "15\n-1\n5\n1\n1\n1\n0\nq\n" 
     #return string_ret
     return string_dict 
