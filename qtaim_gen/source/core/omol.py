@@ -25,9 +25,16 @@ from qtaim_gen.source.core.parse_multiwfn import (
     parse_qtaim,
     parse_charge_doc_bader,
     parse_charge_chelpg,
+    parse_fuzzy_real_space
 )
 
 from qtaim_gen.source.core.utils import pull_ecp_dict, overwrite_molden_w_ecp
+
+ORDER_OF_OPERATIONS = ["fuzzy_full", "qtaim", "bond", "charge", "other"]
+ORDER_OF_OPERATIONS_separate = ["fuzzy_full", "charge_separate", "bond_separate", "qtaim", "other"]
+#ORDER_OF_OPERATIONS_separate = ["fuzzy_full"]
+#ORDER_OF_OPERATIONS_separate = ["fuzzy_full", "charge_separate"]
+
 
 
 def write_conversion(
@@ -141,10 +148,10 @@ def create_jobs(folder, multiwfn_cmd, orca_2mkl_cmd, separate=False, debug=True)
         orca_6(bool): whether calc is from orca6
     """
     if separate:
-        routine_list = ["charge_separate", "bond_separate", "qtaim", "other"]
+        routine_list = ORDER_OF_OPERATIONS_separate
         # routine_list = ["charge_separate"]
     else:
-        routine_list = ["qtaim", "bond", "charge", "other"]
+        routine_list = ORDER_OF_OPERATIONS
         # routine_list = ["qtaim", "bond", "charge"]
 
     if debug:  # just run qtaim in debug mode
@@ -192,10 +199,14 @@ def create_jobs(folder, multiwfn_cmd, orca_2mkl_cmd, separate=False, debug=True)
                 f.write(data)
 
         elif routine == "fuzzy_full":
-            job_dict["fuzzy_full"] = os.path.join(folder, "fuzzy_full.txt")
+            #job_dict["fuzzy_full"] = os.path.join(folder, "fuzzy_full.txt")
             with open(os.path.join(folder, "fuzzy_full.txt"), "w") as f:
-                data = fuzzy_data()
-                f.write(data)
+                fuzzy_dict = fuzzy_data()
+                for key, value in fuzzy_dict.items():
+                    job_dict[key] = os.path.join(folder, "{}.txt".format(key))
+                    with open(os.path.join(folder, "{}.txt".format(key)), "w") as f:
+                        f.write(value)
+                #f.write(data)
 
         elif routine == "bond":
             job_dict["bond"] = os.path.join(folder, "bond.txt")
@@ -309,15 +320,17 @@ def run_jobs(folder, separate=False, orca_6=True, restart=False, debug=False):
         separate(bool): whether to separate the analysis into different files
     """
     if separate:
-        order_of_operations = ["qtaim", "other"]
-        # order_of_operations = ["qtaim"]
+        #order_of_operations = ORDER_OF_OPERATIONS_separate
+        order_of_operations = ["qtaim"]
         charge_dict = charge_data_dict()
         [order_of_operations.append(i) for i in charge_dict.keys()]
         bond_dict = bond_order_dict()
         [order_of_operations.append(i) for i in bond_dict.keys()]
+        fuzzy_dict = fuzzy_data()
+        [order_of_operations.append(i) for i in fuzzy_dict.keys()]
 
     else:
-        order_of_operations = ["bond", "charge", "qtaim", "other"]
+        order_of_operations = ORDER_OF_OPERATIONS
         # order_of_operations = ["bond", "charge", "qtaim"]
 
     if debug:
@@ -342,7 +355,7 @@ def run_jobs(folder, separate=False, orca_6=True, restart=False, debug=False):
             if file.endswith("orca.out") or file.endswith("output.out"):
                 orca_out = os.path.join(folder, file)
 
-        if orca_6 == False:
+        if not orca_6:
             # replace ecp values in converted molden file
             dict_ecp = pull_ecp_dict(orca_out)
             overwrite_molden_w_ecp(molden_file, dict_ecp)
@@ -389,16 +402,18 @@ def parse_multiwfn(folder, separate=False, debug=False):
     """
 
     if separate:
-        routine_list = ["qtaim", "other"]
+        routine_list = ORDER_OF_OPERATIONS_separate
         # routine_list = ["qtaim"]
         charge_dict = charge_data_dict()
         bond_dict = bond_order_dict()
+        fuzzy_dict = fuzzy_data()
 
         [routine_list.append(i) for i in charge_dict.keys()]
         [routine_list.append(i) for i in bond_dict.keys()]
+        [routine_list.append(i) for i in fuzzy_dict.keys()]
 
     else:
-        routine_list = ["bond", "charge", "qtaim", "other"]
+        routine_list = ORDER_OF_OPERATIONS
         # routine_list = ["bond", "charge", "qtaim"]
 
     if debug:
@@ -413,6 +428,12 @@ def parse_multiwfn(folder, separate=False, debug=False):
                     json_file = file_full_path.replace(".out", ".json")
 
                     if routine == "fuzzy_full":
+                        """
+                        print("parsing fuzzy_full")
+                        data = parse_fuzzy_doc(file_full_path)
+                        with open(json_file, "w") as f:
+                            json.dump(data, f, indent=4)
+                        """
                         try:
                             data = parse_fuzzy_doc(file_full_path)
                             with open(json_file, "w") as f:
@@ -584,6 +605,15 @@ def parse_multiwfn(folder, separate=False, debug=False):
                         except:
                             print("error parsing chelpg")
 
+                    elif routine in list(fuzzy_dict.keys()):
+
+                        try:
+                            data = parse_fuzzy_real_space(file_full_path)
+                            with open(json_file, "w") as f:
+                                json.dump(data, f, indent=4)
+                        except:
+                            print("error parsing fuzzy")
+
         elif "CPprop.txt" in file and "qtaim" in routine_list:
 
             json_file = os.path.join(folder, "qtaim.json")
@@ -610,8 +640,11 @@ def parse_multiwfn(folder, separate=False, debug=False):
     if separate:
         charge_routines = list(charge_dict.keys())
         bond_routines = list(bond_dict.keys())
+        fuzzy_routines = list(fuzzy_data().keys())
         charge_dict_compiled = {}
         bond_dict_compiled = {}
+        fuzzy_dict_compiled = {}
+
         for file in os.listdir(folder):
             for routine in charge_routines:
                 if routine == file.split(".json")[0]:
@@ -627,14 +660,29 @@ def parse_multiwfn(folder, separate=False, debug=False):
                     # remove the file
                     os.remove(os.path.join(folder, file))
 
+            for routine in fuzzy_routines:
+                if routine == file.split(".json")[0]:
+                    with open(os.path.join(folder, file), "r") as f:
+                        fuzzy_dict_compiled[routine] = json.load(f)[routine]
+                        #print(fuzzy_dict_compiled)
+                    # remove the file
+                    os.remove(os.path.join(folder, file))
+
         # check that charge_dict_compiled is not {}
         if charge_dict_compiled:
             with open(os.path.join(folder, "charge.json"), "w") as f:
                 json.dump(charge_dict_compiled, f, indent=4)
+        
         # check that bond_dict_compiled is not {}
         if bond_dict_compiled:
             with open(os.path.join(folder, "bond.json"), "w") as f:
                 json.dump(bond_dict_compiled, f, indent=4)
+
+        # check that fuzzy_dict_compiled is not {}
+        if fuzzy_dict_compiled:
+            #print(fuzzy_dict_compiled)
+            with open(os.path.join(folder, "fuzzy_full.json"), "w") as f:
+                json.dump(fuzzy_dict_compiled, f, indent=4)
 
 
 def clean_jobs(folder, separate=False):
@@ -646,14 +694,16 @@ def clean_jobs(folder, separate=False):
     """
 
     if separate:
-        order_of_operations = ["convert", "qtaim", "other"]
+        order_of_operations = ORDER_OF_OPERATIONS_separate
         charge_dict = charge_data_dict()
         [order_of_operations.append(i) for i in charge_dict.keys()]
         bond_dict = bond_order_dict()
         [order_of_operations.append(i) for i in bond_dict.keys()]
+        fuzzy_dict = fuzzy_data()
+        [order_of_operations.append(i) for i in fuzzy_dict.keys()]
 
     else:
-        order_of_operations = ["convert", "bond", "charge", "qtaim", "other"]
+        order_of_operations = ORDER_OF_OPERATIONS
 
     txt_files = []
     txt_files = [i + ".txt" for i in order_of_operations] + ["convert.txt"]
@@ -712,12 +762,14 @@ def gbw_analysis(
     if not os.path.exists(folder):
         print("Folder does not exist")
         return
+    
     if restart:
         print("Restarting from last step in timings.json")
         # check if the timings file exists
         if not os.path.exists(os.path.join(folder, "timings.json")):
             print("No timings file found - starting from scratch!")
             restart = False
+    
     # check if output already exists
     if not overwrite:
         timings_loc = os.path.join(folder, "timings.json")

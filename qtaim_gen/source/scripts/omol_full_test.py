@@ -23,12 +23,12 @@ def main():
         "/home/santiagovargas/dev/Multiwfn_3.8_dev_bin_Linux_noGUI/Multiwfn_noGUI"
     )
 
-    parse_only = False
+    parse_only = True
     separate = True
     overwrite = True
     clean = False
     debug = False
-
+    """
     try:
         # works!
         gbw_analysis(
@@ -46,6 +46,7 @@ def main():
     except:
 
         print("Error in gbw_analysis - case 2")
+    """
     """
     try:
         # works!
@@ -101,7 +102,21 @@ def main():
     except:
 
         print("Error in gbw_analysis - case 5")
+    """
+    gbw_analysis(
+            folder=orca_base,
+            orca_2mkl_cmd=orca5_2mkl,
+            multiwfn_cmd=multiwfn_cmd,
+            parse_only=parse_only,
+            separate=separate,
+            overwrite=True,
+            orca_6=True,
+            clean=clean,
+            restart=False,
+            debug=debug
+        )  # works!
     try:
+        print(orca_base)
         # works!
         gbw_analysis(
             folder=orca_base,
@@ -116,8 +131,9 @@ def main():
             debug=debug
         )  # works!
     except:
-
         print("Error in gbw_analysis - case 0")
+    
+    """
     try:
         # works!
         gbw_analysis(
