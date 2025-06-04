@@ -84,6 +84,12 @@ class QTAIMEmbedConverter:
         self.single_lmdb = True
         self.lmdb_dict = self.pull_lmdbs()
         
+        # scaler
+        if "save_scaler" in self.config_dict.keys():
+            self.save_scaler = self.config_dict["save_scaler"]
+        else:
+            self.save_scaler = False
+        
         self.skip_keys = ["length", "scaled"]
         self.fail_log_dict = {
             "structure": [], 
@@ -388,6 +394,7 @@ class QTAIMEmbedConverter:
 
         for key in keys_to_iterate:
             if key.decode("ascii") not in self.skip_keys:
+
                 try: 
                     # structure keys
                     value_structure = self.__getitem__("geom_lmdb", key)
@@ -421,6 +428,7 @@ class QTAIMEmbedConverter:
                     self.fail_log_dict["structure"].append(key.decode("ascii"))
                     continue
 
+
                 try: 
                     #value_charge = pickle.loads(self.lmdb_dict["charge_lmdb"].get(key))
                     value_charge = self.__getitem__("charge_lmdb", key)
@@ -433,16 +441,15 @@ class QTAIMEmbedConverter:
                         atom_feats_no_qtaim = deepcopy(atom_feats)
 
                         if self.atom_keys_grapher_no_qtaim == None:
-                            self.atom_keys_grapher_no_qtaim = list(atom_feats[0].keys())
+                            self.atom_keys_grapher_no_qtaim = list(atom_feats[0].keys()) # update dict
 
                         
                         
                         if self.global_keys == None:
                             #print(" global keys: ", global_feats.keys())
-                            self.global_keys = list(global_feats.keys()) + list(global_dipole_feats.keys())
-                            self.global_keys_target = list(global_dipole_feats.keys())
-                            #print(" global keys: ", self.global_keys)
-                            #print(" global keys target: ", self.global_keys_target)
+                            self.global_keys = list(global_feats.keys()) + list(global_dipole_feats.keys()) # update dict
+                            self.global_keys_target = list(global_dipole_feats.keys()) # update dict
+                            
                             
                         global_feats.update(global_dipole_feats)
                         atom_feats.update(atom_feats_charge)
@@ -465,9 +472,9 @@ class QTAIMEmbedConverter:
                         )
                         
                         if self.atom_keys == None:
-                            self.atom_keys = atom_keys_qtaim + self.atom_keys_grapher_no_qtaim
+                            self.atom_keys = atom_keys_qtaim + self.atom_keys_grapher_no_qtaim # update dict
                         if self.bond_keys == None:
-                            self.bond_keys = bond_keys_qtaim
+                            self.bond_keys = bond_keys_qtaim # update dict
                     else: 
                         self.fail_log_dict["qtaim"].append(key.decode("ascii"))
                         continue
@@ -477,9 +484,6 @@ class QTAIMEmbedConverter:
 
                 
                 ############################# Molwrapper ####################################
-
-
-
                 try: 
                     mol_wrapper_qtaim_bonds = MoleculeWrapper(
                         mol_graph,
@@ -593,6 +597,7 @@ class QTAIMEmbedConverter:
                     self.fail_log_dict["graph"].append(key.decode("ascii"))
                     continue
                 
+
                 try: 
                     self.feature_scaler_iterative_qtaim.update([graph])
                     self.label_scaler_iterative_qtaim.update([graph])
@@ -621,6 +626,17 @@ class QTAIMEmbedConverter:
         self.label_scaler_iterative.finalize()
         self.feature_scaler_iterative_qtaim.finalize()
         self.label_scaler_iterative_qtaim.finalize()
+
+        
+        if self.save_scaler:
+            lmdb_path = self.config_dict["lmdb_path_non_qtaim"]
+            lmdb_path_qtaim = self.config_dict["lmdb_path_qtaim"]
+            self.feature_scaler_iterative.save_scaler(lmdb_path + "/feature_scaler_iterative.pt")
+            self.label_scaler_iterative.save_scaler(lmdb_path + "/label_scaler_iterative.pt")
+            self.feature_scaler_iterative_qtaim.save_scaler(lmdb_path_qtaim + "/feature_scaler_iterative_qtaim.pt")
+            self.label_scaler_iterative_qtaim.save_scaler(lmdb_path_qtaim + "/label_scaler_iterative_qtaim.pt")
+        
+        
         
         txn = self.db_qtaim.begin(write=True)
         txn.put("scaled".encode("ascii"), pickle.dumps(False, protocol=-1))

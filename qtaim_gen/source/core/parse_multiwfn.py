@@ -782,7 +782,8 @@ def parse_other_doc(other_txt):
 
 def parse_fuzzy_doc(fuzzy_loc):
     """
-    Function to parse fuzzy doc.
+    Function to parse fuzzy doc. This assumes that the fuzzy doc consists of density, grad, laplacian, and elf 
+    values in real space, and localization indices. These should be run with becke.
     Takes:
         fuzzy_loc(str): location of fuzzy analysis output from multiwfn
     Returns:
@@ -841,7 +842,6 @@ def parse_fuzzy_doc(fuzzy_loc):
     return ret_dict
 
 
-
 def parse_fuzzy_real_space(fuzzy_loc):
     """
     Function to parse fuzzy doc.
@@ -852,13 +852,9 @@ def parse_fuzzy_real_space(fuzzy_loc):
     """
 
     ret_dict = {}
-    #data_order = ["density", "grad_norm", "laplacian", "elf"]
     trigger_data_block = "Atomic space"
-    #trigger_local_block = " Localization index:"
 
-    data_ind = 0
     trigger_bool_real = False
-    #trigger_bool_local_block = False
 
     # iterate over lines of the file and print line if trigger is found
     with open(fuzzy_loc, "r") as f:
@@ -876,21 +872,18 @@ def parse_fuzzy_real_space(fuzzy_loc):
                         if line_split[2] == "absolute":
                             dict_data_temp["abs_sum"] = float(line_split[-1])
                         else:
-                            #print("line_split: ", line_split[-1], dict_data_temp)
                             dict_data_temp["sum"] = float(line_split[-1])
                     else:
                         name = line_split[0].replace("(", "_")
                         shift=1 
                         if len(line_split) > 4:
                             shift=0
-                        #print("name: ", name, " value: ", line_split[2+shift])
                         dict_data_temp[name] = float(line_split[2+shift])
 
             if trigger_data_block in line:
                 trigger_bool_real = True
                 dict_data_temp = {}
     return ret_dict
-
 
 
 def parse_qtaim(cprop_file, inp_loc, orca_tf=False):

@@ -51,7 +51,7 @@ def fuzzy_data():  # not being used so don't need to move to dictionary
     string_dict["becke_fuzzy_spin"] = "15\n1\n5\n0\nq\n"
     string_dict["mbis_fuzz_spin"] = "15\n-1\n5\n1\n1\n5\n0\nq\n" 
     string_dict["becke_fuzzy_density"] = "15\n1\n1\n0\nq\n"
-    string_dict["mbis_fuzz_density"] = "15\n-1\n5\n1\n1\n1\n0\nq\n" 
+    string_dict["mbis_fuzzy_density"] = "15\n-1\n5\n1\n1\n1\n0\nq\n" 
     #return string_ret
     return string_dict 
 
