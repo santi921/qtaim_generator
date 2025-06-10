@@ -99,20 +99,45 @@ class TestLMDB:
                 if key.decode("ascii") == "length":
                     assert pkl.loads(value) == 4, f"Expected 4, got {pkl.loads(value)}"
 
+
 dir_active = "./test_files/lmdb_tests/"
 chunk_size = 2
 
 json_2_lmdbs(
-    dir_active, dir_active, "charge", "merged_charge.lmdb", chunk_size, clean=True, merge=False
+    dir_active,
+    dir_active,
+    "charge",
+    "merged_charge.lmdb",
+    chunk_size,
+    clean=True,
+    merge=False,
 )
 json_2_lmdbs(
-    dir_active, dir_active, "bond", "merged_bond.lmdb", chunk_size, clean=True, merge=False
+    dir_active,
+    dir_active,
+    "bond",
+    "merged_bond.lmdb",
+    chunk_size,
+    clean=True,
+    merge=False,
 )
 json_2_lmdbs(
-    dir_active, dir_active, "other", "merged_other.lmdb", chunk_size, clean=True, merge=False
+    dir_active,
+    dir_active,
+    "other",
+    "merged_other.lmdb",
+    chunk_size,
+    clean=True,
+    merge=False,
 )
 json_2_lmdbs(
-    dir_active, dir_active, "qtaim", "merged_qtaim.lmdb", chunk_size, clean=True, merge=False
+    dir_active,
+    dir_active,
+    "qtaim",
+    "merged_qtaim.lmdb",
+    chunk_size,
+    clean=True,
+    merge=False,
 )
 
 inp_files_2_lmdbs(

@@ -782,7 +782,7 @@ def parse_other_doc(other_txt):
 
 def parse_fuzzy_doc(fuzzy_loc):
     """
-    Function to parse fuzzy doc. This assumes that the fuzzy doc consists of density, grad, laplacian, and elf 
+    Function to parse fuzzy doc. This assumes that the fuzzy doc consists of density, grad, laplacian, and elf
     values in real space, and localization indices. These should be run with becke.
     Takes:
         fuzzy_loc(str): location of fuzzy analysis output from multiwfn
@@ -867,7 +867,7 @@ def parse_fuzzy_real_space(fuzzy_loc):
 
                 else:
                     line_split = line.split()
-                    #print(line_split)
+                    # print(line_split)
                     if line_split[0] == "Summing":
                         if line_split[2] == "absolute":
                             dict_data_temp["abs_sum"] = float(line_split[-1])
@@ -875,10 +875,10 @@ def parse_fuzzy_real_space(fuzzy_loc):
                             dict_data_temp["sum"] = float(line_split[-1])
                     else:
                         name = line_split[0].replace("(", "_")
-                        shift=1 
+                        shift = 1
                         if len(line_split) > 4:
-                            shift=0
-                        dict_data_temp[name] = float(line_split[2+shift])
+                            shift = 0
+                        dict_data_temp[name] = float(line_split[2 + shift])
 
             if trigger_data_block in line:
                 trigger_bool_real = True

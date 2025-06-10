@@ -2,8 +2,9 @@ from qtaim_gen.source.core.omol import gbw_analysis
 import os
 import argparse
 
-# add path for shared version 
-#export PATH="/home/santiagovargas/dev/orca5/:$PATH"; export LD_LIBRARY_PATH="/home/santiagovargas/dev/orca5/:$LD_LIBRARY_PATH"
+# add path for shared version
+# export PATH="/home/santiagovargas/dev/orca5/:$PATH"; export LD_LIBRARY_PATH="/home/santiagovargas/dev/orca5/:$LD_LIBRARY_PATH"
+
 
 def main():
     # set environment variables
@@ -19,7 +20,9 @@ def main():
     orca_6_uks = "/home/santiagovargas/dev/qtaim_generator/data/omol_tests/orca6_uks/"
     orca_5_rks = "/home/santiagovargas/dev/qtaim_generator/data/omol_tests/orca5_rks/"
     orca_5_uks = "/home/santiagovargas/dev/qtaim_generator/data/omol_tests/orca5_uks/"
-    orca_test= "/home/santiagovargas/dev/qtaim_generator/tests/test_files/multiwfn/999/"
+    orca_test = (
+        "/home/santiagovargas/dev/qtaim_generator/tests/test_files/multiwfn/999/"
+    )
 
     orca6_2mkl = "/home/santiagovargas/orca_6_0_0/orca_2mkl"  # orca --molden
     orca5_2mkl = "/home/santiagovargas/dev/orca5/orca_2mkl"
@@ -51,7 +54,7 @@ def main():
     print(f"Running test case {test_case}...")
 
     def run_case(test_case):
-        if test_case == 0:        
+        if test_case == 0:
             try:
                 # works!
                 gbw_analysis(
@@ -69,7 +72,7 @@ def main():
             except:
 
                 print("Error in gbw_analysis - case 2")
-        
+
         elif test_case == 1:
             try:
                 # works!
@@ -83,13 +86,13 @@ def main():
                     orca_6=False,
                     clean=clean,
                     restart=False,
-                    debug=debug
+                    debug=debug,
                 )  # works!
             except:
 
                 print("Error in gbw_analysis - case 6")
-        
-        elif test_case == 2:    
+
+        elif test_case == 2:
             try:
                 # works!
                 gbw_analysis(
@@ -102,7 +105,7 @@ def main():
                     orca_6=True,
                     clean=clean,
                     restart=False,
-                    debug=debug
+                    debug=debug,
                 )  # works!
             except:
 
@@ -121,12 +124,12 @@ def main():
                     orca_6=False,
                     clean=clean,
                     restart=False,
-                    debug=debug
+                    debug=debug,
                 )  # works!
             except:
 
                 print("Error in gbw_analysis - case 5")
-        
+
         elif test_case == 4:
             try:
                 print(orca_base)
@@ -141,11 +144,11 @@ def main():
                     orca_6=True,
                     clean=clean,
                     restart=True,
-                    debug=debug
+                    debug=debug,
                 )  # works!
             except:
                 print("Error in gbw_analysis - case 0")
-        
+
         elif test_case == 5:
             try:
                 # works!
@@ -159,7 +162,7 @@ def main():
                     orca_6=True,
                     clean=clean,
                     restart=True,
-                    debug=debug
+                    debug=debug,
                 )  # works!
             except:
 
@@ -178,16 +181,16 @@ def main():
                     orca_6=False,
                     clean=clean,
                     restart=False,
-                    debug=debug
+                    debug=debug,
                 )  # works!
             except:
                 print("Error in gbw_analysis - case 4")
-    
+
     if test_case == -1:
         run_case(0)
         run_case(1)
         run_case(2)
-    
+
     elif test_case == -2:
         run_case(3)
         run_case(4)
@@ -204,4 +207,6 @@ def main():
 
     else:
         run_case(test_case)
+
+
 main()

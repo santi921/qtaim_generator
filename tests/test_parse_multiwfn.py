@@ -11,14 +11,14 @@ from qtaim_gen.source.core.parse_multiwfn import (
     parse_charge_doc_adch,
     parse_charge_becke,
     parse_charge_base,
-    parse_fuzzy_real_space
+    parse_fuzzy_real_space,
 )
 
 from qtaim_gen.source.core.omol import gbw_analysis
 
 
 class TestMultiwfnParser:
-            
+
     orca_6 = "./test_files/multiwfn/"
     gbw_analysis(
         folder=orca_6,
@@ -316,14 +316,25 @@ class TestMultiwfnParser:
             ibsi_dict["6_C_to_9_C"], 0.07658, atol=1e-3
         ), "ibsi bond order is not right"
 
-    def test_fuzzy_info_separate(self): 
-        spin_dict = parse_fuzzy_real_space("./test_files/multiwfn/becke_fuzzy_spin.out")["becke_fuzzy_spin"]
-        density_dict = parse_fuzzy_real_space("./test_files/multiwfn/becke_fuzzy_density.out")["becke_fuzzy_density"]
+    def test_fuzzy_info_separate(self):
+        spin_dict = parse_fuzzy_real_space(
+            "./test_files/multiwfn/becke_fuzzy_spin.out"
+        )["becke_fuzzy_spin"]
+        density_dict = parse_fuzzy_real_space(
+            "./test_files/multiwfn/becke_fuzzy_density.out"
+        )["becke_fuzzy_density"]
         assert len(spin_dict) == 23, "wrong number of atoms in becke fuzzy spin"
         assert len(density_dict) == 23, "wrong number of atoms in becke fuzzy density"
-        assert np.isclose(spin_dict["13_H"], 0.0, atol=1e-3), "wrong value for becke fuzzy spin for 13_H"
-        assert np.isclose(density_dict["13_H"], 0.81110108, atol=1e-3), "wrong value for becke fuzzy density for 13_H"
-        assert np.isclose(density_dict["sum"], 65.99996761, atol=1e-3), "wrong value for becke fuzzy density for 13_H"
+        assert np.isclose(
+            spin_dict["13_H"], 0.0, atol=1e-3
+        ), "wrong value for becke fuzzy spin for 13_H"
+        assert np.isclose(
+            density_dict["13_H"], 0.81110108, atol=1e-3
+        ), "wrong value for becke fuzzy density for 13_H"
+        assert np.isclose(
+            density_dict["sum"], 65.99996761, atol=1e-3
+        ), "wrong value for becke fuzzy density for 13_H"
+
 
 obj = TestMultiwfnParser()
 obj.test_fuzzy_info_separate()

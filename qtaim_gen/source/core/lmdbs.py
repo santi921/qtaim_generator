@@ -268,9 +268,9 @@ def inp_files_2_lmdbs(
 
     files = glob(root_dir + "*/*.inp")
     chunk_ind = 1
-    
+
     for chunk in split_list(files, chunk_size):
-        
+
         data_dict = {}
 
         for file in chunk:
@@ -355,7 +355,7 @@ def get_elements_from_structure_lmdb_folder_list(list_lmdb):
     for lmdb_path in list_lmdb:
         with lmdb.open(lmdb_path, readonly=True, lock=False) as structure_lmdb:
             element_set.update(get_elements_from_structure_lmdb(structure_lmdb))
-    
+
     return element_set
 
 
@@ -377,7 +377,7 @@ def parse_config_gen_to_embed(
     with open(config_path, "r") as f:
         config_dict = json.load(f)
     config_dict["restart"] = restart
-    
+
     if "allowed_ring_size" not in config_dict.keys():
         config_dict["allowed_ring_size"] = [4, 5, 6, 8]
 
