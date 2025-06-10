@@ -320,8 +320,8 @@ def run_jobs(folder, separate=False, orca_6=True, restart=False, debug=False):
     """
 
     if separate:
-        #order_of_operations = ORDER_OF_OPERATIONS_separate
-        order_of_operations = ["qtaim"]
+        order_of_operations = ORDER_OF_OPERATIONS_separate
+        #order_of_operations = ["qtaim"]
         charge_dict = charge_data_dict()
         [order_of_operations.append(i) for i in charge_dict.keys()]
         bond_dict = bond_order_dict()
@@ -391,7 +391,6 @@ def run_jobs(folder, separate=False, orca_6=True, restart=False, debug=False):
         with open(os.path.join(folder, "timings.json"), "w") as f:
             json.dump(timings, f, indent=4)
 
-
 def parse_multiwfn(folder, separate=False, debug=False):
     """
     Parse multiwfn output files to jsons and save them in folder
@@ -402,7 +401,6 @@ def parse_multiwfn(folder, separate=False, debug=False):
 
     if separate:
         routine_list = ORDER_OF_OPERATIONS_separate
-        # routine_list = ["qtaim"]
         charge_dict = charge_data_dict()
         bond_dict = bond_order_dict()
         fuzzy_dict = fuzzy_data()
