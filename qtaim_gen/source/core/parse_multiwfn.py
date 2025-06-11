@@ -860,7 +860,7 @@ def parse_fuzzy_real_space(fuzzy_loc):
     with open(fuzzy_loc, "r") as f:
         for line in f:
             if trigger_bool_real:
-                if line == "\n" or len(line) < 3:
+                if line == "\n" or len(line) < 3: # terminate the block
                     trigger_bool_real = False
                     name = fuzzy_loc.split("/")[-1].split(".")[0]
                     ret_dict[name] = dict_data_temp
@@ -875,7 +875,11 @@ def parse_fuzzy_real_space(fuzzy_loc):
                             dict_data_temp["sum"] = float(line_split[-1])
                     else:
                         name = line_split[0].replace("(", "_")
-                        shift = 1
+                        # remove )
+                        if ")" in name:
+                            name = name[:-1]
+                        
+                        shift = -1
                         if len(line_split) > 4:
                             shift = 0
                         dict_data_temp[name] = float(line_split[2 + shift])

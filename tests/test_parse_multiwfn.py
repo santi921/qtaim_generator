@@ -323,10 +323,11 @@ class TestMultiwfnParser:
         density_dict = parse_fuzzy_real_space(
             "./test_files/multiwfn/becke_fuzzy_density.out"
         )["becke_fuzzy_density"]
-        assert len(spin_dict) == 23, "wrong number of atoms in becke fuzzy spin"
+        
+        assert len(spin_dict) == 60, "wrong number of atoms in becke fuzzy spin"
         assert len(density_dict) == 23, "wrong number of atoms in becke fuzzy density"
         assert np.isclose(
-            spin_dict["13_H"], 0.0, atol=1e-3
+            spin_dict["45_Cl"], 0.0, atol=1e-3
         ), "wrong value for becke fuzzy spin for 13_H"
         assert np.isclose(
             density_dict["13_H"], 0.81110108, atol=1e-3
@@ -336,5 +337,4 @@ class TestMultiwfnParser:
         ), "wrong value for becke fuzzy density for 13_H"
 
 
-obj = TestMultiwfnParser()
-obj.test_fuzzy_info_separate()
+
