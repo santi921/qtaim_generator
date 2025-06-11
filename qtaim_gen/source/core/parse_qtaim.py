@@ -507,7 +507,10 @@ def merge_qtaim_inds(
             k: v for k, v in bond_cps.items() if "connected_bond_paths" in v.keys()
         }
         # print("bond cps: ", bond_cps)
-
+        ####################
+        #print(qtaim_to_dft)
+        ####################
+        
         for k, v in bond_cps.items():
             bond_list_unsorted = v["connected_bond_paths"]
             # print(bond_list_unsorted)
@@ -540,6 +543,7 @@ def gather_imputation(
     reaction=False,
     define_bonds="qtaim",
     inp_type="orca",
+    margin=1.5
 ):
     """
     Takes in dataframe and features and returns dictionary of imputation values
@@ -550,6 +554,7 @@ def gather_imputation(
         root_dir (str): root directory of data
         json_file_imputed (str): json file to store imputation values
         define_bonds (str): bond definition, either "distance" or "qtaim"
+        margin (float): margin for bond distance
     Returns:
         impute_dict (dict): dictionary of imputation values
     """
@@ -603,6 +608,7 @@ def gather_imputation(
                         dft_inp_file=dft_inp_file_reactant,
                         define_bonds=define_bonds,
                         inp_type=inp_type,
+                        margin=margin
                     )
                     mapped_descs_products = merge_qtaim_inds(
                         qtaim_descs=qtaim_descs_products,
@@ -610,6 +616,7 @@ def gather_imputation(
                         dft_inp_file=dft_inp_file_product,
                         define_bonds=define_bonds,
                         inp_type=inp_type,
+                        margin=margin
                     )
 
                     for k, v in mapped_descs_reactants.items():
@@ -657,6 +664,7 @@ def gather_imputation(
                         dft_inp_file=dft_inp_file,
                         define_bonds=define_bonds,
                         inp_type=inp_type,
+                        margin=margin
                     )
                     for k, v in mapped_descs.items():
                         if v == {}:

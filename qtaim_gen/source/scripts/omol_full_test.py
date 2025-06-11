@@ -1,6 +1,7 @@
 from qtaim_gen.source.core.omol import gbw_analysis
 import os
 import argparse
+import logging
 
 # add path for shared version
 # export PATH="/home/santiagovargas/dev/orca5/:$PATH"; export LD_LIBRARY_PATH="/home/santiagovargas/dev/orca5/:$LD_LIBRARY_PATH"
@@ -12,6 +13,8 @@ def main():
     # set mem
     os.system("ulimit -s unlimited")
     os.system("export LD_LIBRARY_PATH=/home/santiagovargas/dev/orca5/:$LD_LIBRARY_PATH")
+    os.system("export Multiwfnpath=/home/santiagovargas/dev/Multiwfn_3.8_dev_bin_Linux_noGUI")
+
 
     orca_base = "/home/santiagovargas/dev/qtaim_generator/data/omol_tests/base_test/"
     orca_6 = "/home/santiagovargas/dev/qtaim_generator/data/omol_tests/orca6/"
@@ -38,6 +41,8 @@ def main():
     overwrite = True
     clean = False
     debug = False
+    # create logger in target folder
+
 
     parser = argparse.ArgumentParser(
         description="Run gbw_analysis on ORCA output files."
@@ -56,9 +61,16 @@ def main():
     def run_case(test_case):
         if test_case == 0:
             try:
+                folder = orca_6_rks
+                # create logger in target folder
+                logging.basicConfig(
+                    filename=os.path.join(folder, "gbw_analysis.log"),
+                    level=logging.INFO,
+                    format="%(asctime)s - %(levelname)s - %(message)s",
+                )
                 # works!
                 gbw_analysis(
-                    folder=orca_6_rks,
+                    folder=folder,
                     orca_2mkl_cmd=orca6_2mkl,
                     multiwfn_cmd=multiwfn_cmd,
                     parse_only=parse_only,
@@ -68,6 +80,7 @@ def main():
                     clean=clean,
                     restart=False,
                     debug=debug,
+                    logger=logging.getLogger("gbw_analysis"),
                 )  # works!
             except:
 
@@ -75,9 +88,16 @@ def main():
 
         elif test_case == 1:
             try:
+                folder = orca_5_uks
+                # create logger in target folder
+                logging.basicConfig(
+                    filename=os.path.join(folder, "gbw_analysis.log"),
+                    level=logging.INFO,
+                    format="%(asctime)s - %(levelname)s - %(message)s",
+                )
                 # works!
                 gbw_analysis(
-                    folder=orca_5_uks,
+                    folder=folder,
                     orca_2mkl_cmd=orca5_2mkl,
                     multiwfn_cmd=multiwfn_cmd,
                     parse_only=parse_only,
@@ -87,6 +107,7 @@ def main():
                     clean=clean,
                     restart=False,
                     debug=debug,
+                    logger=logging.getLogger("gbw_analysis"),
                 )  # works!
             except:
 
@@ -94,7 +115,14 @@ def main():
 
         elif test_case == 2:
             try:
+                # create logger in target folder
+                logging.basicConfig(
+                    filename=os.path.join(orca_6_uks, "gbw_analysis.log"),
+                    level=logging.INFO,
+                    format="%(asctime)s - %(levelname)s - %(message)s",
+                )
                 # works!
+
                 gbw_analysis(
                     folder=orca_6_uks,
                     orca_2mkl_cmd=orca6_2mkl,
@@ -106,6 +134,7 @@ def main():
                     clean=clean,
                     restart=False,
                     debug=debug,
+                    logger=logging.getLogger("gbw_analysis"),
                 )  # works!
             except:
 
@@ -113,6 +142,12 @@ def main():
 
         elif test_case == 3:
             try:
+                # create logger in target folder
+                logging.basicConfig(
+                    filename=os.path.join(orca_5_rks, "gbw_analysis.log"),
+                    level=logging.INFO,
+                    format="%(asctime)s - %(levelname)s - %(message)s",
+                )
                 # works!
                 gbw_analysis(
                     folder=orca_5_rks,
@@ -125,6 +160,7 @@ def main():
                     clean=clean,
                     restart=False,
                     debug=debug,
+                    logger=logging.getLogger("gbw_analysis"),
                 )  # works!
             except:
 
@@ -133,6 +169,13 @@ def main():
         elif test_case == 4:
             try:
                 print(orca_base)
+                # create logger in target folder
+                logging.basicConfig(
+                    filename=os.path.join(orca_base, "gbw_analysis.log"),
+                    level=logging.INFO,
+                    format="%(asctime)s - %(levelname)s - %(message)s",
+                )
+
                 # works!
                 gbw_analysis(
                     folder=orca_base,
@@ -143,14 +186,22 @@ def main():
                     overwrite=True,
                     orca_6=True,
                     clean=clean,
-                    restart=True,
+                    restart=False,
                     debug=debug,
+                    logger=logging.getLogger("gbw_analysis"),
                 )  # works!
             except:
                 print("Error in gbw_analysis - case 0")
 
         elif test_case == 5:
             try:
+
+                # create logger in target folder
+                logging.basicConfig(
+                    filename=os.path.join(orca_6, "gbw_analysis.log"),
+                    level=logging.INFO,
+                    format="%(asctime)s - %(levelname)s - %(message)s",
+                )
                 # works!
                 gbw_analysis(
                     folder=orca_6,
@@ -161,27 +212,36 @@ def main():
                     overwrite=overwrite,
                     orca_6=True,
                     clean=clean,
-                    restart=True,
+                    restart=False,
                     debug=debug,
+                    logger=logging.getLogger("gbw_analysis"),
                 )  # works!
             except:
 
                 print("Error in gbw_analysis - case 1")
-
+            
         elif test_case == 6:
+
             try:
+                # create logger in target folder
+                logging.basicConfig(
+                    filename=os.path.join(orca_5, "gbw_analysis.log"),
+                    level=logging.INFO,
+                    format="%(asctime)s - %(levelname)s - %(message)s",
+                )
                 # works!
                 gbw_analysis(
                     folder=orca_5,
                     orca_2mkl_cmd=orca5_2mkl,
                     multiwfn_cmd=multiwfn_cmd,
-                    parse_only=parse_only,
-                    separate=separate,
-                    overwrite=overwrite,
+                    parse_only=False,
+                    separate=True,
+                    overwrite=True,
                     orca_6=False,
-                    clean=clean,
+                    clean=False,
                     restart=False,
                     debug=debug,
+                    logger=logging.getLogger("gbw_analysis"),
                 )  # works!
             except:
                 print("Error in gbw_analysis - case 4")
@@ -210,3 +270,5 @@ def main():
 
 
 main()
+
+# python omol_full_test.py 1
