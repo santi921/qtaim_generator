@@ -44,6 +44,31 @@ ORDER_OF_OPERATIONS_separate = [
 ]
 
 
+def write_settings_file(mem=400000000, nthreads=4): 
+    # get loc of qtaim_embed folder 
+    qtaim_embed_loc = str(Path(__file__).parent.parent.parent)
+    old_path = qtaim_embed_loc + "/source/data/settings.ini"
+    # copy old path to current path
+    new_path = "./settings.ini"
+    # wwrite txt files line by line and add a line nthreads = str(nthreads) + "\n" 
+    # another line ompstacksize= str(mem) + "\n"
+    with open(old_path, "r") as f:
+        data = f.read()
+    # write to new path
+    # remove last line and save separately
+    last_lines = data.split("\n")[-3:]
+    data = "\n".join(data.split("\n")[:-3])  # remove last line
+
+    with open(new_path, "w") as f:
+        f.write(data)
+        f.write('  nthreads= {}\n'.format(nthreads))
+        f.write('  ompstacksize= {}\n'.format(mem))
+        f.write(last_lines[0] + "\n")  # write last line
+        f.write(last_lines[1] + "\n")  # write last line without newline
+        f.write(last_lines[2])  # write last line without newline
+        f.write("\n")
+
+
 def write_conversion(
     out_folder, read_file, overwrite=False, name="convert.in", orca_2mkl_cmd="orca_2mkl"
 ):
@@ -339,6 +364,7 @@ def create_jobs(folder, multiwfn_cmd, orca_2mkl_cmd, separate=False, debug=True,
         
         except Exception as e:
             logger.error(f"Error creating execution script for {key}: {e}")
+
 
 def run_jobs(folder, separate=False, orca_6=True, restart=False, debug=False, logger=None):
     """
@@ -695,7 +721,9 @@ def gbw_analysis(
     orca_6=True,
     restart=False,
     debug=False,
-    logger=None
+    logger=None,
+    mem=400000000, 
+    nthreads=4
 ):
     """
     Run a full analysis on a folder of gbw files
@@ -710,7 +738,12 @@ def gbw_analysis(
         orca_6(bool): whether calc is from orca6
         restart(bool): whether to restart from the last step using timings.json
         debug(bool): whether to run a minimal set of jobs
-
+        logger(logging.Logger): logger to log messages
+    Writes:
+        - settings.ini file with memory and nthreads
+        - jobs for conversion to wfn and multiwfn analysis
+        - timings.json file with timings for each step
+        - bond.json, charge.json, fuzzy_full.json, qtaim.json, other.json files with parsed data
     """
 
     if logger is None:
@@ -721,8 +754,10 @@ def gbw_analysis(
         print("Folder does not exist")
         logger.error("Folder does not exist: {}".format(folder))
         return
-    
 
+    
+    write_settings_file(mem=mem, nthreads=nthreads)
+    
 
     if restart:
         logger.info("Restarting from last step in timings.json")
