@@ -1,4 +1,4 @@
-from qtaim_gen.source.core.omol import gbw_analysis
+from qtaim_gen.source.core.omol import gbw_analysis, write_settings_file
 import os
 import argparse
 import logging
@@ -13,19 +13,36 @@ def main():
     # set mem
     os.system("ulimit -s unlimited")
     os.system("export LD_LIBRARY_PATH=/home/santiagovargas/dev/orca5/:$LD_LIBRARY_PATH")
-    os.system("export Multiwfnpath=/home/santiagovargas/dev/Multiwfn_3.8_dev_bin_Linux_noGUI")
-
-
-    orca_base = "/home/santiagovargas/dev/qtaim_generator/data/omol_tests/base_test/"
-    orca_6 = "/home/santiagovargas/dev/qtaim_generator/data/omol_tests/orca6/"
-    orca_5 = "/home/santiagovargas/dev/qtaim_generator/data/omol_tests/orca5/"
-    orca_6_rks = "/home/santiagovargas/dev/qtaim_generator/data/omol_tests/orca6_rks/"
-    orca_6_uks = "/home/santiagovargas/dev/qtaim_generator/data/omol_tests/orca6_uks/"
-    orca_5_rks = "/home/santiagovargas/dev/qtaim_generator/data/omol_tests/orca5_rks/"
-    orca_5_uks = "/home/santiagovargas/dev/qtaim_generator/data/omol_tests/orca5_uks/"
-    orca_test = (
-        "/home/santiagovargas/dev/qtaim_generator/tests/test_files/multiwfn/999/"
+    os.system("export Multiwfnpath=/home/santiagovargas/dev/Multiwfn_3.8_dev_bin_Linux_noGUI/")
+    
+    parser = argparse.ArgumentParser(
+        description="Run gbw_analysis on ORCA output files."
     )
+    parser.add_argument(
+        "test_case",
+        type=int,
+        choices=[0, 1, 2, 3, 4, 5, 6, -1, -2, -3],
+        help="Test case number to run (0-6) or -1, -2, -3.",
+    )
+
+    parser.add_argument(
+        "threads",
+        type=int,
+        help="Number of threads to use for the analysis.",
+        default=8
+    )
+
+    args = parser.parse_args()
+    test_case = args.test_case
+    threads = int(args.threads)
+
+    orca_base = "/home/santiagovargas/dev/qtaim_generator/data/omol_profiling/{}_threads/base_test/".format(threads)
+    orca_6 = "/home/santiagovargas/dev/qtaim_generator/data/omol_profiling/{}_threads/orca6/".format(threads)
+    orca_5 = "/home/santiagovargas/dev/qtaim_generator/data/omol_profiling/{}_threads/orca5/".format(threads)
+    orca_6_rks = "/home/santiagovargas/dev/qtaim_generator/data/omol_profiling/{}_threads/orca6_rks/".format(threads)
+    orca_6_uks = "/home/santiagovargas/dev/qtaim_generator/data/omol_profiling/{}_threads/orca6_uks/".format(threads)
+    orca_5_rks = "/home/santiagovargas/dev/qtaim_generator/data/omol_profiling/{}_threads/orca5_rks/".format(threads)
+    orca_5_uks = "/home/santiagovargas/dev/qtaim_generator/data/omol_profiling/{}_threads/orca5_uks/".format(threads)
 
     orca6_2mkl = "/home/santiagovargas/orca_6_0_0/orca_2mkl"  # orca --molden
     orca5_2mkl = "/home/santiagovargas/dev/orca5/orca_2mkl"
@@ -39,23 +56,10 @@ def main():
     parse_only = False
     separate = True
     overwrite = True
-    clean = False
+    clean = True
     debug = False
     # create logger in target folder
 
-
-    parser = argparse.ArgumentParser(
-        description="Run gbw_analysis on ORCA output files."
-    )
-    parser.add_argument(
-        "test_case",
-        type=int,
-        choices=[0, 1, 2, 3, 4, 5, 6, -1, -2, -3],
-        help="Test case number to run (0-6) or -1, -2, -3.",
-    )
-
-    args = parser.parse_args()
-    test_case = args.test_case
     print(f"Running test case {test_case}...")
 
     def run_case(test_case):
@@ -81,6 +85,8 @@ def main():
                     restart=False,
                     debug=debug,
                     logger=logging.getLogger("gbw_analysis"),
+                    mem=400000000, 
+                    nthreads=threads
                 )  # works!
             except:
 
@@ -108,6 +114,8 @@ def main():
                     restart=False,
                     debug=debug,
                     logger=logging.getLogger("gbw_analysis"),
+                    mem=400000000, 
+                    nthreads=threads
                 )  # works!
             except:
 
@@ -135,6 +143,8 @@ def main():
                     restart=False,
                     debug=debug,
                     logger=logging.getLogger("gbw_analysis"),
+                    mem=400000000, 
+                    nthreads=threads
                 )  # works!
             except:
 
@@ -161,6 +171,8 @@ def main():
                     restart=False,
                     debug=debug,
                     logger=logging.getLogger("gbw_analysis"),
+                    mem=400000000, 
+                    nthreads=threads
                 )  # works!
             except:
 
@@ -189,6 +201,8 @@ def main():
                     restart=False,
                     debug=debug,
                     logger=logging.getLogger("gbw_analysis"),
+                    mem=400000000, 
+                    nthreads=threads
                 )  # works!
             except:
                 print("Error in gbw_analysis - case 0")
@@ -211,10 +225,12 @@ def main():
                     separate=separate,
                     overwrite=overwrite,
                     orca_6=True,
-                    clean=clean,
+                    clean=True,
                     restart=False,
                     debug=debug,
                     logger=logging.getLogger("gbw_analysis"),
+                    mem=400000000, 
+                    nthreads=threads
                 )  # works!
             except:
 
@@ -242,6 +258,8 @@ def main():
                     restart=False,
                     debug=debug,
                     logger=logging.getLogger("gbw_analysis"),
+                    mem=400000000, 
+                    nthreads=threads
                 )  # works!
             except:
                 print("Error in gbw_analysis - case 4")
@@ -255,7 +273,8 @@ def main():
         run_case(3)
         run_case(4)
         run_case(5)
-
+        run_case(6)
+    
     elif test_case == -3:
         run_case(6)
         run_case(3)

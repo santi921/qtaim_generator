@@ -1,6 +1,8 @@
 from pathlib import Path
 import os, stat, json, time, logging
 
+
+
 from qtaim_gen.source.data.multiwfn import (
     charge_data,
     charge_data_dict,
@@ -198,24 +200,29 @@ def create_jobs(folder, multiwfn_cmd, orca_2mkl_cmd, separate=False, debug=True,
         # print(file)
         if file.endswith(".wfn"):
             wfn_present = True
-            file_read = os.path.join(folder, file)
+            file_wfn_search = os.path.join(folder, file)
+            
 
+    for file in os.listdir(folder):
         if file.endswith(".gbw"):
             bool_gbw = True
             file_gbw = os.path.join(folder, file)
             file_wfn = file.replace(".gbw", ".wfn")
+            # if there is a wfn change its name to the gbw prefix
+            if wfn_present:
+                if file_wfn not in os.listdir(folder):
+                    logger.info(f"Renaming WFN file to: {file_wfn}")
+                    os.rename(os.path.join(folder, file_wfn_search), os.path.join(folder, file_wfn))
+
             file_molden = file.replace(".gbw", ".molden.input")
-            file_read = os.path.join(folder, file_wfn)
             file_molden = os.path.join(folder, file_molden)
+            file_read = os.path.join(folder, file_wfn)
+            
 
     if not wfn_present and bool_gbw:
         logger.info(f"file_gbw: {file_gbw}")
         logger.info(f"out folder: {folder}")
         logger.info("wfn not there - writing conversion script")
-        #print("file_gbw: {}".format(file_gbw))
-        #print("out folder: {}".format(folder))
-        # write conversion script from gbw to wfn
-        #print("wfn not there - writing conversion script")
         try:
             write_conversion(
                 out_folder=folder,
@@ -301,8 +308,6 @@ def create_jobs(folder, multiwfn_cmd, orca_2mkl_cmd, separate=False, debug=True,
     # print(job_dict)
     for key, value in job_dict.items():
         try:
-
-            # print(key, value)
             if key == "qtaim":
                 mv_cpprop = True
             else:
@@ -366,7 +371,7 @@ def create_jobs(folder, multiwfn_cmd, orca_2mkl_cmd, separate=False, debug=True,
             logger.error(f"Error creating execution script for {key}: {e}")
 
 
-def run_jobs(folder, separate=False, orca_6=True, restart=False, debug=False, logger=None):
+def run_jobs(folder, separate=False, orca_6=True, restart=False, debug=False, logger=None, prof_mem=False):
     """
     Run conversion and multiwfn jobs
     Takes:
@@ -386,7 +391,10 @@ def run_jobs(folder, separate=False, orca_6=True, restart=False, debug=False, lo
         [order_of_operations.append(i) for i in bond_dict.keys()]
         fuzzy_dict = fuzzy_data()
         [order_of_operations.append(i) for i in fuzzy_dict.keys()]
-
+        # remove     "charge_separate","bond_separate",
+        order_of_operations.remove("charge_separate")
+        order_of_operations.remove("bond_separate")
+        order_of_operations.remove("fuzzy_full")
     else:
         order_of_operations = ORDER_OF_OPERATIONS
 
@@ -441,17 +449,41 @@ def run_jobs(folder, separate=False, orca_6=True, restart=False, debug=False, lo
                     timings = json.load(f)
                     if order in timings.keys():
                         continue
+        
+        if prof_mem:
+            memory = {}
 
         mfwn_file = os.path.join(folder, "props_{}.mfwn".format(order))
-
-
         try:
             logger.info(f"Running {mfwn_file}")
             start = time.time()
-            os.system("{}".format(mfwn_file))
+            
+            # to replace 
+            logger.info(f"Process: {mfwn_file}")
+            #proc = subprocess.Popen(mfwn_file, stdout=subprocess.PIPE)
+            #proc = subprocess.Popen(mfwn_file, stdout=subprocess.PIPE, shell=True)
+            #proc = subprocess.Popen(["bash", mfwn_file], stdout=subprocess.PIPE)
+            #p = psutil.Process(proc.pid)
+            
+            os.system(mfwn_file)
+            
+            """
+            if prof_mem:
+                max_mem = 0 
+                
+                while proc.poll() is None:
+                    mem = p.memory_info().rss  # in bytes
+                    if mem > max_mem:
+                        max_mem = mem
+                    time.sleep(0.1)  # sleep for a short time to avoid busy waiting
+                logger.info(f"Max memory usage for {mfwn_file}: {max_mem / (1024 * 1024):.2f} MB")
+                memory[order] = max_mem / (1024 * 1024)  # store in MB
+            """
             end = time.time()
+
             timings[order] = end - start
             logger.info(f"Completed {order} in {end - start:.2f} seconds")
+        
         except Exception as e:
             logger.error(f"Error running {mfwn_file}: {e}")
             timings[order] = -1
@@ -460,6 +492,9 @@ def run_jobs(folder, separate=False, orca_6=True, restart=False, debug=False, lo
         try:
             with open(os.path.join(folder, "timings.json"), "w") as f:
                 json.dump(timings, f, indent=4)
+            if prof_mem:
+                with open(os.path.join(folder, "memory.json"), "w") as f:
+                    json.dump(memory, f, indent=4)
         except Exception as e:
             logger.error(f"Error saving timings.json: {e}")
 
@@ -694,6 +729,17 @@ def clean_jobs(folder, separate=False, logger=None):
             if file.endswith("convert.in"):
                 os.remove(os.path.join(folder, file))
                 logger.info(f"Removed {file}")
+            if file.endswith("CPprop.txt"):
+                os.remove(os.path.join(folder, file))
+                logger.info(f"Removed {file}")
+            if file.endswith("fuzzy_full.txt"):
+                os.remove(os.path.join(folder, file))
+                logger.info(f"Removed {file}")
+            if file.endswith("wfn"):
+                # if there is a gbw in the folder remove wfn
+                if any(f.endswith(".gbw") for f in os.listdir(folder)):
+                    os.remove(os.path.join(folder, file))
+                    logger.info(f"Removed {file}")
         except Exception as e:
             logger.error(f"Error removing file {file}: {e}")
 
@@ -723,7 +769,8 @@ def gbw_analysis(
     debug=False,
     logger=None,
     mem=400000000, 
-    nthreads=4
+    nthreads=4, 
+    prof_mem=False
 ):
     """
     Run a full analysis on a folder of gbw files
@@ -739,6 +786,9 @@ def gbw_analysis(
         restart(bool): whether to restart from the last step using timings.json
         debug(bool): whether to run a minimal set of jobs
         logger(logging.Logger): logger to log messages
+        mem(int): memory to use for the analysis in bytes
+        nthreads(int): number of threads to use for the analysis
+        prof_mem(bool): whether to profile memory usage during the analysis
     Writes:
         - settings.ini file with memory and nthreads
         - jobs for conversion to wfn and multiwfn analysis
@@ -799,7 +849,8 @@ def gbw_analysis(
             orca_6=orca_6,
             restart=restart,
             debug=debug,
-            logger=logger
+            logger=logger, 
+            prof_mem=prof_mem
         )
 
     print("... Parsing multiwfn output")
