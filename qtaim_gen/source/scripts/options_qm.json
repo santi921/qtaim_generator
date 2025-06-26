@@ -3,28 +3,73 @@
   "basis": "DKH-def2-TZVP SARC/J",
   "relativistic": true,
   "basis_atoms": [
-          {"element": "Dy", "basis": "SARC-DKH-TZVP"},
-          {"element": "Ce", "basis": "SARC-DKH-TZVP"},
-          {"element": "Er", "basis": "SARC-DKH-TZVP"},
-          {"element": "Eu", "basis": "SARC-DKH-TZVP"},
-          {"element": "Gd", "basis": "SARC-DKH-TZVP"},
-          {"element": "Ho", "basis": "SARC-DKH-TZVP"},
-          {"element": "La", "basis": "SARC-DKH-TZVP"},
-          {"element": "Lu", "basis": "SARC-DKH-TZVP"},
-          {"element": "Nd", "basis": "SARC-DKH-TZVP"},
-          {"element": "Pm", "basis": "SARC-DKH-TZVP"},
-          {"element": "Pr", "basis": "SARC-DKH-TZVP"},
-          {"element": "Sm", "basis": "SARC-DKH-TZVP"},
-          {"element": "Tb", "basis": "SARC-DKH-TZVP"},
-          {"element": "Tm", "basis": "SARC-DKH-TZVP"},
-          {"element": "Tb", "basis": "SARC-DKH-TZVP"},
-          {"element": "Yb", "basis": "SARC-DKH-TZVP"}
-        ],
+    {
+      "element": "Dy",
+      "basis": "SARC-DKH-TZVP"
+    },
+    {
+      "element": "Ce",
+      "basis": "SARC-DKH-TZVP"
+    },
+    {
+      "element": "Er",
+      "basis": "SARC-DKH-TZVP"
+    },
+    {
+      "element": "Eu",
+      "basis": "SARC-DKH-TZVP"
+    },
+    {
+      "element": "Gd",
+      "basis": "SARC-DKH-TZVP"
+    },
+    {
+      "element": "Ho",
+      "basis": "SARC-DKH-TZVP"
+    },
+    {
+      "element": "La",
+      "basis": "SARC-DKH-TZVP"
+    },
+    {
+      "element": "Lu",
+      "basis": "SARC-DKH-TZVP"
+    },
+    {
+      "element": "Nd",
+      "basis": "SARC-DKH-TZVP"
+    },
+    {
+      "element": "Pm",
+      "basis": "SARC-DKH-TZVP"
+    },
+    {
+      "element": "Pr",
+      "basis": "SARC-DKH-TZVP"
+    },
+    {
+      "element": "Sm",
+      "basis": "SARC-DKH-TZVP"
+    },
+    {
+      "element": "Tb",
+      "basis": "SARC-DKH-TZVP"
+    },
+    {
+      "element": "Tm",
+      "basis": "SARC-DKH-TZVP"
+    },
+    {
+      "element": "Tb",
+      "basis": "SARC-DKH-TZVP"
+    },
+    {
+      "element": "Yb",
+      "basis": "SARC-DKH-TZVP"
+    }
+  ],
   "parallel_procs": "%PAL NPROCS 24 END",
   "orca_path": "/path/to/orca_5_0_4/orca",
   "multiwfn_cmd": "Multiwfn_noGUI",
   "multiwfn_options_file": "/path/to/qtaim_generator/qtaim_gen/source/scripts/data.txt"
 }
-
-
-

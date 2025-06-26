@@ -2,7 +2,6 @@ from pathlib import Path
 import os, stat, json, time, logging
 
 
-
 from qtaim_gen.source.data.multiwfn import (
     charge_data,
     charge_data_dict,
@@ -46,13 +45,13 @@ ORDER_OF_OPERATIONS_separate = [
 ]
 
 
-def write_settings_file(mem=400000000, nthreads=4): 
-    # get loc of qtaim_embed folder 
+def write_settings_file(mem=400000000, nthreads=4):
+    # get loc of qtaim_embed folder
     qtaim_embed_loc = str(Path(__file__).parent.parent.parent)
     old_path = qtaim_embed_loc + "/source/data/settings.ini"
     # copy old path to current path
     new_path = "./settings.ini"
-    # wwrite txt files line by line and add a line nthreads = str(nthreads) + "\n" 
+    # wwrite txt files line by line and add a line nthreads = str(nthreads) + "\n"
     # another line ompstacksize= str(mem) + "\n"
     with open(old_path, "r") as f:
         data = f.read()
@@ -63,8 +62,8 @@ def write_settings_file(mem=400000000, nthreads=4):
 
     with open(new_path, "w") as f:
         f.write(data)
-        f.write('  nthreads= {}\n'.format(nthreads))
-        f.write('  ompstacksize= {}\n'.format(mem))
+        f.write("  nthreads= {}\n".format(nthreads))
+        f.write("  ompstacksize= {}\n".format(mem))
         f.write(last_lines[0] + "\n")  # write last line
         f.write(last_lines[1] + "\n")  # write last line without newline
         f.write(last_lines[2])  # write last line without newline
@@ -170,7 +169,9 @@ def write_multiwfn_exe(
         os.chmod(out_file, st.st_mode | stat.S_IEXEC)
 
 
-def create_jobs(folder, multiwfn_cmd, orca_2mkl_cmd, separate=False, debug=True, logger=None):
+def create_jobs(
+    folder, multiwfn_cmd, orca_2mkl_cmd, separate=False, debug=True, logger=None
+):
     """
     Create job files for multiwfn analysis
     Takes:
@@ -201,7 +202,6 @@ def create_jobs(folder, multiwfn_cmd, orca_2mkl_cmd, separate=False, debug=True,
         if file.endswith(".wfn"):
             wfn_present = True
             file_wfn_search = os.path.join(folder, file)
-            
 
     for file in os.listdir(folder):
         if file.endswith(".gbw"):
@@ -212,12 +212,14 @@ def create_jobs(folder, multiwfn_cmd, orca_2mkl_cmd, separate=False, debug=True,
             if wfn_present:
                 if file_wfn not in os.listdir(folder):
                     logger.info(f"Renaming WFN file to: {file_wfn}")
-                    os.rename(os.path.join(folder, file_wfn_search), os.path.join(folder, file_wfn))
+                    os.rename(
+                        os.path.join(folder, file_wfn_search),
+                        os.path.join(folder, file_wfn),
+                    )
 
             file_molden = file.replace(".gbw", ".molden.input")
             file_molden = os.path.join(folder, file_molden)
             file_read = os.path.join(folder, file_wfn)
-            
 
     if not wfn_present and bool_gbw:
         logger.info(f"file_gbw: {file_gbw}")
@@ -235,7 +237,7 @@ def create_jobs(folder, multiwfn_cmd, orca_2mkl_cmd, separate=False, debug=True,
 
         except Exception as e:
             logger.error(f"Error writing conversion script: {e}")
-        
+
     job_dict = {}
 
     # print("folder: {}".format(folder))
@@ -304,7 +306,7 @@ def create_jobs(folder, multiwfn_cmd, orca_2mkl_cmd, separate=False, debug=True,
 
         except Exception as e:
             logger.error(f"Error creating job for routine '{routine}': {e}")
-    
+
     # print(job_dict)
     for key, value in job_dict.items():
         try:
@@ -364,14 +366,22 @@ def create_jobs(folder, multiwfn_cmd, orca_2mkl_cmd, separate=False, debug=True,
                     name="props_{}.mfwn".format(key),
                     mv_cpprop=mv_cpprop,
                 )
-            
+
             logger.info(f"Created execution script for {key}")
-        
+
         except Exception as e:
             logger.error(f"Error creating execution script for {key}: {e}")
 
 
-def run_jobs(folder, separate=False, orca_6=True, restart=False, debug=False, logger=None, prof_mem=False):
+def run_jobs(
+    folder,
+    separate=False,
+    orca_6=True,
+    restart=False,
+    debug=False,
+    logger=None,
+    prof_mem=False,
+):
     """
     Run conversion and multiwfn jobs
     Takes:
@@ -414,7 +424,7 @@ def run_jobs(folder, separate=False, orca_6=True, restart=False, debug=False, lo
         if conv_file is None:
             logger.error("No conversion script (convert.in) found in folder.")
             return
-        
+
         # run conversion script
         try:
             os.system("{}".format(conv_file))
@@ -449,7 +459,7 @@ def run_jobs(folder, separate=False, orca_6=True, restart=False, debug=False, lo
                     timings = json.load(f)
                     if order in timings.keys():
                         continue
-        
+
         if prof_mem:
             memory = {}
 
@@ -457,16 +467,16 @@ def run_jobs(folder, separate=False, orca_6=True, restart=False, debug=False, lo
         try:
             logger.info(f"Running {mfwn_file}")
             start = time.time()
-            
-            # to replace 
+
+            # to replace
             logger.info(f"Process: {mfwn_file}")
-            #proc = subprocess.Popen(mfwn_file, stdout=subprocess.PIPE)
-            #proc = subprocess.Popen(mfwn_file, stdout=subprocess.PIPE, shell=True)
-            #proc = subprocess.Popen(["bash", mfwn_file], stdout=subprocess.PIPE)
-            #p = psutil.Process(proc.pid)
-            
+            # proc = subprocess.Popen(mfwn_file, stdout=subprocess.PIPE)
+            # proc = subprocess.Popen(mfwn_file, stdout=subprocess.PIPE, shell=True)
+            # proc = subprocess.Popen(["bash", mfwn_file], stdout=subprocess.PIPE)
+            # p = psutil.Process(proc.pid)
+
             os.system(mfwn_file)
-            
+
             """
             if prof_mem:
                 max_mem = 0 
@@ -483,7 +493,7 @@ def run_jobs(folder, separate=False, orca_6=True, restart=False, debug=False, lo
 
             timings[order] = end - start
             logger.info(f"Completed {order} in {end - start:.2f} seconds")
-        
+
         except Exception as e:
             logger.error(f"Error running {mfwn_file}: {e}")
             timings[order] = -1
@@ -543,45 +553,67 @@ def parse_multiwfn(folder, separate=False, debug=False, logger=None):
                         elif routine == "other":
                             data = parse_other_doc(file_full_path)
                         elif routine == "charge":
-                            charge_dict_overall, atomic_dipole_dict_overall, dipole_info = parse_charge_doc(file_full_path)
+                            (
+                                charge_dict_overall,
+                                atomic_dipole_dict_overall,
+                                dipole_info,
+                            ) = parse_charge_doc(file_full_path)
                             data = {
                                 "charge": charge_dict_overall,
                                 "dipole": dipole_info,
                                 "atomic_dipole": atomic_dipole_dict_overall,
                             }
                         elif routine == "hirshfeld":
-                            charge_dict_overall, dipole_info = parse_charge_base(file_full_path, corrected=False)
+                            charge_dict_overall, dipole_info = parse_charge_base(
+                                file_full_path, corrected=False
+                            )
                             data = {
                                 "charge": charge_dict_overall,
                                 "dipole": dipole_info,
                             }
                         elif routine == "vdd":
-                            charge_dict_overall, dipole_info = parse_charge_base(file_full_path, corrected=False)
+                            charge_dict_overall, dipole_info = parse_charge_base(
+                                file_full_path, corrected=False
+                            )
                             data = {
                                 "charge": charge_dict_overall,
                                 "dipole": dipole_info,
                             }
                         elif routine == "mbis":
-                            charge_dict_overall = parse_charge_base(file_full_path, corrected=False, dipole=False)
+                            charge_dict_overall = parse_charge_base(
+                                file_full_path, corrected=False, dipole=False
+                            )
                             data = {"charge": charge_dict_overall}
                         elif routine == "bader":
-                            charge_dict_overall, spin_info = parse_charge_doc_bader(file_full_path)
+                            charge_dict_overall, spin_info = parse_charge_doc_bader(
+                                file_full_path
+                            )
                             data = {"charge": charge_dict_overall, "spin": spin_info}
                         elif routine == "cm5":
-                            charge_dict_overall, dipole_info = parse_charge_base(file_full_path, corrected=False)
+                            charge_dict_overall, dipole_info = parse_charge_base(
+                                file_full_path, corrected=False
+                            )
                             data = {
                                 "charge": charge_dict_overall,
                                 "dipole": dipole_info,
                             }
                         elif routine == "adch":
-                            charge_dict_overall, atomic_dipole_dict_overall, dipole_info = parse_charge_doc_adch(file_full_path)
+                            (
+                                charge_dict_overall,
+                                atomic_dipole_dict_overall,
+                                dipole_info,
+                            ) = parse_charge_doc_adch(file_full_path)
                             data = {
                                 "charge": charge_dict_overall,
                                 "dipole": dipole_info,
                                 "atomic_dipole": atomic_dipole_dict_overall,
                             }
                         elif routine == "becke":
-                            charge_dict_overall, atomic_dipole_dict_overall, dipole_info = parse_charge_becke(file_full_path)
+                            (
+                                charge_dict_overall,
+                                atomic_dipole_dict_overall,
+                                dipole_info,
+                            ) = parse_charge_becke(file_full_path)
                             data = {
                                 "charge": charge_dict_overall,
                                 "dipole": dipole_info,
@@ -593,7 +625,9 @@ def parse_multiwfn(folder, separate=False, debug=False, logger=None):
                         elif routine in list(fuzzy_dict.keys()):
                             data = parse_fuzzy_real_space(file_full_path)
                         else:
-                            logger.warning(f"Unknown routine '{routine}' in file {file_full_path}")
+                            logger.warning(
+                                f"Unknown routine '{routine}' in file {file_full_path}"
+                            )
                             continue
 
                         with open(json_file, "w") as f:
@@ -601,8 +635,10 @@ def parse_multiwfn(folder, separate=False, debug=False, logger=None):
                         logger.info(f"Parsed {routine} output to {json_file}")
 
                     except Exception as e:
-                        logger.error(f"Error parsing {routine} in {file_full_path}: {e}")
-        
+                        logger.error(
+                            f"Error parsing {routine} in {file_full_path}: {e}"
+                        )
+
         elif "CPprop.txt" in file and "qtaim" in routine_list:
             json_file = os.path.join(folder, "qtaim.json")
             cp_prop_path = os.path.join(folder, file)
@@ -615,19 +651,23 @@ def parse_multiwfn(folder, separate=False, debug=False, logger=None):
                 if file2.endswith("input.in"):
                     inp_loc = os.path.join(folder, file2)
                     inp_orca = False
-            
-            qtaim_dict = parse_qtaim(cprop_file=cp_prop_path, inp_loc=inp_loc, orca_tf=inp_orca)
-            
+
+            qtaim_dict = parse_qtaim(
+                cprop_file=cp_prop_path, inp_loc=inp_loc, orca_tf=inp_orca
+            )
+
             try:
                 print(cp_prop_path)
                 print(inp_loc)
                 print(inp_orca)
 
-                qtaim_dict = parse_qtaim(cprop_file=cp_prop_path, inp_loc=inp_loc, orca_tf=inp_orca)
+                qtaim_dict = parse_qtaim(
+                    cprop_file=cp_prop_path, inp_loc=inp_loc, orca_tf=inp_orca
+                )
                 with open(json_file, "w") as f:
                     json.dump(qtaim_dict, f, indent=4)
                 logger.info(f"Parsed qtaim output to {json_file}")
-            
+
             except Exception as e:
                 logger.error(f"Error parsing qtaim: {e}")
 
@@ -688,12 +728,12 @@ def clean_jobs(folder, separate=False, logger=None):
         - all .txt files that are not in the order of operations
         - all .out files that are not in the order of operations
         - all molden.input files
-        - all convert.in files 
+        - all convert.in files
     """
     if logger is None:
         logger = logging.getLogger("gbw_analysis")
     logger.info("Cleaning up jobs in folder: {}".format(folder))
-    
+
     if separate:
         order_of_operations = ORDER_OF_OPERATIONS_separate
         charge_dict = charge_data_dict()
@@ -749,7 +789,7 @@ def setup_logger(folder, name="gbw_analysis.log"):
     logger.setLevel(logging.INFO)
     log_path = os.path.join(folder, name)
     fh = logging.FileHandler(log_path)
-    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+    formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
     fh.setFormatter(formatter)
     if not logger.hasHandlers():
         logger.addHandler(fh)
@@ -768,9 +808,10 @@ def gbw_analysis(
     restart=False,
     debug=False,
     logger=None,
-    mem=400000000, 
-    nthreads=4, 
-    prof_mem=False
+    mem=400000000,
+    nthreads=4,
+    prof_mem=False,
+    preprocess_compessed=False,
 ):
     """
     Run a full analysis on a folder of gbw files
@@ -789,6 +830,7 @@ def gbw_analysis(
         mem(int): memory to use for the analysis in bytes
         nthreads(int): number of threads to use for the analysis
         prof_mem(bool): whether to profile memory usage during the analysis
+        preprocess_compessed(bool): whether to preprocess compressed files (not implemented yet)
     Writes:
         - settings.ini file with memory and nthreads
         - jobs for conversion to wfn and multiwfn analysis
@@ -805,9 +847,60 @@ def gbw_analysis(
         logger.error("Folder does not exist: {}".format(folder))
         return
 
-    
+    # check if there is a .wfn or .gbw file in the folder. If there is an
+    # option to preprocess compressed files
+    if preprocess_compessed:
+        logger.info("Preprocessing compressed files in folder: {}".format(folder))
+        # run unstd
+        for file in os.listdir(folder):
+            if file.endswith(".tar.zst") or file.endswith(".tgz"):
+                logger.info(f"Found compressed file: {file}")
+                zstd_file = file
+                unstd_cmd = "unstd {}".format(os.path.join(folder, zstd_file))
+                os.system(unstd_cmd)
+                # untar resulting file
+                if zstd_file.endswith(".tar.zst"):
+                    tar_cmd = "tar -xf {}".format(
+                        os.path.join(folder, zstd_file.replace(".tar.zst", ".tar"))
+                    )
+
+                tar_file_out = zstd_file.replace(".tar.zst", ".tar").replace(
+                    ".tgz", ".tar"
+                )
+                # remove the tar file after extracting
+                os.system(tar_cmd)
+                # remove the tar file after extracting
+                os.remove(os.path.join(folder, tar_file_out))
+                # mv orca.engrad, orca.out, orca.inp, orca.property.txt, orca_stderr
+                for file2 in os.listdir(folder):
+                    if (
+                        file2.startswith("orca.engrad")
+                        or file2.startswith("orca.out")
+                        or file2.startswith("orca.inp")
+                        or file2.startswith("orca.property.inp")
+                        or file2.startswith("orca.property.txt")
+                        or file2.startswith("orca_stderr")
+                    ):
+                        logger.info(f"Moving {file2} to folder {folder}")
+                        os.rename(
+                            os.path.join(folder, file2),
+                            os.path.join(
+                                folder,
+                                zstd_file.replace(".tar.zst", "").replace(".tgz", ""),
+                                file2,
+                            ),
+                        )
+
+            if file.endswith(".gbw.zstd0"):
+                logger.info(f"Found compressed gbw file: {file}")
+                zstd_file = file
+                gbw_file = zstd_file.replace(".zstd0", "")
+                unstd_cmd = "unzstd {} -o {}".format(
+                    os.path.join(folder, zstd_file), os.path.join(folder, gbw_file)
+                )
+                os.system(unstd_cmd)
+
     write_settings_file(mem=mem, nthreads=nthreads)
-    
 
     if restart:
         logger.info("Restarting from last step in timings.json")
@@ -840,7 +933,7 @@ def gbw_analysis(
             orca_2mkl_cmd=orca_2mkl_cmd,
             separate=separate,
             debug=debug,
-            logger=logger
+            logger=logger,
         )
         # run jobs
         run_jobs(
@@ -849,8 +942,8 @@ def gbw_analysis(
             orca_6=orca_6,
             restart=restart,
             debug=debug,
-            logger=logger, 
-            prof_mem=prof_mem
+            logger=logger,
+            prof_mem=prof_mem,
         )
 
     print("... Parsing multiwfn output")

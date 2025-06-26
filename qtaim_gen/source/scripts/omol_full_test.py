@@ -9,7 +9,7 @@ import logging
 
 def main():
     # set environment variables
-    os.environ["OMP_STACKSIZE"] = "64000000"
+    os.environ["OMP_sSTACKSIZE"] = "64000000"
     # set mem
     os.system("ulimit -s unlimited")
     os.system("export LD_LIBRARY_PATH=/home/santiagovargas/dev/orca5/:$LD_LIBRARY_PATH")
@@ -290,4 +290,39 @@ def main():
 
 main()
 
-# python omol_full_test.py 1
+
+
+
+# Parameters
+#SBATCH --account=m4298_g
+#SBATCH --cpus-per-task=5
+#SBATCH --error=/pscratch/sd/s/santiago/fairchem/debug/202506-1914-3342-d94e/logs/%j_0_log.err
+#SBATCH --gpus-per-node=1
+#SBATCH --job-name=uma
+#SBATCH --mem=80GB
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=1
+#SBATCH --open-mode=append
+#SBATCH --output=/pscratch/sd/s/santiago/fairchem/debug/202506-1914-3342-d94e/logs/%j_0_log.out
+#SBATCH --qos=premium
+#SBATCH --signal=USR2@90
+#SBATCH --time=60
+#SBATCH --wckey=submitit
+
+
+# Parameters
+#SBATCH --account=m4298_g
+#SBATCH --constraint=gpu
+#SBATCH --cpus-per-task=5
+#SBATCH --error=/pscratch/sd/s/santiago/MinDScAIP/debug/202506-1914-1835-b49a/logs/%j_0_log.err
+#SBATCH --gpus-per-node=1
+#SBATCH --job-name=mindscaip_medium
+#SBATCH --mem=80GB
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=1
+#SBATCH --open-mode=append
+#SBATCH --output=/pscratch/sd/s/santiago/MinDScAIP/debug/202506-1914-1835-b49a/logs/%j_0_log.out
+#SBATCH --qos=premium
+#SBATCH --signal=USR2@90
+#SBATCH --time=60
+#SBATCH --wckey=submitit
