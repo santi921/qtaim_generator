@@ -856,7 +856,7 @@ def gbw_analysis(
             if file.endswith(".tar.zst") or file.endswith(".tgz"):
                 logger.info(f"Found compressed file: {file}")
                 zstd_file = file
-                unstd_cmd = "unstd {}".format(os.path.join(folder, zstd_file))
+                unstd_cmd = "unzstd {}".format(os.path.join(folder, zstd_file))
                 os.system(unstd_cmd)
                 # untar resulting file
                 if zstd_file.endswith(".tar.zst"):
