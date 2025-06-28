@@ -904,7 +904,7 @@ def gbw_analysis(
                             os.path.join("./", file2),
                             os.path.join(
                                 folder,
-                                zstd_file.replace(".tar.zst", "").replace(".tgz", ""),
+                                #zstd_file.replace(".tar.zst", "").replace(".tgz", ""),
                                 file2,
                             ),
                         )
