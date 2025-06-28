@@ -542,16 +542,22 @@ def parse_multiwfn(folder, separate=False, debug=False, logger=None):
                     try:
                         if routine == "fuzzy_full":
                             data = parse_fuzzy_doc(file_full_path)
+                        
                         elif routine == "bond":
                             data = parse_bond_order_doc(file_full_path)
+                        
                         elif routine == "ibsi":
                             data = parse_bond_order_ibsi(file_full_path)
+                        
                         elif routine == "laplace":
                             data = parse_bond_order_laplace(file_full_path)
+                        
                         elif routine == "fuzzy":
                             data = parse_bond_order_fuzzy(file_full_path)
+                        
                         elif routine == "other":
                             data = parse_other_doc(file_full_path)
+                        
                         elif routine == "charge":
                             (
                                 charge_dict_overall,
@@ -563,6 +569,7 @@ def parse_multiwfn(folder, separate=False, debug=False, logger=None):
                                 "dipole": dipole_info,
                                 "atomic_dipole": atomic_dipole_dict_overall,
                             }
+
                         elif routine == "hirshfeld":
                             charge_dict_overall, dipole_info = parse_charge_base(
                                 file_full_path, corrected=False
@@ -571,6 +578,7 @@ def parse_multiwfn(folder, separate=False, debug=False, logger=None):
                                 "charge": charge_dict_overall,
                                 "dipole": dipole_info,
                             }
+
                         elif routine == "vdd":
                             charge_dict_overall, dipole_info = parse_charge_base(
                                 file_full_path, corrected=False
@@ -579,16 +587,19 @@ def parse_multiwfn(folder, separate=False, debug=False, logger=None):
                                 "charge": charge_dict_overall,
                                 "dipole": dipole_info,
                             }
+
                         elif routine == "mbis":
                             charge_dict_overall = parse_charge_base(
                                 file_full_path, corrected=False, dipole=False
                             )
                             data = {"charge": charge_dict_overall}
+                        
                         elif routine == "bader":
                             charge_dict_overall, spin_info = parse_charge_doc_bader(
                                 file_full_path
                             )
                             data = {"charge": charge_dict_overall, "spin": spin_info}
+
                         elif routine == "cm5":
                             charge_dict_overall, dipole_info = parse_charge_base(
                                 file_full_path, corrected=False
@@ -597,6 +608,7 @@ def parse_multiwfn(folder, separate=False, debug=False, logger=None):
                                 "charge": charge_dict_overall,
                                 "dipole": dipole_info,
                             }
+
                         elif routine == "adch":
                             (
                                 charge_dict_overall,
@@ -608,6 +620,7 @@ def parse_multiwfn(folder, separate=False, debug=False, logger=None):
                                 "dipole": dipole_info,
                                 "atomic_dipole": atomic_dipole_dict_overall,
                             }
+
                         elif routine == "becke":
                             (
                                 charge_dict_overall,
@@ -619,11 +632,14 @@ def parse_multiwfn(folder, separate=False, debug=False, logger=None):
                                 "dipole": dipole_info,
                                 "atomic_dipole": atomic_dipole_dict_overall,
                             }
+
                         elif routine == "chelpg":
                             charge_dict_overall = parse_charge_chelpg(file_full_path)
                             data = {"charge": charge_dict_overall}
+                        
                         elif routine in list(fuzzy_dict.keys()):
                             data = parse_fuzzy_real_space(file_full_path)
+                        
                         else:
                             logger.warning(
                                 f"Unknown routine '{routine}' in file {file_full_path}"
@@ -657,9 +673,9 @@ def parse_multiwfn(folder, separate=False, debug=False, logger=None):
             )
 
             try:
-                print(cp_prop_path)
-                print(inp_loc)
-                print(inp_orca)
+                #print(cp_prop_path)
+                #print(inp_loc)
+                #print(inp_orca)
 
                 qtaim_dict = parse_qtaim(
                     cprop_file=cp_prop_path, inp_loc=inp_loc, orca_tf=inp_orca
@@ -856,9 +872,10 @@ def gbw_analysis(
             if file.endswith(".tar.zst") or file.endswith(".tgz"):
                 logger.info(f"Found compressed file: {file}")
                 zstd_file = file
-                unstd_cmd = "unzstd {}".format(os.path.join(folder, zstd_file))
+                unstd_cmd = "unzstd -f {}".format(os.path.join(folder, zstd_file))
                 os.system(unstd_cmd)
                 # untar resulting file
+                
                 if zstd_file.endswith(".tar.zst"):
                     tar_cmd = "tar -xf {}".format(
                         os.path.join(folder, zstd_file.replace(".tar.zst", ".tar"))
@@ -872,7 +889,8 @@ def gbw_analysis(
                 # remove the tar file after extracting
                 os.remove(os.path.join(folder, tar_file_out))
                 # mv orca.engrad, orca.out, orca.inp, orca.property.txt, orca_stderr
-                for file2 in os.listdir(folder):
+                
+                for file2 in os.listdir("./"):
                     if (
                         file2.startswith("orca.engrad")
                         or file2.startswith("orca.out")
@@ -883,7 +901,7 @@ def gbw_analysis(
                     ):
                         logger.info(f"Moving {file2} to folder {folder}")
                         os.rename(
-                            os.path.join(folder, file2),
+                            os.path.join("./", file2),
                             os.path.join(
                                 folder,
                                 zstd_file.replace(".tar.zst", "").replace(".tgz", ""),
@@ -895,7 +913,7 @@ def gbw_analysis(
                 logger.info(f"Found compressed gbw file: {file}")
                 zstd_file = file
                 gbw_file = zstd_file.replace(".zstd0", "")
-                unstd_cmd = "unzstd {} -o {}".format(
+                unstd_cmd = "unzstd {} -o {} -f".format(
                     os.path.join(folder, zstd_file), os.path.join(folder, gbw_file)
                 )
                 os.system(unstd_cmd)

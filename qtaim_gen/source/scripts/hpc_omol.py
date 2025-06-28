@@ -16,7 +16,7 @@ def main():
 
     orca6_2mkl = "/home/santiagovargas/orca_6_0_0/orca_2mkl"  # change this
     multiwfn_cmd = "/home/santiagovargas/dev/Multiwfn_3.8_dev_bin_Linux_noGUI/Multiwfn_noGUI"  # change this
-
+    restart = True
     folder_file = os.path.join("./out.txt")
     # read folder file and randomly select a folder
     with open(folder_file, "r") as f:
@@ -33,10 +33,11 @@ def main():
         # check if there is a file called timings.json, qtaim.json, other.json, fuzzy_full,json, and charge.json
         if (
             os.path.exists(os.path.join(run_root, "timings.json"))
-            or os.path.exists(os.path.join(run_root, "qtaim.json"))
-            or os.path.exists(os.path.join(run_root, "other.json"))
-            or os.path.exists(os.path.join(run_root, "fuzzy_full.json"))
-            or os.path.exists(os.path.join(run_root, "charge.json"))
+            and os.path.exists(os.path.join(run_root, "qtaim.json"))
+            and os.path.exists(os.path.join(run_root, "other.json"))
+            and os.path.exists(os.path.join(run_root, "fuzzy_full.json"))
+            and os.path.exists(os.path.join(run_root, "charge.json"))
+            and not restart
         ):
             print(f"Skipping {run_root} - already processed")
             continue
