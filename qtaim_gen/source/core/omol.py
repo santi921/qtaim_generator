@@ -542,22 +542,22 @@ def parse_multiwfn(folder, separate=False, debug=False, logger=None):
                     try:
                         if routine == "fuzzy_full":
                             data = parse_fuzzy_doc(file_full_path)
-                        
+
                         elif routine == "bond":
                             data = parse_bond_order_doc(file_full_path)
-                        
+
                         elif routine == "ibsi":
                             data = parse_bond_order_ibsi(file_full_path)
-                        
+
                         elif routine == "laplace":
                             data = parse_bond_order_laplace(file_full_path)
-                        
+
                         elif routine == "fuzzy":
                             data = parse_bond_order_fuzzy(file_full_path)
-                        
+
                         elif routine == "other":
                             data = parse_other_doc(file_full_path)
-                        
+
                         elif routine == "charge":
                             (
                                 charge_dict_overall,
@@ -593,7 +593,7 @@ def parse_multiwfn(folder, separate=False, debug=False, logger=None):
                                 file_full_path, corrected=False, dipole=False
                             )
                             data = {"charge": charge_dict_overall}
-                        
+
                         elif routine == "bader":
                             charge_dict_overall, spin_info = parse_charge_doc_bader(
                                 file_full_path
@@ -636,10 +636,10 @@ def parse_multiwfn(folder, separate=False, debug=False, logger=None):
                         elif routine == "chelpg":
                             charge_dict_overall = parse_charge_chelpg(file_full_path)
                             data = {"charge": charge_dict_overall}
-                        
+
                         elif routine in list(fuzzy_dict.keys()):
                             data = parse_fuzzy_real_space(file_full_path)
-                        
+
                         else:
                             logger.warning(
                                 f"Unknown routine '{routine}' in file {file_full_path}"
@@ -673,9 +673,9 @@ def parse_multiwfn(folder, separate=False, debug=False, logger=None):
             )
 
             try:
-                #print(cp_prop_path)
-                #print(inp_loc)
-                #print(inp_orca)
+                # print(cp_prop_path)
+                # print(inp_loc)
+                # print(inp_orca)
 
                 qtaim_dict = parse_qtaim(
                     cprop_file=cp_prop_path, inp_loc=inp_loc, orca_tf=inp_orca
@@ -701,14 +701,18 @@ def parse_multiwfn(folder, separate=False, debug=False, logger=None):
                     with open(os.path.join(folder, file), "r") as f:
                         charge_dict_compiled[routine] = json.load(f)
                     # remove the file
-                    os.remove(os.path.join(folder, file))
+                    if os.path.exists(os.path.join(folder, file)):
+                        logger.info(f"Removing file: {file}")
+                        os.remove(os.path.join(folder, file))
 
             for routine in bond_routines:
                 if routine == file.split(".json")[0]:
                     with open(os.path.join(folder, file), "r") as f:
                         bond_dict_compiled[routine] = json.load(f)
                     # remove the file
-                    os.remove(os.path.join(folder, file))
+                    if os.path.exists(os.path.join(folder, file)):
+                        logger.info(f"Removing file: {file}")
+                        os.remove(os.path.join(folder, file))
 
             for routine in fuzzy_routines:
                 if routine == file.split(".json")[0]:
@@ -716,16 +720,20 @@ def parse_multiwfn(folder, separate=False, debug=False, logger=None):
                         fuzzy_dict_compiled[routine] = json.load(f)[routine]
                         # print(fuzzy_dict_compiled)
                     # remove the file
-                    os.remove(os.path.join(folder, file))
+                    if os.path.exists(os.path.join(folder, file)):
+                        logger.info(f"Removing file: {file}")
+                        os.remove(os.path.join(folder, file))
 
         if charge_dict_compiled:
             with open(os.path.join(folder, "charge.json"), "w") as f:
                 json.dump(charge_dict_compiled, f, indent=4)
             logger.info("Compiled charge.json")
+
         if bond_dict_compiled:
             with open(os.path.join(folder, "bond.json"), "w") as f:
                 json.dump(bond_dict_compiled, f, indent=4)
             logger.info("Compiled bond.json")
+
         if fuzzy_dict_compiled:
             with open(os.path.join(folder, "fuzzy_full.json"), "w") as f:
                 json.dump(fuzzy_dict_compiled, f, indent=4)
@@ -875,7 +883,7 @@ def gbw_analysis(
                 unstd_cmd = "unzstd -f {}".format(os.path.join(folder, zstd_file))
                 os.system(unstd_cmd)
                 # untar resulting file
-                
+
                 if zstd_file.endswith(".tar.zst"):
                     tar_cmd = "tar -xf {}".format(
                         os.path.join(folder, zstd_file.replace(".tar.zst", ".tar"))
@@ -887,9 +895,11 @@ def gbw_analysis(
                 # remove the tar file after extracting
                 os.system(tar_cmd)
                 # remove the tar file after extracting
-                os.remove(os.path.join(folder, tar_file_out))
+                if os.path.exists(os.path.join(folder, tar_file_out)):
+                    logger.info(f"Removing tar file: {tar_file_out}")
+                    os.remove(os.path.join(folder, tar_file_out))
                 # mv orca.engrad, orca.out, orca.inp, orca.property.txt, orca_stderr
-                
+
                 for file2 in os.listdir("./"):
                     if (
                         file2.startswith("orca.engrad")
@@ -904,7 +914,7 @@ def gbw_analysis(
                             os.path.join("./", file2),
                             os.path.join(
                                 folder,
-                                #zstd_file.replace(".tar.zst", "").replace(".tgz", ""),
+                                # zstd_file.replace(".tar.zst", "").replace(".tgz", ""),
                                 file2,
                             ),
                         )
