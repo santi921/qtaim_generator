@@ -278,7 +278,7 @@ def dft_inp_to_dict(dft_inp_file, parse_charge_spin=False):
 
     # find line starting with "* xyz"
     for ind, line in enumerate(lines):
-        if "* xyz" in line:
+        if "* xyz" in line or "*xyz" in line:
             xyz_ind = ind
             break
 
