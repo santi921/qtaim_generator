@@ -277,10 +277,18 @@ def dft_inp_to_dict(dft_inp_file, parse_charge_spin=False):
         lines = [line[:-1] for line in lines]
 
     # find line starting with "* xyz"
+    start=False
+    ind_terminal = -1
     for ind, line in enumerate(lines):
+        #print(line)
+        if "*" in line and start:
+            ind_terminal = ind
+            break
+
         if "* xyz" in line or "*xyz" in line:
             xyz_ind = ind
-            break
+            start= True
+
 
     if parse_charge_spin:
         ret_dict = {}
@@ -289,7 +297,7 @@ def dft_inp_to_dict(dft_inp_file, parse_charge_spin=False):
         ret_dict["spin"] = spin
 
     # filter lines before and including xyz_ind
-    lines = lines[xyz_ind + 1 : -1]
+    lines = lines[xyz_ind + 1 : ind_terminal]
 
     for ind, line in enumerate(lines):
         line_split = line.split()

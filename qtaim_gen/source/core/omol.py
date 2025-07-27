@@ -509,14 +509,17 @@ def run_jobs(
             logger.error(f"Error saving timings.json: {e}")
 
 
-def parse_multiwfn(folder, separate=False, debug=False, logger=None):
+def parse_multiwfn(folder, separate=False, debug=False, logger=None, return_dicts=False):
     """
     Parse multiwfn output files to jsons and save them in folder
     Takes:
         folder(str): folder to parse
         separate(bool): whether to separate the analysis into different files
         debug(bool): whether to run a minimal set of jobs
+        return_dicts(bool): return results as well as writing
     """
+    if return_dicts:
+        compiled_dicts = {}
 
     if separate:
         routine_list = ORDER_OF_OPERATIONS_separate
@@ -682,6 +685,8 @@ def parse_multiwfn(folder, separate=False, debug=False, logger=None):
                 )
                 with open(json_file, "w") as f:
                     json.dump(qtaim_dict, f, indent=4)
+                if return_dicts:
+                    compiled_dicts["qtaim"] = qtaim_dict
                 logger.info(f"Parsed qtaim output to {json_file}")
 
             except Exception as e:
@@ -727,17 +732,27 @@ def parse_multiwfn(folder, separate=False, debug=False, logger=None):
         if charge_dict_compiled:
             with open(os.path.join(folder, "charge.json"), "w") as f:
                 json.dump(charge_dict_compiled, f, indent=4)
+            if return_dicts:
+                compiled_dicts["charge"] = charge_dict_compiled
             logger.info("Compiled charge.json")
 
         if bond_dict_compiled:
             with open(os.path.join(folder, "bond.json"), "w") as f:
                 json.dump(bond_dict_compiled, f, indent=4)
+            if return_dicts:
+                compiled_dicts["bond"] = bond_dict_compiled
             logger.info("Compiled bond.json")
 
         if fuzzy_dict_compiled:
             with open(os.path.join(folder, "fuzzy_full.json"), "w") as f:
                 json.dump(fuzzy_dict_compiled, f, indent=4)
+            if return_dicts:
+                compiled_dicts["fuzzy_full"] = fuzzy_dict_compiled
             logger.info("Compiled fuzzy_full.json")
+
+        if return_dicts:
+            return compiled_dicts
+    
 
 
 def clean_jobs(folder, separate=False, logger=None):
