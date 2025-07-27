@@ -1,4 +1,6 @@
-import json
+import os
+import json 
+from qtaim_gen.source.core.parse_qtaim import dft_inp_to_dict
 
 def validate_timing_dict(timing_json_loc): 
     """
@@ -35,7 +37,7 @@ def validate_timing_dict(timing_json_loc):
             raise ValueError(f"Missing expected key '{key}' in timing json.")
         # check that the times aren't tiny 
         
-        if timing_dict[key] < 1e-1 and key != 'convert':
+        if timing_dict[key] < 1e-6 and key != 'convert':
             print(f"Timing for '{key}' is too small: {timing_dict[key]} seconds.")
             return False
     print("Timing json structure is valid.")
@@ -122,7 +124,9 @@ def validate_qtaim_dict(qtaim_json_loc, n_atoms=None, harsh_check=False):
         print("QTAIM json file is empty.")
         return False
     
+    #dict_ncps = {qtaim_dict[key] for key in qtaim_dict if "_" not in key}
     dict_ncps = [qtaim_dict[key] for key in list(qtaim_dict.keys()) if "_" not in key]
+    #dict_bcps = {qtaim_dict[key] for key in qtaim_dict if "_" in key}
     dict_bcps = [qtaim_dict[key] for key in list(qtaim_dict.keys()) if "_" in key]
 
     if n_atoms is not None:
@@ -131,5 +135,57 @@ def validate_qtaim_dict(qtaim_json_loc, n_atoms=None, harsh_check=False):
             if harsh_check:
                 return False
     print("QTAIM json structure is valid.")
+    return True
+    
+
+
+def validation_checks(folder): 
+    """
+    Run all validation checks on the json files in the given folder.
+    """
+    # check that all the json files are present
+    required_files = ["timings.json", "fuzzy_full.json", "other.json", "charge.json", "qtaim.json", "orca.inp"]
+    for file in required_files:
+        if not os.path.exists(os.path.join(folder, file)):
+            print(f"Missing required file: {file}")
+            return False
+
+    # gather n_atoms, spin, charge from the orca.inp file
+    orca_inp_path = os.path.join(folder, "orca.inp")
+    if not os.path.exists(orca_inp_path):
+        print("Missing orca.inp file.")
+        return False
+    dft_dict = dft_inp_to_dict(orca_inp_path, parse_charge_spin=True)
+    #print(dft_dict)
+    n_atoms = len(dft_dict["mol"])
+    spin = dft_dict.get("spin", None)
+    charge = dft_dict.get("charge", None)
+    print(f"n_atoms: {n_atoms}, spin: {spin}, charge: {charge}")
+    if spin != 2:
+        spin_tf = True
+    else:
+        spin_tf = False
+        
+    timing_json_loc = os.path.join(folder, "timings.json")
+    fuzzy_json_loc = os.path.join(folder, "fuzzy_full.json")
+    other_dict_loc = os.path.join(folder, "other.json")
+    charge_json_loc = os.path.join(folder, "charge.json")
+    qtaim_json_loc = os.path.join(folder, "qtaim.json")
+    #bonding_json_loc = os.path.join(folder, "bonding.json")
+
+    if not validate_timing_dict(timing_json_loc):
+        return False
+    if not validate_fuzzy_dict(fuzzy_json_loc, n_atoms=n_atoms, spin=spin_tf):
+        return False
+    if not validate_other_dict(other_dict_loc):
+        return False
+    if not validate_charge_dict(charge_json_loc, n_atoms=n_atoms):
+        return False
+    if not validate_qtaim_dict(qtaim_json_loc, n_atoms=n_atoms, harsh_check=True):
+        return False
+    #if not validate_qtaim_dict(bonding_json_loc, n_atoms=n_atoms, harsh_check=False):
+    #    return False
+    
+    print("All validation checks passed.")
     return True
     
