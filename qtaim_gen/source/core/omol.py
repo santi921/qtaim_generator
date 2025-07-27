@@ -509,7 +509,7 @@ def run_jobs(
             logger.error(f"Error saving timings.json: {e}")
 
 
-def parse_multiwfn(folder, separate=False, debug=False, logger=None, return_dicts=False):
+def parse_multiwfn(folder, separate=False, debug=False, logger=None):
     """
     Parse multiwfn output files to jsons and save them in folder
     Takes:
@@ -518,8 +518,8 @@ def parse_multiwfn(folder, separate=False, debug=False, logger=None, return_dict
         debug(bool): whether to run a minimal set of jobs
         return_dicts(bool): return results as well as writing
     """
-    if return_dicts:
-        compiled_dicts = {}
+    #if return_dicts:
+    #    compiled_dicts = {}
 
     if separate:
         routine_list = ORDER_OF_OPERATIONS_separate
@@ -546,13 +546,13 @@ def parse_multiwfn(folder, separate=False, debug=False, logger=None, return_dict
                         if routine == "fuzzy_full":
                             data = parse_fuzzy_doc(file_full_path)
 
-                        elif routine == "bond":
-                            data = parse_bond_order_doc(file_full_path)
+                        elif routine == "fuzzy_bond":
+                            data = parse_bond_order_fuzzy(file_full_path)
 
-                        elif routine == "ibsi":
+                        elif routine == "ibsi_bond":
                             data = parse_bond_order_ibsi(file_full_path)
 
-                        elif routine == "laplace":
+                        elif routine == "laplace_bond":
                             data = parse_bond_order_laplace(file_full_path)
 
                         elif routine == "fuzzy":
@@ -685,8 +685,8 @@ def parse_multiwfn(folder, separate=False, debug=False, logger=None, return_dict
                 )
                 with open(json_file, "w") as f:
                     json.dump(qtaim_dict, f, indent=4)
-                if return_dicts:
-                    compiled_dicts["qtaim"] = qtaim_dict
+                #if return_dicts:
+                #    compiled_dicts["qtaim"] = qtaim_dict
                 logger.info(f"Parsed qtaim output to {json_file}")
 
             except Exception as e:
@@ -732,27 +732,27 @@ def parse_multiwfn(folder, separate=False, debug=False, logger=None, return_dict
         if charge_dict_compiled:
             with open(os.path.join(folder, "charge.json"), "w") as f:
                 json.dump(charge_dict_compiled, f, indent=4)
-            if return_dicts:
-                compiled_dicts["charge"] = charge_dict_compiled
+            #if return_dicts:
+            #    compiled_dicts["charge"] = charge_dict_compiled
             logger.info("Compiled charge.json")
 
         if bond_dict_compiled:
             with open(os.path.join(folder, "bond.json"), "w") as f:
                 json.dump(bond_dict_compiled, f, indent=4)
-            if return_dicts:
-                compiled_dicts["bond"] = bond_dict_compiled
+            #if return_dicts:
+            #    compiled_dicts["bond"] = bond_dict_compiled
             logger.info("Compiled bond.json")
 
         if fuzzy_dict_compiled:
             with open(os.path.join(folder, "fuzzy_full.json"), "w") as f:
                 json.dump(fuzzy_dict_compiled, f, indent=4)
-            if return_dicts:
-                compiled_dicts["fuzzy_full"] = fuzzy_dict_compiled
+            #if return_dicts:
+            #    compiled_dicts["fuzzy_full"] = fuzzy_dict_compiled
             logger.info("Compiled fuzzy_full.json")
 
-        if return_dicts:
-            return compiled_dicts
-    
+    #if return_dicts:
+    #    return compiled_dicts
+
 
 
 def clean_jobs(folder, separate=False, logger=None):

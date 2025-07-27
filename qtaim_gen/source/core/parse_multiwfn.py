@@ -556,11 +556,13 @@ def parse_bond_order_doc(bond_order_txt):
                     break
                 ibsi_bool = True
 
-    bond_dict = {
-        "fuzzy": fuzzy_bond_dict,
-        "laplace": laplace_bond_dict,
-        "ibsi": ibsi_bond_dict,
-    }
+    bond_dict = {}
+    if fuzzy_bond_dict != {}:
+        bond_dict = fuzzy_bond_dict
+    if laplace_bond_dict != {}:
+        bond_dict["laplace"] = laplace_bond_dict
+    if ibsi_bond_dict != {}:
+        bond_dict["ibsi"] = ibsi_bond_dict
 
     return bond_dict
 
