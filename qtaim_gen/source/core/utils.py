@@ -1,5 +1,5 @@
 import os
-
+from qtaim_gen.source.core.parse_qtaim import dft_inp_to_dict
 
 def pull_ecp_dict(orca_out):
     """
@@ -84,3 +84,19 @@ def overwrite_molden_w_ecp(molden_file, dict_ecp):
 
     # overwrite the original file
     os.rename(molden_file_temp, molden_file)
+
+
+def check_spin(folder):
+    """
+    Utility to find .inp file in folder and parse it to find if it's a doublet
+    """
+    # find the .inp file in the folder
+    orca_inp_files = [f for f in os.listdir(folder) if f.endswith(".inp")]
+    if not orca_inp_files:
+        raise FileNotFoundError("No .inp file found in the folder.")
+    inp_file = os.path.join(folder, orca_inp_files[0])
+    dft_dict = dft_inp_to_dict(inp_file, parse_charge_spin=True)
+    spin = dft_dict.get("spin", None)
+    if spin == 2: return False
+    return True
+   

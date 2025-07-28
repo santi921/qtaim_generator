@@ -11,11 +11,6 @@ from qtaim_gen.source.data.multiwfn import (
     other_data,
     qtaim_data,
 )
-
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-
 from qtaim_gen.source.core.parse_multiwfn import (
     parse_charge_doc,
     parse_charge_base,
@@ -33,7 +28,11 @@ from qtaim_gen.source.core.parse_multiwfn import (
     parse_fuzzy_real_space,
 )
 
-from qtaim_gen.source.core.utils import pull_ecp_dict, overwrite_molden_w_ecp
+from qtaim_gen.source.core.utils import pull_ecp_dict, overwrite_molden_w_ecp, check_spin
+
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 ORDER_OF_OPERATIONS = ["fuzzy_full", "qtaim", "bond", "charge", "other"]
 ORDER_OF_OPERATIONS_separate = [
@@ -170,7 +169,12 @@ def write_multiwfn_exe(
 
 
 def create_jobs(
-    folder, multiwfn_cmd, orca_2mkl_cmd, separate=False, debug=True, logger=None
+    folder, 
+    multiwfn_cmd, 
+    orca_2mkl_cmd, 
+    separate=False, 
+    debug=True, 
+    logger=None
 ):
     """
     Create job files for multiwfn analysis
@@ -182,6 +186,7 @@ def create_jobs(
         overwrite(bool): whether to overwrite the output files
         orca_6(bool): whether calc is from orca6
         logger(logging.Logger): logger to log messages
+
     """
     if logger is None:
         logger = logging.getLogger("gbw_analysis")
@@ -254,7 +259,8 @@ def create_jobs(
             elif routine == "fuzzy_full":
                 # job_dict["fuzzy_full"] = os.path.join(folder, "fuzzy_full.txt")
                 with open(os.path.join(folder, "fuzzy_full.txt"), "w") as f:
-                    fuzzy_dict = fuzzy_data()
+                    spin_tf = check_spin(folder)
+                    fuzzy_dict = fuzzy_data(spin=spin_tf)
                     for key, value in fuzzy_dict.items():
                         job_dict[key] = os.path.join(folder, "{}.txt".format(key))
                         with open(os.path.join(folder, "{}.txt".format(key)), "w") as f:
@@ -399,7 +405,8 @@ def run_jobs(
         [order_of_operations.append(i) for i in charge_dict.keys()]
         bond_dict = bond_order_dict()
         [order_of_operations.append(i) for i in bond_dict.keys()]
-        fuzzy_dict = fuzzy_data()
+        spin_tf = check_spin(folder)
+        fuzzy_dict = fuzzy_data(spin=spin_tf)
         [order_of_operations.append(i) for i in fuzzy_dict.keys()]
         # remove     "charge_separate","bond_separate",
         order_of_operations.remove("charge_separate")
@@ -525,7 +532,8 @@ def parse_multiwfn(folder, separate=False, debug=False, logger=None):
         routine_list = ORDER_OF_OPERATIONS_separate
         charge_dict = charge_data_dict()
         bond_dict = bond_order_dict()
-        fuzzy_dict = fuzzy_data()
+        spin_tf = check_spin(folder)
+        fuzzy_dict = fuzzy_data(spin=spin_tf)
         [routine_list.append(i) for i in charge_dict.keys()]
         [routine_list.append(i) for i in bond_dict.keys()]
         [routine_list.append(i) for i in fuzzy_dict.keys()]
@@ -695,7 +703,7 @@ def parse_multiwfn(folder, separate=False, debug=False, logger=None):
     if separate:
         charge_routines = list(charge_dict.keys())
         bond_routines = list(bond_dict.keys())
-        fuzzy_routines = list(fuzzy_data().keys())
+        fuzzy_routines = list(fuzzy_data(spin=spin_tf).keys())
         charge_dict_compiled = {}
         bond_dict_compiled = {}
         fuzzy_dict_compiled = {}
@@ -754,7 +762,6 @@ def parse_multiwfn(folder, separate=False, debug=False, logger=None):
     #    return compiled_dicts
 
 
-
 def clean_jobs(folder, separate=False, logger=None):
     """
     Clean up the mess of files created by the analysis
@@ -779,7 +786,8 @@ def clean_jobs(folder, separate=False, logger=None):
         [order_of_operations.append(i) for i in charge_dict.keys()]
         bond_dict = bond_order_dict()
         [order_of_operations.append(i) for i in bond_dict.keys()]
-        fuzzy_dict = fuzzy_data()
+        spin_tf = check_spin(folder)
+        fuzzy_dict = fuzzy_data(spin=spin_tf)
         [order_of_operations.append(i) for i in fuzzy_dict.keys()]
     else:
         order_of_operations = ORDER_OF_OPERATIONS
