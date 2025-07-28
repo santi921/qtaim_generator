@@ -16,10 +16,7 @@ from qtaim_embed.data.processing import (
 from qtaim_embed.core.molwrapper import MoleculeWrapper
 from qtaim_embed.utils.grapher import get_grapher
 
-from qtaim_embed.data.lmdb import (
-    serialize_dgl_graph, 
-    load_dgl_graph_from_serialized
-)
+from qtaim_embed.data.lmdb import serialize_dgl_graph, load_dgl_graph_from_serialized
 
 from qtaim_gen.source.core.lmdbs import (
     get_elements_from_structure_lmdb,
@@ -31,7 +28,7 @@ from qtaim_gen.source.core.lmdbs import (
 from qtaim_gen.source.core.embed import (
     split_graph_labels,
     get_include_exclude_indices,
-    build_and_featurize_graph
+    build_and_featurize_graph,
 )
 
 
@@ -55,48 +52,44 @@ def clean_id(key: bytes) -> str:
 
 
 class QTAIMEmbedConverter:
-    def __init__(
-            self, 
-            config_dict: Dict[str, Any], 
-            config_path: str = None
-        ):
+    def __init__(self, config_dict: Dict[str, Any], config_path: str = None):
         self.config_dict = config_dict
         self.restart = config_dict["restart"]
         self.config_path = config_path
-        
+
         # keys
         self.atom_keys_grapher_no_qtaim = None
         self.atom_keys = None
         self.bond_keys_grapher_no_qtaim = None
         self.bond_keys = None
-        self.global_keys= None
+        self.global_keys = None
         self.global_keys_target = None
-        
+
         # indices of keys in graphs
         self.index_dict = {}
         self.index_dict_qtaim = {}
-        
+
         # graphers
         self.grapher_qtaim = None
         self.grapher_no_qtaim = None
-        
+
         # data
         self.single_lmdb = True
         self.lmdb_dict = self.pull_lmdbs()
-        
+
         # scaler
         if "save_scaler" in self.config_dict.keys():
             self.save_scaler = self.config_dict["save_scaler"]
         else:
             self.save_scaler = False
-        
+
         self.skip_keys = ["length", "scaled"]
         self.fail_log_dict = {
-            "structure": [], 
+            "structure": [],
             "qtaim": [],
-            "charge": [], 
-            "graph": [], 
-            "scaler": []
+            "charge": [],
+            "graph": [],
+            "scaler": [],
         }
 
         ####################### Element Set ########################
@@ -104,14 +97,16 @@ class QTAIMEmbedConverter:
             element_set = self.config_dict["element_set"]
         else:
             if self.single_lmdb:
-                element_set = get_elements_from_structure_lmdb(self.lmdb_dict["geom_lmdb"])
-            else: 
+                element_set = get_elements_from_structure_lmdb(
+                    self.lmdb_dict["geom_lmdb"]
+                )
+            else:
                 element_set = get_elements_from_structure_lmdb_folder_list(
                     self.lmdb_dict["geom_lmdb"]
                 )
 
         self.element_set = sorted(list(element_set))
- 
+
         ####################### LMDB Dir Stuff ########################
         # make directory for lmdb
         if not os.path.exists(self.config_dict["lmdb_path_non_qtaim"]):
@@ -119,7 +114,7 @@ class QTAIMEmbedConverter:
 
         if not os.path.exists(self.config_dict["lmdb_path_qtaim"]):
             os.makedirs(self.config_dict["lmdb_path_qtaim"])
-        
+
         if "filter_list" not in self.config_dict.keys():
             self.config_dict["filter_list"] = ["scaled", "length"]
 
@@ -127,17 +122,20 @@ class QTAIMEmbedConverter:
             self.config_dict["chunk"] = -1
 
         if "lmdb_qtaim_name" not in config_dict.keys():
-            assert "lmdb_non_qtaim_name" not in config_dict.keys(), "qtaim and non qtaim names must be not set at the same time"
+            assert (
+                "lmdb_non_qtaim_name" not in config_dict.keys()
+            ), "qtaim and non qtaim names must be not set at the same time"
             # TODO: folder lmdb wrapper --> this does folder outputs!!! (chunking)
             pass
-            
-        else: 
+
+        else:
             self.file_qtaim = os.path.join(
                 self.config_dict["lmdb_path_qtaim"], self.config_dict["lmdb_qtaim_name"]
             )
-            
+
             self.file_non_qtaim = os.path.join(
-                self.config_dict["lmdb_path_non_qtaim"], self.config_dict["lmdb_non_qtaim_name"]
+                self.config_dict["lmdb_path_non_qtaim"],
+                self.config_dict["lmdb_non_qtaim_name"],
             )
 
             if os.path.exists(self.file_qtaim) and self.restart:
@@ -147,7 +145,6 @@ class QTAIMEmbedConverter:
 
             self.db_qtaim = self.connect_db(self.file_qtaim)
             self.db_non_qtaim = self.connect_db(self.file_non_qtaim)
-
 
             self.feature_scaler_iterative = HeteroGraphStandardScalerIterative(
                 features_tf=True, mean={}, std={}
@@ -163,7 +160,6 @@ class QTAIMEmbedConverter:
                 features_tf=False, mean={}, std={}
             )
 
-    
     def pull_lmdbs(self) -> Dict[str, Any]:
 
         lmdb_dict = {}
@@ -172,37 +168,39 @@ class QTAIMEmbedConverter:
             "geom_lmdb" in config_dict["lmdb_locations"].keys()
         ), "The config file must contain a key 'geom_lmdb'"
 
-    
         for key in config_dict["lmdb_locations"].keys():
             lmdb_path = config_dict["lmdb_locations"][key]
 
             # check if the path is a file or directory
             if not os.path.exists(lmdb_path):
                 raise ValueError(f"Path '{lmdb_path}' does not exist.")
-            
+
             if os.path.isdir(lmdb_path):
-                #print(f"Path '{lmdb_path}' is a directory.")
+                # print(f"Path '{lmdb_path}' is a directory.")
                 # if the path is a directory, check if it contains lmdb files
-                lmdb_dict[key] = self.connect_folder_of_dbs(db_path=lmdb_path, key=key.split("_")[0])
-                self.single_lmdb = False                
-            else: 
-                # single lmdb file 
+                lmdb_dict[key] = self.connect_folder_of_dbs(
+                    db_path=lmdb_path, key=key.split("_")[0]
+                )
+                self.single_lmdb = False
+            else:
+                # single lmdb file
                 lmdb_dict[key] = self.connect_db(lmdb_path, with_meta=True)
 
         if self.single_lmdb:
             assert (
-                lmdb_dict[key]['env'].stat()["entries"] > 0
+                lmdb_dict[key]["env"].stat()["entries"] > 0
             ), f"The LMDB file is empty: {lmdb_dict[key]}"
         else:
             for key in lmdb_dict.keys():
                 assert (
-                    lmdb_dict[key]['num_samples'] > 0
-                ), f"The LMDB file is empty: {lmdb_dict[key]}" 
+                    lmdb_dict[key]["num_samples"] > 0
+                ), f"The LMDB file is empty: {lmdb_dict[key]}"
 
         return lmdb_dict
 
-
-    def connect_db(self, lmdb_path=None, map_size=int(1099511627776 * 2), with_meta=False):
+    def connect_db(
+        self, lmdb_path=None, map_size=int(1099511627776 * 2), with_meta=False
+    ):
         env = lmdb.open(
             str(lmdb_path),
             subdir=False,
@@ -214,14 +212,14 @@ class QTAIMEmbedConverter:
             map_async=True,
             map_size=map_size,
         )
-        if with_meta: 
+        if with_meta:
             length_entry = env.begin().get("length".encode("ascii"))
             _keys = []
             with env.begin(write=False) as txn:
                 cursor = txn.cursor()
                 for key, _ in cursor:
                     _keys.append(key)
-            
+
             return {
                 "env": env,
                 "keys": _keys,
@@ -229,10 +227,9 @@ class QTAIMEmbedConverter:
             }
         return env
 
-    
     def connect_folder_of_dbs(self, db_path, key=None):
-        #print("Connecting to folder of LMDBs")
-        #print("key: ", key)
+        # print("Connecting to folder of LMDBs")
+        # print("key: ", key)
         if os.path.isdir(db_path):
             db_paths = sorted(glob(f"{db_path}/*{key}*.lmdb"))
             assert len(db_paths) > 0, f"No LMDBs found in '{db_path}'"
@@ -253,13 +250,13 @@ class QTAIMEmbedConverter:
                     num_entries = cur_env.stat()["entries"]
 
                 # Append the keys (0->num_entries) as a list
-                _keys.append(list(range(num_entries)))  # need to be dicts 
+                _keys.append(list(range(num_entries)))  # need to be dicts
 
-            keylens = [len(k) for k in _keys]  # need to be dicts 
-            _keylen_cumulative = np.cumsum(keylens).tolist()  # need to be dicts 
+            keylens = [len(k) for k in _keys]  # need to be dicts
+            _keylen_cumulative = np.cumsum(keylens).tolist()  # need to be dicts
             num_samples = sum(keylens)  # need to be dicts
 
-            return{
+            return {
                 "envs": envs,
                 "keys": _keys,
                 "keylens": keylens,
@@ -268,37 +265,41 @@ class QTAIMEmbedConverter:
                 "lmdb_paths": db_paths,
             }
 
-        else: 
+        else:
             # Throw error if the path is a file
             raise ValueError(f"Path '{db_path}' is a file, not a directory.")
 
-
     def scale_graphs_single(
-        self, 
+        self,
         lmdb_file: lmdb,
-        label_scaler: Union[HeteroGraphStandardScalerIterative, HeteroGraphLogMagnitudeScaler],
-        feature_scaler: Union[HeteroGraphStandardScalerIterative, HeteroGraphLogMagnitudeScaler],
+        label_scaler: Union[
+            HeteroGraphStandardScalerIterative, HeteroGraphLogMagnitudeScaler
+        ],
+        feature_scaler: Union[
+            HeteroGraphStandardScalerIterative, HeteroGraphLogMagnitudeScaler
+        ],
     ) -> None:
         """
         Scale the graphs using the provided scaler. Read from LMDB file and apply the scaler to each graph.
         """
 
-
-        with lmdb_file.begin(write=False) as txn_in:    
+        with lmdb_file.begin(write=False) as txn_in:
             cursor = txn_in.cursor()
-            for key, value in cursor: 
-                    
+            for key, value in cursor:
+
                 if key.decode("ascii") not in self.config_dict["filter_list"]:
-                    #print(key.decode("ascii"))
+                    # print(key.decode("ascii"))
                     graph = load_dgl_graph_from_serialized(pickle.loads(value))
-                    #print(graph)
+                    # print(graph)
                     graph = feature_scaler([graph])
                     graph = label_scaler(graph)
-                    
+
                     txn = lmdb_file.begin(write=True)
                     txn.put(
                         f"{key}".encode("ascii"),
-                        pickle.dumps(serialize_dgl_graph(graph[0], ret=True), protocol=-1),
+                        pickle.dumps(
+                            serialize_dgl_graph(graph[0], ret=True), protocol=-1
+                        ),
                     )
                     txn.commit()
 
@@ -311,7 +312,7 @@ class QTAIMEmbedConverter:
                         pickle.dumps(length, protocol=-1),
                     )
                     txn.commit()
-                
+
                 if key.decode("ascii") == "scaled":
                     # get the length of the lmdb file
                     txn = lmdb_file.begin(write=True)
@@ -333,10 +334,9 @@ class QTAIMEmbedConverter:
 
         lmdb_file.close()
         """
-        
 
     def scale_graph_lmdb(self):
-        
+
         if self.config_dict["chunk"] == -1:
             db_qtaim = lmdb.open(
                 self.file_qtaim,
@@ -366,28 +366,28 @@ class QTAIMEmbedConverter:
                 feature_scaler=self.feature_scaler_iterative,
             )
 
-          
-        else: 
+        else:
             pass
             # TODO: implement chunking
 
-
     def main_loop(
-        self
-    ) -> Dict[str, Union[HeteroGraphStandardScalerIterative, HeteroGraphLogMagnitudeScaler]]:
+        self,
+    ) -> Dict[
+        str, Union[HeteroGraphStandardScalerIterative, HeteroGraphLogMagnitudeScaler]
+    ]:
         """
         Main loop for processing the LMDB files and generating the graphs.
         """
 
-        #with self.lmdb_dict["structure_lmdb"].begin(write=False) as txn_in:
-            #cursor = txn_in.cursor()
-            #for key, value in cursor:  # first loop for gathering statistics and averages
-                
+        # with self.lmdb_dict["structure_lmdb"].begin(write=False) as txn_in:
+        # cursor = txn_in.cursor()
+        # for key, value in cursor:  # first loop for gathering statistics and averages
+
         if self.single_lmdb:
             keys_to_iterate = self.lmdb_dict["geom_lmdb"]["keys"]
         else:
-            #print("geom_lmdb dict")
-            #print(self.lmdb_dict["geom_lmdb"])
+            # print("geom_lmdb dict")
+            # print(self.lmdb_dict["geom_lmdb"])
             keys_to_iterate = []
             for key in self.lmdb_dict["geom_lmdb"]["keys"]:
                 keys_to_iterate.append(key)
@@ -395,7 +395,7 @@ class QTAIMEmbedConverter:
         for key in keys_to_iterate:
             if key.decode("ascii") not in self.skip_keys:
 
-                try: 
+                try:
                     # structure keys
                     value_structure = self.__getitem__("geom_lmdb", key)
                     if value_structure != None:
@@ -415,22 +415,22 @@ class QTAIMEmbedConverter:
                             "n_bonds": len(bonds),
                         }
 
-
                         # initialize atom_feats with dictionary whos keys are atom inds and empty dict as values
                         atom_feats = {i: {} for i in range(n_atoms)}
                         bond_feats = {}
-                        bond_list = {tuple(sorted(b)): None for b in bonds if b[0] != b[1]}
+                        bond_list = {
+                            tuple(sorted(b)): None for b in bonds if b[0] != b[1]
+                        }
 
-                    else: 
+                    else:
                         self.fail_log_dict["structure"].append(key.decode("ascii"))
                         continue
-                except: 
+                except:
                     self.fail_log_dict["structure"].append(key.decode("ascii"))
                     continue
 
-
-                try: 
-                    #value_charge = pickle.loads(self.lmdb_dict["charge_lmdb"].get(key))
+                try:
+                    # value_charge = pickle.loads(self.lmdb_dict["charge_lmdb"].get(key))
                     value_charge = self.__getitem__("charge_lmdb", key)
                     if value_charge != None:
                         # parse charge data
@@ -441,50 +441,61 @@ class QTAIMEmbedConverter:
                         atom_feats_no_qtaim = deepcopy(atom_feats)
 
                         if self.atom_keys_grapher_no_qtaim == None:
-                            self.atom_keys_grapher_no_qtaim = list(atom_feats[0].keys()) # update dict
+                            self.atom_keys_grapher_no_qtaim = list(
+                                atom_feats[0].keys()
+                            )  # update dict
 
-                        
-                        
                         if self.global_keys == None:
-                            #print(" global keys: ", global_feats.keys())
-                            self.global_keys = list(global_feats.keys()) + list(global_dipole_feats.keys()) # update dict
-                            self.global_keys_target = list(global_dipole_feats.keys()) # update dict
-                            
-                            
+                            # print(" global keys: ", global_feats.keys())
+                            self.global_keys = list(global_feats.keys()) + list(
+                                global_dipole_feats.keys()
+                            )  # update dict
+                            self.global_keys_target = list(
+                                global_dipole_feats.keys()
+                            )  # update dict
+
                         global_feats.update(global_dipole_feats)
                         atom_feats.update(atom_feats_charge)
-                    else: 
+                    else:
                         self.fail_log_dict["charge"].append(key.decode("ascii"))
                         continue
                 except:
                     self.fail_log_dict["charge"].append(key.decode("ascii"))
                     continue
 
-
                 try:
                     value_qtaim = self.__getitem__("qtaim_lmdb", key)
                     if value_qtaim != None:
                         # parse qtaim data
-                        atom_keys_qtaim, bond_keys_qtaim, atom_feats, bond_feats, connected_bond_paths = (
-                            parse_qtaim_data(
-                                value_qtaim, atom_feats, bond_feats, self.atom_keys, self.bond_keys
-                            )
+                        (
+                            atom_keys_qtaim,
+                            bond_keys_qtaim,
+                            atom_feats,
+                            bond_feats,
+                            connected_bond_paths,
+                        ) = parse_qtaim_data(
+                            value_qtaim,
+                            atom_feats,
+                            bond_feats,
+                            self.atom_keys,
+                            self.bond_keys,
                         )
-                        
+
                         if self.atom_keys == None:
-                            self.atom_keys = atom_keys_qtaim + self.atom_keys_grapher_no_qtaim # update dict
+                            self.atom_keys = (
+                                atom_keys_qtaim + self.atom_keys_grapher_no_qtaim
+                            )  # update dict
                         if self.bond_keys == None:
-                            self.bond_keys = bond_keys_qtaim # update dict
-                    else: 
+                            self.bond_keys = bond_keys_qtaim  # update dict
+                    else:
                         self.fail_log_dict["qtaim"].append(key.decode("ascii"))
                         continue
-                except: 
+                except:
                     self.fail_log_dict["qtaim"].append(key.decode("ascii"))
                     continue
 
-                
                 ############################# Molwrapper ####################################
-                try: 
+                try:
                     mol_wrapper_qtaim_bonds = MoleculeWrapper(
                         mol_graph,
                         functional_group=None,
@@ -517,8 +528,8 @@ class QTAIMEmbedConverter:
                         self.grapher_qtaim = get_grapher(
                             element_set=self.element_set,
                             atom_keys=self.atom_keys,  # todo
-                            bond_keys=self.bond_keys,  
-                            #bond_keys=[], 
+                            bond_keys=self.bond_keys,
+                            # bond_keys=[],
                             global_keys=self.global_keys,
                             allowed_ring_size=self.config_dict["allowed_ring_size"],
                             allowed_charges=self.config_dict["allowed_charges"],
@@ -528,7 +539,7 @@ class QTAIMEmbedConverter:
                             bond_featurizer_tf=True,
                             global_featurizer_tf=True,
                         )
-                        #print("\nbond keys qtaim: ", self.bond_keys)
+                        # print("\nbond keys qtaim: ", self.bond_keys)
 
                     if not self.grapher_no_qtaim:
                         self.grapher_no_qtaim = get_grapher(
@@ -572,12 +583,12 @@ class QTAIMEmbedConverter:
                             "global": self.global_keys_target,
                         }
                         self.index_dict = get_include_exclude_indices(
-                            feat_names=self.grapher_no_qtaim.feat_names, target_dict=key_target
+                            feat_names=self.grapher_no_qtaim.feat_names,
+                            target_dict=key_target,
                         )
                         # save self.index_dict to config
                         self.config_dict["index_dict"] = self.index_dict
                         self.overwrite_config()
-                        
 
                     # split graph into features and labels
                     split_graph_labels(
@@ -596,9 +607,8 @@ class QTAIMEmbedConverter:
                 except:
                     self.fail_log_dict["graph"].append(key.decode("ascii"))
                     continue
-                
 
-                try: 
+                try:
                     self.feature_scaler_iterative_qtaim.update([graph])
                     self.label_scaler_iterative_qtaim.update([graph])
 
@@ -615,29 +625,36 @@ class QTAIMEmbedConverter:
                     txn = self.db_non_qtaim.begin(write=True)
                     txn.put(
                         f"{key}".encode("ascii"),
-                        pickle.dumps(serialize_dgl_graph(graph_no_qtaim, ret=True), protocol=-1),
+                        pickle.dumps(
+                            serialize_dgl_graph(graph_no_qtaim, ret=True), protocol=-1
+                        ),
                     )
-                    txn.commit()         
+                    txn.commit()
                 except:
                     self.fail_log_dict["scaler"].append(key.decode("ascii"))
                     continue
-        
+
         self.feature_scaler_iterative.finalize()
         self.label_scaler_iterative.finalize()
         self.feature_scaler_iterative_qtaim.finalize()
         self.label_scaler_iterative_qtaim.finalize()
 
-        
         if self.save_scaler:
             lmdb_path = self.config_dict["lmdb_path_non_qtaim"]
             lmdb_path_qtaim = self.config_dict["lmdb_path_qtaim"]
-            self.feature_scaler_iterative.save_scaler(lmdb_path + "/feature_scaler_iterative.pt")
-            self.label_scaler_iterative.save_scaler(lmdb_path + "/label_scaler_iterative.pt")
-            self.feature_scaler_iterative_qtaim.save_scaler(lmdb_path_qtaim + "/feature_scaler_iterative_qtaim.pt")
-            self.label_scaler_iterative_qtaim.save_scaler(lmdb_path_qtaim + "/label_scaler_iterative_qtaim.pt")
-        
-        
-        
+            self.feature_scaler_iterative.save_scaler(
+                lmdb_path + "/feature_scaler_iterative.pt"
+            )
+            self.label_scaler_iterative.save_scaler(
+                lmdb_path + "/label_scaler_iterative.pt"
+            )
+            self.feature_scaler_iterative_qtaim.save_scaler(
+                lmdb_path_qtaim + "/feature_scaler_iterative_qtaim.pt"
+            )
+            self.label_scaler_iterative_qtaim.save_scaler(
+                lmdb_path_qtaim + "/label_scaler_iterative_qtaim.pt"
+            )
+
         txn = self.db_qtaim.begin(write=True)
         txn.put("scaled".encode("ascii"), pickle.dumps(False, protocol=-1))
         txn.commit()
@@ -654,7 +671,6 @@ class QTAIMEmbedConverter:
             print(f"{key}: \t\t {len(self.fail_log_dict[key])} errors")
             if len(self.fail_log_dict[key]) > 0:
                 print(f"error keys: \t{self.fail_log_dict[key]}")
-    
 
     def __getitem__(self, key_lmdb, idx):
         """
@@ -685,24 +701,23 @@ class QTAIMEmbedConverter:
             # handle if the key is not in the lmdb
             if datapoint_pickled is None:
                 print(f"Key {idx} not found in LMDB {key_lmdb}.")
-                #assert False, f"Key {idx} not found in LMDB {key_lmdb}."
+                # assert False, f"Key {idx} not found in LMDB {key_lmdb}."
                 return None
-            
+
             data_object = pickle.loads(datapoint_pickled)
-            #data_object.id = f"{db_idx}_{el_idx}"
+            # data_object.id = f"{db_idx}_{el_idx}"
 
         else:
-            #value_charge = pickle.loads(self.lmdb_dict["charge_lmdb"].get(key))
-            datapoint_pickled = self.lmdb_dict[key_lmdb]['env'].begin().get(idx)
-            # throw 
+            # value_charge = pickle.loads(self.lmdb_dict["charge_lmdb"].get(key))
+            datapoint_pickled = self.lmdb_dict[key_lmdb]["env"].begin().get(idx)
+            # throw
             # handle if the key is not in the lmdb
             if datapoint_pickled is None:
                 print(f"Key {idx} not found in LMDB {key_lmdb}.")
-                #assert False, f"Key {idx} not found in LMDB {key_lmdb}."
+                # assert False, f"Key {idx} not found in LMDB {key_lmdb}."
                 return None
-            #assert False, f"LMDB file {key_lmdb} is not a folder. Use the key directly."    
+            # assert False, f"LMDB file {key_lmdb} is not a folder. Use the key directly."
             data_object = pickle.loads(datapoint_pickled)
-
 
         return data_object
 
@@ -716,9 +731,10 @@ class QTAIMEmbedConverter:
             json.dump(self.config_dict, f, indent=4)
             print(f"Config file {file_location} overwritten.")
 
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="LMDB to embed")
-    
+
     parser.add_argument(
         "--config_path",
         type=str,
@@ -741,8 +757,10 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
     config_path = str(args.config_path)
-    
-    config_dict = parse_config_gen_to_embed(args.config_path, restart=bool(args.restart))        
+
+    config_dict = parse_config_gen_to_embed(
+        args.config_path, restart=bool(args.restart)
+    )
     scaler = QTAIMEmbedConverter(config_dict, config_path=config_path)
     scaler.main_loop()
     scaler.scale_graph_lmdb()

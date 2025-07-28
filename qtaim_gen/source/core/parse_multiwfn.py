@@ -862,7 +862,7 @@ def parse_fuzzy_real_space(fuzzy_loc):
     with open(fuzzy_loc, "r") as f:
         for line in f:
             if trigger_bool_real:
-                if line == "\n" or len(line) < 3: # terminate the block
+                if line == "\n" or len(line) < 3:  # terminate the block
                     trigger_bool_real = False
                     name = fuzzy_loc.split("/")[-1].split(".")[0]
                     ret_dict[name] = dict_data_temp
@@ -880,7 +880,7 @@ def parse_fuzzy_real_space(fuzzy_loc):
                         # remove )
                         if ")" in name:
                             name = name[:-1]
-                        
+
                         shift = -1
                         if len(line_split) > 4:
                             shift = 0

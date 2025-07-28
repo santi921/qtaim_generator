@@ -28,7 +28,11 @@ from qtaim_gen.source.core.parse_multiwfn import (
     parse_fuzzy_real_space,
 )
 
-from qtaim_gen.source.core.utils import pull_ecp_dict, overwrite_molden_w_ecp, check_spin
+from qtaim_gen.source.core.utils import (
+    pull_ecp_dict,
+    overwrite_molden_w_ecp,
+    check_spin,
+)
 
 
 logging.basicConfig(level=logging.INFO)
@@ -169,12 +173,7 @@ def write_multiwfn_exe(
 
 
 def create_jobs(
-    folder, 
-    multiwfn_cmd, 
-    orca_2mkl_cmd, 
-    separate=False, 
-    debug=True, 
-    logger=None
+    folder, multiwfn_cmd, orca_2mkl_cmd, separate=False, debug=True, logger=None
 ):
     """
     Create job files for multiwfn analysis
@@ -525,7 +524,7 @@ def parse_multiwfn(folder, separate=False, debug=False, logger=None):
         debug(bool): whether to run a minimal set of jobs
         return_dicts(bool): return results as well as writing
     """
-    #if return_dicts:
+    # if return_dicts:
     #    compiled_dicts = {}
 
     if separate:
@@ -693,7 +692,7 @@ def parse_multiwfn(folder, separate=False, debug=False, logger=None):
                 )
                 with open(json_file, "w") as f:
                     json.dump(qtaim_dict, f, indent=4)
-                #if return_dicts:
+                # if return_dicts:
                 #    compiled_dicts["qtaim"] = qtaim_dict
                 logger.info(f"Parsed qtaim output to {json_file}")
 
@@ -740,25 +739,25 @@ def parse_multiwfn(folder, separate=False, debug=False, logger=None):
         if charge_dict_compiled:
             with open(os.path.join(folder, "charge.json"), "w") as f:
                 json.dump(charge_dict_compiled, f, indent=4)
-            #if return_dicts:
+            # if return_dicts:
             #    compiled_dicts["charge"] = charge_dict_compiled
             logger.info("Compiled charge.json")
 
         if bond_dict_compiled:
             with open(os.path.join(folder, "bond.json"), "w") as f:
                 json.dump(bond_dict_compiled, f, indent=4)
-            #if return_dicts:
+            # if return_dicts:
             #    compiled_dicts["bond"] = bond_dict_compiled
             logger.info("Compiled bond.json")
 
         if fuzzy_dict_compiled:
             with open(os.path.join(folder, "fuzzy_full.json"), "w") as f:
                 json.dump(fuzzy_dict_compiled, f, indent=4)
-            #if return_dicts:
+            # if return_dicts:
             #    compiled_dicts["fuzzy_full"] = fuzzy_dict_compiled
             logger.info("Compiled fuzzy_full.json")
 
-    #if return_dicts:
+    # if return_dicts:
     #    return compiled_dicts
 
 

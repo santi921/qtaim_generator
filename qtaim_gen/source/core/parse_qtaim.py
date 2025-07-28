@@ -277,18 +277,17 @@ def dft_inp_to_dict(dft_inp_file, parse_charge_spin=False):
         lines = [line[:-1] for line in lines]
 
     # find line starting with "* xyz"
-    start=False
+    start = False
     ind_terminal = -1
     for ind, line in enumerate(lines):
-        #print(line)
+        # print(line)
         if "*" in line and start:
             ind_terminal = ind
             break
 
         if "* xyz" in line or "*xyz" in line:
             xyz_ind = ind
-            start= True
-
+            start = True
 
     if parse_charge_spin:
         ret_dict = {}
@@ -516,9 +515,9 @@ def merge_qtaim_inds(
         }
         # print("bond cps: ", bond_cps)
         ####################
-        #print(qtaim_to_dft)
+        # print(qtaim_to_dft)
         ####################
-        
+
         for k, v in bond_cps.items():
             bond_list_unsorted = v["connected_bond_paths"]
             # print(bond_list_unsorted)
@@ -551,7 +550,7 @@ def gather_imputation(
     reaction=False,
     define_bonds="qtaim",
     inp_type="orca",
-    margin=1.5
+    margin=1.5,
 ):
     """
     Takes in dataframe and features and returns dictionary of imputation values
@@ -616,7 +615,7 @@ def gather_imputation(
                         dft_inp_file=dft_inp_file_reactant,
                         define_bonds=define_bonds,
                         inp_type=inp_type,
-                        margin=margin
+                        margin=margin,
                     )
                     mapped_descs_products = merge_qtaim_inds(
                         qtaim_descs=qtaim_descs_products,
@@ -624,7 +623,7 @@ def gather_imputation(
                         dft_inp_file=dft_inp_file_product,
                         define_bonds=define_bonds,
                         inp_type=inp_type,
-                        margin=margin
+                        margin=margin,
                     )
 
                     for k, v in mapped_descs_reactants.items():
@@ -672,7 +671,7 @@ def gather_imputation(
                         dft_inp_file=dft_inp_file,
                         define_bonds=define_bonds,
                         inp_type=inp_type,
-                        margin=margin
+                        margin=margin,
                     )
                     for k, v in mapped_descs.items():
                         if v == {}:

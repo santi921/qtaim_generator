@@ -1,6 +1,7 @@
 import os
 from qtaim_gen.source.core.parse_qtaim import dft_inp_to_dict
 
+
 def pull_ecp_dict(orca_out):
     """
     Method to pull the ecp dictionary from the orca output file.
@@ -97,6 +98,6 @@ def check_spin(folder):
     inp_file = os.path.join(folder, orca_inp_files[0])
     dft_dict = dft_inp_to_dict(inp_file, parse_charge_spin=True)
     spin = dft_dict.get("spin", None)
-    if spin == 2: return False
+    if spin == 2:
+        return False
     return True
-   
