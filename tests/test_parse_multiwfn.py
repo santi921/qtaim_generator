@@ -28,13 +28,12 @@ class TestMultiwfnParser:
         separate=True,
         clean=False,
     )  # works!
-    
 
     def test_bond_info(self):
         file_bond_info = "./test_files/multiwfn/bond.out"
         bond_dict = parse_bond_order_doc(file_bond_info)
         # print(bond_dict["fuzzy"]['81_H_to_82_N'], bond_dict["laplace"]['81_H_to_82_N'], bond_dict["ibsi"]['81_H_to_82_N'])
-        #assert len(bond_dict.keys()) == 3, "incorrect number of keys in the dictionary"
+        # assert len(bond_dict.keys()) == 3, "incorrect number of keys in the dictionary"
         assert len(bond_dict["laplace"]) == 88, "wrong number of laplace bonds"
         assert len(bond_dict["fuzzy"]) == 158, "wrong number of fuzzy bonds"
         assert len(bond_dict["ibsi"]) == 568, "wrong number of ibsi bonds"
@@ -323,7 +322,7 @@ class TestMultiwfnParser:
         density_dict = parse_fuzzy_real_space(
             "./test_files/multiwfn/becke_fuzzy_density.out"
         )["becke_fuzzy_density"]
-        
+
         assert len(spin_dict) == 60, "wrong number of atoms in becke fuzzy spin"
         assert len(density_dict) == 23, "wrong number of atoms in becke fuzzy density"
         assert np.isclose(
@@ -335,4 +334,3 @@ class TestMultiwfnParser:
         assert np.isclose(
             density_dict["sum"], 65.99996761, atol=1e-3
         ), "wrong value for becke fuzzy density for 13_H"
-

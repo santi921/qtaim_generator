@@ -93,11 +93,15 @@ def check_spin(folder):
     """
     # find the .inp file in the folder
     orca_inp_files = [f for f in os.listdir(folder) if f.endswith(".inp")]
+    # add *.in files to list
+    orca_inp_files += [f for f in os.listdir(folder) if f.endswith(".in")]
+    orca_inp_files = [f for f in orca_inp_files if f != "convert.in"]
+
     if not orca_inp_files:
         raise FileNotFoundError("No .inp file found in the folder.")
     inp_file = os.path.join(folder, orca_inp_files[0])
     dft_dict = dft_inp_to_dict(inp_file, parse_charge_spin=True)
     spin = dft_dict.get("spin", None)
-    if spin == 2:
+    if spin == 1:
         return False
     return True

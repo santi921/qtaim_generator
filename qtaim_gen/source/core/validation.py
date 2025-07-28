@@ -12,7 +12,6 @@ def validate_timing_dict(timing_json_loc, verbose=False):
         timing_dict = json.load(f)
 
     expected_keys = [
-        "convert",
         "qtaim",
         "other",
         "bader",
@@ -244,6 +243,12 @@ def validation_checks(folder, verbose=False):
 
     # check for a file ending with .inp
     inp_files = [f for f in os.listdir(folder) if f.endswith(".inp")]
+    # add *.in files to list
+    inp_files += [f for f in os.listdir(folder) if f.endswith(".in")]
+    # remove convert.in 
+    inp_files = [f for f in inp_files if f != "convert.in"]
+
+    print("inp_files:", inp_files)
     if not inp_files:
         if verbose:
             print("No .inp file found in the folder.")
@@ -267,7 +272,7 @@ def validation_checks(folder, verbose=False):
     if verbose:
         print(f"n_atoms: {n_atoms}, spin: {spin}, charge: {charge}")
 
-    if spin != 2:
+    if spin != 1:
         spin_tf = True
     else:
         spin_tf = False

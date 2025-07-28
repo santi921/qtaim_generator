@@ -498,7 +498,6 @@ def merge_qtaim_inds(
 
     else:
         dft_dict = dft_inp_to_dict(dft_inp_file)
-
     # find only atom cps to map
     atom_only_cps, bond_cps = only_atom_cps(qtaim_descs)
 
