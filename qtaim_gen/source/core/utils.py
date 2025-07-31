@@ -1,6 +1,6 @@
 import os
 from qtaim_gen.source.core.parse_qtaim import dft_inp_to_dict
-
+import time
 
 def pull_ecp_dict(orca_out):
     """
@@ -105,3 +105,17 @@ def check_spin(folder):
     if spin == 1:
         return False
     return True
+
+
+def check_folder_writing(folder):
+    """
+    Utility to check how long ago any file in the folder was modified.
+    Returns:
+        (float) : The time in seconds since the last modification of any file in the folder.
+    """
+    # Get the current time
+    current_time = time.time()
+    # Get the modification times of all files in the folder
+    mod_times = [os.path.getmtime(os.path.join(folder, f)) for f in os.listdir(folder)]
+    # Return the time since the last modification
+    return current_time - max(mod_times) if mod_times else 0
