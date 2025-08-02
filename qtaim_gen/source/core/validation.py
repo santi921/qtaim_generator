@@ -236,10 +236,14 @@ def validation_checks(folder, verbose=False):
         "charge.json",
         "qtaim.json",
     ]
+    tf = True
     for file in required_files:
         if not os.path.exists(os.path.join(folder, file)):
             print(f"Missing required file: {file}")
-            return False
+            tf = False
+
+    if not tf:
+        return False
 
     # check for a file ending with .inp
     inp_files = [f for f in os.listdir(folder) if f.endswith(".inp")]
@@ -248,7 +252,7 @@ def validation_checks(folder, verbose=False):
     # remove convert.in 
     inp_files = [f for f in inp_files if f != "convert.in"]
 
-    print("inp_files:", inp_files)
+    #print("inp_files:", inp_files)
     if not inp_files:
         if verbose:
             print("No .inp file found in the folder.")
