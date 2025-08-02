@@ -12,17 +12,20 @@ def charge_data():
     return string_ret
 
 
-def charge_data_dict():
+def charge_data_dict(full_set=False):
     # cut resp and chelpg and peoe
     string_dict = {}
-    #string_dict["bader"] = "17\n1\n1\n2\n7\n1\n1\n7\n1\n5\n-10\nq\n"
+    
     string_dict["hirshfeld"] = "7\n1\n1\nn\n0\nq\n"
     string_dict["vdd"] = "7\n2\n1\nn\n0\nq\n"
-    string_dict["becke"] = "7\n10\n0\nn\n0\nq\n"
     string_dict["adch"] = "7\n11\n1\nn\n0\nq\n"
-    string_dict["mbis"] = "7\n20\n1\nn\n0\nq\n"
     string_dict["cm5"] = "7\n16\n1\nn\n0\nq\n"  # might cut later
-    string_dict["chelpg"] = "7\n12\n1\nn\n0\n0\nq\n"  # might cut later
+        
+    if full_set:
+        string_dict["becke"] = "7\n10\n0\nn\n0\nq\n"
+        string_dict["mbis"] = "7\n20\n1\nn\n0\nq\n"
+        string_dict["bader"] = "17\n1\n1\n2\n7\n1\n1\n7\n1\n5\n-10\nq\n"
+        string_dict["chelpg"] = "7\n12\n1\nn\n0\n0\nq\n"  # might cut later
 
     return string_dict
 
@@ -40,22 +43,25 @@ def bond_order_dict():
     return string_dict
 
 
-def fuzzy_data(spin=True):
+def fuzzy_data(spin=True, full_set=False):
     # string_ret = "15\n1\n1\n1\n2\n1\n3\n1\n9\n4\nn\n0\nq\n"
     # string_ret = "15\n1\n1\nn1\n2\n1\n3\n1\n9\n4\nn\n0\nq\n"
     string_dict = {}
     string_dict["becke_fuzzy_density"] = "15\n1\n1\n0\nq\n"
-    # string_dict["becke_fuzzy_density"] = "15\n1\n1\n0\nq\n"
-    #string_dict["mbis_fuzzy_density"] = "15\n-1\n5\n1\n1\n1\n0\nq\n"
     string_dict["hirsh_fuzzy_density"] = "15\n-1\n3\n1\n1\n1\n0\nq\n"
-    string_dict["grad_norm_rho_fuzzy"] = "15\n1\n2\n0\nq\n"
     string_dict["laplacian_rho_fuzzy"] = "15\n1\n3\n0\nq\n"
-    string_dict["elf_fuzzy"] = "15\n1\n9\n0\nq\n"
+    
 
     if spin:
-        #string_dict["mbis_fuzzy_spin"] = "15\n-1\n5\n1\n1\n5\n0\nq\n"
         string_dict["hirsh_fuzzy_spin"] = "15\n-1\n3\n1\n1\n5\n0\nq\n"
         string_dict["becke_fuzzy_spin"] = "15\n1\n5\n0\nq\n"
+        if full_set:
+            string_dict["mbis_fuzzy_spin"] = "15\n-1\n5\n1\n1\n5\n0\nq\n"
+        
+    if full_set:
+        string_dict["elf_fuzzy"] = "15\n1\n9\n0\nq\n"
+        string_dict["mbis_fuzzy_density"] = "15\n-1\n5\n1\n1\n1\n0\nq\n"
+        string_dict["grad_norm_rho_fuzzy"] = "15\n1\n2\n0\nq\n"
 
     # return string_ret
     return string_dict
