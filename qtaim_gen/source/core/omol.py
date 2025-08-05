@@ -409,9 +409,12 @@ def run_jobs(
         fuzzy_dict = fuzzy_data(spin=spin_tf)
         [order_of_operations.append(i) for i in fuzzy_dict.keys()]
         # remove     "charge_separate","bond_separate",
-        order_of_operations.remove("charge_separate")
-        order_of_operations.remove("bond_separate")
-        order_of_operations.remove("fuzzy_full")
+        if "charge_separate" in order_of_operations:
+            order_of_operations.remove("charge_separate")
+        if "bond_separate" in order_of_operations:
+            order_of_operations.remove("bond_separate")
+        if "fuzzy_full" in order_of_operations:
+            order_of_operations.remove("fuzzy_full")
     else:
         order_of_operations = ORDER_OF_OPERATIONS
 
@@ -1006,3 +1009,5 @@ def gbw_analysis(
         #    # clean some of the mess
         logger.info("... Cleaning up")
         clean_jobs(folder, separate=separate, logger=logger)
+
+# /global/scratch/users/santiagovargas/gbws_cleaning_lean/ml_elytes/elytes_md_eqv2_electro_512_C3H8O_3_group_133_shell_0_0_1_1341
