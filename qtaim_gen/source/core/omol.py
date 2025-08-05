@@ -44,7 +44,7 @@ ORDER_OF_OPERATIONS_separate = [
     "charge_separate",
     "bond_separate",
     "qtaim",
-    "other",
+    #"other", # muting for meta 
 ]
 
 
@@ -259,6 +259,7 @@ def create_jobs(
                 # job_dict["fuzzy_full"] = os.path.join(folder, "fuzzy_full.txt")
                 with open(os.path.join(folder, "fuzzy_full.txt"), "w") as f:
                     spin_tf = check_spin(folder)
+                    print("spin_tf: {}".format(spin_tf))
                     fuzzy_dict = fuzzy_data(spin=spin_tf)
                     for key, value in fuzzy_dict.items():
                         job_dict[key] = os.path.join(folder, "{}.txt".format(key))
@@ -532,6 +533,7 @@ def parse_multiwfn(folder, separate=False, debug=False, logger=None):
         charge_dict = charge_data_dict()
         bond_dict = bond_order_dict()
         spin_tf = check_spin(folder)
+        #print("spin_tf: {}".format(spin_tf))
         fuzzy_dict = fuzzy_data(spin=spin_tf)
         [routine_list.append(i) for i in charge_dict.keys()]
         [routine_list.append(i) for i in bond_dict.keys()]
