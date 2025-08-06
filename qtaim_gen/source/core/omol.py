@@ -648,9 +648,12 @@ def parse_multiwfn(folder, separate=False, debug=False, logger=None):
                         logger.info(f"Parsed {routine} output to {json_file}")
 
                     except Exception as e:
-                        logger.error(
-                            f"Error parsing {routine} in {file_full_path}: {e}"
-                        )
+                        if route == "qtaim": 
+                            pass
+                        else: 
+                            logger.error(
+                                f"Error parsing {routine} in {file_full_path}: {e}"
+                            )
 
         elif "CPprop.txt" in file and "qtaim" in routine_list:
             json_file = os.path.join(folder, "qtaim.json")
@@ -884,6 +887,14 @@ def gbw_analysis(
     # option to preprocess compressed files
     if preprocess_compessed:
         logger.info("Preprocessing compressed files in folder: {}".format(folder))
+        # check if the required files are already uncompressed - .inp, .wfn
+        required_files = [".inp", ".wfn"]
+        uncompressed_files = [f for f in os.listdir(folder) if f.endswith(tuple(required_files))]
+        if uncompressed_files:
+            logger.info("Found uncompressed files: {}".format(uncompressed_files))
+        else:
+            logger.warning("No uncompressed files found - will attempt to uncompress")
+    
         # run unstd
         for file in os.listdir(folder):
             if file.endswith(".tar.zst") or file.endswith(".tgz"):
@@ -993,3 +1004,22 @@ def gbw_analysis(
         clean_jobs(folder, separate=separate, logger=logger)
 
 # /global/scratch/users/santiagovargas/gbws_cleaning_lean/ml_elytes/elytes_md_eqv2_electro_512_C3H8O_3_group_133_shell_0_0_1_1341
+#!/bin/bash
+#SBATCH --job-name=conj_systems
+#SBATCH --partition=cm2
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=6
+#SBATCH --cpus-per-task=1
+#SBATCH --time=40:00:00
+#SBATCH -C lr6_m192
+#SBATCH -p lr6
+#SBATCH --account=lr_blau
+#SBATCH --qos=condo_blau
+
+#
+## Command(s) to run (example):
+source ~/.bashrc
+module load gcc
+micromamba activate qtaim_embed
+ulimit -s unlimited
+python hpc_lawr.py
