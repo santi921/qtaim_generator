@@ -408,13 +408,7 @@ def run_jobs(
         spin_tf = check_spin(folder)
         fuzzy_dict = fuzzy_data(spin=spin_tf)
         [order_of_operations.append(i) for i in fuzzy_dict.keys()]
-        # remove     "charge_separate","bond_separate",
-        if "charge_separate" in order_of_operations:
-            order_of_operations.remove("charge_separate")
-        if "bond_separate" in order_of_operations:
-            order_of_operations.remove("bond_separate")
-        if "fuzzy_full" in order_of_operations:
-            order_of_operations.remove("fuzzy_full")
+
     else:
         order_of_operations = ORDER_OF_OPERATIONS
 
@@ -487,18 +481,6 @@ def run_jobs(
 
             os.system(mfwn_file)
 
-            """
-            if prof_mem:
-                max_mem = 0 
-                
-                while proc.poll() is None:
-                    mem = p.memory_info().rss  # in bytes
-                    if mem > max_mem:
-                        max_mem = mem
-                    time.sleep(0.1)  # sleep for a short time to avoid busy waiting
-                logger.info(f"Max memory usage for {mfwn_file}: {max_mem / (1024 * 1024):.2f} MB")
-                memory[order] = max_mem / (1024 * 1024)  # store in MB
-            """
             end = time.time()
 
             timings[order] = end - start
