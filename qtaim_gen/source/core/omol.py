@@ -892,61 +892,65 @@ def gbw_analysis(
         uncompressed_files = [f for f in os.listdir(folder) if f.endswith(tuple(required_files))]
         if uncompressed_files:
             logger.info("Found uncompressed files: {}".format(uncompressed_files))
+            logger.info("Skipping uncompression step")
+
+            
         else:
             logger.warning("No uncompressed files found - will attempt to uncompress")
-    
-        # run unstd
-        for file in os.listdir(folder):
-            if file.endswith(".tar.zst") or file.endswith(".tgz"):
-                logger.info(f"Found compressed file: {file}")
-                zstd_file = file
-                unstd_cmd = "unzstd -f {}".format(os.path.join(folder, zstd_file))
-                os.system(unstd_cmd)
-                # untar resulting file
+        # skip if uncompressed files are present
+        if not uncompressed_files:
+            # run unstd
+            for file in os.listdir(folder):
+                if file.endswith(".tar.zst") or file.endswith(".tgz"):
+                    logger.info(f"Found compressed file: {file}")
+                    zstd_file = file
+                    unstd_cmd = "unzstd -f {}".format(os.path.join(folder, zstd_file))
+                    os.system(unstd_cmd)
+                    # untar resulting file
 
-                if zstd_file.endswith(".tar.zst"):
-                    tar_cmd = "tar -xf {}".format(
-                        os.path.join(folder, zstd_file.replace(".tar.zst", ".tar"))
-                    )
-
-                tar_file_out = zstd_file.replace(".tar.zst", ".tar").replace(
-                    ".tgz", ".tar"
-                )
-                # remove the tar file after extracting
-                os.system(tar_cmd)
-                # remove the tar file after extracting
-                if os.path.exists(os.path.join(folder, tar_file_out)):
-                    logger.info(f"Removing tar file: {tar_file_out}")
-                    os.remove(os.path.join(folder, tar_file_out))
-                # mv orca.engrad, orca.out, orca.inp, orca.property.txt, orca_stderr
-
-                for file2 in os.listdir("./"):
-                    if (
-                        file2.startswith("orca.engrad")
-                        or file2.startswith("orca.out")
-                        or file2.startswith("orca.inp")
-                        or file2.startswith("orca.property.inp")
-                        or file2.startswith("orca.property.txt")
-                        or file2.startswith("orca_stderr")
-                    ):
-                        logger.info(f"Moving {file2} to folder {folder}")
-                        os.rename(
-                            os.path.join("./", file2),
-                            os.path.join(
-                                folder,
-                                # zstd_file.replace(".tar.zst", "").replace(".tgz", ""),
-                                file2,
-                            ),
+                    if zstd_file.endswith(".tar.zst"):
+                        tar_cmd = "tar -xf {}".format(
+                            os.path.join(folder, zstd_file.replace(".tar.zst", ".tar"))
                         )
 
-            if file.endswith(".gbw.zstd0"):
-                logger.info(f"Found compressed gbw file: {file}")
-                zstd_file = file
-                gbw_file = zstd_file.replace(".zstd0", "")
-                unstd_cmd = "unzstd {} -o {} -f".format(
-                    os.path.join(folder, zstd_file), os.path.join(folder, gbw_file)
-                )
-                os.system(unstd_cmd)
+                    tar_file_out = zstd_file.replace(".tar.zst", ".tar").replace(
+                        ".tgz", ".tar"
+                    )
+                    # remove the tar file after extracting
+                    os.system(tar_cmd)
+                    # remove the tar file after extracting
+                    if os.path.exists(os.path.join(folder, tar_file_out)):
+                        logger.info(f"Removing tar file: {tar_file_out}")
+                        os.remove(os.path.join(folder, tar_file_out))
+                    # mv orca.engrad, orca.out, orca.inp, orca.property.txt, orca_stderr
+
+                    for file2 in os.listdir("./"):
+                        if (
+                            file2.startswith("orca.engrad")
+                            or file2.startswith("orca.out")
+                            or file2.startswith("orca.inp")
+                            or file2.startswith("orca.property.inp")
+                            or file2.startswith("orca.property.txt")
+                            or file2.startswith("orca_stderr")
+                        ):
+                            logger.info(f"Moving {file2} to folder {folder}")
+                            os.rename(
+                                os.path.join("./", file2),
+                                os.path.join(
+                                    folder,
+                                    # zstd_file.replace(".tar.zst", "").replace(".tgz", ""),
+                                    file2,
+                                ),
+                            )
+
+                if file.endswith(".gbw.zstd0"):
+                    logger.info(f"Found compressed gbw file: {file}")
+                    zstd_file = file
+                    gbw_file = zstd_file.replace(".zstd0", "")
+                    unstd_cmd = "unzstd {} -o {} -f".format(
+                        os.path.join(folder, zstd_file), os.path.join(folder, gbw_file)
+                    )
+                    os.system(unstd_cmd)
 
     write_settings_file(mem=mem, nthreads=nthreads)
 
