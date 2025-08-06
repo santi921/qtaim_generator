@@ -1015,11 +1015,3 @@ def gbw_analysis(
 #SBATCH -p lr6
 #SBATCH --account=lr_blau
 #SBATCH --qos=condo_blau
-
-#
-## Command(s) to run (example):
-source ~/.bashrc
-module load gcc
-micromamba activate qtaim_embed
-ulimit -s unlimited
-python hpc_lawr.py
