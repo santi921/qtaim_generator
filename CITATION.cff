@@ -1,0 +1,18 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite the following work."
+title: "High-throughput quantum theory of atoms in molecules (QTAIM) for geometric deep learning of molecular and reaction properties"
+authors:
+  - family-names: Vargas
+    given-names: Santiago
+  - family-names: Gee
+    given-names: Winston
+  - family-names: Alexandrova
+    given-names: Anastassia
+date-released: 2024-01-01
+journal: "Digital Discovery"
+volume: "3"
+issue: "5"
+pages: "987-998"
+publisher: "RSC"
+doi: 10.1039/D4DD00057A
+url: "http://dx.doi.org/10.1039/D4DD00057A"
