@@ -44,7 +44,7 @@ ORDER_OF_OPERATIONS_separate = [
     "charge_separate",
     "bond_separate",
     "qtaim",
-    #"other", # muting for meta 
+    "other", # muting for meta 
 ]
 
 
@@ -173,7 +173,13 @@ def write_multiwfn_exe(
 
 
 def create_jobs(
-    folder, multiwfn_cmd, orca_2mkl_cmd, separate=False, debug=True, logger=None
+    folder, 
+    multiwfn_cmd, 
+    orca_2mkl_cmd, 
+    separate=False, 
+    debug=True, 
+    logger=None, 
+    full_set=False
 ):
     """
     Create job files for multiwfn analysis
@@ -260,7 +266,7 @@ def create_jobs(
                 with open(os.path.join(folder, "fuzzy_full.txt"), "w") as f:
                     spin_tf = check_spin(folder)
                     print("spin_tf: {}".format(spin_tf))
-                    fuzzy_dict = fuzzy_data(spin=spin_tf)
+                    fuzzy_dict = fuzzy_data(spin=spin_tf, full_set=full_set)
                     for key, value in fuzzy_dict.items():
                         job_dict[key] = os.path.join(folder, "{}.txt".format(key))
                         with open(os.path.join(folder, "{}.txt".format(key)), "w") as f:
@@ -274,7 +280,7 @@ def create_jobs(
                     f.write(data)
 
             elif routine == "bond_separate":
-                bond_dict = bond_order_dict()
+                bond_dict = bond_order_dict(full_set=full_set)
                 for key, value in bond_dict.items():
                     job_dict[key] = os.path.join(folder, "{}.txt".format(key))
                     with open(os.path.join(folder, "{}.txt".format(key)), "w") as f:
@@ -287,7 +293,7 @@ def create_jobs(
                     f.write(data)
 
             elif routine == "charge_separate":
-                charge_dict = charge_data_dict()
+                charge_dict = charge_data_dict(full_set=full_set)
                 for key, value in charge_dict.items():
                     job_dict[key] = os.path.join(folder, "{}.txt".format(key))
                     with open(os.path.join(folder, "{}.txt".format(key)), "w") as f:
@@ -322,7 +328,7 @@ def create_jobs(
                 mv_cpprop = False
 
             if key == "charge_separate":
-                charge_dict = charge_data_dict()
+                charge_dict = charge_data_dict(full_set=full_set)
                 for key, value in charge_dict.items():
                     write_multiwfn_exe(
                         out_folder=folder,
@@ -336,7 +342,7 @@ def create_jobs(
                     )
 
             elif key == "bond_separate":
-                bond_dict = bond_order_dict()
+                bond_dict = bond_order_dict(full_set=full_set)
                 for key, value in bond_dict.items():
                     write_multiwfn_exe(
                         out_folder=folder,
@@ -387,6 +393,7 @@ def run_jobs(
     debug=False,
     logger=None,
     prof_mem=False,
+    full_set=False
 ):
     """
     Run conversion and multiwfn jobs
@@ -401,12 +408,12 @@ def run_jobs(
     if separate:
         order_of_operations = ORDER_OF_OPERATIONS_separate
         # order_of_operations = ["qtaim"]
-        charge_dict = charge_data_dict()
+        charge_dict = charge_data_dict(full_set=full_set)
         [order_of_operations.append(i) for i in charge_dict.keys()]
-        bond_dict = bond_order_dict()
+        bond_dict = bond_order_dict(full_set=full_set)
         [order_of_operations.append(i) for i in bond_dict.keys()]
         spin_tf = check_spin(folder)
-        fuzzy_dict = fuzzy_data(spin=spin_tf)
+        fuzzy_dict = fuzzy_data(spin=spin_tf, full_set=full_set)
         [order_of_operations.append(i) for i in fuzzy_dict.keys()]
 
     else:
@@ -501,7 +508,7 @@ def run_jobs(
             logger.error(f"Error saving timings.json: {e}")
 
 
-def parse_multiwfn(folder, separate=False, debug=False, logger=None):
+def parse_multiwfn(folder, separate=False, debug=False, logger=None, full_set=False):
     """
     Parse multiwfn output files to jsons and save them in folder
     Takes:
@@ -515,11 +522,11 @@ def parse_multiwfn(folder, separate=False, debug=False, logger=None):
 
     if separate:
         routine_list = ORDER_OF_OPERATIONS_separate
-        charge_dict = charge_data_dict()
-        bond_dict = bond_order_dict()
+        charge_dict = charge_data_dict(full_set=full_set)
+        bond_dict = bond_order_dict(full_set=full_set)
         spin_tf = check_spin(folder)
         #print("spin_tf: {}".format(spin_tf))
-        fuzzy_dict = fuzzy_data(spin=spin_tf)
+        fuzzy_dict = fuzzy_data(spin=spin_tf, full_set=full_set)
         [routine_list.append(i) for i in charge_dict.keys()]
         [routine_list.append(i) for i in bond_dict.keys()]
         [routine_list.append(i) for i in fuzzy_dict.keys()]
@@ -751,7 +758,7 @@ def parse_multiwfn(folder, separate=False, debug=False, logger=None):
     #    return compiled_dicts
 
 
-def clean_jobs(folder, separate=False, logger=None):
+def clean_jobs(folder, separate=False, logger=None, full_set=False):
     """
     Clean up the mess of files created by the analysis
     Takes:
@@ -771,12 +778,12 @@ def clean_jobs(folder, separate=False, logger=None):
 
     if separate:
         order_of_operations = ORDER_OF_OPERATIONS_separate
-        charge_dict = charge_data_dict()
+        charge_dict = charge_data_dict(full_set=full_set)
         [order_of_operations.append(i) for i in charge_dict.keys()]
-        bond_dict = bond_order_dict()
+        bond_dict = bond_order_dict(full_set=full_set)
         [order_of_operations.append(i) for i in bond_dict.keys()]
         spin_tf = check_spin(folder)
-        fuzzy_dict = fuzzy_data(spin=spin_tf)
+        fuzzy_dict = fuzzy_data(spin=spin_tf, full_set=full_set)
         [order_of_operations.append(i) for i in fuzzy_dict.keys()]
     else:
         order_of_operations = ORDER_OF_OPERATIONS
@@ -848,6 +855,7 @@ def gbw_analysis(
     nthreads=4,
     prof_mem=False,
     preprocess_compessed=False,
+    full_set=False
 ):
     """
     Run a full analysis on a folder of gbw files
@@ -867,6 +875,7 @@ def gbw_analysis(
         nthreads(int): number of threads to use for the analysis
         prof_mem(bool): whether to profile memory usage during the analysis
         preprocess_compessed(bool): whether to preprocess compressed files (not implemented yet)
+        full_set(bool): refined set of calcs or not
     Writes:
         - settings.ini file with memory and nthreads
         - jobs for conversion to wfn and multiwfn analysis
@@ -888,7 +897,7 @@ def gbw_analysis(
     if preprocess_compessed:
         logger.info("Preprocessing compressed files in folder: {}".format(folder))
         # check if the required files are already uncompressed - .inp, .wfn
-        required_files = [".inp", ".wfn"]
+        required_files = [".inp", ".gbw", ".wfn"]
         uncompressed_files = [f for f in os.listdir(folder) if f.endswith(tuple(required_files))]
         if uncompressed_files:
             logger.info("Found uncompressed files: {}".format(uncompressed_files))
@@ -898,7 +907,7 @@ def gbw_analysis(
         else:
             logger.warning("No uncompressed files found - will attempt to uncompress")
         # skip if uncompressed files are present
-        if not uncompressed_files:
+        if len(uncompressed_files) > 2: 
             # run unstd
             for file in os.listdir(folder):
                 if file.endswith(".tar.zst") or file.endswith(".tgz"):
@@ -986,6 +995,7 @@ def gbw_analysis(
             separate=separate,
             debug=debug,
             logger=logger,
+            full_set=full_set
         )
         # run jobs
         run_jobs(
@@ -996,6 +1006,7 @@ def gbw_analysis(
             debug=debug,
             logger=logger,
             prof_mem=prof_mem,
+            full_set=full_set
         )
 
     print("... Parsing multiwfn output")
@@ -1005,7 +1016,7 @@ def gbw_analysis(
     if clean:
         #    # clean some of the mess
         logger.info("... Cleaning up")
-        clean_jobs(folder, separate=separate, logger=logger)
+        clean_jobs(folder, separate=separate, logger=logger, full_set=full_set)
 
 # /global/scratch/users/santiagovargas/gbws_cleaning_lean/ml_elytes/elytes_md_eqv2_electro_512_C3H8O_3_group_133_shell_0_0_1_1341
 #!/bin/bash
