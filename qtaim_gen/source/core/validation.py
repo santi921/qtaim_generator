@@ -3,7 +3,7 @@ import json
 from qtaim_gen.source.core.parse_qtaim import dft_inp_to_dict
 
 
-def validate_timing_dict(timing_json_loc, verbose=False, full_set=0):
+def validate_timing_dict(timing_json_loc, verbose=False, full_set=0, spin_tf=False):
     """
     Basic check that the timing json file has the expected structure.
     Check that it has the keys 'total', 'qtaim', 'charge', 'bond', and 'fuzzy_full'.
@@ -14,29 +14,43 @@ def validate_timing_dict(timing_json_loc, verbose=False, full_set=0):
     expected_keys = [
         "qtaim",
         "other",
-        "bader",
         "hirshfeld",
-        "vdd",
         "becke",
         "adch",
-        "mbis",
         "cm5",
-        "chelpg",
         "fuzzy_bond",
-        "ibsi_bond",
         "becke_fuzzy_density",
-        "mbis_fuzzy_density",
-        "hirsh_fuzzy_density",
-        "grad_norm_rho_fuzzy",
-        "laplacian_rho_fuzzy",
-        "elf_fuzzy",
+        "hirsh_fuzzy_density", 
+    ]
+    
+    excepted_spin_keys = [
+        "mbis_fuzzy_spin"
     ]
 
-    excepted_spin_keys = [
-        "mbis_fuzzy_spin",
-        "hirsh_fuzzy_spin",
-        "becke_fuzzy_spin",
-    ]
+    if full_set > 0:
+        expected_keys += [
+            "vdd"
+            "mbis",
+            "chelpg",
+            "ibsi_bond",
+            "elf_fuzzy",
+            "mbis_fuzzy_density",
+            
+        ]
+        
+        excepted_spin_keys += ["becke_fuzzy_spin"]
+
+    if full_set > 1:
+        expected_keys += [
+            "bader",
+            "laplacian_bond",
+            "grad_norm_rho_fuzzy",
+            "laplacian_rho_fuzzy",
+        ]
+        excepted_spin_keys += ["mbis_fuzzy_spin"]
+        
+
+    
     for key in expected_keys:
         if key not in timing_dict:
             if verbose:
@@ -48,14 +62,43 @@ def validate_timing_dict(timing_json_loc, verbose=False, full_set=0):
             print(f"Timing for '{key}' is too small: {timing_dict[key]} seconds.")
             return
 
-    for key in excepted_spin_keys:
-        if key not in timing_dict:
-            if verbose:
-                print(f"Missing expected spin key '{key}' in timing json.")
-            return False
+    if spin_tf:
+        for key in excepted_spin_keys:
+            if key not in timing_dict:
+                if verbose:
+                    print(f"Missing expected spin key '{key}' in timing json.")
+                return False
 
     if verbose:
         print("Timing json structure is valid.")
+    return True
+
+def validate_bond_dict(bond_json_loc, verbose=False, full_set=0):
+    """
+    Basic check that the bond json file has the expected structure.
+    Check that it has the keys 'fuzzy_bond', 'ibsi_bond', and 'laplacian_bond'.
+    """
+    with open(bond_json_loc, "r") as f:
+        bond_dict = json.load(f)
+
+    expected_keys = [
+        "fuzzy_bond"
+    ]
+
+    if full_set > 0:
+        expected_keys += ["ibsi_bond"]
+    if full_set > 1:
+        expected_keys += ["laplacian_bond"]
+
+    for key in expected_keys:
+        if key not in bond_dict:
+            if verbose:
+                print(f"Missing expected key '{key}' in bond json.")
+            return False
+
+    if verbose:
+        print("Bond json structure is valid.")
+    
     return True
 
 
@@ -70,15 +113,19 @@ def validate_fuzzy_dict(
         fuzzy_dict = json.load(f)
 
     expected_keys = [
-        "grad_norm_rho_fuzzy",
-        "elf_fuzzy",
         "becke_fuzzy_density",
         "hirsh_fuzzy_density",
-        "mbis_fuzzy_density",
-        "laplacian_rho_fuzzy",
     ]
+
+    if full_set > 0:
+        expected_keys += ["elf_fuzzy", "mbis_fuzzy_density"]
+    if full_set > 1:
+        expected_keys += ["grad_norm_rho_fuzzy", "laplacian_rho_fuzzy"]
+
     if spin:
-        expected_keys += ["hirsh_fuzzy_spin", "becke_fuzzy_spin", "mbis_fuzzy_spin"]
+        expected_keys += ["hirsh_fuzzy_spin", "becke_fuzzy_spin"]
+        if full_set > 0:
+            expected_keys += ["mbis_fuzzy_spin"]
 
     for key in expected_keys:
         if key not in fuzzy_dict:
@@ -162,15 +209,16 @@ def validate_charge_dict(charge_json_loc, n_atoms=None, verbose=False, full_set=
         charge_dict = json.load(f)
 
     expected_keys = [
-        "mbis",
         "adch",
-        "chelpg",
         "becke",
         "hirshfeld",
-        "cm5",
-        "bader",
-        "vdd",
+        "cm5"
     ]
+
+    if full_set > 0:
+        expected_keys += ["mbis", "vdd", "chelpg"]
+    if full_set > 1:
+        expected_keys += ["bader"]
 
     for key in expected_keys:
         if key not in charge_dict:
