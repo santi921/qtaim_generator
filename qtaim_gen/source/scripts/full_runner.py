@@ -6,10 +6,11 @@ import argparse
 import resource
 from qtaim_gen.source.core.omol import gbw_analysis
 
+
 def main(argv=None):
 
     parser = argparse.ArgumentParser()
-    
+
     parser.add_argument(
         "--overrun_running",
         action="store_true",
@@ -49,16 +50,22 @@ def main(argv=None):
 
     parser.add_argument(
         "--parse_only",
-        action="store_true", 
+        action="store_true",
         help="only parse existing files, do not run analysis",
     )
 
     parser.add_argument(
-        "--num_jobs", type=int, default=100, help="number of jobs to check and try to run"
+        "--num_jobs",
+        type=int,
+        default=100,
+        help="number of jobs to check and try to run",
     )
 
     parser.add_argument(
-        "--job_file", type=str, help="file containing list of folders to run analysis on", default="./out.txt"
+        "--job_file",
+        type=str,
+        help="file containing list of folders to run analysis on",
+        default="./out.txt",
     )
 
     parser.add_argument(
@@ -66,7 +73,10 @@ def main(argv=None):
     )
 
     parser.add_argument(
-        "--full_set", type=int, default=0, help="level of calculation detail (0-baseline, 1-baseline)"
+        "--full_set",
+        type=int,
+        default=0,
+        help="level of calculation detail (0-baseline, 1-baseline)",
     )
 
     parser.add_argument(
@@ -74,30 +84,32 @@ def main(argv=None):
     )
 
     args = parser.parse_args(argv)
-    
-    overrun_running = bool(args.overrun_running) if 'overrun_running' in args else False
-    restart = bool(args.restart) if 'restart' in args else False
+
+    overrun_running = bool(args.overrun_running) if "overrun_running" in args else False
+    restart = bool(args.restart) if "restart" in args else False
     multiwfn_cmd = args.multiwfn_cmd
     orca6_2mkl = args.orca_2mkl_cmd
-    preprocess_compressed = bool(args.preprocess_compressed) if 'preprocess_compressed' in args else False
-    debug = bool(args.debug) if 'debug' in args else False
-    clean = bool(args.clean) if 'clean' in args else False
-    parse_only = bool(args.parse_only) if 'parse_only' in args else False
-    num_jobs = int(args.num_jobs) if 'num_jobs' in args else 1
+    preprocess_compressed = (
+        bool(args.preprocess_compressed) if "preprocess_compressed" in args else False
+    )
+    debug = bool(args.debug) if "debug" in args else False
+    clean = bool(args.clean) if "clean" in args else False
+    parse_only = bool(args.parse_only) if "parse_only" in args else False
+    num_jobs = int(args.num_jobs) if "num_jobs" in args else 1
     n_threads = int(args.n_threads)
-    full_set = int(args.full_set) if 'full_set' in args else 0
-    overwrite = bool(args.overwrite) if 'overwrite' in args else False
+    full_set = int(args.full_set) if "full_set" in args else 0
+    overwrite = bool(args.overwrite) if "overwrite" in args else False
     job_file = args.job_file
 
-
     # set env vars
-    #os.environ["OMP_STACKSIZE"] = args.OMP_STACKSIZE
+    # os.environ["OMP_STACKSIZE"] = args.OMP_STACKSIZE
     # set mem
-    #os.system(
+    # os.system(
     #    "ulimit -s unlimited"
-    #)  # this sometimes doesn't work and I need to manually set this in cmdline
-    resource.setrlimit(resource.RLIMIT_STACK, (resource.RLIM_INFINITY, resource.RLIM_INFINITY))
-
+    # )  # this sometimes doesn't work and I need to manually set this in cmdline
+    resource.setrlimit(
+        resource.RLIMIT_STACK, (resource.RLIM_INFINITY, resource.RLIM_INFINITY)
+    )
 
     # this is the running list of folders to run analysis on - change this to your own file
     folder_file = os.path.join(job_file)
@@ -109,11 +121,13 @@ def main(argv=None):
         print("No folders found in out.txt")
         return
 
-    #randomly sample num_jobs folders without replacement
+    # randomly sample num_jobs folders without replacement
     if num_jobs > len(folders):
-        print(f"Requested num_jobs {num_jobs} exceeds available folders {len(folders)}. Reducing to {len(folders)}.")
+        print(
+            f"Requested num_jobs {num_jobs} exceeds available folders {len(folders)}. Reducing to {len(folders)}."
+        )
         num_jobs = len(folders)
-    
+
     # shuffle folders
     random.shuffle(folders)
     folders_run = folders[:num_jobs]
@@ -136,7 +150,7 @@ def main(argv=None):
 
         # check if there are multiple .*mwfn files
         mwfn_files = [f for f in os.listdir(run_root) if f.endswith(".mwfn")]
-        
+
         if len(mwfn_files) > 1 and not overrun_running:
             print(f"Skipping {run_root} - multiple mwfn files found")
             continue
@@ -156,7 +170,7 @@ def main(argv=None):
                     orca_2mkl_cmd=orca6_2mkl,
                     multiwfn_cmd=multiwfn_cmd,
                     parse_only=parse_only,
-                    separate=True, # default to true b/c this is how restarts work best
+                    separate=True,  # default to true b/c this is how restarts work best
                     overwrite=overwrite,
                     orca_6=True,
                     clean=clean,
@@ -171,7 +185,6 @@ def main(argv=None):
                 print(f"Error in gbw_analysis for {run_root}: {e}")
 
     pass
-
 
 
 if __name__ == "__main__":

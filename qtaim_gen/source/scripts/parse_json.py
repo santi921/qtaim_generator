@@ -3,13 +3,13 @@ import pandas as pd
 
 import bson
 from qtaim_gen.source.core.parse_json import (
-        get_keys_qtaim,
-        get_qtaim_data_impute,
-        get_qtaim_data,
-        gather_impute,
-        parse_bond,
-        gather_dicts,
-        get_data
+    get_keys_qtaim,
+    get_qtaim_data_impute,
+    get_qtaim_data,
+    gather_impute,
+    parse_bond,
+    gather_dicts,
+    get_data,
 )
 
 
@@ -53,7 +53,6 @@ def main():
         action="store_true",
         help="update bonds with qtaim bond path definitions",
     )
-    
 
     parser.add_argument(
         "-define_bonds", choices=["distances", "qtaim"], default="qtaim"
@@ -69,7 +68,6 @@ def main():
     define_bonds = args.define_bonds
     update_bonds_w_qtaim = args.update_bonds_w_qtaim
 
-
     print("define_bonds: {}".format(define_bonds))
     print("impute: {}".format(impute))
     print("root: {}".format(root))
@@ -78,7 +76,6 @@ def main():
     print("reaction: {}".format(reaction))
     print("parse_charges_spin: {}".format(parse_charges))
     print("reading file from: {}".format(root + file_in))
-
 
     if file_in.endswith(".json"):
         path_json = root + file_in
@@ -102,12 +99,10 @@ def main():
 
     if impute:
         imputed_file = root + "impute_vals.json"
-    
-    print("df type {}".format(type(pandas_file)))
 
+    print("df type {}".format(type(pandas_file)))
 
     impute_dict = {}
 
-    
 
 main()

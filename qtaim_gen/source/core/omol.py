@@ -843,9 +843,6 @@ def setup_logger(folder: str, name: str = "gbw_analysis") -> logging.Logger:
     return logger
 
 
-
-
-
 def gbw_analysis(
     folder,
     multiwfn_cmd,
@@ -888,7 +885,7 @@ def gbw_analysis(
         - jobs for conversion to wfn and multiwfn analysis
         - timings.json file with timings for each step
         - bond.json, charge.json, fuzzy_full.json, qtaim.json, other.json files with parsed data
-    Returns: 
+    Returns:
         - tf_validation(bool): whether the analysis was successful
     """
 
@@ -1031,6 +1028,7 @@ def gbw_analysis(
     tf_validation = validation_checks(folder)
     logger.info("gbw_analysis completed in folder: {}".format(folder))
     logger.info("Validation status: {}".format(tf_validation))
+
 
 # /global/scratch/users/santiagovargas/gbws_cleaning_lean/ml_elytes/elytes_md_eqv2_electro_512_C3H8O_3_group_133_shell_0_0_1_1341
 #!/bin/bash

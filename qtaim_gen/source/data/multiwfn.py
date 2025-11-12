@@ -15,20 +15,20 @@ def charge_data():
 def charge_data_dict(full_set=0):
     # cut resp and chelpg and peoe
     string_dict = {}
-    
+
     string_dict["hirshfeld"] = "7\n1\n1\nn\n0\nq\n"
     string_dict["adch"] = "7\n11\n1\nn\n0\nq\n"
     string_dict["cm5"] = "7\n16\n1\nn\n0\nq\n"  # might cut later
     string_dict["becke"] = "7\n10\n0\nn\n0\nq\n"
-    
+
     if full_set > 0:
         string_dict["vdd"] = "7\n2\n1\nn\n0\nq\n"
         string_dict["mbis"] = "7\n20\n1\nn\n0\nq\n"
         string_dict["chelpg"] = "7\n12\n1\nn\n0\n0\nq\n"  # might cut later
-    
+
     if full_set > 1:
         string_dict["bader"] = "17\n1\n1\n2\n7\n1\n1\n7\n1\n5\n-10\nq\n"
-        
+
     return string_dict
 
 
@@ -40,13 +40,13 @@ def bond_order_data():  # separate out into dictionary
 def bond_order_dict(full_set: int = 0):
     string_dict = {}
     string_dict["fuzzy_bond"] = "9\n7\nn\n0\nq\n"
-    
+
     if full_set > 0:
         string_dict["ibsi_bond"] = "9\n10\n1\n1\n0\n0\nq\n"
-    
+
     if full_set > 1:
-        string_dict["laplacian_bond"] = "9\n8\nn\n0\nq\n" # expensive
-    
+        string_dict["laplacian_bond"] = "9\n8\nn\n0\nq\n"  # expensive
+
     return string_dict
 
 
@@ -66,7 +66,7 @@ def fuzzy_data(spin: bool = True, full_set: int = 0):
     if full_set > 0:
         string_dict["elf_fuzzy"] = "15\n1\n9\n0\nq\n"
         string_dict["mbis_fuzzy_density"] = "15\n-1\n5\n1\n1\n1\n0\nq\n"
-    
+
     if full_set > 1:
         string_dict["laplacian_rho_fuzzy"] = "15\n1\n3\n0\nq\n"
         string_dict["grad_norm_rho_fuzzy"] = "15\n1\n2\n0\nq\n"
@@ -75,7 +75,7 @@ def fuzzy_data(spin: bool = True, full_set: int = 0):
     return string_dict
 
 
-def other_data(): 
+def other_data():
     string_ret = "26\n3\na\nn\n3\nh\nn\n8\n0\n0\n12\n0\n-1\n2\n2\n0\n-1\n-1\nq\n"
     return string_ret
 

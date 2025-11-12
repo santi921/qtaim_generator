@@ -20,24 +20,20 @@ def validate_timing_dict(timing_json_loc, verbose=False, full_set=0, spin_tf=Fal
         "cm5",
         "fuzzy_bond",
         "becke_fuzzy_density",
-        "hirsh_fuzzy_density", 
+        "hirsh_fuzzy_density",
     ]
-    
-    excepted_spin_keys = [
-        "mbis_fuzzy_spin"
-    ]
+
+    excepted_spin_keys = ["mbis_fuzzy_spin"]
 
     if full_set > 0:
         expected_keys += [
-            "vdd"
-            "mbis",
+            "vdd" "mbis",
             "chelpg",
             "ibsi_bond",
             "elf_fuzzy",
             "mbis_fuzzy_density",
-            
         ]
-        
+
         excepted_spin_keys += ["becke_fuzzy_spin"]
 
     if full_set > 1:
@@ -48,9 +44,7 @@ def validate_timing_dict(timing_json_loc, verbose=False, full_set=0, spin_tf=Fal
             "laplacian_rho_fuzzy",
         ]
         excepted_spin_keys += ["mbis_fuzzy_spin"]
-        
 
-    
     for key in expected_keys:
         if key not in timing_dict:
             if verbose:
@@ -73,6 +67,7 @@ def validate_timing_dict(timing_json_loc, verbose=False, full_set=0, spin_tf=Fal
         print("Timing json structure is valid.")
     return True
 
+
 def validate_bond_dict(bond_json_loc, verbose=False, full_set=0):
     """
     Basic check that the bond json file has the expected structure.
@@ -81,9 +76,7 @@ def validate_bond_dict(bond_json_loc, verbose=False, full_set=0):
     with open(bond_json_loc, "r") as f:
         bond_dict = json.load(f)
 
-    expected_keys = [
-        "fuzzy_bond"
-    ]
+    expected_keys = ["fuzzy_bond"]
 
     if full_set > 0:
         expected_keys += ["ibsi_bond"]
@@ -98,12 +91,12 @@ def validate_bond_dict(bond_json_loc, verbose=False, full_set=0):
 
     if verbose:
         print("Bond json structure is valid.")
-    
+
     return True
 
 
 def validate_fuzzy_dict(
-    fuzzy_json_loc, n_atoms=None, spin=True, verbose=False, full_set=0
+    fuzzy_json_loc, n_atoms=None, spin_tf=True, verbose=False, full_set=0
 ):
     """
     Basic check that the fuzzy json file has the expected structure.
@@ -122,7 +115,7 @@ def validate_fuzzy_dict(
     if full_set > 1:
         expected_keys += ["grad_norm_rho_fuzzy", "laplacian_rho_fuzzy"]
 
-    if spin:
+    if spin_tf:
         expected_keys += ["hirsh_fuzzy_spin", "becke_fuzzy_spin"]
         if full_set > 0:
             expected_keys += ["mbis_fuzzy_spin"]
@@ -142,7 +135,7 @@ def validate_fuzzy_dict(
     return True
 
 
-def validate_other_dict(other_dict_loc, verbose=False, full_set=0):
+def validate_other_dict(other_dict_loc, verbose=False):
     """
     Basic check that the other json file has the expected structure.
     Check that it has the keys 'atoms', 'bonds', 'charges', and 'fuzzy'.
@@ -208,12 +201,7 @@ def validate_charge_dict(charge_json_loc, n_atoms=None, verbose=False, full_set=
     with open(charge_json_loc, "r") as f:
         charge_dict = json.load(f)
 
-    expected_keys = [
-        "adch",
-        "becke",
-        "hirshfeld",
-        "cm5"
-    ]
+    expected_keys = ["adch", "becke", "hirshfeld", "cm5"]
 
     if full_set > 0:
         expected_keys += ["mbis", "vdd", "chelpg"]
@@ -349,8 +337,11 @@ def validation_checks(folder: str, verbose: bool = False, full_set: int = 0):
     bond_json_loc = os.path.join(folder, "bond.json")
     # bonding_json_loc = os.path.join(folder, "bonding.json")
 
-    if not validate_timing_dict(timing_json_loc, verbose=verbose, full_set=full_set):
+    if not validate_timing_dict(
+        timing_json_loc, verbose=verbose, full_set=full_set, spin_tf=spin_tf
+    ):
         return False
+
     if not validate_fuzzy_dict(
         fuzzy_json_loc,
         n_atoms=n_atoms,
@@ -361,10 +352,10 @@ def validation_checks(folder: str, verbose: bool = False, full_set: int = 0):
         return False
     if not validate_other_dict(other_dict_loc, verbose=verbose):
         return False
-    
+
     if not validate_charge_dict(charge_json_loc, n_atoms=n_atoms, verbose=verbose):
         return False
-    
+
     if not validate_qtaim_dict(qtaim_json_loc, n_atoms=n_atoms, verbose=verbose):
         return False
 

@@ -1,6 +1,3 @@
-"""qtaim_gen.source package
-
-
-"""
+"""qtaim_gen.source package"""
 
 __all__ = []

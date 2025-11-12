@@ -9,6 +9,7 @@ import parsl
 from parsl.configs.local_threads import config  # or your config
 from qtaim_gen.source.core.workflow import run_folder_task
 
+
 def main(argv: Optional[List[str]] = None) -> int:
     """CLI entry point for launching a batch of Parsl jobs.
 
@@ -27,11 +28,11 @@ def main(argv: Optional[List[str]] = None) -> int:
             "This script submits one job per folder listed in --job_file."
         ),
     )
-    #parser.add_argument(
+    # parser.add_argument(
     #    "--overrun_running",
     #    action="store_true",
     #    help="overrun folders that are currently running (multiple .mwfn files)",
-    #)
+    # )
 
     # parser.add_argument(
     #    "--OMP_STACKSIZE", type=str, default="64000000", help="set OMP_STACKSIZE environment variable"
@@ -70,15 +71,22 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     parser.add_argument(
         "--parse_only",
-        action="store_true", help="only parse existing files, do not run analysis",
+        action="store_true",
+        help="only parse existing files, do not run analysis",
     )
 
     parser.add_argument(
-        "--num_jobs", type=int, default=100, help="number of jobs to check and try to run"
+        "--num_jobs",
+        type=int,
+        default=100,
+        help="number of jobs to check and try to run",
     )
 
     parser.add_argument(
-        "--job_file", type=str, help="file containing list of folders to run analysis on", default="./out.txt"
+        "--job_file",
+        type=str,
+        help="file containing list of folders to run analysis on",
+        default="./out.txt",
     )
 
     parser.add_argument(
@@ -92,12 +100,11 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
 
     parser.add_argument(
-        "--full_set", 
-        type=int, 
-        default=0, 
-        help="level of calculation detail (0-baseline, 1-baseline)"
+        "--full_set",
+        type=int,
+        default=0,
+        help="level of calculation detail (0-baseline, 1-baseline)",
     )
-
 
     parser.add_argument(
         "--overwrite", action="store_true", help="overwrite existing analysis files"
@@ -106,7 +113,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     args = parser.parse_args(argv)
 
     # Safely extract boolean flags and other values using getattr
-    #overrun_running: bool = bool(getattr(args, "overrun_running", False))
+    # overrun_running: bool = bool(getattr(args, "overrun_running", False))
     restart: bool = bool(getattr(args, "restart", False))
     multiwfn_cmd: Optional[str] = getattr(args, "multiwfn_cmd", None)
     orca6_2mkl: Optional[str] = getattr(args, "orca_2mkl_cmd", None)
@@ -119,11 +126,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     full_set: int = int(getattr(args, "full_set", 0))
     job_file: str = getattr(args, "job_file")
     dry_run: bool = bool(getattr(args, "dry_run", False))
-    overwrite = bool(args.overwrite) if 'overwrite' in args else False
-
+    overwrite = bool(args.overwrite) if "overwrite" in args else False
 
     # set env vars
-    resource.setrlimit(resource.RLIMIT_STACK, (resource.RLIM_INFINITY, resource.RLIM_INFINITY))
+    resource.setrlimit(
+        resource.RLIMIT_STACK, (resource.RLIM_INFINITY, resource.RLIM_INFINITY)
+    )
     # set mem
     # Basic static checks before launching heavy work
     if not os.path.exists(job_file):
@@ -148,7 +156,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         else:
             missing.append(f)
     if missing:
-        print(f"Warning: {len(missing)} listed paths do not exist or are not directories; they will be skipped.")
+        print(
+            f"Warning: {len(missing)} listed paths do not exist or are not directories; they will be skipped."
+        )
         for m in missing[:10]:
             print("  missing:", m)
         if len(missing) > 10:
@@ -166,20 +176,20 @@ def main(argv: Optional[List[str]] = None) -> int:
         print(f"Total folders listed: {len(folders)}")
         return 0
 
-    
     parsl.load(config)
     print("Parsl config loaded. Submitting jobs...")
     print(config)
 
-    #randomly sample num_jobs folders without replacement
+    # randomly sample num_jobs folders without replacement
     if num_jobs > len(folders):
-        print(f"Requested num_jobs {num_jobs} exceeds available folders {len(folders)}. Reducing to {len(folders)}.")
+        print(
+            f"Requested num_jobs {num_jobs} exceeds available folders {len(folders)}. Reducing to {len(folders)}."
+        )
         num_jobs = len(folders)
 
     # shuffle folders
     random.shuffle(folders)
     folders_run = folders[:num_jobs]
-
 
     # Submit one Parsl job per selected folder. We do not pass a logger
     # into the remote app; each worker will create its own per-folder logger.
@@ -201,13 +211,13 @@ def main(argv: Optional[List[str]] = None) -> int:
         )
         for f in folders_run
     ]
-    
-    
+
     for fut in futures:
         res = fut.result()
         print(res)
 
     return 0
+
 
 if __name__ == "__main__":
     raise SystemExit(main())

@@ -123,13 +123,13 @@ def process_folder(
         result["status"] = "ok"
         logger.info("Completed folder %s in %.2f s", folder, result["elapsed"])
         return result
-    
+
     except Exception as exc:
         logger.exception("Error processing %s: %s", folder, exc)
         result["status"] = "error"
         result["error"] = str(exc)
         return result
-    
+
     finally:
         # restore original working directory
         try:
