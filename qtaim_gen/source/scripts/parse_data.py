@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 import argparse
 import pandas as pd
 
@@ -8,7 +10,7 @@ from qtaim_gen.source.core.parse_qtaim import (
 )
 
 
-def main():
+def main(argv=None):
     drop_list = []
 
     parser = argparse.ArgumentParser()
@@ -59,7 +61,7 @@ def main():
         "-define_bonds", choices=["distances", "qtaim"], default="qtaim"
     )
 
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     root = args.root
     file_in = args.file_in
     impute = bool(args.impute)
@@ -203,4 +205,5 @@ def main():
         print("file format not supported")
 
 
-main()
+if __name__ == "__main__":
+    raise SystemExit(main())

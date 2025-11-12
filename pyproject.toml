@@ -1,0 +1,53 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "qtaim_generator"
+version = "0.0.0"
+description = "QTAIM generator and utilities"
+readme = "README.md"
+requires-python = ">=3.9"
+authors = [ { name = "Santiago Vargas" } ]
+
+# Dependencies
+# Note: RDKit is best installed from conda (conda-forge) for full functionality and C++ dependencies.
+# If you prefer pip, there is a PyPI package `rdkit-pypi` but it may be limited compared to the conda build.
+dependencies = [
+    "pymatgen>=2024.0.0",
+    "lmdb>=1.4.0"
+]
+
+[tool.setuptools]
+# Auto-discover packages in the repository
+packages = { find = {} }
+
+[project.scripts]
+create-files = "qtaim_gen.source.scripts.create_files:main"
+parse-data = "qtaim_gen.source.scripts.parse_data:main"
+run-qtaim-gen = "qtaim_gen.source.scripts.run:main"
+clean-failed-files = "qtaim_gen.source.scripts.helpers.clean_failed_files:main"
+check-res-wfn = "qtaim_gen.source.scripts.helpers.check_res_wfn:main"
+check-res-rxn-json = "qtaim_gen.source.scripts.helpers.check_res_rxn_json:main"
+folder-xyz-molecules-to-pkl = "qtaim_gen.source.scripts.helpers.folder_xyz_molecules_to_pkl:main"
+outcar-seek-and-convert-xyz = "qtaim_gen.source.scripts.helpers.outcar_seek_and_convert_xyz:main"
+folder-orca-inp-to-pkl = "qtaim_gen.source.scripts.helpers.folder_orca_inp_to_pkl:main"
+
+# Optional: add project URLs
+[project.urls]
+"Homepage" = "https://github.com/santi921/qtaim_generator"
+"Bug Tracker" = "https://github.com/santi921/qtaim_generator/issues"
+
+# Conda environment specification (informational). Use `environment.yml` to
+# create the recommended conda environment with RDKit from conda-forge.
+[tool.conda]
+# Channels to use when creating the environment
+channels = ["conda-forge", "defaults"]
+
+# Conda dependencies; prefer installing RDKit from conda-forge
+dependencies = [
+    "python=3.9",
+    "rdkit",
+    "pymatgen>=2024.0.0",
+    "lmdb",
+]

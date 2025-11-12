@@ -1,4 +1,4 @@
- import argparse
+import argparse
 import pandas as pd
 
 import bson

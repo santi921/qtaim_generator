@@ -5,6 +5,8 @@
     
 """
 
+#!/usr/bin/env python3
+
 import argparse
 import os, json
 import pandas as pd
@@ -13,7 +15,7 @@ from pymatgen.analysis.graphs import MoleculeGraph
 from qtaim_gen.source.core.bonds import get_bonds_from_rdkit
 
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("-xyz_folder", type=str, default="../../../../data/xyz/")
     parser.add_argument(
@@ -30,7 +32,7 @@ def main():
         action="store_true",
         help="Pull charge from xyz, should be the 1st item in the comment line",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     xyz_folder = args.xyz_folder
     pkl_file = args.pkl_file
     pull_spin = bool(args.pull_spin)
@@ -59,7 +61,7 @@ def main():
         if determine_bonds:
             try:
                 bonds_rdkit = get_bonds_from_rdkit(xyz_folder + xyz_file)
-            except:
+            except Exception:
                 bonds_rdkit = []
             bond_list.append(bonds_rdkit)
         identifier.append(ind)
@@ -110,4 +112,5 @@ def main():
     df_pkl = pd.read_pickle(xyz_folder + pkl_file)
 
 
-main()
+if __name__ == "__main__":
+    raise SystemExit(main())

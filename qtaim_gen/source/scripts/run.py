@@ -1,12 +1,21 @@
-import os, random, threading, subprocess, argparse
-from glob import glob
+#!/usr/bin/env python3
+
+import os, random, argparse
 from qtaim_gen.source.core.controller import (
     controller_single,
     ThreadWithResult,
 )
 
 
-def main():
+def main(argv=None):
+    """Run controller threads.
+
+    Args:
+        argv (list[str] | None): optional argv for argparse.
+
+    Returns:
+        int: exit code
+    """
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "-redo_qtaim", "--redo_qtaim", action="store_true", help="redo QTAIM"
@@ -42,7 +51,7 @@ def main():
         "-folders_to_crawl", help="number of folders to check", type=int, default=20000
     )
 
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     redo_qtaim = args.redo_qtaim
     just_dft = args.just_dft
     reactions = args.reactions
@@ -80,4 +89,5 @@ def main():
             thread.join()
 
 
-main()
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -1,9 +1,11 @@
+#!/usr/bin/env python3
+
 import os, bson, argparse
 from glob import glob
 import pandas as pd
 
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--json_file",
@@ -18,7 +20,7 @@ def main():
         help="",
     )
 
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     json_file = args.json_file
     json_loc = args.json_loc
 
@@ -67,4 +69,5 @@ def main():
     print("total rows: {}".format(len(pandas_file)))
 
 
-main()
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -1,0 +1,13 @@
+name: qtaim_generator
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.10
+  - rdkit
+  - pymatgen>=2024.0.0
+  - lmdb
+  - pip
+  - pip:
+      - bson
+    # keep pip-only extras here if needed

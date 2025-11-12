@@ -1,11 +1,11 @@
-name: qtaim_embed
+name: qtaim_gem_mpfit
 channels:
   - pytorch
   - conda-forge
   - defaults
 dependencies:
-  - ase=3.22.1=pyhd8ed1ab_1
-  - dgl=1.1.1.cu116=py311_0
+  - ase=3.22.1=pyhd8ed1ab_1 # try to bump this 
+  - dgl=1.1.1.cu116=py311_0 # try to bump this 
   - importlib-metadata=6.7.0=pyha770c72_0
   - importlib_metadata=6.7.0=hd8ed1ab_0
   - importlib_resources=6.1.0=pyhd8ed1ab_0
@@ -21,16 +21,20 @@ dependencies:
   - matplotlib-inline=0.1.6=py311h06a4308_0
   - nglview=3.0.6=pyhba93850_0
   - plotly=5.15.0=pyhd8ed1ab_0
-  - pymatgen=2023.6.28=py311h92ebd52_0
+  - pymatgen=2023.6.28=py311h92ebd52_0 # try to bump this 
   - setuptools=68.0.0=pyhd8ed1ab_0
   - tqdm=4.65.0=py311h92b7b1e_0
   - virtualenv=20.17.1=py311h38be061_0
   - wheel=0.40.0=pyhd8ed1ab_0
-  - yaml=0.2.5=h7f98852_2
+  - yaml=0.2.5=h7f98852
   - pip:
-      - babel==2.12.1
-      - deepchem==2.5.0
+      - babel==2.17.0
+      #- deepchem==2.5.0
       - json5==0.9.14
+      - lmdb==1.6.2
+      - pickle5==0.0.11
+      - torchdata==0.11.0
+      - torch==2.4.0
       - jupyter-events==0.7.0
       - jupyter-lsp==2.2.0
       - jupyter-server==2.7.3

@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 import pandas as pd
 import os, argparse, stat, json, bson
 from qtaim_gen.source.core.io import write_input_file_from_pmg_molecule
@@ -13,16 +15,26 @@ def convert_graph_info(site_info):
     }
 
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("-reaction", action="store_true")
-    parser.add_argument("-parser", type=str, default="Multiwfn")
-    parser.add_argument("-file", type=str, default="20230512_mpreact_assoc.bson")
-    parser.add_argument("-root", type=str, default="../data/rapter/")
-    parser.add_argument("-options_qm_file", default="options_qm.json")
-    parser.add_argument("--molden_sub", action="store_true", help="molden subroutine")
+def main(argv=None):
+    """
+    Entry point for create_files script.
 
-    args = parser.parse_args()
+    Args:
+        argv (list[str] | None): Optional list of command-line arguments (excludes program name).
+            If None, arguments are read from sys.argv.
+
+    Returns:
+        int: exit code (0 on success).
+    """
+    argp = argparse.ArgumentParser()
+    argp.add_argument("-reaction", action="store_true")
+    argp.add_argument("-parser", type=str, default="Multiwfn")
+    argp.add_argument("-file", type=str, default="20230512_mpreact_assoc.bson")
+    argp.add_argument("-root", type=str, default="../data/rapter/")
+    argp.add_argument("-options_qm_file", default="options_qm.json")
+    argp.add_argument("--molden_sub", action="store_true", help="molden subroutine")
+
+    args = argp.parse_args(argv)
 
     reaction_tf = bool(args.reaction)
     molden_tf = bool(args.molden_sub)
@@ -269,5 +281,9 @@ def main():
                 st = os.stat(props_file)
                 os.chmod(props_file, st.st_mode | stat.S_IEXEC)
 
+    # Completed successfully
+    return 0
 
-main()
+
+if __name__ == "__main__":
+    raise SystemExit(main())

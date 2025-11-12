@@ -1,9 +1,11 @@
+#!/usr/bin/env python3
+
 import os, bson, argparse
 from glob import glob
 import pandas as pd
 
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser()
 
     parser.add_argument(
@@ -13,7 +15,7 @@ def main():
         help="",
     )
 
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     root = args.root
     folders = glob(root + "/*")
 
@@ -30,4 +32,5 @@ def main():
     print("Wfns computed: {} / {}".format(count, len(folders)))
 
 
-main()
+if __name__ == "__main__":
+    raise SystemExit(main())

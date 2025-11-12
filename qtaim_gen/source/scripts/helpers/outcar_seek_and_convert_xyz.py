@@ -184,7 +184,7 @@ def untar_file(tar_path):
             shutil.copyfileobj(f_in, f_out)
 
 
-def main():
+def main(argv=None):
     # Set the folder path to traverse
     folder_path = "./H0"
 
@@ -244,4 +244,5 @@ def main():
                 convert_poscar_to_xyz(outcar_file, output_directory)
 
 
-main()
+if __name__ == "__main__":
+    raise SystemExit(main())

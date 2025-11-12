@@ -5,6 +5,8 @@
     
 """
 
+#!/usr/bin/env python3
+
 import argparse
 import os, json
 import pandas as pd
@@ -16,7 +18,7 @@ from tqdm import tqdm
 from qtaim_gen.source.core.parse_json import get_data
 
 
-def main():
+def main(argv=None):
 
     parser = argparse.ArgumentParser()
     parser.add_argument("-root_folder", type=str, default="./ORCA/")
@@ -26,7 +28,7 @@ def main():
         "--gather_json_data", action="store_true", help="Gather data from json files"
     )
 
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     root_folder = args.root_folder
     pkl_file = args.pkl_file
     gather_tf = bool(args.gather_json_data)
@@ -68,7 +70,7 @@ def main():
                     full_descriptors=True,
                     root_folder_tf=False,
                 )
-            except:
+            except Exception:
                 data = {}
                 print("Error in reading data from json file - ", in_file)
 
@@ -106,9 +108,9 @@ def main():
 
         try:
             bonds_rdkit = get_bonds_from_rdkit(root_folder + xyz_file)
-        except:
+        except Exception:
             bonds_rdkit = []
-            [molecule_graph.add_edge(bond[0], bond[1]) for bond in bonds_rdkit]
+        [molecule_graph.add_edge(bond[0], bond[1]) for bond in bonds_rdkit]
 
         bond_list.append(bonds_rdkit)
         identifier.append(ind)
@@ -137,4 +139,5 @@ def main():
     pd.to_pickle(df, root_folder + pkl_file)
 
 
-main()
+if __name__ == "__main__":
+    raise SystemExit(main())
