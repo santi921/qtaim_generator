@@ -23,10 +23,16 @@ dependencies = [
 packages = { find = {} }
 
 [project.scripts]
+# QTAIM - only
 create-files = "qtaim_gen.source.scripts.create_files:main"
+# QTAIM - only
 parse-data = "qtaim_gen.source.scripts.parse_data:main"
+# QTAIM - only
 run-qtaim-gen = "qtaim_gen.source.scripts.run:main"
+# QTAIM - only
 clean-failed-files = "qtaim_gen.source.scripts.helpers.clean_failed_files:main"
+# Full analysis 
+full_runner = "qtaim_gen.source.scripts.full_runner:main"
 check-res-wfn = "qtaim_gen.source.scripts.helpers.check_res_wfn:main"
 check-res-rxn-json = "qtaim_gen.source.scripts.helpers.check_res_rxn_json:main"
 folder-xyz-molecules-to-pkl = "qtaim_gen.source.scripts.helpers.folder_xyz_molecules_to_pkl:main"

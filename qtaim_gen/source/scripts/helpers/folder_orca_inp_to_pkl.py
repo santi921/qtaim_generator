@@ -1,11 +1,11 @@
+#!/usr/bin/env python3
+
 """
     Helper script to convert a folder of xyz files to a json file of pmg molecules + bonds + properties
     Usage: 
         python create_json_from_xyz.py --xyz_folder xyz_folder --json_file json_file
     
 """
-
-#!/usr/bin/env python3
 
 import argparse
 import os, json
