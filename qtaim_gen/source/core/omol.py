@@ -179,7 +179,7 @@ def create_jobs(
     separate=False, 
     debug=True, 
     logger=None, 
-    full_set=False
+    full_set=0
 ):
     """
     Create job files for multiwfn analysis
@@ -393,7 +393,7 @@ def run_jobs(
     debug=False,
     logger=None,
     prof_mem=False,
-    full_set=False
+    full_set=0
 ):
     """
     Run conversion and multiwfn jobs
@@ -508,7 +508,7 @@ def run_jobs(
             logger.error(f"Error saving timings.json: {e}")
 
 
-def parse_multiwfn(folder, separate=False, debug=False, logger=None, full_set=False):
+def parse_multiwfn(folder, separate=False, debug=False, logger=None, full_set=0):
     """
     Parse multiwfn output files to jsons and save them in folder
     Takes:
@@ -553,7 +553,7 @@ def parse_multiwfn(folder, separate=False, debug=False, logger=None, full_set=Fa
                         elif routine == "ibsi_bond":
                             data = parse_bond_order_ibsi(file_full_path)
 
-                        elif routine == "laplace_bond":
+                        elif routine == "laplacian_bond":
                             data = parse_bond_order_laplace(file_full_path)
 
                         elif routine == "fuzzy":
@@ -761,7 +761,7 @@ def parse_multiwfn(folder, separate=False, debug=False, logger=None, full_set=Fa
     #    return compiled_dicts
 
 
-def clean_jobs(folder, separate=False, logger=None, full_set=False):
+def clean_jobs(folder, separate=False, logger=None, full_set=0):
     """
     Clean up the mess of files created by the analysis
     Takes:
@@ -858,7 +858,7 @@ def gbw_analysis(
     n_threads=4,
     prof_mem=False,
     preprocess_compressed=False,
-    full_set=False
+    full_set=0
 ):
     """
     Run a full analysis on a folder of gbw files
@@ -878,7 +878,7 @@ def gbw_analysis(
         n_threads(int): number of threads to use for the analysis
         prof_mem(bool): whether to profile memory usage during the analysis
         preprocess_compressed(bool): whether to preprocess compressed files (not implemented yet)
-        full_set(bool): refined set of cheaper calcs or full set of analysis
+        full_set(int): refined set of cheaper calcs or full set of analysis
     Writes:
         - settings.ini file with memory and n_threads
         - jobs for conversion to wfn and multiwfn analysis

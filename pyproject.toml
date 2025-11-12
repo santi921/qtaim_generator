@@ -37,7 +37,9 @@ run-qtaim-gen = "qtaim_gen.source.scripts.run:main"
 # QTAIM - only
 clean-failed-files = "qtaim_gen.source.scripts.helpers.clean_failed_files:main"
 # Full analysis 
-full_runner = "qtaim_gen.source.scripts.full_runner:main"
+full-runner = "qtaim_gen.source.scripts.full_runner:main"
+full-runner-parsl = "qtaim_gen.source.scripts.full_runner_parsl:main"
+
 check-res-wfn = "qtaim_gen.source.scripts.helpers.check_res_wfn:main"
 check-res-rxn-json = "qtaim_gen.source.scripts.helpers.check_res_rxn_json:main"
 folder-xyz-molecules-to-pkl = "qtaim_gen.source.scripts.helpers.folder_xyz_molecules_to_pkl:main"

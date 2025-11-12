@@ -49,7 +49,8 @@ def main(argv=None):
 
     parser.add_argument(
         "--parse_only",
-        action="store_true", help="only parse existing files, do not run analysis",
+        action="store_true", 
+        help="only parse existing files, do not run analysis",
     )
 
     parser.add_argument(
@@ -65,7 +66,7 @@ def main(argv=None):
     )
 
     parser.add_argument(
-        "--full_set", action="store_true", help="run full set of analysis or refined set"
+        "--full_set", type=int, default=0, help="level of calculation detail (0-baseline, 1-baseline)"
     )
 
     parser.add_argument(
@@ -84,7 +85,7 @@ def main(argv=None):
     parse_only = bool(args.parse_only) if 'parse_only' in args else False
     num_jobs = int(args.num_jobs) if 'num_jobs' in args else 1
     n_threads = int(args.n_threads)
-    full_set = bool(args.full_set) if 'full_set' in args else False
+    full_set = int(args.full_set) if 'full_set' in args else 0
     overwrite = bool(args.overwrite) if 'overwrite' in args else False
     job_file = args.job_file
 
@@ -108,9 +109,17 @@ def main(argv=None):
         print("No folders found in out.txt")
         return
 
+    #randomly sample num_jobs folders without replacement
+    if num_jobs > len(folders):
+        print(f"Requested num_jobs {num_jobs} exceeds available folders {len(folders)}. Reducing to {len(folders)}.")
+        num_jobs = len(folders)
     
+    # shuffle folders
+    random.shuffle(folders)
+    folders_run = folders[:num_jobs]
+
     for i in range(num_jobs):
-        run_root = random.choice(folders)
+        run_root = folders_run[i]
         print(f"Selected folder: {run_root}")
         # check three states - not started, running, finished
         # check if there is a file called timings.json, qtaim.json, other.json, fuzzy_full,json, and charge.json
