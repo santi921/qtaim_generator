@@ -361,8 +361,10 @@ def validation_checks(folder: str, verbose: bool = False, full_set: int = 0):
         return False
     if not validate_other_dict(other_dict_loc, verbose=verbose):
         return False
+    
     if not validate_charge_dict(charge_json_loc, n_atoms=n_atoms, verbose=verbose):
         return False
+    
     if not validate_qtaim_dict(qtaim_json_loc, n_atoms=n_atoms, verbose=verbose):
         return False
 
