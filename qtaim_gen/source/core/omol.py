@@ -48,13 +48,13 @@ ORDER_OF_OPERATIONS_separate = [
 ]
 
 
-def write_settings_file(mem=400000000, nthreads=4):
+def write_settings_file(mem=400000000, n_threads=4):
     # get loc of qtaim_embed folder
     qtaim_embed_loc = str(Path(__file__).parent.parent.parent)
     old_path = qtaim_embed_loc + "/source/data/settings.ini"
     # copy old path to current path
     new_path = "./settings.ini"
-    # wwrite txt files line by line and add a line nthreads = str(nthreads) + "\n"
+    # wwrite txt files line by line and add a line n_threads = str(n_threads) + "\n"
     # another line ompstacksize= str(mem) + "\n"
     with open(old_path, "r") as f:
         data = f.read()
@@ -65,7 +65,7 @@ def write_settings_file(mem=400000000, nthreads=4):
 
     with open(new_path, "w") as f:
         f.write(data)
-        f.write("  nthreads= {}\n".format(nthreads))
+        f.write("  n_threads= {}\n".format(n_threads))
         f.write("  ompstacksize= {}\n".format(mem))
         f.write(last_lines[0] + "\n")  # write last line
         f.write(last_lines[1] + "\n")  # write last line without newline
@@ -643,7 +643,10 @@ def parse_multiwfn(folder, separate=False, debug=False, logger=None, full_set=Fa
 
                         elif routine in list(fuzzy_dict.keys()):
                             data = parse_fuzzy_real_space(file_full_path)
-
+                        
+                        elif routine == "qtaim":
+                            pass 
+                        
                         else:
                             logger.warning(
                                 f"Unknown routine '{routine}' in file {file_full_path}"
@@ -655,7 +658,7 @@ def parse_multiwfn(folder, separate=False, debug=False, logger=None, full_set=Fa
                         logger.info(f"Parsed {routine} output to {json_file}")
 
                     except Exception as e:
-                        if route == "qtaim": 
+                        if routine == "qtaim": 
                             pass
                         else: 
                             logger.error(
@@ -852,7 +855,7 @@ def gbw_analysis(
     debug=False,
     logger=None,
     mem=400000000,
-    nthreads=4,
+    n_threads=4,
     prof_mem=False,
     preprocess_compressed=False,
     full_set=False
@@ -872,12 +875,12 @@ def gbw_analysis(
         debug(bool): whether to run a minimal set of jobs
         logger(logging.Logger): logger to log messages
         mem(int): memory to use for the analysis in bytes
-        nthreads(int): number of threads to use for the analysis
+        n_threads(int): number of threads to use for the analysis
         prof_mem(bool): whether to profile memory usage during the analysis
         preprocess_compressed(bool): whether to preprocess compressed files (not implemented yet)
         full_set(bool): refined set of cheaper calcs or full set of analysis
     Writes:
-        - settings.ini file with memory and nthreads
+        - settings.ini file with memory and n_threads
         - jobs for conversion to wfn and multiwfn analysis
         - timings.json file with timings for each step
         - bond.json, charge.json, fuzzy_full.json, qtaim.json, other.json files with parsed data
@@ -961,7 +964,7 @@ def gbw_analysis(
                     )
                     os.system(unstd_cmd)
 
-    write_settings_file(mem=mem, nthreads=nthreads)
+    write_settings_file(mem=mem, n_threads=n_threads)
    
     if restart:
         logger.info("Restarting from last step in timings.json")

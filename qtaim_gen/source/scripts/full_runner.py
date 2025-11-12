@@ -1,21 +1,19 @@
 #!/usr/bin/env python3
-from qtaim_gen.source.core.omol import gbw_analysis
 import os
 import logging
 import random
 import argparse
-
+import resource
+from qtaim_gen.source.core.omol import gbw_analysis
 
 def main(argv=None):
+
     parser = argparse.ArgumentParser()
+    
     parser.add_argument(
         "--overrun_running",
         action="store_true",
         help="overrun folders that are currently running (multiple .mwfn files)",
-    )
-
-    parser.add_argument(
-        "--OMP_STACKSIZE", type=str, default="64000000", help="set OMP_STACKSIZE environment variable"
     )
 
     parser.add_argument(
@@ -32,7 +30,7 @@ def main(argv=None):
     )
 
     parser.add_argument(
-        "--preprocess_compessed",
+        "--preprocess_compressed",
         action="store_true",
         help="whether or not to preprocess compressed files",
     )
@@ -68,7 +66,10 @@ def main(argv=None):
 
     parser.add_argument(
         "--full_set", action="store_true", help="run full set of analysis or refined set"
+    )
 
+    parser.add_argument(
+        "--overwrite", action="store_true", help="overwrite existing analysis files"
     )
 
     args = parser.parse_args(argv)
@@ -77,23 +78,25 @@ def main(argv=None):
     restart = bool(args.restart) if 'restart' in args else False
     multiwfn_cmd = args.multiwfn_cmd
     orca6_2mkl = args.orca_2mkl_cmd
-    preprocess_compressed = bool(args.preprocess_compessed) if 'preprocess_compressed' in args else False
+    preprocess_compressed = bool(args.preprocess_compressed) if 'preprocess_compressed' in args else False
     debug = bool(args.debug) if 'debug' in args else False
     clean = bool(args.clean) if 'clean' in args else False
     parse_only = bool(args.parse_only) if 'parse_only' in args else False
     num_jobs = int(args.num_jobs) if 'num_jobs' in args else 1
     n_threads = int(args.n_threads)
     full_set = bool(args.full_set) if 'full_set' in args else False
+    overwrite = bool(args.overwrite) if 'overwrite' in args else False
     job_file = args.job_file
 
 
     # set env vars
-    os.environ["OMP_STACKSIZE"] = args.OMP_STACKSIZE
+    #os.environ["OMP_STACKSIZE"] = args.OMP_STACKSIZE
     # set mem
-    os.system(
-        "ulimit -s unlimited"
-    )  # this sometimes doesn't work and I need to manually set this in cmdline
-    
+    #os.system(
+    #    "ulimit -s unlimited"
+    #)  # this sometimes doesn't work and I need to manually set this in cmdline
+    resource.setrlimit(resource.RLIMIT_STACK, (resource.RLIM_INFINITY, resource.RLIM_INFINITY))
+
 
     # this is the running list of folders to run analysis on - change this to your own file
     folder_file = os.path.join(job_file)
@@ -108,6 +111,7 @@ def main(argv=None):
     
     for i in range(num_jobs):
         run_root = random.choice(folders)
+        print(f"Selected folder: {run_root}")
         # check three states - not started, running, finished
         # check if there is a file called timings.json, qtaim.json, other.json, fuzzy_full,json, and charge.json
         if (
@@ -116,7 +120,7 @@ def main(argv=None):
             and os.path.exists(os.path.join(run_root, "other.json"))
             and os.path.exists(os.path.join(run_root, "fuzzy_full.json"))
             and os.path.exists(os.path.join(run_root, "charge.json"))
-            and not restart
+            and not overwrite
         ):
             print(f"Skipping {run_root} - already processed")
             continue
@@ -144,10 +148,10 @@ def main(argv=None):
                     multiwfn_cmd=multiwfn_cmd,
                     parse_only=parse_only,
                     separate=True, # default to true b/c this is how restarts work best
-                    overwrite=False,
+                    overwrite=overwrite,
                     orca_6=True,
                     clean=clean,
-                    nthreads=n_threads,
+                    n_threads=n_threads,
                     full_set=full_set,
                     restart=restart,
                     debug=debug,
