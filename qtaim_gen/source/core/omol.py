@@ -854,7 +854,7 @@ def gbw_analysis(
     mem=400000000,
     nthreads=4,
     prof_mem=False,
-    preprocess_compessed=False,
+    preprocess_compressed=False,
     full_set=False
 ):
     """
@@ -874,8 +874,8 @@ def gbw_analysis(
         mem(int): memory to use for the analysis in bytes
         nthreads(int): number of threads to use for the analysis
         prof_mem(bool): whether to profile memory usage during the analysis
-        preprocess_compessed(bool): whether to preprocess compressed files (not implemented yet)
-        full_set(bool): refined set of calcs or not
+        preprocess_compressed(bool): whether to preprocess compressed files (not implemented yet)
+        full_set(bool): refined set of cheaper calcs or full set of analysis
     Writes:
         - settings.ini file with memory and nthreads
         - jobs for conversion to wfn and multiwfn analysis
@@ -894,7 +894,7 @@ def gbw_analysis(
 
     # check if there is a .wfn or .gbw file in the folder. If there is an
     # option to preprocess compressed files
-    if preprocess_compessed:
+    if preprocess_compressed:
         logger.info("Preprocessing compressed files in folder: {}".format(folder))
         # check if the required files are already uncompressed - .inp, .wfn
         required_files = [".inp", ".gbw", ".wfn"]
@@ -962,7 +962,7 @@ def gbw_analysis(
                     os.system(unstd_cmd)
 
     write_settings_file(mem=mem, nthreads=nthreads)
-
+   
     if restart:
         logger.info("Restarting from last step in timings.json")
         # check if the timings file exists

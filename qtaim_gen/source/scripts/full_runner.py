@@ -62,6 +62,15 @@ def main(argv=None):
         "--job_file", type=str, help="file containing list of folders to run analysis on", default="./out.txt"
     )
 
+    parser.add_argument(
+        "--n_threads", type=int, default=4, help="number of threads to use"
+    )
+
+    parser.add_argument(
+        "--full_set", action="store_true", help="run full set of analysis or refined set"
+
+    )
+
     args = parser.parse_args(argv)
     
     overrun_running = bool(args.overrun_running) if 'overrun_running' in args else False
@@ -73,6 +82,8 @@ def main(argv=None):
     clean = bool(args.clean) if 'clean' in args else False
     parse_only = bool(args.parse_only) if 'parse_only' in args else False
     num_jobs = int(args.num_jobs) if 'num_jobs' in args else 1
+    n_threads = int(args.n_threads)
+    full_set = bool(args.full_set) if 'full_set' in args else False
     job_file = args.job_file
 
 
@@ -136,10 +147,12 @@ def main(argv=None):
                     overwrite=False,
                     orca_6=True,
                     clean=clean,
+                    nthreads=n_threads,
+                    full_set=full_set,
                     restart=restart,
                     debug=debug,
                     logger=logging.getLogger("gbw_analysis"),
-                    preprocess_compessed=preprocess_compressed,
+                    preprocess_compressed=preprocess_compressed,
                 )  # works!
             except Exception as e:
                 print(f"Error in gbw_analysis for {run_root}: {e}")
