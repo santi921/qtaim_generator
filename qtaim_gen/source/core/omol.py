@@ -44,7 +44,7 @@ ORDER_OF_OPERATIONS_separate = [
     "charge_separate",
     "bond_separate",
     "qtaim",
-    "other", # muting for meta 
+    "other",  # muting for meta
 ]
 
 
@@ -173,13 +173,13 @@ def write_multiwfn_exe(
 
 
 def create_jobs(
-    folder, 
-    multiwfn_cmd, 
-    orca_2mkl_cmd, 
-    separate=False, 
-    debug=True, 
-    logger=None, 
-    full_set=0
+    folder,
+    multiwfn_cmd,
+    orca_2mkl_cmd,
+    separate=False,
+    debug=True,
+    logger=None,
+    full_set=0,
 ):
     """
     Create job files for multiwfn analysis
@@ -393,7 +393,7 @@ def run_jobs(
     debug=False,
     logger=None,
     prof_mem=False,
-    full_set=0
+    full_set=0,
 ):
     """
     Run conversion and multiwfn jobs
@@ -525,7 +525,7 @@ def parse_multiwfn(folder, separate=False, debug=False, logger=None, full_set=0)
         charge_dict = charge_data_dict(full_set=full_set)
         bond_dict = bond_order_dict(full_set=full_set)
         spin_tf = check_spin(folder)
-        #print("spin_tf: {}".format(spin_tf))
+        # print("spin_tf: {}".format(spin_tf))
         fuzzy_dict = fuzzy_data(spin=spin_tf, full_set=full_set)
         [routine_list.append(i) for i in charge_dict.keys()]
         [routine_list.append(i) for i in bond_dict.keys()]
@@ -643,10 +643,10 @@ def parse_multiwfn(folder, separate=False, debug=False, logger=None, full_set=0)
 
                         elif routine in list(fuzzy_dict.keys()):
                             data = parse_fuzzy_real_space(file_full_path)
-                        
+
                         elif routine == "qtaim":
-                            pass 
-                        
+                            pass
+
                         else:
                             logger.warning(
                                 f"Unknown routine '{routine}' in file {file_full_path}"
@@ -658,9 +658,9 @@ def parse_multiwfn(folder, separate=False, debug=False, logger=None, full_set=0)
                         logger.info(f"Parsed {routine} output to {json_file}")
 
                     except Exception as e:
-                        if routine == "qtaim": 
+                        if routine == "qtaim":
                             pass
-                        else: 
+                        else:
                             logger.error(
                                 f"Error parsing {routine} in {file_full_path}: {e}"
                             )
@@ -858,7 +858,7 @@ def gbw_analysis(
     n_threads=4,
     prof_mem=False,
     preprocess_compressed=False,
-    full_set=0
+    full_set=0,
 ):
     """
     Run a full analysis on a folder of gbw files
@@ -901,16 +901,17 @@ def gbw_analysis(
         logger.info("Preprocessing compressed files in folder: {}".format(folder))
         # check if the required files are already uncompressed - .inp, .wfn
         required_files = [".inp", ".gbw", ".wfn"]
-        uncompressed_files = [f for f in os.listdir(folder) if f.endswith(tuple(required_files))]
+        uncompressed_files = [
+            f for f in os.listdir(folder) if f.endswith(tuple(required_files))
+        ]
         if uncompressed_files:
             logger.info("Found uncompressed files: {}".format(uncompressed_files))
             logger.info("Skipping uncompression step")
 
-            
         else:
             logger.warning("No uncompressed files found - will attempt to uncompress")
         # skip if uncompressed files are present
-        if len(uncompressed_files) > 2: 
+        if len(uncompressed_files) > 2:
             # run unstd
             for file in os.listdir(folder):
                 if file.endswith(".tar.zst") or file.endswith(".tgz"):
@@ -965,7 +966,7 @@ def gbw_analysis(
                     os.system(unstd_cmd)
 
     write_settings_file(mem=mem, n_threads=n_threads)
-   
+
     if restart:
         logger.info("Restarting from last step in timings.json")
         # check if the timings file exists
@@ -998,7 +999,7 @@ def gbw_analysis(
             separate=separate,
             debug=debug,
             logger=logger,
-            full_set=full_set
+            full_set=full_set,
         )
         # run jobs
         run_jobs(
@@ -1009,7 +1010,7 @@ def gbw_analysis(
             debug=debug,
             logger=logger,
             prof_mem=prof_mem,
-            full_set=full_set
+            full_set=full_set,
         )
 
     print("... Parsing multiwfn output")
@@ -1021,15 +1022,16 @@ def gbw_analysis(
         logger.info("... Cleaning up")
         clean_jobs(folder, separate=separate, logger=logger, full_set=full_set)
 
+
 # /global/scratch/users/santiagovargas/gbws_cleaning_lean/ml_elytes/elytes_md_eqv2_electro_512_C3H8O_3_group_133_shell_0_0_1_1341
 #!/bin/bash
-#SBATCH --job-name=conj_systems
-#SBATCH --partition=cm2
-#SBATCH --nodes=1
-#SBATCH --ntasks-per-node=6
-#SBATCH --cpus-per-task=1
-#SBATCH --time=40:00:00
-#SBATCH -C lr6_m192
-#SBATCH -p lr6
-#SBATCH --account=lr_blau
-#SBATCH --qos=condo_blau
+# SBATCH --job-name=conj_systems
+# SBATCH --partition=cm2
+# SBATCH --nodes=1
+# SBATCH --ntasks-per-node=6
+# SBATCH --cpus-per-task=1
+# SBATCH --time=40:00:00
+# SBATCH -C lr6_m192
+# SBATCH -p lr6
+# SBATCH --account=lr_blau
+# SBATCH --qos=condo_blau

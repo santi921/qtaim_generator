@@ -1,9 +1,10 @@
-import os 
+import os
 import logging
 import time
 from parsl import python_app
 from qtaim_gen.source.core.omol import gbw_analysis
 from typing import Optional, Dict, Any
+
 
 def setup_logger_for_folder(folder: str, name: str = "gbw_analysis") -> logging.Logger:
     logger = logging.getLogger(f"{name}-{folder}")
@@ -16,6 +17,7 @@ def setup_logger_for_folder(folder: str, name: str = "gbw_analysis") -> logging.
         logger.addHandler(fh)
     return logger
 
+
 def acquire_lock(folder: str) -> bool:
     lockfile = os.path.join(folder, ".processing.lock")
     try:
@@ -26,12 +28,14 @@ def acquire_lock(folder: str) -> bool:
     except FileExistsError:
         return False
 
+
 def release_lock(folder: str) -> None:
     lockfile = os.path.join(folder, ".processing.lock")
     try:
         os.remove(lockfile)
     except FileNotFoundError:
         pass
+
 
 def process_folder(
     folder: str,
@@ -72,7 +76,13 @@ def process_folder(
         # e.g. skip if outputs exist and not restart
         outputs_present = all(
             os.path.exists(os.path.join(folder, fn))
-            for fn in ("timings.json", "qtaim.json", "other.json", "fuzzy_full.json", "charge.json")
+            for fn in (
+                "timings.json",
+                "qtaim.json",
+                "other.json",
+                "fuzzy_full.json",
+                "charge.json",
+            )
         )
         if outputs_present and not overwrite:
             logger.info("Skipping %s: already processed", folder)
@@ -126,8 +136,14 @@ def process_folder(
             # best-effort restore; if this fails, log to stderr
             print(f"Warning: failed to restore cwd to {orig_cwd}")
 
+
 @python_app
-def run_folder_task(folder: str, multiwfn_cmd: Optional[str] = None, orca_2mkl_cmd: Optional[str] = None, **kwargs) -> Dict[str, Any]:
+def run_folder_task(
+    folder: str,
+    multiwfn_cmd: Optional[str] = None,
+    orca_2mkl_cmd: Optional[str] = None,
+    **kwargs,
+) -> Dict[str, Any]:
     """Parsl python_app wrapper that runs process_folder on a worker.
 
     The real processing function is imported inside the app so the worker
@@ -135,4 +151,7 @@ def run_folder_task(folder: str, multiwfn_cmd: Optional[str] = None, orca_2mkl_c
     """
     # this runs inside remote worker; import inside to ensure worker env has package
     from qtaim_gen.source.scripts.full_runner_parsl import process_folder
-    return process_folder(folder, multiwfn_cmd=multiwfn_cmd, orca_2mkl_cmd=orca_2mkl_cmd, **kwargs)
+
+    return process_folder(
+        folder, multiwfn_cmd=multiwfn_cmd, orca_2mkl_cmd=orca_2mkl_cmd, **kwargs
+    )

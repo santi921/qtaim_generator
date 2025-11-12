@@ -47,7 +47,7 @@ def bond_order_dict(full_set=0):
     return string_dict
 
 
-def fuzzy_data(spin=True, full_set=False):
+def fuzzy_data(spin=True, full_set=0):
     # string_ret = "15\n1\n1\n1\n2\n1\n3\n1\n9\n4\nn\n0\nq\n"
     # string_ret = "15\n1\n1\nn1\n2\n1\n3\n1\n9\n4\nn\n0\nq\n"
     string_dict = {}

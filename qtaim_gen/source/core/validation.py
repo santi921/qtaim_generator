@@ -3,7 +3,7 @@ import json
 from qtaim_gen.source.core.parse_qtaim import dft_inp_to_dict
 
 
-def validate_timing_dict(timing_json_loc, verbose=False):
+def validate_timing_dict(timing_json_loc, verbose=False, full_set=0):
     """
     Basic check that the timing json file has the expected structure.
     Check that it has the keys 'total', 'qtaim', 'charge', 'bond', and 'fuzzy_full'.
@@ -59,7 +59,9 @@ def validate_timing_dict(timing_json_loc, verbose=False):
     return True
 
 
-def validate_fuzzy_dict(fuzzy_json_loc, n_atoms=None, spin=True, verbose=False):
+def validate_fuzzy_dict(
+    fuzzy_json_loc, n_atoms=None, spin=True, verbose=False, full_set=0
+):
     """
     Basic check that the fuzzy json file has the expected structure.
     Check that it has the keys 'fuzzy', 'fuzzy_bonds', 'fuzzy_bcp', 'fuzzy_ncp'.
@@ -77,6 +79,7 @@ def validate_fuzzy_dict(fuzzy_json_loc, n_atoms=None, spin=True, verbose=False):
     ]
     if spin:
         expected_keys += ["hirsh_fuzzy_spin", "becke_fuzzy_spin", "mbis_fuzzy_spin"]
+
     for key in expected_keys:
         if key not in fuzzy_dict:
             raise ValueError(f"Missing expected key '{key}' in fuzzy json.")
@@ -92,13 +95,14 @@ def validate_fuzzy_dict(fuzzy_json_loc, n_atoms=None, spin=True, verbose=False):
     return True
 
 
-def validate_other_dict(other_dict_loc, verbose=False):
+def validate_other_dict(other_dict_loc, verbose=False, full_set=0):
     """
     Basic check that the other json file has the expected structure.
     Check that it has the keys 'atoms', 'bonds', 'charges', and 'fuzzy'.
     """
     with open(other_dict_loc, "r") as f:
         other_dict = json.load(f)
+
     expected_keys = [
         "mpp_full",
         "sdp_full",
@@ -148,7 +152,7 @@ def validate_other_dict(other_dict_loc, verbose=False):
     return True
 
 
-def validate_charge_dict(charge_json_loc, n_atoms=None, verbose=False):
+def validate_charge_dict(charge_json_loc, n_atoms=None, verbose=False, full_set=0):
     """
     Basic check that the charge json file has the expected structure.
     Check that it has the keys 'mbis', 'adch', 'chelpg', 'becke',  'hirshfeld', 'cm5', 'bader', 'vdd'
@@ -167,6 +171,7 @@ def validate_charge_dict(charge_json_loc, n_atoms=None, verbose=False):
         "bader",
         "vdd",
     ]
+
     for key in expected_keys:
         if key not in charge_dict:
             if verbose:
@@ -224,9 +229,15 @@ def validate_qtaim_dict(qtaim_json_loc, n_atoms=None, verbose=False):
     return True
 
 
-def validation_checks(folder, verbose=False):
+def validation_checks(folder: str, verbose: bool = False, full_set: int = 0):
     """
     Run all validation checks on the json files in the given folder.
+    Arguments:
+        folder (str): Path to the folder containing the json files.
+        verbose (bool): If True, print detailed validation messages.
+        full_set (int): Level of calculation detail (0-baseline, 1-baseline, 2-full).
+    Returns:
+        bool: True if all validation checks pass, False otherwise.
     """
     # check that all the json files are present
     required_files = [
@@ -235,6 +246,7 @@ def validation_checks(folder, verbose=False):
         "other.json",
         "charge.json",
         "qtaim.json",
+        "bond.json",
     ]
     tf = True
     for file in required_files:
@@ -249,10 +261,10 @@ def validation_checks(folder, verbose=False):
     inp_files = [f for f in os.listdir(folder) if f.endswith(".inp")]
     # add *.in files to list
     inp_files += [f for f in os.listdir(folder) if f.endswith(".in")]
-    # remove convert.in 
+    # remove convert.in
     inp_files = [f for f in inp_files if f != "convert.in"]
 
-    #print("inp_files:", inp_files)
+    # print("inp_files:", inp_files)
     if not inp_files:
         if verbose:
             print("No .inp file found in the folder.")
@@ -286,12 +298,17 @@ def validation_checks(folder, verbose=False):
     other_dict_loc = os.path.join(folder, "other.json")
     charge_json_loc = os.path.join(folder, "charge.json")
     qtaim_json_loc = os.path.join(folder, "qtaim.json")
+    bond_json_loc = os.path.join(folder, "bond.json")
     # bonding_json_loc = os.path.join(folder, "bonding.json")
 
-    if not validate_timing_dict(timing_json_loc, verbose=verbose):
+    if not validate_timing_dict(timing_json_loc, verbose=verbose, full_set=full_set):
         return False
     if not validate_fuzzy_dict(
-        fuzzy_json_loc, n_atoms=n_atoms, spin=spin_tf, verbose=verbose
+        fuzzy_json_loc,
+        n_atoms=n_atoms,
+        spin=spin_tf,
+        verbose=verbose,
+        full_set=full_set,
     ):
         return False
     if not validate_other_dict(other_dict_loc, verbose=verbose):
@@ -299,6 +316,11 @@ def validation_checks(folder, verbose=False):
     if not validate_charge_dict(charge_json_loc, n_atoms=n_atoms, verbose=verbose):
         return False
     if not validate_qtaim_dict(qtaim_json_loc, n_atoms=n_atoms, verbose=verbose):
+        return False
+
+    if not validate_bond_dict(
+        bond_json_loc, n_atoms=n_atoms, verbose=verbose, full_set=full_set
+    ):
         return False
 
     if verbose:
