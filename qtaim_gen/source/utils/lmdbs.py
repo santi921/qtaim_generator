@@ -9,12 +9,12 @@ from glob import glob
 from pymatgen.core import Molecule
 from pymatgen.analysis.graphs import MoleculeGraph
 
-from qtaim_gen.source.core.io import convert_inp_to_xyz
+from qtaim_gen.source.utils.io import convert_inp_to_xyz
 from qtaim_gen.source.core.parse_qtaim import (
     get_spin_charge_from_orca_inp,
     orca_inp_to_dict,
 )
-from qtaim_gen.source.core.bonds import get_bonds_from_rdkit
+from qtaim_gen.source.utils.bonds import get_bonds_from_rdkit
 
 
 def convert_inp_to_xyz(orca_path, output_path):

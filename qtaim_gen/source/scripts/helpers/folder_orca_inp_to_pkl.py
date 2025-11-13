@@ -12,8 +12,8 @@ import os, json
 import pandas as pd
 from pymatgen.core import Molecule
 from pymatgen.analysis.graphs import MoleculeGraph
-from qtaim_gen.source.core.bonds import get_bonds_from_rdkit
-from qtaim_gen.source.core.io import convert_inp_to_xyz
+from qtaim_gen.source.utils.bonds import get_bonds_from_rdkit
+from qtaim_gen.source.utils.io import convert_inp_to_xyz
 from tqdm import tqdm
 from qtaim_gen.source.core.parse_json import get_data
 

@@ -10,7 +10,7 @@ import os, json, ast
 import pandas as pd
 from pymatgen.core import Molecule
 from pymatgen.analysis.graphs import MoleculeGraph
-from qtaim_gen.source.core.bonds import get_bonds_from_rdkit
+from qtaim_gen.source.utils.bonds import get_bonds_from_rdkit
 
 
 def main():

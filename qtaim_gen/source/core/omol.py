@@ -1,7 +1,7 @@
 from pathlib import Path
 import os, stat, json, time, logging
 
-from qtaim_gen.source.core.validation import validation_checks
+from qtaim_gen.source.utils.validation import validation_checks
 
 from qtaim_gen.source.data.multiwfn import (
     charge_data,
@@ -29,7 +29,7 @@ from qtaim_gen.source.core.parse_multiwfn import (
     parse_fuzzy_real_space,
 )
 
-from qtaim_gen.source.core.utils import (
+from qtaim_gen.source.utils.io import (
     pull_ecp_dict,
     overwrite_molden_w_ecp,
     check_spin,

@@ -18,14 +18,14 @@ from qtaim_embed.utils.grapher import get_grapher
 
 from qtaim_embed.data.lmdb import serialize_dgl_graph, load_dgl_graph_from_serialized
 
-from qtaim_gen.source.core.lmdbs import (
+from qtaim_gen.source.utils.lmdbs import (
     get_elements_from_structure_lmdb,
     get_elements_from_structure_lmdb_folder_list,
     parse_config_gen_to_embed,
     parse_charge_data,
     parse_qtaim_data,
 )
-from qtaim_gen.source.core.embed import (
+from qtaim_gen.source.core.qtaim_embed import (
     split_graph_labels,
     get_include_exclude_indices,
     build_and_featurize_graph,

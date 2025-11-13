@@ -28,3 +28,4 @@
 *wfx
 *.lmdb
 *.lmdb-lock
+*settings.ini

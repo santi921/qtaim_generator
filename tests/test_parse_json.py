@@ -14,8 +14,8 @@ from qtaim_gen.source.core.parse_json import (
 
 from pymatgen.core import Molecule
 from pymatgen.analysis.graphs import MoleculeGraph
-from qtaim_gen.source.core.bonds import get_bonds_from_rdkit
-from qtaim_gen.source.core.io import convert_inp_to_xyz
+from qtaim_gen.source.utils.bonds import get_bonds_from_rdkit
+from qtaim_gen.source.utils.io import convert_inp_to_xyz
 
 
 root_folder = "./test_files/QTAIM/"

@@ -2,7 +2,7 @@
 
 import pandas as pd
 import os, argparse, stat, json, bson
-from qtaim_gen.source.core.io import write_input_file_from_pmg_molecule
+from qtaim_gen.source.utils.io import write_input_file_from_pmg_molecule
 from pathlib import Path
 
 

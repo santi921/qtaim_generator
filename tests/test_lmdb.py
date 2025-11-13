@@ -2,7 +2,7 @@ import lmdb
 import json
 import pickle as pkl
 
-from qtaim_gen.source.core.lmdbs import json_2_lmdbs, inp_files_2_lmdbs
+from qtaim_gen.source.utils.lmdbs import json_2_lmdbs, inp_files_2_lmdbs
 
 
 class TestLMDB:
