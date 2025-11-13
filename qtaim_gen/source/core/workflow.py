@@ -152,8 +152,7 @@ def run_folder_task(
     process imports the correct package layout and environment.
     """
     # this runs inside remote worker; import inside to ensure worker env has package
-    from qtaim_gen.source.scripts.full_runner_parsl import process_folder
-
+    
     return process_folder(
         folder, multiwfn_cmd=multiwfn_cmd, orca_2mkl_cmd=orca_2mkl_cmd, **kwargs
     )

@@ -3,7 +3,7 @@ import json
 from qtaim_gen.source.core.parse_qtaim import dft_inp_to_dict
 
 
-def validate_timing_dict(timing_json_loc, verbose=False, full_set=0, spin_tf=False):
+def validate_timing_dict(timing_json_loc: str, verbose: bool = False, full_set: int = 0, spin_tf: bool = False):
     """
     Basic check that the timing json file has the expected structure.
     Check that it has the keys 'total', 'qtaim', 'charge', 'bond', and 'fuzzy_full'.
@@ -27,7 +27,8 @@ def validate_timing_dict(timing_json_loc, verbose=False, full_set=0, spin_tf=Fal
 
     if full_set > 0:
         expected_keys += [
-            "vdd" "mbis",
+            "vdd",
+            "mbis",
             "chelpg",
             "ibsi_bond",
             "elf_fuzzy",
@@ -68,7 +69,7 @@ def validate_timing_dict(timing_json_loc, verbose=False, full_set=0, spin_tf=Fal
     return True
 
 
-def validate_bond_dict(bond_json_loc, verbose=False, full_set=0):
+def validate_bond_dict(bond_json_loc: str, verbose: bool = False, full_set: int = 0):
     """
     Basic check that the bond json file has the expected structure.
     Check that it has the keys 'fuzzy_bond', 'ibsi_bond', and 'laplacian_bond'.
@@ -96,7 +97,7 @@ def validate_bond_dict(bond_json_loc, verbose=False, full_set=0):
 
 
 def validate_fuzzy_dict(
-    fuzzy_json_loc, n_atoms=None, spin_tf=True, verbose=False, full_set=0
+    fuzzy_json_loc: str, n_atoms: int = None, spin_tf: bool = False, verbose: bool = False, full_set: int = 0
 ):
     """
     Basic check that the fuzzy json file has the expected structure.
@@ -135,7 +136,7 @@ def validate_fuzzy_dict(
     return True
 
 
-def validate_other_dict(other_dict_loc, verbose=False):
+def validate_other_dict(other_dict_loc: str, verbose: bool=False):
     """
     Basic check that the other json file has the expected structure.
     Check that it has the keys 'atoms', 'bonds', 'charges', and 'fuzzy'.
@@ -192,7 +193,7 @@ def validate_other_dict(other_dict_loc, verbose=False):
     return True
 
 
-def validate_charge_dict(charge_json_loc, n_atoms=None, verbose=False, full_set=0):
+def validate_charge_dict(charge_json_loc: str, n_atoms: int = None, verbose: bool = False, full_set: int = 0):
     """
     Basic check that the charge json file has the expected structure.
     Check that it has the keys 'mbis', 'adch', 'chelpg', 'becke',  'hirshfeld', 'cm5', 'bader', 'vdd'
@@ -231,7 +232,7 @@ def validate_charge_dict(charge_json_loc, n_atoms=None, verbose=False, full_set=
     return True
 
 
-def validate_qtaim_dict(qtaim_json_loc, n_atoms=None, verbose=False):
+def validate_qtaim_dict(qtaim_json_loc: str, n_atoms: int = None, verbose: bool = False):
     """
     Basic check that the qtaim json file has the expected structure
     Check that it has the keys 'atoms', 'bonds', 'charges', and 'fuzzy'.
@@ -300,12 +301,12 @@ def validation_checks(folder: str, verbose: bool = False, full_set: int = 0):
     # remove convert.in
     inp_files = [f for f in inp_files if f != "convert.in"]
 
-    # print("inp_files:", inp_files)
     if not inp_files:
         if verbose:
             print("No .inp file found in the folder.")
         return False
     inp_file = inp_files[0]  # take the first .inp file found
+    
     if verbose:
         print(f'Using input file "{inp_file}" for validation.')
 
@@ -316,7 +317,7 @@ def validation_checks(folder: str, verbose: bool = False, full_set: int = 0):
             print(f"Missing orca.inp file at {orca_inp_path}.")
         return False
     dft_dict = dft_inp_to_dict(orca_inp_path, parse_charge_spin=True)
-    # print(dft_dict)
+    #print("log dict: ", str(dft_dict))
     n_atoms = len(dft_dict["mol"])
     spin = dft_dict.get("spin", None)
     charge = dft_dict.get("charge", None)
@@ -328,7 +329,8 @@ def validation_checks(folder: str, verbose: bool = False, full_set: int = 0):
         spin_tf = True
     else:
         spin_tf = False
-
+    
+    
     timing_json_loc = os.path.join(folder, "timings.json")
     fuzzy_json_loc = os.path.join(folder, "fuzzy_full.json")
     other_dict_loc = os.path.join(folder, "other.json")
@@ -338,7 +340,10 @@ def validation_checks(folder: str, verbose: bool = False, full_set: int = 0):
     # bonding_json_loc = os.path.join(folder, "bonding.json")
 
     if not validate_timing_dict(
-        timing_json_loc, verbose=verbose, full_set=full_set, spin_tf=spin_tf
+        timing_json_loc, 
+        verbose=verbose, 
+        full_set=full_set, 
+        spin_tf=spin_tf
     ):
         return False
 

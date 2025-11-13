@@ -1,7 +1,8 @@
 from qtaim_gen.source.core.parse_qtaim import dft_inp_to_dict
+from typing import Dict, Sequence, Any, Union
 
 
-def write_input_file(folder, lines, n_atoms, options):
+def write_input_file(folder: str, lines: Sequence[str], n_atoms: int, options: Dict[str, Any]) -> None:
     """
     Write input file for Multiwfn.
     Takes:
@@ -29,7 +30,7 @@ def write_input_file(folder, lines, n_atoms, options):
         f.write("*\n")
 
 
-def convert_inp_to_xyz(orca_path, output_path):
+def convert_inp_to_xyz(orca_path: str, output_path: str) -> None:
     """
     Convert an ORCA input file to an XYZ file.
     Takes:
@@ -39,17 +40,17 @@ def convert_inp_to_xyz(orca_path, output_path):
         None
     """
 
-    mol_dict = dft_inp_to_dict(orca_path, parse_charge_spin=True)
+    mol_dict: Dict[str, Any] = dft_inp_to_dict(orca_path, parse_charge_spin=True)
 
-    n_atoms = len(mol_dict["mol"])
+    n_atoms: int = len(mol_dict["mol"])
 
-    xyz_str = "{}\n".format(n_atoms)
-    spin_charge_line = "{} {}\n".format(mol_dict["charge"], mol_dict["spin"])
+    xyz_str: str = "{}\n".format(n_atoms)
+    spin_charge_line: str = "{} {}\n".format(mol_dict["charge"], mol_dict["spin"])
     xyz_str += spin_charge_line
     # write the atom positions
     for ind, atom in mol_dict["mol"].items():
 
-        atom_line = "{} {} {} {}\n".format(
+        atom_line: str = "{} {} {} {}\n".format(
             atom["element"], atom["pos"][0], atom["pos"][1], atom["pos"][2]
         )
         xyz_str += atom_line
@@ -58,19 +59,19 @@ def convert_inp_to_xyz(orca_path, output_path):
         f.write(xyz_str)
 
 
-def write_input_file_from_pmg_molecule(folder, molecule, options):
+def write_input_file_from_pmg_molecule(folder: str, molecule: Union[Any, Dict[str, Any]], options: Dict[str, Any]) -> None:
     try:
         sites = molecule.sites
         charge = molecule.charge
         spin = molecule.spin_multiplicity
         pmg = True
-    except:
+    except Exception:
         sites = molecule["sites"]
         charge = molecule["charge"]
         spin = molecule["spin_multiplicity"]
         pmg = False
 
-    n_atoms = int(len(sites))
+    n_atoms: int = int(len(sites))
 
     # print(folder)
     with open(folder + "/input.in", "w") as f:

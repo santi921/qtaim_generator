@@ -203,9 +203,12 @@ def get_qtaim_descs(file="./CPprop_1157_1118_1158.txt", verbose=False):
     return ret_dict
 
 
-def get_spin_charge_from_orca_inp(dft_inp_file):
+def get_spin_charge_from_orca_inp(dft_inp_file: str) -> tuple:
     """
     helper to just get spin and charge from orca file
+    Takes
+        dft_inp_file (str): path to dft input file. inp file typically
+    returns: charge (int), spin (int)
     """
     with open(dft_inp_file) as f:
         lines = f.readlines()
@@ -220,10 +223,10 @@ def get_spin_charge_from_orca_inp(dft_inp_file):
             break
 
     charge, spin = header.split()[-2:]
-    return charge, spin
+    return int(charge), int(spin)
 
 
-def orca_inp_to_dict(dft_inp_file):
+def orca_inp_to_dict(dft_inp_file: str) -> dict:
     """
     helper function to parse dft input file.
     Takes
@@ -262,12 +265,14 @@ def orca_inp_to_dict(dft_inp_file):
     return atom_dict
 
 
-def dft_inp_to_dict(dft_inp_file, parse_charge_spin=False):
+def dft_inp_to_dict(dft_inp_file: str, parse_charge_spin : bool=False) -> dict:
     """
     helper function to parse dft input file.
     Takes
         dft_inp_file (str): path to dft input file
-    returns: dictionary of atom positions
+    returns: 
+        dictionary of atom positions
+    If parse_charge_spin is True, returns dictionary with charge, spin, and mol (atom dict)
     """
     atom_dict = {}
 
@@ -311,9 +316,9 @@ def dft_inp_to_dict(dft_inp_file, parse_charge_spin=False):
     return atom_dict
 
 
-def only_atom_cps(qtaim_descs):
+def only_atom_cps(qtaim_descs: dict) -> tuple:
     """
-    separates qtaim descriptors into atom and bond descriptors
+        separates qtaim descriptors into atom and bond descriptors
     """
     ret_dict = {}
     ret_dict_bonds = {}
@@ -325,7 +330,7 @@ def only_atom_cps(qtaim_descs):
     return ret_dict, ret_dict_bonds
 
 
-def find_cp(atom_dict, atom_cp_dict, margin=0.5):
+def find_cp(atom_dict: dict, atom_cp_dict:  dict, margin: float=0.5) -> tuple:
     """
     From a dictionary of atom ind, position, and element, find the corresponding cp in the atom_cp_dict
     Takes:

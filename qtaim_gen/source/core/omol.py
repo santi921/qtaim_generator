@@ -213,7 +213,9 @@ def create_jobs(
         if file.endswith(".wfn"):
             wfn_present = True
             file_wfn_search = os.path.join(folder, file)
-
+    
+    bool_gbw = False
+    
     for file in os.listdir(folder):
         if file.endswith(".gbw"):
             bool_gbw = True
@@ -314,8 +316,8 @@ def create_jobs(
                     data = "100\n2\n5\n{}\n0\nq\n".format(file_wfn)
                     f.write(data)
 
-            else:
-                logger.warning(f"Routine not recognized: {routine}")
+            #else:
+            #    logger.warning(f"Routine not recognized: {routine}")
 
         except Exception as e:
             logger.error(f"Error creating job for routine '{routine}': {e}")
@@ -569,6 +571,7 @@ def parse_multiwfn(folder, separate=False, debug=False, logger=None, full_set=0)
                                 atomic_dipole_dict_overall,
                                 dipole_info,
                             ) = parse_charge_doc(file_full_path)
+                            
                             data = {
                                 "charge": charge_dict_overall,
                                 "dipole": dipole_info,
@@ -645,8 +648,8 @@ def parse_multiwfn(folder, separate=False, debug=False, logger=None, full_set=0)
                         elif routine in list(fuzzy_dict.keys()):
                             data = parse_fuzzy_real_space(file_full_path)
 
-                        elif routine == "qtaim":
-                            pass
+                        #elif routine == "qtaim":
+                        #    pass
 
                         else:
                             logger.warning(
@@ -675,6 +678,7 @@ def parse_multiwfn(folder, separate=False, debug=False, logger=None, full_set=0)
                 if file2.endswith(".inp"):
                     inp_loc = os.path.join(folder, file2)
                     inp_orca = True
+                
                 if file2.endswith("input.in"):
                     inp_loc = os.path.join(folder, file2)
                     inp_orca = False
@@ -703,7 +707,7 @@ def parse_multiwfn(folder, separate=False, debug=False, logger=None, full_set=0)
     if separate:
         charge_routines = list(charge_dict.keys())
         bond_routines = list(bond_dict.keys())
-        fuzzy_routines = list(fuzzy_data(spin=spin_tf).keys())
+        fuzzy_routines = list(fuzzy_data(spin=spin_tf, full_set=full_set).keys())
         charge_dict_compiled = {}
         bond_dict_compiled = {}
         fuzzy_dict_compiled = {}
@@ -1018,14 +1022,20 @@ def gbw_analysis(
 
     print("... Parsing multiwfn output")
     # parse those jobs to jsons for 5 categories
-    parse_multiwfn(folder, separate=separate, debug=debug, logger=logger)
+    parse_multiwfn(
+        folder, 
+        separate=separate, 
+        debug=debug, 
+        logger=logger,
+        full_set=full_set
+    )
 
     if clean:
         #    # clean some of the mess
         logger.info("... Cleaning up")
         clean_jobs(folder, separate=separate, logger=logger, full_set=full_set)
 
-    tf_validation = validation_checks(folder)
+    tf_validation = validation_checks(folder, full_set=full_set, verbose=True)
     logger.info("gbw_analysis completed in folder: {}".format(folder))
     logger.info("Validation status: {}".format(tf_validation))
 
