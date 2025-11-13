@@ -265,12 +265,12 @@ def orca_inp_to_dict(dft_inp_file: str) -> dict:
     return atom_dict
 
 
-def dft_inp_to_dict(dft_inp_file: str, parse_charge_spin : bool=False) -> dict:
+def dft_inp_to_dict(dft_inp_file: str, parse_charge_spin: bool = False) -> dict:
     """
     helper function to parse dft input file.
     Takes
         dft_inp_file (str): path to dft input file
-    returns: 
+    returns:
         dictionary of atom positions
     If parse_charge_spin is True, returns dictionary with charge, spin, and mol (atom dict)
     """
@@ -318,7 +318,7 @@ def dft_inp_to_dict(dft_inp_file: str, parse_charge_spin : bool=False) -> dict:
 
 def only_atom_cps(qtaim_descs: dict) -> tuple:
     """
-        separates qtaim descriptors into atom and bond descriptors
+    separates qtaim descriptors into atom and bond descriptors
     """
     ret_dict = {}
     ret_dict_bonds = {}
@@ -330,7 +330,7 @@ def only_atom_cps(qtaim_descs: dict) -> tuple:
     return ret_dict, ret_dict_bonds
 
 
-def find_cp(atom_dict: dict, atom_cp_dict:  dict, margin: float=0.5) -> tuple:
+def find_cp(atom_dict: dict, atom_cp_dict: dict, margin: float = 0.5) -> tuple:
     """
     From a dictionary of atom ind, position, and element, find the corresponding cp in the atom_cp_dict
     Takes:

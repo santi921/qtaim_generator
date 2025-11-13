@@ -2,7 +2,9 @@ from qtaim_gen.source.core.parse_qtaim import dft_inp_to_dict
 from typing import Dict, Sequence, Any, Union
 
 
-def write_input_file(folder: str, lines: Sequence[str], n_atoms: int, options: Dict[str, Any]) -> None:
+def write_input_file(
+    folder: str, lines: Sequence[str], n_atoms: int, options: Dict[str, Any]
+) -> None:
     """
     Write input file for Multiwfn.
     Takes:
@@ -59,7 +61,9 @@ def convert_inp_to_xyz(orca_path: str, output_path: str) -> None:
         f.write(xyz_str)
 
 
-def write_input_file_from_pmg_molecule(folder: str, molecule: Union[Any, Dict[str, Any]], options: Dict[str, Any]) -> None:
+def write_input_file_from_pmg_molecule(
+    folder: str, molecule: Union[Any, Dict[str, Any]], options: Dict[str, Any]
+) -> None:
     try:
         sites = molecule.sites
         charge = molecule.charge
