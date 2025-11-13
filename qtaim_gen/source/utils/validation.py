@@ -359,7 +359,7 @@ def validation_checks(folder: str, verbose: bool = False, full_set: int = 0):
     if not validate_fuzzy_dict(
         fuzzy_json_loc,
         n_atoms=n_atoms,
-        spin=spin_tf,
+        spin_tf=spin_tf,
         verbose=verbose,
         full_set=full_set,
     ):
@@ -374,7 +374,7 @@ def validation_checks(folder: str, verbose: bool = False, full_set: int = 0):
         return False
 
     if not validate_bond_dict(
-        bond_json_loc, n_atoms=n_atoms, verbose=verbose, full_set=full_set
+        bond_json_loc, verbose=verbose, full_set=full_set
     ):
         return False
 
