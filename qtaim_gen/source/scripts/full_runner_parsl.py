@@ -8,7 +8,10 @@ from typing import Optional, List
 import parsl
 from parsl.configs.local_threads import config  # or your config
 from qtaim_gen.source.core.workflow import run_folder_task
-
+from parsl.providers import LocalProvider
+from parsl.config import Config
+from parsl.executors import HighThroughputExecutor
+from parsl.executors.threads import ThreadPoolExecutor
 
 def main(argv: Optional[List[str]] = None) -> int:
     """CLI entry point for launching a batch of Parsl jobs.
@@ -28,15 +31,6 @@ def main(argv: Optional[List[str]] = None) -> int:
             "This script submits one job per folder listed in --job_file."
         ),
     )
-    # parser.add_argument(
-    #    "--overrun_running",
-    #    action="store_true",
-    #    help="overrun folders that are currently running (multiple .mwfn files)",
-    # )
-
-    # parser.add_argument(
-    #    "--OMP_STACKSIZE", type=str, default="64000000", help="set OMP_STACKSIZE environment variable"
-    # )
 
     parser.add_argument(
         "--debug",
@@ -96,8 +90,13 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
 
     parser.add_argument(
-        "--n_threads", type=int, default=4, help="number of threads to use"
+        "--n_threads", type=int, default=4, help="number of threads to use per job"
     )
+
+    parser.add_argument(
+        "--n_workers", type=int, default=4, help="number of workers total"
+    )
+
 
     parser.add_argument(
         "--full_set",
@@ -108,6 +107,10 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     parser.add_argument(
         "--overwrite", action="store_true", help="overwrite existing analysis files"
+    )
+
+    parser.add_argument(
+        "--move_results", action="store_true", help="move results to a separate folder"
     )
 
     args = parser.parse_args(argv)
@@ -123,7 +126,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     parse_only: bool = bool(getattr(args, "parse_only", False))
     num_jobs: int = int(getattr(args, "num_jobs", 1))
     n_threads: int = int(getattr(args, "n_threads", 4))
+    n_workers: int = int(getattr(args, "n_workers", 10))
     full_set: int = int(getattr(args, "full_set", 0))
+    move_results: bool = bool(getattr(args, "move_results", False))
     job_file: str = getattr(args, "job_file")
     dry_run: bool = bool(getattr(args, "dry_run", False))
     overwrite = bool(args.overwrite) if "overwrite" in args else False
@@ -176,9 +181,21 @@ def main(argv: Optional[List[str]] = None) -> int:
         print(f"Total folders listed: {len(folders)}")
         return 0
 
-    parsl.load(config)
+    
+    local_threads = Config(
+        executors=[
+            ThreadPoolExecutor(
+                max_threads=n_workers,
+                label='local_threads'
+                )
+        ]
+    )
+
+    parsl.clear()
+    parsl.load(local_threads)
+
     print("Parsl config loaded. Submitting jobs...")
-    print(config)
+    print(local_threads)
 
     # randomly sample num_jobs folders without replacement
     if num_jobs > len(folders):
@@ -208,16 +225,29 @@ def main(argv: Optional[List[str]] = None) -> int:
             restart=restart,
             debug=debug,
             preprocess_compressed=preprocess_compressed,
+            move_results=move_results,
         )
         for f in folders_run
     ]
 
-    for fut in futures:
-        res = fut.result()
-        print(res)
-
-    return 0
-
+    try:
+        # block until all done
+        for f in futures:
+            f.result()
+    finally:
+        # ensure we cleanup even on exceptions
+        try:
+            dfk = parsl.dfk()
+            if dfk is not None:
+                dfk.cleanup()   # shutdown workers/executors
+        except Exception as e:
+            # log warning, don't crash on cleanup failure
+            print("Warning: cleanup failed:", e)
+        # remove Parsl DFK from module so subsequent imports/config changes are possible
+        try:
+            parsl.clear()
+        except Exception:
+            pass
 
 if __name__ == "__main__":
     raise SystemExit(main())

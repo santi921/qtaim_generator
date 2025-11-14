@@ -5,7 +5,7 @@ import time
 from qtaim_gen.source.core.parse_qtaim import dft_inp_to_dict
 
 
-def pull_ecp_dict(orca_out):
+def pull_ecp_dict(orca_out: str) -> Dict[int, Dict[str, Union[str, float]]]:
     """
     Method to pull the ecp dictionary from the orca output file.
     Takes:
@@ -37,7 +37,7 @@ def pull_ecp_dict(orca_out):
     return dict_ecp
 
 
-def overwrite_molden_w_ecp(molden_file, dict_ecp):
+def overwrite_molden_w_ecp(molden_file: str, dict_ecp: Dict[int, Dict[str, Union[str, float]]]) -> None:
     """
     Method to overwrite the molden file with the ecp substitutions.
     Takes:
@@ -90,7 +90,7 @@ def overwrite_molden_w_ecp(molden_file, dict_ecp):
     os.rename(molden_file_temp, molden_file)
 
 
-def check_spin(folder):
+def check_spin(folder: str) -> bool:
     """
     Utility to find .inp file in folder and parse it to find if it's a doublet
     """
@@ -111,7 +111,7 @@ def check_spin(folder):
     return True
 
 
-def check_folder_writing(folder):
+def check_folder_writing(folder: str) -> float:
     """
     Utility to check how long ago any file in the folder was modified.
     Returns:
@@ -240,3 +240,24 @@ def write_input_file_from_pmg_molecule(
             )
         f.write("*\n")
 
+
+def check_results_exist(folder: str) -> bool:
+    """
+    Check if the results files exist in the folder.
+    Takes:
+        folder: folder to check
+    Returns:
+        bool: True if results files exist, False otherwise
+    """
+    required_files = [
+        "timings.json",
+        "qtaim.json",
+        "other.json",
+        "fuzzy_full.json",
+        "charge.json",
+    ]
+    for file in required_files:
+        file_check = os.path.join(folder, file)
+        if not os.path.exists(file_check) or os.path.getsize(file_check) == 0:
+            return False
+    return True

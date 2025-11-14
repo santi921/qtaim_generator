@@ -83,6 +83,10 @@ def main(argv=None):
         "--overwrite", action="store_true", help="overwrite existing analysis files"
     )
 
+    parser.add_argument(
+        "--move_results", action="store_true", help="move results to a separate folder"
+    )
+
     args = parser.parse_args(argv)
 
     overrun_running = bool(args.overrun_running) if "overrun_running" in args else False
@@ -99,6 +103,7 @@ def main(argv=None):
     n_threads = int(args.n_threads)
     full_set = int(args.full_set) if "full_set" in args else 0
     overwrite = bool(args.overwrite) if "overwrite" in args else False
+    move_results = bool(args.move_results) if "move_results" in args else False
     job_file = args.job_file
 
     # set env vars
@@ -180,6 +185,7 @@ def main(argv=None):
                     debug=debug,
                     logger=logging.getLogger("gbw_analysis"),
                     preprocess_compressed=preprocess_compressed,
+                    move_results=move_results,
                 )  # works!
             except Exception as e:
                 print(f"Error in gbw_analysis for {run_root}: {e}")

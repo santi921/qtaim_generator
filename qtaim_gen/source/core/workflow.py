@@ -52,11 +52,12 @@ def process_folder(
     overrun_running: bool = False,
     preprocess_compressed: bool = False,
     omp_stacksize: str = "64000000",
-    n_threads: int = 4,
+    n_threads: int = 3,
     overwrite: bool = False,
     separate: bool = True,
     orca_6: bool = True,
     full_set: bool = False,
+    move_results: bool = True,
 ) -> Dict[str, Any]:
     """Process a single folder and return a small status dict.
 
@@ -79,6 +80,7 @@ def process_folder(
 
     # remember current working directory and switch into the folder while processing
     orig_cwd: str = os.getcwd()
+
     try:
         os.chdir(folder)
         # pre-checks (idempotency)
@@ -105,8 +107,9 @@ def process_folder(
             result["status"] = "skipped"
             return result
         # set env
+        # set omp stacksize
         os.environ["OMP_STACKSIZE"] = omp_stacksize
-
+        
         # call the existing function (pass logger)
         t0: float = time.time()
         gbw_analysis(
@@ -124,6 +127,7 @@ def process_folder(
             logger=logger,
             full_set=full_set,
             preprocess_compressed=preprocess_compressed,
+            move_results=move_results
         )
         t1: float = time.time()
 

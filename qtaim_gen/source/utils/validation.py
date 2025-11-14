@@ -279,13 +279,14 @@ def validate_qtaim_dict(
     return True
 
 
-def validation_checks(folder: str, verbose: bool = False, full_set: int = 0):
+def validation_checks(folder: str, verbose: bool = False, full_set: int = 0, move_results: bool = True):
     """
     Run all validation checks on the json files in the given folder.
     Arguments:
         folder (str): Path to the folder containing the json files.
         verbose (bool): If True, print detailed validation messages.
         full_set (int): Level of calculation detail (0-baseline, 1-baseline, 2-full).
+        move_results (bool): Adjust if files have been moved during cleaning.
     Returns:
         bool: True if all validation checks pass, False otherwise.
     """
@@ -299,9 +300,16 @@ def validation_checks(folder: str, verbose: bool = False, full_set: int = 0):
         "bond.json",
     ]
     tf = True
+    
+    if move_results:
+        folder_check_res = os.path.join(folder, "generator")
+    else:
+        folder_check_res = folder
+
+
     for file in required_files:
-        if not os.path.exists(os.path.join(folder, file)):
-            print(f"Missing required file: {file}")
+        if not os.path.exists(os.path.join(folder_check_res, file)):
+            print(f"Missing required file: {os.path.join(folder_check_res, file)}")
             tf = False
 
     if not tf:
@@ -343,12 +351,12 @@ def validation_checks(folder: str, verbose: bool = False, full_set: int = 0):
     else:
         spin_tf = False
 
-    timing_json_loc = os.path.join(folder, "timings.json")
-    fuzzy_json_loc = os.path.join(folder, "fuzzy_full.json")
-    other_dict_loc = os.path.join(folder, "other.json")
-    charge_json_loc = os.path.join(folder, "charge.json")
-    qtaim_json_loc = os.path.join(folder, "qtaim.json")
-    bond_json_loc = os.path.join(folder, "bond.json")
+    timing_json_loc = os.path.join(folder_check_res, "timings.json")
+    fuzzy_json_loc = os.path.join(folder_check_res, "fuzzy_full.json")
+    other_dict_loc = os.path.join(folder_check_res, "other.json")
+    charge_json_loc = os.path.join(folder_check_res, "charge.json")
+    qtaim_json_loc = os.path.join(folder_check_res, "qtaim.json")
+    bond_json_loc = os.path.join(folder_check_res, "bond.json")
     # bonding_json_loc = os.path.join(folder, "bonding.json")
 
     if not validate_timing_dict(

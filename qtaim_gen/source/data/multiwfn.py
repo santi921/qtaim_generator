@@ -1,10 +1,12 @@
 """
 Helpers to generate the data strings for the multiwfn program
 """
+from typing import Optional, List
 
-
-def charge_data():
-    # old string with every charge method possible with a gbw
+def charge_data() -> str:
+    """
+    charge analysis data input - single jobs
+    """
     # string_ret = "7\n1\n1\nn\n2\n1\nn\n10\n0\nn\n11\n1\nn\n12\n1\nn\n0\n13\n1\nn\n0\n16\n1\nn\n18\n1\nn\n0\n19\nn\n20\n1\nn\n0\nq\n"
     string_ret = (
         "7\n1\n1\nn\n2\n1\nn\n10\n0\nn\n11\n1\nn\n13\n1\nn\n0\n20\n1\nn\n0\nq\n"
@@ -12,7 +14,12 @@ def charge_data():
     return string_ret
 
 
-def charge_data_dict(full_set=0):
+def charge_data_dict(full_set: int = 0) -> dict:
+    """
+    charge analysis data input - dictionary form
+    Takes full_set to decide which methods to include
+    Returns dictionary of method names to input strings
+    """
     # cut resp and chelpg and peoe
     string_dict = {}
 
@@ -32,12 +39,20 @@ def charge_data_dict(full_set=0):
     return string_dict
 
 
-def bond_order_data():  # separate out into dictionary
+def bond_order_data() -> str:  # separate out into dictionary
+    """
+    bond order data input - single job
+    """
     string_ret = "9\n7\nn\n8\nn\n10\n1\n1\n0\n0\nq\n"
     return string_ret
 
 
-def bond_order_dict(full_set: int = 0):
+def bond_order_dict(full_set: int = 0) -> dict:
+    """
+    bond order data input - dictionary form
+    Takes full_set to decide which methods to include
+    Returns dictionary of method names to input strings
+    """
     string_dict = {}
     string_dict["fuzzy_bond"] = "9\n7\nn\n0\nq\n"
 
@@ -50,7 +65,15 @@ def bond_order_dict(full_set: int = 0):
     return string_dict
 
 
-def fuzzy_data(spin: bool = True, full_set: int = 0):
+def fuzzy_data(spin: bool = True, full_set: int = 0) -> dict:
+    """
+    fuzzy analysis data input - multiple jobs
+    Takes:
+        spin: whether to include spin fuzzy analysis
+        full_set: level of calculation detail (0-baseline, 1-baseline+mbis/elf, 2-full)
+    Returns
+        dictionary of method names to input strings
+    """
     # string_ret = "15\n1\n1\n1\n2\n1\n3\n1\n9\n4\nn\n0\nq\n"
     # string_ret = "15\n1\n1\nn1\n2\n1\n3\n1\n9\n4\nn\n0\nq\n"
     string_dict = {}
@@ -75,12 +98,18 @@ def fuzzy_data(spin: bool = True, full_set: int = 0):
     return string_dict
 
 
-def other_data():
-    string_ret = "26\n3\na\nn\n3\nh\nn\n8\n0\n0\n12\n0\n-1\n2\n2\n0\n-1\n-1\nq\n"
+def other_data() -> str:
+    """
+    other properties - ellip, esp, lol, eta, e_loc, lagrangian
+    """
+    string_ret = "26\n3\na\nn\n3\nh\nn\n8\n0\n0\n12\n0\n-1\n2\n2\n0\n-  1\n-1\nq\n"
     return string_ret
 
 
-def qtaim_data(exhaustive=False):  # can work in one go
+def qtaim_data(exhaustive: bool = False) -> str:  # can work in one go
+    """
+    qtaim data - critical points search and analysis
+    """
     if exhaustive:
         string_ret = "2\n2\n3\n4\n5\n6\n-1\n-9\n8\n7\n0\n-10\nq\n"
     else:  # skips spherical search around atoms

@@ -1,7 +1,10 @@
 from pathlib import Path
 import os, stat, json, time, logging
+from typing import Optional, Dict, Any, List
+import subprocess
 
 from qtaim_gen.source.utils.validation import validation_checks
+from qtaim_gen.source.utils.io import check_results_exist
 
 from qtaim_gen.source.data.multiwfn import (
     charge_data,
@@ -49,12 +52,11 @@ ORDER_OF_OPERATIONS_separate = [
 ]
 
 
-def write_settings_file(mem=400000000, n_threads=4):
+def write_settings_file(folder: str, mem: int = 400000000, n_threads: int = 3) -> None:
     # get loc of qtaim_embed folder
     qtaim_embed_loc = str(Path(__file__).parent.parent.parent)
     old_path = qtaim_embed_loc + "/source/data/settings.ini"
     # copy old path to current path
-    new_path = "./settings.ini"
     # wwrite txt files line by line and add a line n_threads = str(n_threads) + "\n"
     # another line ompstacksize= str(mem) + "\n"
     with open(old_path, "r") as f:
@@ -64,9 +66,13 @@ def write_settings_file(mem=400000000, n_threads=4):
     last_lines = data.split("\n")[-3:]
     data = "\n".join(data.split("\n")[:-3])  # remove last line
 
+    new_path = str(Path(folder).joinpath("settings.ini"))
+    # if new_path exists remove it
+    if os.path.exists(new_path):
+        os.remove(new_path)
     with open(new_path, "w") as f:
         f.write(data)
-        f.write("  n_threads= {}\n".format(n_threads))
+        f.write("  nthreads= {}\n".format(n_threads))
         f.write("  ompstacksize= {}\n".format(mem))
         f.write(last_lines[0] + "\n")  # write last line
         f.write(last_lines[1] + "\n")  # write last line without newline
@@ -75,8 +81,12 @@ def write_settings_file(mem=400000000, n_threads=4):
 
 
 def write_conversion(
-    out_folder, read_file, overwrite=False, name="convert.in", orca_2mkl_cmd="orca_2mkl"
-):
+    out_folder: str,
+    read_file: str,
+    overwrite: bool = False,
+    name: str = "convert.in",
+    orca_2mkl_cmd: str = "orca_2mkl",
+) -> None:
     """
     Function to write a bash script that runs multiwfn on a given input file.
     Args:
@@ -114,15 +124,15 @@ def write_conversion(
 
 
 def write_multiwfn_exe(
-    out_folder,
-    read_file,
-    multi_wfn_cmd,
-    multiwfn_input_file,
-    convert_gbw=False,
-    overwrite=False,
-    mv_cpprop=False,
-    name="props.mfwn",
-):
+    out_folder: str,
+    read_file: str,
+    multi_wfn_cmd: str,
+    multiwfn_input_file: str,
+    convert_gbw: bool = False,
+    overwrite: bool = False,
+    mv_cpprop: bool = False,
+    name: str = "props.mfwn",
+) -> None:
     """
     Function to write a bash script that runs multiwfn on a given input file.
     Args:
@@ -174,14 +184,14 @@ def write_multiwfn_exe(
 
 
 def create_jobs(
-    folder,
-    multiwfn_cmd,
-    orca_2mkl_cmd,
-    separate=False,
-    debug=True,
-    logger=None,
-    full_set=0,
-):
+    folder: str,
+    multiwfn_cmd: str,
+    orca_2mkl_cmd: str,
+    separate: bool = False,
+    debug: bool = True,
+    logger: Optional[logging.Logger] = None,
+    full_set: int = 0,
+) -> None:
     """
     Create job files for multiwfn analysis
     Takes:
@@ -325,10 +335,10 @@ def create_jobs(
     # print(job_dict)
     for key, value in job_dict.items():
         try:
-            if key == "qtaim":
-                mv_cpprop = True
-            else:
-                mv_cpprop = False
+            #if key == "qtaim":
+            #    mv_cpprop = True
+            #else:
+            mv_cpprop = False
 
             if key == "charge_separate":
                 charge_dict = charge_data_dict(full_set=full_set)
@@ -389,21 +399,26 @@ def create_jobs(
 
 
 def run_jobs(
-    folder,
-    separate=False,
-    orca_6=True,
-    restart=False,
-    debug=False,
-    logger=None,
-    prof_mem=False,
-    full_set=0,
-):
+    folder: str,
+    separate: bool = False,
+    orca_6: bool = True,
+    restart: bool = False,
+    debug: bool = False,
+    logger: Optional[logging.Logger] = None,
+    prof_mem: bool = False,
+    full_set: int = 0,
+    move_results: bool = False,
+) -> None:
     """
     Run conversion and multiwfn jobs
     Takes:
         folder(str): folder to run jobs in
         separate(bool): whether to separate the analysis into different files
         logger(logging.Logger): logger to log messages
+        prof_mem(bool): whether to profile memory usage
+        full_set(int): whether to use full set of analysis (1) or minimal (0)
+        move_results(bool): whether to move results to a separate folder
+
     """
     if logger is None:
         logger = logging.getLogger("gbw_analysis")
@@ -439,9 +454,9 @@ def run_jobs(
             logger.error("No conversion script (convert.in) found in folder.")
             return
 
-        # run conversion script
+        # run conversion script using subprocess with explicit cwd
         try:
-            os.system("{}".format(conv_file))
+            subprocess.run(["bash", conv_file], cwd=folder, check=True)
         except Exception as e:
             logger.error(f"Error running conversion script: {e}")
 
@@ -450,7 +465,6 @@ def run_jobs(
                 molden_file = os.path.join(folder, file)
             if file.endswith("orca.out") or file.endswith("output.out"):
                 orca_out = os.path.join(folder, file)
-
         if not orca_6:
             try:
                 dict_ecp = pull_ecp_dict(orca_out)
@@ -468,8 +482,12 @@ def run_jobs(
     for order in order_of_operations:
         # if restart, check if timing file exists
         if restart:
-            if os.path.exists(os.path.join(folder, "timings.json")):
-                with open(os.path.join(folder, "timings.json"), "r") as f:
+            if move_results:
+                folder_check = os.path.join(folder, "generator")
+            else:
+                folder_check = folder
+            if os.path.exists(os.path.join(folder_check, "timings.json")):
+                with open(os.path.join(folder_check, "timings.json"), "r") as f:
                     timings = json.load(f)
                     if order in timings.keys():
                         continue
@@ -484,12 +502,11 @@ def run_jobs(
 
             # to replace
             logger.info(f"Process: {mfwn_file}")
-            # proc = subprocess.Popen(mfwn_file, stdout=subprocess.PIPE)
-            # proc = subprocess.Popen(mfwn_file, stdout=subprocess.PIPE, shell=True)
-            # proc = subprocess.Popen(["bash", mfwn_file], stdout=subprocess.PIPE)
-            # p = psutil.Process(proc.pid)
-
-            os.system(mfwn_file)
+            # run the multiwfn wrapper script with explicit cwd to avoid depending on process CWD
+            try:
+                subprocess.run(["bash", mfwn_file], cwd=folder, check=True)
+            except Exception as e:
+                logger.error(f"Error running {mfwn_file} via subprocess: {e}")
 
             end = time.time()
 
@@ -511,7 +528,13 @@ def run_jobs(
             logger.error(f"Error saving timings.json: {e}")
 
 
-def parse_multiwfn(folder, separate=False, debug=False, logger=None, full_set=0):
+def parse_multiwfn(
+    folder: str,
+    separate: bool = False,
+    debug: bool = False,
+    logger: Optional[logging.Logger] = None,
+    full_set: int = 0,
+) -> None:
     """
     Parse multiwfn output files to jsons and save them in folder
     Takes:
@@ -766,7 +789,13 @@ def parse_multiwfn(folder, separate=False, debug=False, logger=None, full_set=0)
     #    return compiled_dicts
 
 
-def clean_jobs(folder, separate=False, logger=None, full_set=0):
+def clean_jobs(
+    folder: str, 
+    separate: bool = False, 
+    logger: Optional[logging.Logger] = None, 
+    full_set: int = 0, 
+    move_results: bool = True
+) -> None:
     """
     Clean up the mess of files created by the analysis
     Takes:
@@ -779,7 +808,7 @@ def clean_jobs(folder, separate=False, logger=None, full_set=0):
         - all .out files that are not in the order of operations
         - all molden.input files
         - all convert.in files
-    """
+    """ 
     if logger is None:
         logger = logging.getLogger("gbw_analysis")
     logger.info("Cleaning up jobs in folder: {}".format(folder))
@@ -798,8 +827,8 @@ def clean_jobs(folder, separate=False, logger=None, full_set=0):
 
     txt_files = []
     txt_files = [i + ".txt" for i in order_of_operations] + ["convert.txt"]
-    txt_files += [i + ".out" for i in order_of_operations]
-
+    txt_files += [i + ".out" for i in order_of_operations] + ["convert.out"]
+    txt_files += [i for i in ["settings.ini", "convert.out", "convert.txt"]]
     # print all jobs ending in .mfwn
     for file in os.listdir(folder):
         try:
@@ -832,7 +861,46 @@ def clean_jobs(folder, separate=False, logger=None, full_set=0):
                     os.remove(os.path.join(folder, file))
                     logger.info(f"Removed {file}")
         except Exception as e:
-            logger.error(f"Error removing file {file}: {e}")
+            logger.info(f"Couldn't rm file {file}: {e}")
+
+
+    # move all results to a results folder
+    results_list = ["timings.json", "charge.json", "bond.json", "fuzzy_full.json", "qtaim.json", "other.json"]
+    if move_results:
+        results_folder = os.path.join(folder, "generator")
+        if not os.path.exists(results_folder):
+            os.mkdir(results_folder)
+
+        for file in os.listdir(folder):
+            if file in results_list:
+                # if file exists in results folder, merge the jsons
+                if os.path.exists(os.path.join(results_folder, file)):
+                    try:
+                        with open(os.path.join(folder, file), "r") as f:
+                            data_new = json.load(f)
+                        with open(os.path.join(results_folder, file), "r") as f:
+                            data_existing = json.load(f)
+                        # merge the two dicts
+                        if isinstance(data_existing, dict) and isinstance(data_new, dict):
+                            data_merged = {**data_existing, **data_new}
+                        else:
+                            data_merged = data_new  # if not dict, just overwrite
+                        with open(os.path.join(results_folder, file), "w") as f:
+                            json.dump(data_merged, f, indent=4)
+                        logger.info(f"Merged {file} into results folder")
+                        # remove the original file
+                        os.remove(os.path.join(folder, file))
+                    except Exception as e:
+                        logger.error(f"Error merging file {file}: {e}")
+                else:
+                    try:
+                        os.rename(
+                            os.path.join(folder, file),
+                            os.path.join(results_folder, file),
+                        )
+                        logger.info(f"Moved {file} to results folder")
+                    except Exception as e:
+                        logger.error(f"Error moving file {file}: {e}")
 
 
 def setup_logger(folder: str, name: str = "gbw_analysis") -> logging.Logger:
@@ -848,23 +916,24 @@ def setup_logger(folder: str, name: str = "gbw_analysis") -> logging.Logger:
 
 
 def gbw_analysis(
-    folder,
-    multiwfn_cmd,
-    orca_2mkl_cmd,
-    separate=True,
-    parse_only=False,
-    clean=True,
-    overwrite=True,
-    orca_6=True,
-    restart=False,
-    debug=False,
-    logger=None,
-    mem=400000000,
-    n_threads=4,
-    prof_mem=False,
-    preprocess_compressed=False,
-    full_set=0,
-):
+    folder: str,
+    multiwfn_cmd: str,
+    orca_2mkl_cmd: str,
+    separate: bool = True,
+    parse_only: bool = False,
+    clean: bool = True,
+    overwrite: bool = True,
+    orca_6: bool = True,
+    restart: bool = False,
+    debug: bool = False,
+    logger: Optional[logging.Logger] = None,
+    mem: int = 400000000,
+    n_threads: int = 4,
+    prof_mem: bool = False,
+    preprocess_compressed: bool = False,
+    full_set: int = 0,
+    move_results: bool = True,
+) -> None:
     """
     Run a full analysis on a folder of gbw files
     Takes:
@@ -884,6 +953,7 @@ def gbw_analysis(
         prof_mem(bool): whether to profile memory usage during the analysis
         preprocess_compressed(bool): whether to preprocess compressed files (not implemented yet)
         full_set(int): refined set of cheaper calcs or full set of analysis
+        move_results(bool): whether to move results to a single results folder after analysis
     Writes:
         - settings.ini file with memory and n_threads
         - jobs for conversion to wfn and multiwfn analysis
@@ -918,33 +988,42 @@ def gbw_analysis(
         else:
             logger.warning("No uncompressed files found - will attempt to uncompress")
         # skip if uncompressed files are present
+        
         if len(uncompressed_files) > 2:
-            # run unstd
+            # run unstd and extract in the target folder so resulting files land there
             for file in os.listdir(folder):
                 if file.endswith(".tar.zst") or file.endswith(".tgz"):
                     logger.info(f"Found compressed file: {file}")
                     zstd_file = file
-                    unstd_cmd = "unzstd -f {}".format(os.path.join(folder, zstd_file))
-                    os.system(unstd_cmd)
-                    # untar resulting file
+                    # run unzstd with cwd=folder so outputs land directly in folder
+                    try:
+                        subprocess.run(["unzstd", "-f", zstd_file], cwd=folder, check=True)
+                    except Exception as e:
+                        logger.error(f"Error running unzstd on {zstd_file}: {e}")
 
+                    # untar resulting file (tar filename is zstd_file with .tar)
                     if zstd_file.endswith(".tar.zst"):
-                        tar_cmd = "tar -xf {}".format(
-                            os.path.join(folder, zstd_file.replace(".tar.zst", ".tar"))
-                        )
+                        tar_file_name = zstd_file.replace(".tar.zst", ".tar")
+                        tar_cmd = ["tar", "-xf", tar_file_name]
+                    else:
+                        tar_file_name = zstd_file.replace(".tgz", ".tar")
+                        tar_cmd = ["tar", "-xf", tar_file_name]
 
-                    tar_file_out = zstd_file.replace(".tar.zst", ".tar").replace(
-                        ".tgz", ".tar"
-                    )
-                    # remove the tar file after extracting
-                    os.system(tar_cmd)
+                    tar_file_out = tar_file_name
+                    # extract tar in the folder
+                    try:
+                        subprocess.run(tar_cmd, cwd=folder, check=True)
+                    except Exception as e:
+                        logger.error(f"Error extracting tar {tar_file_name}: {e}")
+
                     # remove the tar file after extracting
                     if os.path.exists(os.path.join(folder, tar_file_out)):
                         logger.info(f"Removing tar file: {tar_file_out}")
                         os.remove(os.path.join(folder, tar_file_out))
-                    # mv orca.engrad, orca.out, orca.inp, orca.property.txt, orca_stderr
 
-                    for file2 in os.listdir("./"):
+                    # After extracting in-place (cwd=folder), expected files should be in folder
+                    found_any = False
+                    for file2 in os.listdir(folder):
                         if (
                             file2.startswith("orca.engrad")
                             or file2.startswith("orca.out")
@@ -953,48 +1032,51 @@ def gbw_analysis(
                             or file2.startswith("orca.property.txt")
                             or file2.startswith("orca_stderr")
                         ):
-                            logger.info(f"Moving {file2} to folder {folder}")
-                            os.rename(
-                                os.path.join("./", file2),
-                                os.path.join(
-                                    folder,
-                                    # zstd_file.replace(".tar.zst", "").replace(".tgz", ""),
-                                    file2,
-                                ),
-                            )
+                            logger.info(f"Found extracted file in folder: {file2}")
+                            found_any = True
+                    if not found_any:
+                        logger.warning(
+                            "No expected extracted files found in %s after extraction",
+                            folder,
+                        )
 
                 if file.endswith(".gbw.zstd0"):
                     logger.info(f"Found compressed gbw file: {file}")
                     zstd_file = file
                     gbw_file = zstd_file.replace(".zstd0", "")
-                    unstd_cmd = "unzstd {} -o {} -f".format(
-                        os.path.join(folder, zstd_file), os.path.join(folder, gbw_file)
-                    )
-                    os.system(unstd_cmd)
-
-    write_settings_file(mem=mem, n_threads=n_threads)
+                    # run unzstd to produce gbw_file inside folder
+                    try:
+                        subprocess.run(
+                            ["unzstd", "-o", gbw_file, "-f", zstd_file],
+                            cwd=folder,
+                            check=True,
+                        )
+                    except Exception as e:
+                        logger.error(f"Error running unzstd for gbw {zstd_file}: {e}")
 
     if restart:
         logger.info("Restarting from last step in timings.json")
         # check if the timings file exists
-        if not os.path.exists(os.path.join(folder, "timings.json")):
+        if not os.path.exists(os.path.join(folder, "timings.json")) and not os.path.exists(os.path.join(folder, "generator/timings.json")):
             logger.warning("No timings file found - starting from scratch!")
             restart = False
 
     # check if output already exists
     if not overwrite:
-        timings_loc = os.path.join(folder, "timings.json")
-        bond_loc = os.path.join(folder, "bond.json")
-        charge_loc = os.path.join(folder, "charge.json")
+        if move_results:
+            folder_check = os.path.join(folder, "generator")
+        else: 
+            folder_check = folder
 
-        tf_timings = os.path.exists(timings_loc) and os.path.getsize(timings_loc) > 0
-        tf_bond = os.path.exists(bond_loc) and os.path.getsize(bond_loc) > 0
-        tf_charge = os.path.exists(charge_loc) and os.path.getsize(charge_loc) > 0
-
-        # check that all files are not empty
-        if tf_timings and tf_bond and tf_charge:
+        if check_results_exist(folder_check):
             print("Output already exists")
+            tf_validation = validation_checks(folder, full_set=full_set, verbose=False, move_results=move_results)
+            logger.info("gbw_analysis completed in folder: {}".format(folder))
+            logger.info("Validation status: {}".format(tf_validation))
             return
+
+    write_settings_file(mem=mem, n_threads=n_threads, folder=folder)
+    
 
     if not parse_only:
         print("... Creating jobs")
@@ -1018,6 +1100,7 @@ def gbw_analysis(
             logger=logger,
             prof_mem=prof_mem,
             full_set=full_set,
+            move_results=move_results
         )
 
     print("... Parsing multiwfn output")
@@ -1029,9 +1112,9 @@ def gbw_analysis(
     if clean:
         #    # clean some of the mess
         logger.info("... Cleaning up")
-        clean_jobs(folder, separate=separate, logger=logger, full_set=full_set)
+        clean_jobs(folder, separate=separate, logger=logger, full_set=full_set, move_results=move_results)
 
-    tf_validation = validation_checks(folder, full_set=full_set, verbose=False)
+    tf_validation = validation_checks(folder, full_set=full_set, verbose=False, move_results=move_results)
     logger.info("gbw_analysis completed in folder: {}".format(folder))
     logger.info("Validation status: {}".format(tf_validation))
 
