@@ -7,7 +7,24 @@ import logging
 import random
 import argparse
 import resource
+import time
 from qtaim_gen.source.core.omol import gbw_analysis
+from typing import Optional, Dict, Any, List
+
+def setup_logger_for_folder(folder: str, name: str = "gbw_analysis") -> logging.Logger:
+    logger: logging.Logger = logging.getLogger(f"{name}-{folder}")
+    # Avoid duplicate handlers
+    if not logger.handlers:
+        logger.setLevel(logging.INFO)
+        fh: logging.FileHandler = logging.FileHandler(
+            os.path.join(folder, "gbw_analysis.log")
+        )
+        fmt: logging.Formatter = logging.Formatter(
+            "%(asctime)s - %(levelname)s - %(message)s"
+        )
+        fh.setFormatter(fmt)
+        logger.addHandler(fh)
+    return logger
 
 
 def main(argv=None):
@@ -81,6 +98,13 @@ def main(argv=None):
         "--run_root", type=str, help="absolute path to the folder to run analysis on"   
     )
 
+    parser.add_argument(
+        "--move_results_to_folder", type=str, help="absolute path to the folder to move results to", default=None
+    )
+    
+
+    
+
     args = parser.parse_args(argv)
 
     overrun_running = bool(args.overrun_running) if "overrun_running" in args else False
@@ -98,6 +122,7 @@ def main(argv=None):
     overwrite = bool(args.overwrite) if "overwrite" in args else False
     move_results = bool(args.move_results) if "move_results" in args else False
     run_root = args.run_root
+    move_results_to_folder = args.move_results_to_folder
 
     # set env vars
     resource.setrlimit(
@@ -106,26 +131,39 @@ def main(argv=None):
 
     run_root = args.run_root
 
+    result: Dict[str, Any] = {
+        "folder": run_root,
+        "status": "unknown",
+        "elapsed": None,
+        "error": None,
+    }
+    folder = os.path.abspath(run_root)
+    logger: logging.Logger = setup_logger_for_folder(folder)
+
     print(f"Selected folder: {run_root}")
     # check three states - not started, running, finished
     # check if there is a file called timings.json, qtaim.json, other.json, fuzzy_full,json, and charge.json
-    if (
-        os.path.exists(os.path.join(run_root, "timings.json"))
-        and os.path.exists(os.path.join(run_root, "qtaim.json"))
-        and os.path.exists(os.path.join(run_root, "other.json"))
-        and os.path.exists(os.path.join(run_root, "fuzzy_full.json"))
-        and os.path.exists(os.path.join(run_root, "charge.json"))
-        and not overwrite
-    ):
-        print(f"Skipping {run_root} - already processed")
-        return
+    outputs_present: bool = all(
+        os.path.exists(os.path.join(folder, fn))
+        for fn in (
+            "timings.json",
+            "qtaim.json",
+            "other.json",
+            "fuzzy_full.json",
+            "charge.json",
+        )
+    )
+    if outputs_present and not overwrite:
+        logger.info("Skipping %s: already processed", folder)
+        result["status"] = "skipped"
+        return result
 
     # check if there are multiple .*mwfn files
-    mwfn_files = [f for f in os.listdir(run_root) if f.endswith(".mwfn")]
-
+    mwfn_files: List[str] = [f for f in os.listdir(folder) if f.endswith(".mwfn")]
     if len(mwfn_files) > 1 and not overrun_running:
-        print(f"Skipping {run_root} - seems to be running already")
-        return
+        logger.info("Skipping %s: multiple mwfn files found", folder)
+        result["status"] = "skipped"
+        return result
 
     else:
         try:
@@ -135,6 +173,8 @@ def main(argv=None):
                 level=logging.INFO,
                 format="%(asctime)s - %(levelname)s - %(message)s",
             )
+
+            t0: float = time.time()
 
             gbw_analysis(
                 folder=run_root,
@@ -149,12 +189,39 @@ def main(argv=None):
                 full_set=full_set,
                 restart=restart,
                 debug=debug,
-                logger=logging.getLogger("gbw_analysis"),
+                logger=logger,
                 preprocess_compressed=preprocess_compressed,
                 move_results=move_results,
             )  # works!
-        except Exception as e:
-            print(f"Error in gbw_analysis for {run_root}: {e}")
+            t1: float = time.time()
+            result["elapsed"] = t1 - t0
+            result["status"] = "ok"
+            logger.info("Completed folder %s in %.2f s", folder, result["elapsed"])
+        
+            if move_results and move_results_to_folder is not None:
+                #dest_folder = os.path.join(move_results_to_folder, os.path.basename(run_root))
+                if not os.path.exists(move_results_to_folder):
+                    os.makedirs(move_results_to_folder)
+
+                for file_name in [
+                    "timings.json",
+                    "qtaim.json",
+                    "other.json",
+                    "fuzzy_full.json",
+                    "charge.json",
+                    "gbw_analysis.log",
+                ]:
+                    src_file = os.path.join(run_root, file_name)
+                    if os.path.exists(src_file):
+                        print(f"Moving {src_file} to {move_results_to_folder}")
+                        dest_file = os.path.join(move_results_to_folder, file_name)
+                        os.rename(src_file, dest_file)
+                        
+        except Exception as exc:
+            logger.exception("Error processing %s: %s", folder, exc)
+            result["status"] = "error"
+            result["error"] = str(exc)
+            return result
 
     pass
 

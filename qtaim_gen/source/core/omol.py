@@ -1117,6 +1117,9 @@ def gbw_analysis(
     tf_validation = validation_checks(folder, full_set=full_set, verbose=False, move_results=move_results)
     logger.info("gbw_analysis completed in folder: {}".format(folder))
     logger.info("Validation status: {}".format(tf_validation))
+    # move log file to results folder
+    
+    
 
 
 # /global/scratch/users/santiagovargas/gbws_cleaning_lean/ml_elytes/elytes_md_eqv2_electro_512_C3H8O_3_group_133_shell_0_0_1_1341

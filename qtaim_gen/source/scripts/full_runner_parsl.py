@@ -8,9 +8,7 @@ from typing import Optional, List
 import parsl
 from parsl.configs.local_threads import config  # or your config
 from qtaim_gen.source.core.workflow import run_folder_task
-from parsl.providers import LocalProvider
 from parsl.config import Config
-from parsl.executors import HighThroughputExecutor
 from parsl.executors.threads import ThreadPoolExecutor
 
 def main(argv: Optional[List[str]] = None) -> int:
