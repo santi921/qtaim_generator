@@ -989,7 +989,7 @@ def gbw_analysis(
             logger.warning("No uncompressed files found - will attempt to uncompress")
         # skip if uncompressed files are present
         
-        if len(uncompressed_files) > 2:
+        if len(uncompressed_files) < 2:
             # run unstd and extract in the target folder so resulting files land there
             for file in os.listdir(folder):
                 if file.endswith(".tar.zst") or file.endswith(".tgz"):
