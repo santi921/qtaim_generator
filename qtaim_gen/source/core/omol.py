@@ -996,18 +996,20 @@ def gbw_analysis(
                     logger.info(f"Found compressed file: {file}")
                     zstd_file = file
                     # run unzstd with cwd=folder so outputs land directly in folder
+                    
                     try:
                         subprocess.run(["unzstd", "-f", zstd_file], cwd=folder, check=True)
                     except Exception as e:
                         logger.error(f"Error running unzstd on {zstd_file}: {e}")
 
                     # untar resulting file (tar filename is zstd_file with .tar)
+                    
                     if zstd_file.endswith(".tar.zst"):
                         tar_file_name = zstd_file.replace(".tar.zst", ".tar")
-                        tar_cmd = ["tar", "-xf", tar_file_name]
+                        tar_cmd = ["tar", "-xf", tar_file_name, "--directory", folder]
                     else:
                         tar_file_name = zstd_file.replace(".tgz", ".tar")
-                        tar_cmd = ["tar", "-xf", tar_file_name]
+                        tar_cmd = ["tar", "-xf", tar_file_name, "--directory", folder]
 
                     tar_file_out = tar_file_name
                     # extract tar in the folder
