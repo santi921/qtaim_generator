@@ -1,19 +1,39 @@
-# (QTAIM) Generator
+# Generator
 
 <img src="https://github.com/santi921/qtaim_generator/blob/main/qtaim_gen/notebooks/TOC.png" width=50% height=50%>
 
-A simple package to perform QTAIM on molecules, reactions, and (soon) periodic systems. Uses QTAIM to define bonds in a system as well as define a rich set of descriptors for machine learning. With a few scripts you can get to generating QTAIM-informatics for analysis and machine learning tasks. Currently, this package supports BondNet(<a href="https://github.com/santi921/bondnet">BonDNet</a>) (for reaction-property predicton) and <a href="https://github.com/santi921/qtaim_embed">QTAIM-Embed</a> and ChemProp <a href="[https://github.com/santi921/qtaim_embed](https://github.com/chemprop/chemprop)">QTAIM-Embed</a> for molecular machine learning tasks. Note that the Chemprop implementation currently only supports atom-level QTAIM descriptors. 
-## Overview / Installation
-To get started you will need to decide a few things: 
-1) DFT Software: We currently have input file writers for Orca though creating custom writers for other software should be easy to integrate. For ORCA, we add a few options such a relativistic corrections and atom-specific basis sets. See the <a href="[https://github.com/santi921/qtaim_generator/blob/main/qtaim_gen/source/scripts/options_qm.json]">example JSON</a>  for more options 
-2) QTAIM software: The implementation with Critic2 works but is relatively experimental and we suggest you use Multiwfn as it yields a richer set of QTAIM features. 
-3) Level of theory: QTAIM is pretty resistant to low levels of theory. Take care, however, when your dataset contains metals (especially heavy metals where this assertion is  less tested). 
+A package to perform post-processing on molecules, reactions, and (soon) periodic systems. It's a wrapper around Multiwfn that handles high-throughput workflows and can compute a rich set of descriptors including QTAIM, partial charges, several bonding schemes, etc. I am currently overhauling the package away from being QTAIM-first and instead integrating many descriptors in tandem. I will be sticking with the JSON file format for QTAIM and the "full" feature implementations so running calculations will remain the same, gathering and parsing utilities for ML, however, will change. Here's a quick status about what is available for QTAIM/full at the moment:
+
+### QTAIM
+- [x] Reaction-level feature generation and processing
+- [x] Molecule-level feature generation and processing
+- [x] Post-processing to LMDBs in DGL for ML
+
+
+### Full
+- [x] Molecule-level feature generation and processing
+- [ ] Reaction-level feature generation and processing
+- [x] High-throughput runners using python MP
+- [x] High-throughput runners using parsl 
+- [ ] Post-processing to LMDBs for ML (ongoing)
+- [ ] Quacc integration (ongoing)
 
 
 Simply install this package by cloning the repo and running: 
 ```
 pip install -e .
 ```
+
+# Overview - QTAIM Usage
+
+We can use QTAIM to define bonds in a system as well as define a rich set of descriptors for machine learning. With a few scripts you can get to generating QTAIM-informatics for analysis and machine learning tasks. Currently, this package supports BondNet(<a href="https://github.com/santi921/bondnet">BonDNet</a>) (for reaction-property predicton) and <a href="https://github.com/santi921/qtaim_embed">QTAIM-Embed</a> and ChemProp <a href="[https://github.com/santi921/qtaim_embed](https://github.com/chemprop/chemprop)">QTAIM-Embed</a> for molecular machine learning tasks. Note that the Chemprop implementation currently only supports atom-level QTAIM descriptors. 
+
+## Overview
+To get started you will need to decide a few things: 
+1) DFT Software: We currently have input file writers for Orca though creating custom writers for other software should be easy to integrate. For ORCA, we add a few options such a relativistic corrections and atom-specific basis sets. See the <a href="[https://github.com/santi921/qtaim_generator/blob/main/qtaim_gen/source/scripts/options_qm.json]">example JSON</a>  for more options 
+2) QTAIM software: The implementation with Critic2 works but is relatively experimental and we suggest you use Multiwfn as it yields a richer set of QTAIM features. 
+3) Level of theory: QTAIM is pretty resistant to low levels of theory. Take care, however, when your dataset contains metals (especially heavy metals where this assertion is  less tested). 
+
 
 ## Usage
 Three scripts will be needed to generate QTAIM features readily formatted for your dataset. These scripts generate job files, run jobs, and parse outputs to a single json, respectively. For the following we will assume you have a properly formatted json/pickle/bson and will return to this later. 
@@ -50,6 +70,12 @@ Three scripts will be needed to generate QTAIM features readily formatted for yo
 
 ## Data Structure
 Jsons, pkls, and bson can all be parsed. 
+
+
+
+# Overview - Full Usage
+# TODO
+
 
  ## Citation 
  If you use this package please cite the following, thanks!
