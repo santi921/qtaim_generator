@@ -9,7 +9,7 @@ from parsl.executors.threads import ThreadPoolExecutor
 
 def alcf_config(
     threads_per_task: int = 8,
-    safety_factor: int = 1,
+    safety_factor: float = 1.0,
     threads_per_node: int = 256,
     n_jobs: int = 64,
     queue: str = "debug",

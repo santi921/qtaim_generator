@@ -129,8 +129,8 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     parser.add_argument(
         "--safety_factor",
-        type=int,
-        default=1,
+        type=float,
+        default=1.0,
         help="Safety factor for worker allocation. In local it's ratio between total workers and threads per job (HPC)",
     )
 
@@ -170,7 +170,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     type_runner: str = str(getattr(args, "type", "local"))
     queue: str = str(getattr(args, "queue", "debug"))
     timeout_hr: float = float(getattr(args, "timeout_hr", 0.5))
-    safety_factor: int = int(getattr(args, "safety_factor", 1))
+    safety_factor: float = float(getattr(args, "safety_factor", 1.0))
     n_nodes: int = int(getattr(args, "n_nodes", 1))
     # convert timeout_hr to str
     timeout_str: str = (
@@ -180,6 +180,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     if type_runner == "local":
         n_threads_per_job = max(1, int(n_threads // safety_factor))
         parsl_config = base_config(n_workers=n_threads)
+        
     else:
         parsl_config = alcf_config(
             queue=queue,
