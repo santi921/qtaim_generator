@@ -1,6 +1,7 @@
 import os
 from typing import Dict, Sequence, Any, Union
 import time
+import random
 
 from qtaim_gen.source.core.parse_qtaim import dft_inp_to_dict
 
@@ -263,3 +264,41 @@ def check_results_exist(folder: str) -> bool:
         if not os.path.exists(file_check) or os.path.getsize(file_check) == 0:
             return False
     return True
+
+
+def sample_lines(filename, n):
+    """
+    Uniformly sample n lines from a text file with an unknown but large number
+    of lines, using a two-pass approach.
+
+    Takes:
+        filename (str): Path to the text file.
+        n (int): Number of lines to sample.
+    Returns:
+        List[str]: List of n sampled lines.
+    """
+    # Pass 1: count lines
+    with open(filename, "r") as f:
+        total_lines = sum(1 for _ in f)
+
+    if n > total_lines:
+        raise ValueError(f"Requested {n} lines, but file has only {total_lines}")
+
+    # Choose n distinct line indices in C and sort them
+    chosen_indices = sorted(random.sample(range(total_lines), n))
+
+    samples = []
+    target_idx_pos = 0
+    target = chosen_indices[target_idx_pos]
+
+    # Pass 2: stream again and collect chosen lines
+    with open(filename, "r") as f:
+        for i, line in enumerate(f):
+            if i == target:
+                samples.append(line)
+                target_idx_pos += 1
+                if target_idx_pos == n:  # got all of them; stop early
+                    break
+                target = chosen_indices[target_idx_pos]
+
+    return samples

@@ -4,12 +4,13 @@ import signal
 import random
 import argparse
 import parsl
+
 from typing import Optional, List
 import resource
 
 from qtaim_gen.source.core.workflow import run_folder_task
 from qtaim_gen.source.utils.parsl_configs import alcf_config, base_config
-
+from qtaim_gen.source.utils.io import sample_lines
 
 should_stop = False
 
@@ -180,7 +181,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     if type_runner == "local":
         n_threads_per_job = max(1, int(n_threads // safety_factor))
         parsl_config = base_config(n_workers=n_threads)
-        
+
     else:
         parsl_config = alcf_config(
             queue=queue,
@@ -212,9 +213,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     if not os.path.exists(job_file):
         print(f"Error: job_file '{job_file}' does not exist")
         return 2
-
-    # read folder file and randomly select a folder
     folder_file = os.path.join(job_file)
+
+    # this is more effecient, add when we're going prod
+    #folders = sample_lines(job_file, num_folders)
+    
+    # read folder file and randomly select a folder - THIS READS EVERY LINE
     with open(folder_file, "r") as f:
         folders = f.readlines()
     folders = [f.strip() for f in folders if f.strip()]  # remove empty lines
