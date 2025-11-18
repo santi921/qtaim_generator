@@ -11,6 +11,17 @@ from qtaim_gen.source.core.workflow import run_folder_task
 from parsl.config import Config
 from parsl.executors.threads import ThreadPoolExecutor
 
+
+import signal
+
+should_stop = False
+
+def handle_signal(signum, frame):
+    global should_stop
+    print(f"Received signal {signum}, initiating graceful shutdown...")
+    should_stop = True
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     """CLI entry point for launching a batch of Parsl jobs.
 
@@ -113,6 +124,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     args = parser.parse_args(argv)
 
+
     # Safely extract boolean flags and other values using getattr
     # overrun_running: bool = bool(getattr(args, "overrun_running", False))
     restart: bool = bool(getattr(args, "restart", False))
@@ -135,6 +147,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     resource.setrlimit(
         resource.RLIMIT_STACK, (resource.RLIM_INFINITY, resource.RLIM_INFINITY)
     )
+
+    signal.signal(signal.SIGINT, handle_signal)
+    signal.signal(signal.SIGTERM, handle_signal)
+
     # set mem
     # Basic static checks before launching heavy work
     if not os.path.exists(job_file):
@@ -231,6 +247,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     try:
         # block until all done
         for f in futures:
+            if should_stop:
+                print("Graceful shutdown requested. Exiting before all jobs complete.")
+                break
             f.result()
     finally:
         # ensure we cleanup even on exceptions
