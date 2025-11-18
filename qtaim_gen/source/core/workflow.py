@@ -109,7 +109,7 @@ def process_folder(
         # set env
         # set omp stacksize
         os.environ["OMP_STACKSIZE"] = omp_stacksize
-        
+
         # call the existing function (pass logger)
         t0: float = time.time()
         gbw_analysis(
@@ -127,7 +127,7 @@ def process_folder(
             logger=logger,
             full_set=full_set,
             preprocess_compressed=preprocess_compressed,
-            move_results=move_results
+            move_results=move_results,
         )
         t1: float = time.time()
 

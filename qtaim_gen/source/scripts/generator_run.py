@@ -11,6 +11,7 @@ import time
 from qtaim_gen.source.core.omol import gbw_analysis
 from typing import Optional, Dict, Any, List
 
+
 def setup_logger_for_folder(folder: str, name: str = "gbw_analysis") -> logging.Logger:
     logger: logging.Logger = logging.getLogger(f"{name}-{folder}")
     # Avoid duplicate handlers
@@ -74,7 +75,6 @@ def main(argv=None):
         help="only parse existing files, do not run analysis",
     )
 
-
     parser.add_argument(
         "--n_threads", type=int, default=4, help="number of threads to use"
     )
@@ -95,15 +95,15 @@ def main(argv=None):
     )
 
     parser.add_argument(
-        "--run_root", type=str, help="absolute path to the folder to run analysis on"   
+        "--run_root", type=str, help="absolute path to the folder to run analysis on"
     )
 
     parser.add_argument(
-        "--move_results_to_folder", type=str, help="absolute path to the folder to move results to", default=None
+        "--move_results_to_folder",
+        type=str,
+        help="absolute path to the folder to move results to",
+        default=None,
     )
-    
-
-    
 
     args = parser.parse_args(argv)
 
@@ -197,9 +197,9 @@ def main(argv=None):
             result["elapsed"] = t1 - t0
             result["status"] = "ok"
             logger.info("Completed folder %s in %.2f s", folder, result["elapsed"])
-        
+
             if move_results and move_results_to_folder is not None:
-                #dest_folder = os.path.join(move_results_to_folder, os.path.basename(run_root))
+                # dest_folder = os.path.join(move_results_to_folder, os.path.basename(run_root))
                 if not os.path.exists(move_results_to_folder):
                     os.makedirs(move_results_to_folder)
 
@@ -216,7 +216,7 @@ def main(argv=None):
                         print(f"Moving {src_file} to {move_results_to_folder}")
                         dest_file = os.path.join(move_results_to_folder, file_name)
                         os.rename(src_file, dest_file)
-                        
+
         except Exception as exc:
             logger.exception("Error processing %s: %s", folder, exc)
             result["status"] = "error"

@@ -1,7 +1,7 @@
 from quacc import change_settings
 from qtaim_gen.source.quacc.runner import GeneratorRunner
 from quacc import get_settings
-import os 
+import os
 import time
 import argparse
 
@@ -10,6 +10,7 @@ from parsl import python_app
 import parsl
 from parsl.config import Config
 import resource
+
 
 def acquire_lock(folder: str) -> bool:
     lockfile: str = os.path.join(folder, ".processing.lock")
@@ -28,7 +29,6 @@ def release_lock(folder: str) -> None:
         os.remove(lockfile)
     except FileNotFoundError:
         pass
-
 
 
 def process_folder(
@@ -59,19 +59,14 @@ def process_folder(
         dict with keys: folder, status ('ok'|'error'|'skipped'), elapsed, error (opt)
     """
 
-    #multiwfn_cmd = "/home/santiagovargas/dev/Multiwfn_3.8_dev_bin_Linux_noGUI/Multiwfn_noGUI"
-    #orca_2mkl_cmd = "/home/santiagovargas/orca_6_0_0/orca_2mkl"
+    # multiwfn_cmd = "/home/santiagovargas/dev/Multiwfn_3.8_dev_bin_Linux_noGUI/Multiwfn_noGUI"
+    # orca_2mkl_cmd = "/home/santiagovargas/orca_6_0_0/orca_2mkl"
     with change_settings(
-        {
-            "RESULTS_DIR": folder,
-            "SCRATCH_DIR": "./scratch/",
-            "CREATE_UNIQUE_DIR": False
-        }   
+        {"RESULTS_DIR": folder, "SCRATCH_DIR": "./scratch/", "CREATE_UNIQUE_DIR": False}
     ):
         print("Running GeneratorRunner test...")
         print("Setting RESULTS_DIR to ./results/ and SCRATCH_DIR to ./scratch/")
 
-        
         full_set = 0
         n_threads = 5
         clean = True
@@ -83,9 +78,9 @@ def process_folder(
         preprocess_compressed = False
         parse_only = False
         restart = False
-        dry_run= False
-        # print settings 
-        
+        dry_run = False
+        # print settings
+
         # not getting passed through
         print("Current SETTINGS:", get_settings())
         runner = GeneratorRunner(
@@ -108,7 +103,7 @@ def process_folder(
             dry_run=dry_run,
         )
         result = runner.run_cmd()
-        #print("Command Output:", result.stdout)
+        # print("Command Output:", result.stdout)
 
 
 @python_app
@@ -128,7 +123,6 @@ def run_folder_task_quacc(
     return process_folder(
         folder, multiwfn_cmd=multiwfn_cmd, orca_2mkl_cmd=orca_2mkl_cmd, **kwargs
     )
-
 
 
 def main(argv: Optional[List[str]] = None) -> int:
@@ -215,7 +209,6 @@ def main(argv: Optional[List[str]] = None) -> int:
         "--n_workers", type=int, default=4, help="number of workers total"
     )
 
-
     parser.add_argument(
         "--full_set",
         type=int,
@@ -299,14 +292,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         print(f"Total folders listed: {len(folders)}")
         return 0
 
-    
     local_threads = Config(
-        executors=[
-            ThreadPoolExecutor(
-                max_threads=n_workers,
-                label='local_threads'
-                )
-        ]
+        executors=[ThreadPoolExecutor(max_threads=n_workers, label="local_threads")]
     )
 
     parsl.clear()
@@ -357,7 +344,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         try:
             dfk = parsl.dfk()
             if dfk is not None:
-                dfk.cleanup()   # shutdown workers/executors
+                dfk.cleanup()  # shutdown workers/executors
         except Exception as e:
             # log warning, don't crash on cleanup failure
             print("Warning: cleanup failed:", e)
@@ -366,6 +353,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             parsl.clear()
         except Exception:
             pass
+
 
 if __name__ == "__main__":
     raise SystemExit(main())

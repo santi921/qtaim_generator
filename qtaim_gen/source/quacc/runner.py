@@ -8,7 +8,7 @@ from subprocess import PIPE, CompletedProcess, run
 from typing import TYPE_CHECKING, ClassVar, Final
 
 from quacc.runners._base import BaseRunner
-from quacc.runners.generic import GenericRunner 
+from quacc.runners.generic import GenericRunner
 from typing import Optional, Dict, Any, List
 from logging import getLogger
 from pathlib import Path
@@ -22,11 +22,12 @@ if TYPE_CHECKING:
 
 LOGGER = getLogger(__name__)
 
-#from quacc.runners.prep import calc_cleanup, terminate, calc_setup
+# from quacc.runners.prep import calc_cleanup, terminate, calc_setup
 
-#from ase.atoms import Atoms
-#from quacc.types import Filenames, SourceDirectory
+# from ase.atoms import Atoms
+# from quacc.types import Filenames, SourceDirectory
 from quacc import JobFailure, get_settings
+
 
 def calc_cleanup(
     atoms: Atoms | None, tmpdir: Path | str, job_results_dir: Path | str
@@ -115,7 +116,6 @@ class GeneratorRunner(BaseRunner):
         environment: Optional[Dict[str, str]] = None,
         copy_files: Optional[Dict[str, str]] = None,
         move_results_to_folder: Optional[str] = None,
-
     ) -> None:
         """
         Initialize the `GeneratorRunner` with the command and optional copy files and environment variables.
@@ -184,35 +184,35 @@ class GeneratorRunner(BaseRunner):
         results_folder = Path(self.folder) / "generator/"
         if self.move_results:
             copy_files = {
-                self.folder : [
-                    "input.gbw", 
-                    "input.gbw", 
-                    "input.in", 
+                self.folder: [
+                    "input.gbw",
+                    "input.gbw",
+                    "input.in",
                     "gbw_analysis.log",
-                    ],
-                results_folder : [
-                    "timing.json", 
-                    "bond.json", 
+                ],
+                results_folder: [
+                    "timing.json",
+                    "bond.json",
+                    "fuzzy_full.json",
+                    "qtaim.json",
+                    "other.json",
+                    "charge.json",
+                ],
+            }
+        else:
+            copy_files = {
+                self.folder: [
+                    "input.gbw",
+                    "input.gbw",
+                    "input.in",
+                    "gbw_analysis.log",
+                    "timing.json",
+                    "bond.json",
                     "fuzzy_full.json",
                     "qtaim.json",
                     "other.json",
                     "charge.json",
                 ]
-            }
-        else:
-            copy_files = {
-                self.folder : [
-                    "input.gbw", 
-                    "input.gbw", 
-                    "input.in", 
-                    "gbw_analysis.log",
-                    "timing.json", 
-                    "bond.json", 
-                    "fuzzy_full.json",
-                    "qtaim.json",
-                    "other.json",
-                    "charge.json",
-                    ]
             }
 
         self.setup(copy_files=copy_files)
@@ -234,48 +234,53 @@ class GeneratorRunner(BaseRunner):
             }
 
             command_post = [
-                self.command[0], 
-                "--run_root", str(self.tmpdir),
-                "--multiwfn_cmd", str(self.multiwfn_cmd),
-                "--orca_2mkl_cmd", str(self.orca_2mkl_cmd),
-                "--n_threads", str(self.n_threads),
-                "--run_root", str(self.folder), # might need to update this to quacc it up 
-                "--full_set", str(int(self.full_set)),
+                self.command[0],
+                "--run_root",
+                str(self.tmpdir),
+                "--multiwfn_cmd",
+                str(self.multiwfn_cmd),
+                "--orca_2mkl_cmd",
+                str(self.orca_2mkl_cmd),
+                "--n_threads",
+                str(self.n_threads),
+                "--run_root",
+                str(self.folder),  # might need to update this to quacc it up
+                "--full_set",
+                str(int(self.full_set)),
             ]
             if self.preprocess_compressed:
                 command_post.append("--preprocess_compressed")
-            
+
             if self.restart:
                 command_post.append("--restart")
-            
+
             if self.clean:
                 command_post.append("--clean")
-            
+
             if self.parse_only:
                 command_post.append("--parse_only")
-            
+
             if self.debug:
                 command_post.append("--debug")
-            
+
             if self.overrun_running:
                 command_post.append("--overrun_running")
-            
+
             if self.overwrite:
                 command_post.append("--overwrite")
-            
+
             if self.move_results:
                 command_post.append("--move_results")
-            
+
             if self.dry_run:
                 command_post.append("--dry-run")
 
-
-            #if self.move_results_to_folder is not None:
+            # if self.move_results_to_folder is not None:
             command_post.extend(["--move_results_to_folder", str(self.job_results_dir)])
-            
+
             print(command_post)
-            # print as str 
-            #print("Command to run:", " ".join(command_post))
+            # print as str
+            # print("Command to run:", " ".join(command_post))
             cmd_results = run(
                 command_post,
                 cwd=self.tmpdir,
@@ -289,8 +294,6 @@ class GeneratorRunner(BaseRunner):
 
         self.cleanup()
         return cmd_results
-
-
 
     def cleanup(self) -> None:
         """

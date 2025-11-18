@@ -1,41 +1,40 @@
-
 # config.py
 import os
 from parsl.config import Config
-
-# PBSPro is the right provider for ALCF:
 from parsl.providers import PBSProProvider
-# The high throughput executor is for scaling large single core/tile/gpu tasks on HPC system:
 from parsl.executors import HighThroughputExecutor
-# Use the MPI launcher to launch worker processes:
 from parsl.launchers import MpiExecLauncher
 from parsl.executors.threads import ThreadPoolExecutor
 
-def aurora_config(threads_per_task: int = 8) -> Config:
+
+def alcf_config(
+    threads_per_task: int = 8,
+    safety_factor: int = 1,
+    threads_per_node: int = 256,
+    n_jobs: int = 64,
+    queue: str = "debug",
+    timeout: str = "00:30:00",
+) -> Config:
     """
-    Returns a Parsl config optimized for running on the Aurora supercomputer at ALCF.
-    This config is designed to run one task per GPU tile, with each node having 12 tiles.
-    Each task will be assigned to a single tile, and the CPU affinity is set to optimize
-    performance on Aurora's architecture.
+    Returns a Parsl config optimized for running on ALCF.
 
     Returns:
-        Config: A Parsl configuration object for Aurora.
+        Config: A Parsl configuration object for ALCF.
     """
     # These options will run work in 1 node batch jobs run one at a time
-    
-    threads_per_node   = 256        # hardware threads
-    #threads_per_task   = 8          # each job uses 8 threads
-    workers_per_node   = threads_per_node // threads_per_task  # 256 // 8 = 32
 
-    nodes_per_job      = 1
-    max_num_jobs       = 64         # e.g., up to 64 nodes if scheduler allows
+    # threads_per_node   = 256        # hardware threads
+    # threads_per_task   = 8          # each job uses 8 threads
+    workers_per_node = int(
+        threads_per_node // threads_per_task // safety_factor
+    )  # 256 // 8 = 32
 
+    nodes_per_job = 1
 
     # The config will launch workers from this directory
     execute_dir = os.getcwd()
 
     aurora_single_tile_config = Config(
-
         executors=[
             HighThroughputExecutor(
                 label="htex_cpu",
@@ -48,7 +47,7 @@ def aurora_config(threads_per_task: int = 8) -> Config:
                     # Project name
                     account="generator",
                     # Submission queue
-                    queue="debug",
+                    queue=queue,
                     # Commands run before workers launched
                     # Make sure to activate your environment where Parsl is installed
                     worker_init=(
@@ -60,20 +59,25 @@ def aurora_config(threads_per_task: int = 8) -> Config:
                         f"export OPENBLAS_NUM_THREADS={threads_per_task}; "
                         f"export MKL_NUM_THREADS={threads_per_task}; "
                         f"export NUMEXPR_MAX_THREADS={threads_per_task}; "
+                        # set unlim memory
+                        "ulimit -s unlimited; "
+                        "export KMP_STACKSIZE=200M; "
                     ),
                     # Wall time for batch jobs
-                    walltime="00:30:00",
+                    walltime=timeout,
                     # Change if data/modules located on other filesystem
                     scheduler_options="#PBS -l filesystems=home:eagle",
                     # Ensures 1 manger per node; the manager will distribute work to its 12 workers, one per tile
-                    launcher=MpiExecLauncher(bind_cmd="--cpu-bind", overrides="--ppn 1"),
+                    launcher=MpiExecLauncher(
+                        bind_cmd="--cpu-bind", overrides="--ppn 1"
+                    ),
                     # options added to #PBS -l select aside from ncpus
                     select_options="",
                     # How many nodes per PBS job:
                     nodes_per_block=nodes_per_job,
                     # Min/max *concurrent* PBS jobs (blocks) that Parsl can have in the queue:
-                    min_blocks=0,
-                    max_blocks=max_num_jobs,
+                    min_blocks=1,
+                    max_blocks=n_jobs,
                     # Tell Parsl / PBS how many hardware threads there are per node:
                     cpus_per_node=threads_per_node,
                 ),
@@ -86,6 +90,7 @@ def aurora_config(threads_per_task: int = 8) -> Config:
     )
     return aurora_single_tile_config
 
+
 def base_config(n_workers: int = 4) -> Config:
     """Returns a basic Parsl config using local threads executor.
 
@@ -93,14 +98,6 @@ def base_config(n_workers: int = 4) -> Config:
         Config: A Parsl configuration object.
     """
     local_threads = Config(
-        executors=[
-            ThreadPoolExecutor(
-                max_threads=n_workers,
-                label='local_threads'
-                )
-        ]
+        executors=[ThreadPoolExecutor(max_threads=n_workers, label="local_threads")]
     )
     return local_threads
-
-
-

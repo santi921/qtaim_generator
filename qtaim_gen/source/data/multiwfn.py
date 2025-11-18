@@ -1,7 +1,9 @@
 """
 Helpers to generate the data strings for the multiwfn program
 """
+
 from typing import Optional, List
+
 
 def charge_data() -> str:
     """

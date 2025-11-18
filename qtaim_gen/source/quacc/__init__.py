@@ -1,2 +1,1 @@
 """Calculator for Generator calculations."""
-

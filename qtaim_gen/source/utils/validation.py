@@ -279,7 +279,9 @@ def validate_qtaim_dict(
     return True
 
 
-def validation_checks(folder: str, verbose: bool = False, full_set: int = 0, move_results: bool = True):
+def validation_checks(
+    folder: str, verbose: bool = False, full_set: int = 0, move_results: bool = True
+):
     """
     Run all validation checks on the json files in the given folder.
     Arguments:
@@ -300,12 +302,11 @@ def validation_checks(folder: str, verbose: bool = False, full_set: int = 0, mov
         "bond.json",
     ]
     tf = True
-    
+
     if move_results:
         folder_check_res = os.path.join(folder, "generator")
     else:
         folder_check_res = folder
-
 
     for file in required_files:
         if not os.path.exists(os.path.join(folder_check_res, file)):
@@ -381,9 +382,7 @@ def validation_checks(folder: str, verbose: bool = False, full_set: int = 0, mov
     if not validate_qtaim_dict(qtaim_json_loc, n_atoms=n_atoms, verbose=verbose):
         return False
 
-    if not validate_bond_dict(
-        bond_json_loc, verbose=verbose, full_set=full_set
-    ):
+    if not validate_bond_dict(bond_json_loc, verbose=verbose, full_set=full_set):
         return False
 
     if verbose:

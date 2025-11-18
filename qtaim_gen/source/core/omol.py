@@ -335,9 +335,9 @@ def create_jobs(
     # print(job_dict)
     for key, value in job_dict.items():
         try:
-            #if key == "qtaim":
+            # if key == "qtaim":
             #    mv_cpprop = True
-            #else:
+            # else:
             mv_cpprop = False
 
             if key == "charge_separate":
@@ -751,7 +751,7 @@ def parse_multiwfn(
                         elif routine in fuzzy_routines:
                             fuzzy_dict_compiled[routine] = json.load(f)[routine]
                     # remove the file
-                    #if os.path.exists(os.path.join(folder, file)):
+                    # if os.path.exists(os.path.join(folder, file)):
                     #    logger.info(f"Removing file: {file}")
                     #    os.remove(os.path.join(folder, file))
 
@@ -775,8 +775,8 @@ def parse_multiwfn(
             # if return_dicts:
             #    compiled_dicts["fuzzy_full"] = fuzzy_dict_compiled
             logger.info("Compiled fuzzy_full.json")
-    
-    # clean individual json files if separate AFTER compiled jsons writtent to ensure 
+
+    # clean individual json files if separate AFTER compiled jsons writtent to ensure
     # data isn't lost if error occurs
     if separate:
         for routine in combined_routines:
@@ -785,12 +785,13 @@ def parse_multiwfn(
                 os.remove(os.path.join(folder, file))
                 logger.info(f"Removed {file}")
 
+
 def clean_jobs(
-    folder: str, 
-    separate: bool = False, 
-    logger: Optional[logging.Logger] = None, 
-    full_set: int = 0, 
-    move_results: bool = True
+    folder: str,
+    separate: bool = False,
+    logger: Optional[logging.Logger] = None,
+    full_set: int = 0,
+    move_results: bool = True,
 ) -> None:
     """
     Clean up the mess of files created by the analysis
@@ -804,7 +805,7 @@ def clean_jobs(
         - all .out files that are not in the order of operations
         - all molden.input files
         - all convert.in files
-    """ 
+    """
     if logger is None:
         logger = logging.getLogger("gbw_analysis")
     logger.info("Cleaning up jobs in folder: {}".format(folder))
@@ -862,9 +863,15 @@ def clean_jobs(
         except Exception as e:
             logger.info(f"Couldn't rm file {file}: {e}")
 
-
     # move all results to a results folder
-    results_list = ["timings.json", "charge.json", "bond.json", "fuzzy_full.json", "qtaim.json", "other.json"]
+    results_list = [
+        "timings.json",
+        "charge.json",
+        "bond.json",
+        "fuzzy_full.json",
+        "qtaim.json",
+        "other.json",
+    ]
     if move_results:
         results_folder = os.path.join(folder, "generator")
         if not os.path.exists(results_folder):
@@ -880,7 +887,9 @@ def clean_jobs(
                         with open(os.path.join(results_folder, file), "r") as f:
                             data_existing = json.load(f)
                         # merge the two dicts
-                        if isinstance(data_existing, dict) and isinstance(data_new, dict):
+                        if isinstance(data_existing, dict) and isinstance(
+                            data_new, dict
+                        ):
                             data_merged = {**data_existing, **data_new}
                         else:
                             data_merged = data_new  # if not dict, just overwrite
@@ -987,7 +996,7 @@ def gbw_analysis(
         else:
             logger.warning("No uncompressed files found - will attempt to uncompress")
         # skip if uncompressed files are present
-        
+
         if len(uncompressed_files) < 2:
             # run unstd and extract in the target folder so resulting files land there
             for file in os.listdir(folder):
@@ -995,14 +1004,16 @@ def gbw_analysis(
                     logger.info(f"Found compressed file: {file}")
                     zstd_file = file
                     # run unzstd with cwd=folder so outputs land directly in folder
-                    
+
                     try:
-                        subprocess.run(["unzstd", "-f", zstd_file], cwd=folder, check=True)
+                        subprocess.run(
+                            ["unzstd", "-f", zstd_file], cwd=folder, check=True
+                        )
                     except Exception as e:
                         logger.error(f"Error running unzstd on {zstd_file}: {e}")
 
                     # untar resulting file (tar filename is zstd_file with .tar)
-                    
+
                     if zstd_file.endswith(".tar.zst"):
                         tar_file_name = zstd_file.replace(".tar.zst", ".tar")
                         tar_cmd = ["tar", "-xf", tar_file_name, "--directory", folder]
@@ -1058,7 +1069,9 @@ def gbw_analysis(
     if restart:
         logger.info("Restarting from last step in timings.json")
         # check if the timings file exists
-        if not os.path.exists(os.path.join(folder, "timings.json")) and not os.path.exists(os.path.join(folder, "generator/timings.json")):
+        if not os.path.exists(
+            os.path.join(folder, "timings.json")
+        ) and not os.path.exists(os.path.join(folder, "generator/timings.json")):
             logger.warning("No timings file found - starting from scratch!")
             restart = False
 
@@ -1066,18 +1079,19 @@ def gbw_analysis(
     if not overwrite:
         if move_results:
             folder_check = os.path.join(folder, "generator")
-        else: 
+        else:
             folder_check = folder
 
         if check_results_exist(folder_check):
             print("Output already exists")
-            tf_validation = validation_checks(folder, full_set=full_set, verbose=False, move_results=move_results)
+            tf_validation = validation_checks(
+                folder, full_set=full_set, verbose=False, move_results=move_results
+            )
             logger.info("gbw_analysis completed in folder: {}".format(folder))
             logger.info("Validation status: {}".format(tf_validation))
             return
 
     write_settings_file(mem=mem, n_threads=n_threads, folder=folder)
-    
 
     if not parse_only:
         print("... Creating jobs")
@@ -1101,7 +1115,7 @@ def gbw_analysis(
             logger=logger,
             prof_mem=prof_mem,
             full_set=full_set,
-            move_results=move_results
+            move_results=move_results,
         )
 
     print("... Parsing multiwfn output")
@@ -1113,14 +1127,20 @@ def gbw_analysis(
     if clean:
         #    # clean some of the mess
         logger.info("... Cleaning up")
-        clean_jobs(folder, separate=separate, logger=logger, full_set=full_set, move_results=move_results)
+        clean_jobs(
+            folder,
+            separate=separate,
+            logger=logger,
+            full_set=full_set,
+            move_results=move_results,
+        )
 
-    tf_validation = validation_checks(folder, full_set=full_set, verbose=False, move_results=move_results)
+    tf_validation = validation_checks(
+        folder, full_set=full_set, verbose=False, move_results=move_results
+    )
     logger.info("gbw_analysis completed in folder: {}".format(folder))
     logger.info("Validation status: {}".format(tf_validation))
     # move log file to results folder
-    
-    
 
 
 # /global/scratch/users/santiagovargas/gbws_cleaning_lean/ml_elytes/elytes_md_eqv2_electro_512_C3H8O_3_group_133_shell_0_0_1_1341

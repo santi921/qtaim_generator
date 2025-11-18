@@ -37,7 +37,9 @@ def pull_ecp_dict(orca_out: str) -> Dict[int, Dict[str, Union[str, float]]]:
     return dict_ecp
 
 
-def overwrite_molden_w_ecp(molden_file: str, dict_ecp: Dict[int, Dict[str, Union[str, float]]]) -> None:
+def overwrite_molden_w_ecp(
+    molden_file: str, dict_ecp: Dict[int, Dict[str, Union[str, float]]]
+) -> None:
     """
     Method to overwrite the molden file with the ecp substitutions.
     Takes:

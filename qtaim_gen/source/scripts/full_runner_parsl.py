@@ -12,6 +12,8 @@ from qtaim_gen.source.utils.parsl_configs import alcf_config, base_config
 
 
 should_stop = False
+
+
 def handle_signal(signum, frame):
     global should_stop
     print(f"Received signal {signum}, initiating graceful shutdown...")
@@ -94,9 +96,11 @@ def main(argv: Optional[List[str]] = None) -> int:
         help="Print what would run and exit without executing jobs (Parsl not invoked).",
     )
 
-
     parser.add_argument(
-        "--n_threads", type=int, default=4, help="number of threads to use per job, in local mode this is"
+        "--n_threads",
+        type=int,
+        default=4,
+        help="number of threads to use per job, in local mode this is total # threads, in HPC it is threads per job",
     )
 
     parser.add_argument(
@@ -113,7 +117,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument(
         "--move_results", action="store_true", help="move results to a separate folder"
     )
-    
+
     # parsl args
     parser.add_argument(
         "--queue", type=str, default="debug", help="PBS queue to use (HPC)"
@@ -124,23 +128,24 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
 
     parser.add_argument(
-        "--safety_factor", type=int, default=1, help="Safety factor for worker allocation. In local it's ratio between total workers and threads per job (HPC)"
+        "--safety_factor",
+        type=int,
+        default=1,
+        help="Safety factor for worker allocation. In local it's ratio between total workers and threads per job (HPC)",
     )
 
     parser.add_argument(
-        "--type_runner", type=str, default="local", help="local or hpc/qsub submission via parsl (HPC)"
+        "--type_runner",
+        type=str,
+        default="local",
+        help="local or hpc/qsub submission via parsl (HPC)",
     )
-
 
     parser.add_argument(
         "--n_nodes", type=int, default=1, help="number of nodes to use (HPC)"
     )
 
-
-
-
     args = parser.parse_args(argv)
-
 
     # Safely extract boolean flags and other values using getattr
     # overrun_running: bool = bool(getattr(args, "overrun_running", False))
@@ -159,25 +164,27 @@ def main(argv: Optional[List[str]] = None) -> int:
     dry_run: bool = bool(getattr(args, "dry_run", False))
     overwrite = bool(args.overwrite) if "overwrite" in args else False
 
-    # parsl args 
+    # parsl args
     type_runner: str = str(getattr(args, "type", "local"))
     queue: str = str(getattr(args, "queue", "debug"))
     timeout_hr: float = float(getattr(args, "timeout_hr", 0.5))
     safety_factor: int = int(getattr(args, "safety_factor", 1))
     n_nodes: int = int(getattr(args, "n_nodes", 1))
-    # convert timeout_hr to str 
-    timeout_str: str = f"{int(timeout_hr)}:{int((timeout_hr - int(timeout_hr)) * 60):02d}:00"
+    # convert timeout_hr to str
+    timeout_str: str = (
+        f"{int(timeout_hr)}:{int((timeout_hr - int(timeout_hr)) * 60):02d}:00"
+    )
     assert type_runner in ["local", "hpc"], "type_runner must be 'local' or 'hpc'"
     if type_runner == "local":
         n_threads_per_job = max(1, int(n_threads // safety_factor))
         parsl_config = base_config(n_workers=n_threads)
     else:
         parsl_config = alcf_config(
-            queue=queue, 
-            walltime=timeout_str, 
-            threads_per_task=n_threads, 
-            safety_factor=safety_factor, 
-            n_jobs=n_nodes
+            queue=queue,
+            walltime=timeout_str,
+            threads_per_task=n_threads,
+            safety_factor=safety_factor,
+            n_jobs=n_nodes,
         )
 
     ##################### Gather Configs for Parsl
@@ -241,7 +248,6 @@ def main(argv: Optional[List[str]] = None) -> int:
         print(f"Total folders listed: {len(folders)}")
         return 0
 
-
     # randomly sample num_folders folders without replacement
     if num_folders > len(folders):
         print(
@@ -287,7 +293,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         try:
             dfk = parsl.dfk()
             if dfk is not None:
-                dfk.cleanup()   # shutdown workers/executors
+                dfk.cleanup()  # shutdown workers/executors
         except Exception as e:
             # log warning, don't crash on cleanup failure
             print("Warning: cleanup failed:", e)
@@ -296,6 +302,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             parsl.clear()
         except Exception:
             pass
+
 
 if __name__ == "__main__":
     raise SystemExit(main())
