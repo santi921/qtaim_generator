@@ -60,7 +60,7 @@ def alcf_config(
                         f"export MKL_NUM_THREADS={threads_per_task}; "
                         f"export NUMEXPR_MAX_THREADS={threads_per_task}; "
                         # set unlim memory
-                        "ulimit -s unlimited; "
+                        "ulimit -s 300000; " # crux limit
                         "export KMP_STACKSIZE=200M; "
                     ),
                     # Wall time for batch jobs
