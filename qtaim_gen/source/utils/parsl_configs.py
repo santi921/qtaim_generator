@@ -56,6 +56,7 @@ def alcf_config(
                         "conda activate generator; "
                         f"cd {execute_dir}; "
                         f"export OMP_NUM_THREADS={threads_per_task}; "
+                        f"export OMP_STACKSIZE={threads_per_task*1024}; "
                         f"export OPENBLAS_NUM_THREADS={threads_per_task}; "
                         f"export MKL_NUM_THREADS={threads_per_task}; "
                         f"export NUMEXPR_MAX_THREADS={threads_per_task}; "
