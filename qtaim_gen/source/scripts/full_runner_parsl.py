@@ -146,7 +146,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
 
     args = parser.parse_args(argv)
-
+    # print(args)
+    for key, value in vars(args).items():
+        print(f"{key}: {value}")
     # Safely extract boolean flags and other values using getattr
     # overrun_running: bool = bool(getattr(args, "overrun_running", False))
     restart: bool = bool(getattr(args, "restart", False))
