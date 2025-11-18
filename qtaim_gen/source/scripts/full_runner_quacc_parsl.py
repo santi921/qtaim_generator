@@ -1,21 +1,134 @@
-#!/usr/bin/env python3
-import os
-import signal
-import random
+from quacc import change_settings
+from qtaim_gen.source.quacc.runner import GeneratorRunner
+from quacc import get_settings
+import os 
+import time
 import argparse
+
+from typing import Optional, Dict, Any, List
+from parsl import python_app
 import parsl
-from typing import Optional, List
+from parsl.config import Config
 import resource
 
-from qtaim_gen.source.core.workflow import run_folder_task
-from qtaim_gen.source.utils.parsl_configs import alcf_config, base_config
+def acquire_lock(folder: str) -> bool:
+    lockfile: str = os.path.join(folder, ".processing.lock")
+    try:
+        fd: int = os.open(lockfile, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        os.write(fd, str(os.getpid()).encode())
+        os.close(fd)
+        return True
+    except FileExistsError:
+        return False
 
 
-should_stop = False
-def handle_signal(signum, frame):
-    global should_stop
-    print(f"Received signal {signum}, initiating graceful shutdown...")
-    should_stop = True
+def release_lock(folder: str) -> None:
+    lockfile: str = os.path.join(folder, ".processing.lock")
+    try:
+        os.remove(lockfile)
+    except FileNotFoundError:
+        pass
+
+
+
+def process_folder(
+    folder: str,
+    multiwfn_cmd: Optional[str] = None,
+    orca_2mkl_cmd: Optional[str] = None,
+    parse_only: bool = False,
+    restart: bool = False,
+    clean: bool = False,
+    debug: bool = False,
+    overrun_running: bool = False,
+    preprocess_compressed: bool = False,
+    omp_stacksize: str = "64000000",
+    n_threads: int = 3,
+    overwrite: bool = False,
+    separate: bool = True,
+    orca_6: bool = True,
+    full_set: bool = False,
+    move_results: bool = True,
+) -> Dict[str, Any]:
+    """Process a single folder and return a small status dict.
+
+    Args:
+        folder: path to folder
+        ...: same flags you used before
+
+    Returns:
+        dict with keys: folder, status ('ok'|'error'|'skipped'), elapsed, error (opt)
+    """
+
+    #multiwfn_cmd = "/home/santiagovargas/dev/Multiwfn_3.8_dev_bin_Linux_noGUI/Multiwfn_noGUI"
+    #orca_2mkl_cmd = "/home/santiagovargas/orca_6_0_0/orca_2mkl"
+    with change_settings(
+        {
+            "RESULTS_DIR": folder,
+            "SCRATCH_DIR": "./scratch/",
+            "CREATE_UNIQUE_DIR": False
+        }   
+    ):
+        print("Running GeneratorRunner test...")
+        print("Setting RESULTS_DIR to ./results/ and SCRATCH_DIR to ./scratch/")
+
+        
+        full_set = 0
+        n_threads = 5
+        clean = True
+        move_results = True
+        overwrite = True
+        overrun_running = True
+        separate = True
+        debug = False
+        preprocess_compressed = False
+        parse_only = False
+        restart = False
+        dry_run= False
+        # print settings 
+        
+        # not getting passed through
+        print("Current SETTINGS:", get_settings())
+        runner = GeneratorRunner(
+            command="generator-single-runner",
+            folder=folder,
+            multiwfn_cmd=multiwfn_cmd,
+            orca_2mkl_cmd=orca_2mkl_cmd,
+            n_threads=n_threads,
+            parse_only=parse_only,
+            restart=restart,
+            clean=clean,
+            debug=debug,
+            overrun_running=overrun_running,
+            preprocess_compressed=preprocess_compressed,
+            overwrite=overwrite,
+            separate=separate,
+            orca_6=True,
+            full_set=full_set,
+            move_results=move_results,
+            dry_run=dry_run,
+        )
+        result = runner.run_cmd()
+        #print("Command Output:", result.stdout)
+
+
+@python_app
+def run_folder_task_quacc(
+    folder: str,
+    multiwfn_cmd: Optional[str] = None,
+    orca_2mkl_cmd: Optional[str] = None,
+    **kwargs: Any,
+) -> Dict[str, Any]:
+    """Parsl python_app wrapper that runs process_folder on a worker.
+
+    The real processing function is imported inside the app so the worker
+    process imports the correct package layout and environment.
+    """
+    # this runs inside remote worker; import inside to ensure worker env has package
+
+    return process_folder(
+        folder, multiwfn_cmd=multiwfn_cmd, orca_2mkl_cmd=orca_2mkl_cmd, **kwargs
+    )
+
 
 
 def main(argv: Optional[List[str]] = None) -> int:
@@ -75,10 +188,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
 
     parser.add_argument(
-        "--num_folders",
+        "--num_jobs",
         type=int,
         default=100,
-        help="number of folders to check and try to run",
+        help="number of jobs to check and try to run",
     )
 
     parser.add_argument(
@@ -102,6 +215,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         "--n_workers", type=int, default=4, help="number of workers total"
     )
 
+
     parser.add_argument(
         "--full_set",
         type=int,
@@ -117,32 +231,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         "--move_results", action="store_true", help="move results to a separate folder"
     )
 
-    parser.add_argument(
-        "--queue", type=str, default="debug", help="PBS queue to use"
-    )
-
-    parser.add_argument(
-        "--timeout_hr", type=float, default=0.5, help="Walltime for each PBS job"
-    )
-
-    parser.add_argument(
-        "--safety_factor", type=int, default=1, help="Safety factor for worker allocation"
-    )
-
-    parser.add_argument(
-        "--type_runner", type=str, default="local", help="local or hpc/qsub submission via parsl"
-    )
-
-
-    parser.add_argument(
-        "--n_nodes", type=int, default=1, help="number of nodes to use (for HPC submissions)"
-    )
-
-
-
-
     args = parser.parse_args(argv)
-
 
     # Safely extract boolean flags and other values using getattr
     # overrun_running: bool = bool(getattr(args, "overrun_running", False))
@@ -153,7 +242,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     debug: bool = bool(getattr(args, "debug", False))
     clean: bool = bool(getattr(args, "clean", False))
     parse_only: bool = bool(getattr(args, "parse_only", False))
-    num_folders: int = int(getattr(args, "num_folders", 100))
+    num_jobs: int = int(getattr(args, "num_jobs", 1))
     n_threads: int = int(getattr(args, "n_threads", 4))
     n_workers: int = int(getattr(args, "n_workers", 10))
     full_set: int = int(getattr(args, "full_set", 0))
@@ -162,43 +251,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     dry_run: bool = bool(getattr(args, "dry_run", False))
     overwrite = bool(args.overwrite) if "overwrite" in args else False
 
-    # parsl args 
-    type_runner: str = str(getattr(args, "type", "local"))
-    queue: str = str(getattr(args, "queue", "debug"))
-    timeout_hr: float = float(getattr(args, "timeout_hr", 0.5))
-    safety_factor: int = int(getattr(args, "safety_factor", 1))
-    n_nodes: int = int(getattr(args, "n_nodes", 1))
-    # convert timeout_hr to str 
-    timeout_str: str = f"{int(timeout_hr)}:{int((timeout_hr - int(timeout_hr)) * 60):02d}:00"
-    assert type_runner in ["local", "hpc"], "type_runner must be 'local' or 'hpc'"
-    if type_runner == "local":
-        parsl_config = base_config(n_workers=n_workers)
-    else:
-        parsl_config = alcf_config(
-            queue=queue, 
-            walltime=timeout_str, 
-            n_workers=n_workers, 
-            safety_factor=safety_factor, 
-            n_jobs=n_nodes
-        )
-
-    ##################### Gather Configs for Parsl
-    parsl.clear()
-    parsl.load(parsl_config)
-    print("Parsl config loaded. Submitting jobs...")
-    print(parsl_config)
-    ####################
-
-    # set env vars - this is only for the main process; workers set their own envs
-    if resource == "local":
-        resource.setrlimit(
-            resource.RLIMIT_STACK, (resource.RLIM_INFINITY, resource.RLIM_INFINITY)
-        )
-
-    # to handle early stops on the pilot job
-    signal.signal(signal.SIGINT, handle_signal)
-    signal.signal(signal.SIGTERM, handle_signal)
-
+    # set env vars
+    resource.setrlimit(
+        resource.RLIMIT_STACK, (resource.RLIM_INFINITY, resource.RLIM_INFINITY)
+    )
     # set mem
     # Basic static checks before launching heavy work
     if not os.path.exists(job_file):
@@ -243,16 +299,32 @@ def main(argv: Optional[List[str]] = None) -> int:
         print(f"Total folders listed: {len(folders)}")
         return 0
 
+    
+    local_threads = Config(
+        executors=[
+            ThreadPoolExecutor(
+                max_threads=n_workers,
+                label='local_threads'
+                )
+        ]
+    )
 
-    # randomly sample num_folders folders without replacement
-    if num_folders > len(folders):
+    parsl.clear()
+    parsl.load(local_threads)
+
+    print("Parsl config loaded. Submitting jobs...")
+    print(local_threads)
+
+    # randomly sample num_jobs folders without replacement
+    if num_jobs > len(folders):
         print(
-            f"Requested num_folders {num_folders} exceeds available folders {len(folders)}. Reducing to {len(folders)}."
+            f"Requested num_jobs {num_jobs} exceeds available folders {len(folders)}. Reducing to {len(folders)}."
         )
-        num_folders = len(folders)
+        num_jobs = len(folders)
+
     # shuffle folders
     random.shuffle(folders)
-    folders_run = folders[:num_folders]
+    folders_run = folders[:num_jobs]
 
     # Submit one Parsl job per selected folder. We do not pass a logger
     # into the remote app; each worker will create its own per-folder logger.
@@ -279,9 +351,6 @@ def main(argv: Optional[List[str]] = None) -> int:
     try:
         # block until all done
         for f in futures:
-            if should_stop:
-                print("Graceful shutdown requested. Exiting before all jobs complete.")
-                break
             f.result()
     finally:
         # ensure we cleanup even on exceptions

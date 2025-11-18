@@ -735,34 +735,25 @@ def parse_multiwfn(
         bond_dict_compiled = {}
         fuzzy_dict_compiled = {}
 
-        for file in os.listdir(folder):
-            for routine in charge_routines:
+        # remove double for loops by combining
+        directory_files = os.listdir(folder)
+        combined_routines = charge_routines + bond_routines + fuzzy_routines
+        for routine in combined_routines:
+            # json name
+            file = routine + ".json"
+            if file in directory_files:
                 if routine == file.split(".json")[0]:
                     with open(os.path.join(folder, file), "r") as f:
-                        charge_dict_compiled[routine] = json.load(f)
+                        if routine in charge_routines:
+                            charge_dict_compiled[routine] = json.load(f)
+                        elif routine in bond_routines:
+                            bond_dict_compiled[routine] = json.load(f)
+                        elif routine in fuzzy_routines:
+                            fuzzy_dict_compiled[routine] = json.load(f)[routine]
                     # remove the file
-                    if os.path.exists(os.path.join(folder, file)):
-                        logger.info(f"Removing file: {file}")
-                        os.remove(os.path.join(folder, file))
-
-            for routine in bond_routines:
-                if routine == file.split(".json")[0]:
-                    with open(os.path.join(folder, file), "r") as f:
-                        bond_dict_compiled[routine] = json.load(f)
-                    # remove the file
-                    if os.path.exists(os.path.join(folder, file)):
-                        logger.info(f"Removing file: {file}")
-                        os.remove(os.path.join(folder, file))
-
-            for routine in fuzzy_routines:
-                if routine == file.split(".json")[0]:
-                    with open(os.path.join(folder, file), "r") as f:
-                        fuzzy_dict_compiled[routine] = json.load(f)[routine]
-                        # print(fuzzy_dict_compiled)
-                    # remove the file
-                    if os.path.exists(os.path.join(folder, file)):
-                        logger.info(f"Removing file: {file}")
-                        os.remove(os.path.join(folder, file))
+                    #if os.path.exists(os.path.join(folder, file)):
+                    #    logger.info(f"Removing file: {file}")
+                    #    os.remove(os.path.join(folder, file))
 
         if charge_dict_compiled:
             with open(os.path.join(folder, "charge.json"), "w") as f:
@@ -784,10 +775,15 @@ def parse_multiwfn(
             # if return_dicts:
             #    compiled_dicts["fuzzy_full"] = fuzzy_dict_compiled
             logger.info("Compiled fuzzy_full.json")
-
-    # if return_dicts:
-    #    return compiled_dicts
-
+    
+    # clean individual json files if separate AFTER compiled jsons writtent to ensure 
+    # data isn't lost if error occurs
+    if separate:
+        for routine in combined_routines:
+            file = routine + ".json"
+            if file in directory_files:
+                os.remove(os.path.join(folder, file))
+                logger.info(f"Removed {file}")
 
 def clean_jobs(
     folder: str, 
@@ -844,6 +840,9 @@ def clean_jobs(
                     os.remove(os.path.join(folder, file))
                     logger.info(f"Removed {file}")
             if file.endswith(".molden.input"):
+                os.remove(os.path.join(folder, file))
+                logger.info(f"Removed {file}")
+            if file.endswith("settings.ini"):
                 os.remove(os.path.join(folder, file))
                 logger.info(f"Removed {file}")
             if file.endswith("convert.in"):

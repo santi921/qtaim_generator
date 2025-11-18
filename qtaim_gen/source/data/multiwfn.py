@@ -78,7 +78,7 @@ def fuzzy_data(spin: bool = True, full_set: int = 0) -> dict:
     # string_ret = "15\n1\n1\nn1\n2\n1\n3\n1\n9\n4\nn\n0\nq\n"
     string_dict = {}
     string_dict["becke_fuzzy_density"] = "15\n1\n1\n0\nq\n"
-    string_dict["hirsh_fuzzy_density"] = "15\n-1\n3\n1\n1\n1\n0\nq\n"
+    string_dict["hirsh_fuzzy_density"] = "15\n-1\n3\n1\n1\n1\n0\n0\nq\n"
 
     if spin:
         string_dict["hirsh_fuzzy_spin"] = "15\n-1\n3\n1\n1\n5\n0\nq\n"
@@ -88,7 +88,7 @@ def fuzzy_data(spin: bool = True, full_set: int = 0) -> dict:
 
     if full_set > 0:
         string_dict["elf_fuzzy"] = "15\n1\n9\n0\nq\n"
-        string_dict["mbis_fuzzy_density"] = "15\n-1\n5\n1\n1\n1\n0\nq\n"
+        string_dict["mbis_fuzzy_density"] = "15\n-1\n5\n1\n1\n1\n0\n0\nq\n"
 
     if full_set > 1:
         string_dict["laplacian_rho_fuzzy"] = "15\n1\n3\n0\nq\n"
