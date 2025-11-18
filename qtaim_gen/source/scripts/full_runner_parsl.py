@@ -94,19 +94,16 @@ def main(argv: Optional[List[str]] = None) -> int:
         help="Print what would run and exit without executing jobs (Parsl not invoked).",
     )
 
-    parser.add_argument(
-        "--n_threads", type=int, default=4, help="number of threads to use per job"
-    )
 
     parser.add_argument(
-        "--n_workers", type=int, default=4, help="number of workers total"
+        "--n_threads", type=int, default=4, help="number of threads to use per job, in local mode this is"
     )
 
     parser.add_argument(
         "--full_set",
         type=int,
         default=0,
-        help="level of calculation detail (0-baseline, 1-baseline)",
+        help="level of calculation detail (0-baseline, 1-modest, 2-full)",
     )
 
     parser.add_argument(
@@ -116,26 +113,27 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument(
         "--move_results", action="store_true", help="move results to a separate folder"
     )
-
+    
+    # parsl args
     parser.add_argument(
-        "--queue", type=str, default="debug", help="PBS queue to use"
+        "--queue", type=str, default="debug", help="PBS queue to use (HPC)"
     )
 
     parser.add_argument(
-        "--timeout_hr", type=float, default=0.5, help="Walltime for each PBS job"
+        "--timeout_hr", type=float, default=0.5, help="Walltime for each PBS job (HPC)"
     )
 
     parser.add_argument(
-        "--safety_factor", type=int, default=1, help="Safety factor for worker allocation"
+        "--safety_factor", type=int, default=1, help="Safety factor for worker allocation. In local it's ratio between total workers and threads per job (HPC)"
     )
 
     parser.add_argument(
-        "--type_runner", type=str, default="local", help="local or hpc/qsub submission via parsl"
+        "--type_runner", type=str, default="local", help="local or hpc/qsub submission via parsl (HPC)"
     )
 
 
     parser.add_argument(
-        "--n_nodes", type=int, default=1, help="number of nodes to use (for HPC submissions)"
+        "--n_nodes", type=int, default=1, help="number of nodes to use (HPC)"
     )
 
 
@@ -155,7 +153,6 @@ def main(argv: Optional[List[str]] = None) -> int:
     parse_only: bool = bool(getattr(args, "parse_only", False))
     num_folders: int = int(getattr(args, "num_folders", 100))
     n_threads: int = int(getattr(args, "n_threads", 4))
-    n_workers: int = int(getattr(args, "n_workers", 10))
     full_set: int = int(getattr(args, "full_set", 0))
     move_results: bool = bool(getattr(args, "move_results", False))
     job_file: str = getattr(args, "job_file")
@@ -172,12 +169,13 @@ def main(argv: Optional[List[str]] = None) -> int:
     timeout_str: str = f"{int(timeout_hr)}:{int((timeout_hr - int(timeout_hr)) * 60):02d}:00"
     assert type_runner in ["local", "hpc"], "type_runner must be 'local' or 'hpc'"
     if type_runner == "local":
-        parsl_config = base_config(n_workers=n_workers)
+        n_threads_per_job = max(1, int(n_threads // safety_factor))
+        parsl_config = base_config(n_workers=n_threads)
     else:
         parsl_config = alcf_config(
             queue=queue, 
             walltime=timeout_str, 
-            n_workers=n_workers, 
+            threads_per_task=n_threads, 
             safety_factor=safety_factor, 
             n_jobs=n_nodes
         )
@@ -256,6 +254,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     # Submit one Parsl job per selected folder. We do not pass a logger
     # into the remote app; each worker will create its own per-folder logger.
+
     futures = [
         run_folder_task(
             folder=f,
@@ -266,7 +265,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             overwrite=overwrite,
             orca_6=True,
             clean=clean,
-            n_threads=n_threads,
+            n_threads=n_threads_per_job,
             full_set=full_set,
             restart=restart,
             debug=debug,
