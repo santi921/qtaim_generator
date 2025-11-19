@@ -179,7 +179,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     root_omol_inputs: Optional[str] = getattr(args, "root_omol_inputs", None)
 
     # parsl args
-    type_runner: str = str(getattr(args, "type", "local"))
+    type_runner: str = str(getattr(args, "type_runner", "local"))
     queue: str = str(getattr(args, "queue", "debug"))
     timeout_hr: float = float(getattr(args, "timeout_hr", 0.5))
     safety_factor: float = float(getattr(args, "safety_factor", 1.0))
@@ -194,7 +194,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         parsl_config = base_config(n_workers=n_threads)
 
     else:
-        parsl_config = alcf_config(
+        parsl_config, n_threads_per_job = alcf_config(
             queue=queue,
             walltime=timeout_str,
             threads_per_task=n_threads,
@@ -239,7 +239,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     # make dir for results root 
     if root_omol_results:
         os.makedirs(root_omol_results, exist_ok=True)
-        
+
     # verify listed folders exist, warn & skip missing entries
     existing_folders = []
     missing = []

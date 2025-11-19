@@ -168,7 +168,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     overwrite = bool(args.overwrite) if "overwrite" in args else False
 
     # parsl args
-    type_runner: str = str(getattr(args, "type", "local"))
+    type_runner: str = str(getattr(args, "type_runner", "local"))
     queue: str = str(getattr(args, "queue", "debug"))
     timeout_hr: float = float(getattr(args, "timeout_hr", 0.5))
     safety_factor: float = float(getattr(args, "safety_factor", 1.0))
