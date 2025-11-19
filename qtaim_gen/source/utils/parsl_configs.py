@@ -52,7 +52,8 @@ def alcf_config(
                     # Make sure to activate your environment where Parsl is installed
                     worker_init=(
                         "module use /soft/modulefiles; "
-                        "module load conda/2025-06-03; "
+                        "module load conda; "
+                        "conda activate; "
                         "conda activate generator; "
                         f"cd {execute_dir}; "
                         f"export OMP_NUM_THREADS={threads_per_task}; "
