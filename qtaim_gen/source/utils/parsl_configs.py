@@ -53,7 +53,8 @@ def alcf_config(
                     worker_init=(
                         "module use /soft/modulefiles; "
                         "module load conda; "
-                        "conda activate; "
+                        #"conda activate; "
+                        "source /soft/datascience/conda/2025-06-03/bin/activate: "
                         "conda activate generator; "
                         f"cd {execute_dir}; "
                         f"export OMP_NUM_THREADS={threads_per_task}; "
