@@ -13,7 +13,7 @@ def alcf_config(
     threads_per_node: int = 256,
     n_jobs: int = 64,
     queue: str = "debug",
-    timeout: str = "00:30:00",
+    walltime: str = "00:30:00",
 ) -> Config:
     """
     Returns a Parsl config optimized for running on ALCF.
@@ -56,18 +56,18 @@ def alcf_config(
                         "conda activate generator; "
                         f"cd {execute_dir}; "
                         f"export OMP_NUM_THREADS={threads_per_task}; "
-                        f"export OMP_STACKSIZE={threads_per_task*2048}; "
-                        #f"export OPENBLAS_NUM_THREADS={threads_per_task}; "
+                        f"export OMP_STACKSIZE={threads_per_task*1024}; "
+                        f"export OPENBLAS_NUM_THREADS={threads_per_task}; "
                         f"export OMP_PROC_BIND=true; "
                         f"export OMP_PLACES=cores ; "
-                        #f"export MKL_NUM_THREADS={threads_per_task}; "
+                        f"export MKL_NUM_THREADS={threads_per_task}; "
                         #f"export NUMEXPR_MAX_THREADS={threads_per_task}; "
                         # set unlim memory
                         "ulimit -s 300000; " # crux limit
                         "export KMP_STACKSIZE=200M; "
                     ),
                     # Wall time for batch jobs
-                    walltime=timeout, 
+                    walltime=walltime, 
                     # Change if data/modules located on other filesystem
                     scheduler_options="#PBS -l filesystems=home:eagle",
                     # Ensures 1 manger per node; the manager will distribute work to its 12 workers, one per tile
@@ -91,7 +91,7 @@ def alcf_config(
         # so that they will restart in the next job
         retries=1,
     )
-    return aurora_single_tile_config
+    return aurora_single_tile_config, threads_per_node
 
 
 def base_config(n_workers: int = 4) -> Config:
