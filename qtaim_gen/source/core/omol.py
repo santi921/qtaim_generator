@@ -1069,9 +1069,12 @@ def gbw_analysis(
     if restart:
         logger.info("Restarting from last step in timings.json")
         # check if the timings file exists
-        if not os.path.exists(
-            os.path.join(folder, "timings.json")
-        ) and not os.path.exists(os.path.join(folder, "generator/timings.json")):
+        if move_results: 
+            timings_path = os.path.join(folder, "generator", "timings.json")
+        else:
+            timings_path = os.path.join(folder, "timings.json")
+        
+        if not os.path.exists(timings_path):
             logger.warning("No timings file found - starting from scratch!")
             restart = False
 
