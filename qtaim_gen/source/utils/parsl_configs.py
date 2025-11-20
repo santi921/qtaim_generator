@@ -51,22 +51,38 @@ def alcf_config(
                     # Commands run before workers launched
                     # Make sure to activate your environment where Parsl is installed
                     worker_init=(
+                                                    # Debugging
+                        "set -x; "  # print every command as it runs
+                        "echo '--- WORKER_INIT START ---'; "
+                        "hostname; "
+                        "date; "
                         "module use /soft/modulefiles; "
                         "source /soft/datascience/conda/2025-06-03/etc/profile.d/conda.sh; "
-                        #"module load conda; "
-                        #"conda activate; "
-                        "conda activate generator; "
-                        f"cd {execute_dir}; "
+                        "echo 'Loaded conda module'; "
+                        # Sanity check Python / Parsl
+                        "which python || { echo 'python not found'; exit 1; }; "
+                        "python -c 'import sys, parsl; "
+                        "print(\"PYOK\", sys.version); "
+                        "print(\"PARSL\", parsl.__version__)' || { echo 'Python/parsl import failed'; exit 1; }; "
+                        # Go to working dir
+                        f"cd {execute_dir} || {{ echo 'cd {execute_dir} failed'; exit 1; }}; "
+                        "pwd; "
                         f"export OMP_NUM_THREADS={threads_per_task}; "
                         f"export OMP_STACKSIZE={threads_per_task*1024}M; "
                         f"export OPENBLAS_NUM_THREADS={threads_per_task}; "
                         f"export OMP_PROC_BIND=true; "
                         f"export OMP_PLACES=cores ; "
                         f"export MKL_NUM_THREADS={threads_per_task}; "
-                        #f"export NUMEXPR_MAX_THREADS={threads_per_task}; "
-                        # set unlim memory
-                        "ulimit -s 300000; " # crux limit
+                        "ulimit -s 300000; " 
                         "export KMP_STACKSIZE=200M; "
+
+
+
+
+
+
+
+
                     ),
                     # Wall time for batch jobs
                     walltime=walltime, 
@@ -74,7 +90,6 @@ def alcf_config(
                     scheduler_options="#PBS -l filesystems=home:eagle",
                     # Ensures 1 manger per node; the manager will distribute work to its 12 workers, one per tile
                     launcher=MpiExecLauncher(
-                        bind_cmd="--cpu-bind", overrides="--ppn 1"
                     ),
                     # options added to #PBS -l select aside from ncpus
                     select_options="",

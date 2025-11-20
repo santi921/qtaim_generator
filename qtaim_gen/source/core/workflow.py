@@ -273,12 +273,20 @@ def process_folder_alcf(
             "orca.gbw.zstd0",
             "orca.gbw",
             "orca.tar.zst",
+            "orca.inp.orig", 
+            "orca.property.txt", 
+            "orca.out",
+            "orca.engrad", 
+            "orca_stderr"
         ]
         results_folder = os.path.join(folder, "generator")
         for fn in files_to_remove:
             fp = os.path.join(results_folder, fn)
             if os.path.exists(fp):
                 os.remove(fp)
+                # add log
+                logger.info("Removed file %s to save space", fp)
+
         return result
     
     except Exception as exc:
