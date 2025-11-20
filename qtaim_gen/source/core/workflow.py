@@ -277,11 +277,12 @@ def process_folder_alcf(
             "orca.property.txt", 
             "orca.out",
             "orca.engrad", 
-            "orca_stderr"
+            "orca_stderr",
+
         ]
         results_folder = os.path.join(folder, "generator")
         for fn in files_to_remove:
-            fp = os.path.join(results_folder, fn)
+            fp = os.path.join(folder, fn)
             if os.path.exists(fp):
                 os.remove(fp)
                 # add log
