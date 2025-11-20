@@ -52,8 +52,8 @@ def alcf_config(
                     # Make sure to activate your environment where Parsl is installed
                     worker_init=(
                         "module use /soft/modulefiles; "
-                        "source $HOME/venv/bin/activate; "
-                        "module load conda; "
+                        "source /soft/datascience/conda/2025-06-03/etc/profile.d/conda.sh; "
+                        #"module load conda; "
                         #"conda activate; "
                         "conda activate generator; "
                         f"cd {execute_dir}; "
