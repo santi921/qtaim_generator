@@ -204,10 +204,10 @@ def validate_other_dict(other_dict_loc: str, verbose: bool = False, logger: any 
         "ALIE_Overall_surface_area",
         "ALIE_Positive_surface_area",
         "ALIE_Negative_surface_area",
-        #"ESP_Overall_skewness",
-        "ESP_Positive_skewness",
-        #"ALIE_Overall_skewness",
-        "ALIE_Positive_skewness",
+        "ESP_Overall_skewness",
+        #"ESP_Positive_skewness",
+        "ALIE_Overall_skewness",
+        #"ALIE_Positive_skewness",
     ]
     for key in expected_keys:
         if key not in other_dict:

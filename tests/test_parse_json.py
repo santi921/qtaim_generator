@@ -63,8 +63,7 @@ def test_get_data():
         "bader_spin",
         "becke_atomic_dipole",
         "adch_dipole",
-        "ibsi_data",
-        "ALIE_Positive_skewness",
+        "ibsi_data"
     ]
 
     for key in test_keys:
@@ -74,6 +73,7 @@ def test_get_data():
     assert np.isclose(
         data_full["ALIE_Positive_skewness"][2], -0.22218, atol=1e-5
     ), "ALIE_Positive_skewness is not correct"
+
     assert np.isclose(
         data_full["extra_feat_atom_esp_nuc"][2][2], 1069176.567, atol=1e-5
     ), "extra_feat_atom_esp_nuc is not correct"

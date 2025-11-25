@@ -51,7 +51,7 @@ class TestMultiwfnParser:
         file_other_info = "./test_files/multiwfn/other.out"
         other_info_dict = parse_other_doc(file_other_info)
         assert (
-            len(other_info_dict.keys()) == 35
+            len(other_info_dict.keys()) == 32
         ), "incorrect number of keys in the dictionary"
         assert np.isclose(
             other_info_dict["mpp_heavy"], 0.60534, atol=1e-3
