@@ -5,7 +5,8 @@ from parsl.providers import PBSProProvider
 from parsl.executors import HighThroughputExecutor
 from parsl.launchers import MpiExecLauncher
 from parsl.executors.threads import ThreadPoolExecutor
-
+from parsl.addresses import address_by_hostname
+from parsl.monitoring.monitoring import MonitoringHub
 
 def alcf_config(
     threads_per_task: int = 8,
@@ -14,6 +15,7 @@ def alcf_config(
     n_jobs: int = 64,
     queue: str = "debug",
     walltime: str = "00:30:00",
+    monitoring: bool = False
 ) -> Config:
     """
     Returns a Parsl config optimized for running on ALCF.
@@ -33,6 +35,15 @@ def alcf_config(
 
     # The config will launch workers from this directory
     execute_dir = os.getcwd()
+
+    if monitoring:
+        monitoring = MonitoringHub(
+            hub_address=address_by_hostname(),
+            hub_port=55055,
+            monitoring_debug=False,
+        )
+    else:
+        monitoring = None
 
     aurora_single_tile_config = Config(
         executors=[
@@ -107,6 +118,7 @@ def alcf_config(
         # this is necessary if you have tasks that are interrupted by a PBS job ending
         # so that they will restart in the next job
         retries=1,
+        monitoring=monitoring,
     )
     return aurora_single_tile_config, threads_per_node
 

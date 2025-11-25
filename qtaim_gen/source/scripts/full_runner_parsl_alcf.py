@@ -200,6 +200,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             threads_per_task=n_threads,
             safety_factor=safety_factor,
             n_jobs=n_nodes,
+            monitoring=True
         )
 
     ##################### Gather Configs for Parsl
