@@ -104,7 +104,7 @@ def other_data() -> str:
     """
     other properties - ellip, esp, lol, eta, e_loc, lagrangian
     """
-    string_ret = "26\n3\na\nn\n3\nh\nn\n8\n0\n0\n12\n0\n-1\n2\n2\n0\n-  1\n-1\nq\n"
+    string_ret = "26\n3\na\nn\n3\nh\nn\n8\n0\n0\n12\n0\n-1\n2\n2\n0\n-1\n-1\nq\n"
     return string_ret
 
 
