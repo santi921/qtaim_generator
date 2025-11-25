@@ -863,54 +863,6 @@ def clean_jobs(
         except Exception as e:
             logger.info(f"Couldn't rm file {file}: {e}")
 
-    # move all results to a results folder
-    results_list = [
-        "timings.json",
-        "charge.json",
-        "bond.json",
-        "fuzzy_full.json",
-        "qtaim.json",
-        "other.json",
-    ]
-    if move_results:
-        results_folder = os.path.join(folder, "generator")
-        if not os.path.exists(results_folder):
-            os.mkdir(results_folder)
-
-        for file in os.listdir(folder):
-            if file in results_list:
-                # if file exists in results folder, merge the jsons
-                if os.path.exists(os.path.join(results_folder, file)):
-                    try:
-                        with open(os.path.join(folder, file), "r") as f:
-                            data_new = json.load(f)
-                        with open(os.path.join(results_folder, file), "r") as f:
-                            data_existing = json.load(f)
-                        # merge the two dicts
-                        if isinstance(data_existing, dict) and isinstance(
-                            data_new, dict
-                        ):
-                            data_merged = {**data_existing, **data_new}
-                        else:
-                            data_merged = data_new  # if not dict, just overwrite
-                        with open(os.path.join(results_folder, file), "w") as f:
-                            json.dump(data_merged, f, indent=4)
-                        logger.info(f"Merged {file} into results folder")
-                        # remove the original file
-                        os.remove(os.path.join(folder, file))
-                    except Exception as e:
-                        logger.error(f"Error merging file {file}: {e}")
-                else:
-                    try:
-                        os.rename(
-                            os.path.join(folder, file),
-                            os.path.join(results_folder, file),
-                        )
-                        logger.info(f"Moved {file} to results folder")
-                    except Exception as e:
-                        logger.error(f"Error moving file {file}: {e}")
-
-
 def setup_logger(folder: str, name: str = "gbw_analysis") -> logging.Logger:
     logger = logging.getLogger(f"{name}-{folder}")
     # Avoid duplicate handlers
@@ -1145,6 +1097,55 @@ def gbw_analysis(
             full_set=full_set,
             move_results=move_results,
         )
+
+
+    # move all results to a results folder
+    results_list = [
+        "timings.json",
+        "charge.json",
+        "bond.json",
+        "fuzzy_full.json",
+        "qtaim.json",
+        "other.json",
+    ]
+    
+    if move_results:
+        results_folder = os.path.join(folder, "generator")
+        if not os.path.exists(results_folder):
+            os.mkdir(results_folder)
+
+        for file in os.listdir(folder):
+            if file in results_list:
+                # if file exists in results folder, merge the jsons
+                if os.path.exists(os.path.join(results_folder, file)):
+                    try:
+                        with open(os.path.join(folder, file), "r") as f:
+                            data_new = json.load(f)
+                        with open(os.path.join(results_folder, file), "r") as f:
+                            data_existing = json.load(f)
+                        # merge the two dicts
+                        if isinstance(data_existing, dict) and isinstance(
+                            data_new, dict
+                        ):
+                            data_merged = {**data_existing, **data_new}
+                        else:
+                            data_merged = data_new  # if not dict, just overwrite
+                        with open(os.path.join(results_folder, file), "w") as f:
+                            json.dump(data_merged, f, indent=4)
+                        logger.info(f"Merged {file} into results folder")
+                        # remove the original file
+                        os.remove(os.path.join(folder, file))
+                    except Exception as e:
+                        logger.error(f"Error merging file {file}: {e}")
+                else:
+                    try:
+                        os.rename(
+                            os.path.join(folder, file),
+                            os.path.join(results_folder, file),
+                        )
+                        logger.info(f"Moved {file} to results folder")
+                    except Exception as e:
+                        logger.error(f"Error moving file {file}: {e}")
 
     tf_validation = validation_checks(
         folder, 
