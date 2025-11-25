@@ -1108,7 +1108,7 @@ def gbw_analysis(
         "qtaim.json",
         "other.json",
     ]
-    
+
     if move_results:
         results_folder = os.path.join(folder, "generator")
         if not os.path.exists(results_folder):
@@ -1134,7 +1134,8 @@ def gbw_analysis(
                             json.dump(data_merged, f, indent=4)
                         logger.info(f"Merged {file} into results folder")
                         # remove the original file
-                        os.remove(os.path.join(folder, file))
+                        if clean:
+                            os.remove(os.path.join(folder, file))
                     except Exception as e:
                         logger.error(f"Error merging file {file}: {e}")
                 else:
