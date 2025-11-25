@@ -735,7 +735,7 @@ def parse_other_doc(other_txt):
             "name": "Polar_surface_area",
             "data_ind": 7,
         },
-        "Overall skewness:": {"name": "Overall_skewness", "data_ind": -1},
+        #"Overall skewness:": {"name": "Overall_skewness", "data_ind": -1},
         "Positive skewness:": {"name": "Positive_skewness", "data_ind": -1},
         "Negative skewness:": {"name": "Negative_skewness", "data_ind": -1},
     }
