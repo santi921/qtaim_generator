@@ -15,7 +15,7 @@ def alcf_config(
     n_jobs: int = 64,
     queue: str = "debug",
     walltime: str = "00:30:00",
-    monitoring: bool = False
+    monitoring: bool = False,
 ) -> Config:
     """
     Returns a Parsl config optimized for running on ALCF.
@@ -61,8 +61,7 @@ def alcf_config(
                     queue=queue,
                     # Commands run before workers launched
                     # Make sure to activate your environment where Parsl is installed
-                    worker_init=(
-                                                    # Debugging
+                    worker_init=(                      # Debugging
                         "set -x; "  # print every command as it runs
                         "echo '--- WORKER_INIT START ---'; "
                         "hostname; "
@@ -86,14 +85,6 @@ def alcf_config(
                         f"export MKL_NUM_THREADS={threads_per_task}; "
                         "ulimit -s 300000; " 
                         "export KMP_STACKSIZE=200M; "
-
-
-
-
-
-
-
-
                     ),
                     # Wall time for batch jobs
                     walltime=walltime, 
@@ -118,7 +109,7 @@ def alcf_config(
         # this is necessary if you have tasks that are interrupted by a PBS job ending
         # so that they will restart in the next job
         retries=1,
-        monitoring=monitoring,
+        #monitoring=monitoring,
     )
     return aurora_single_tile_config, threads_per_node
 

@@ -166,6 +166,7 @@ def process_folder(
             # best-effort restore; if this fails, log to stderr
             print(f"Warning: failed to restore cwd to {orig_cwd}")
 
+
 def process_folder_alcf(
     folder: str,
     multiwfn_cmd: Optional[str] = None,
