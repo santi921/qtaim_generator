@@ -1088,11 +1088,18 @@ def gbw_analysis(
         if check_results_exist(folder_check):
             print("Output already exists")
             tf_validation = validation_checks(
-                folder, full_set=full_set, verbose=False, move_results=move_results
+                folder, 
+                full_set=full_set, 
+                verbose=False,
+                move_results=move_results
             )
-            logger.info("gbw_analysis completed in folder: {}".format(folder))
-            logger.info("Validation status: {}".format(tf_validation))
-            return
+            
+            # we might change level-of-analysis so only return if all requested analyses are present
+            if tf_validation:
+                logger.info("gbw_analysis completed in folder: {}".format(folder))
+                logger.info("Validation status: {}".format(tf_validation))
+                return
+            
 
     write_settings_file(mem=mem, n_threads=n_threads, folder=folder)
 
