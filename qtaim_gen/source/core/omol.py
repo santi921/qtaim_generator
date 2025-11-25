@@ -1091,7 +1091,8 @@ def gbw_analysis(
                 folder, 
                 full_set=full_set, 
                 verbose=False,
-                move_results=move_results
+                move_results=move_results,
+                logger=logger
             )
             
             # we might change level-of-analysis so only return if all requested analyses are present
@@ -1146,7 +1147,11 @@ def gbw_analysis(
         )
 
     tf_validation = validation_checks(
-        folder, full_set=full_set, verbose=False, move_results=move_results
+        folder, 
+        full_set=full_set, 
+        verbose=False, 
+        move_results=move_results, 
+        logger=logger
     )
     logger.info("gbw_analysis completed in folder: {}".format(folder))
     logger.info("Validation status: {}".format(tf_validation))

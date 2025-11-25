@@ -1,3 +1,4 @@
+from asyncio.log import logger
 import os
 import json
 from qtaim_gen.source.core.parse_qtaim import dft_inp_to_dict
@@ -280,7 +281,11 @@ def validate_qtaim_dict(
 
 
 def validation_checks(
-    folder: str, verbose: bool = False, full_set: int = 0, move_results: bool = True
+    folder: str,
+    verbose: bool = False, 
+    full_set: int = 0, 
+    move_results: bool = True,
+    logger: any = None
 ):
     """
     Run all validation checks on the json files in the given folder.
@@ -310,7 +315,10 @@ def validation_checks(
 
     for file in required_files:
         if not os.path.exists(os.path.join(folder_check_res, file)):
-            print(f"Missing required file: {os.path.join(folder_check_res, file)}")
+            if logger:
+                logger.error(f"Missing required file: {file} in folder: {folder_check_res}")
+            if verbose:
+                print(f"Missing required file: {file} in folder: {folder_check_res}")
             tf = False
 
     if not tf:
@@ -324,11 +332,16 @@ def validation_checks(
     inp_files = [f for f in inp_files if f != "convert.in"]
 
     if not inp_files:
+        if logger:
+            logger.error(f"No .inp file found in folder: {folder}.")
         if verbose:
-            print("No .inp file found in the folder.")
+            print(f"No .inp file found in folder: {folder}.")
         return False
     inp_file = inp_files[0]  # take the first .inp file found
 
+    if logger:
+        logger.info(f'Using input file "{inp_file}" for validation.')
+        
     if verbose:
         print(f'Using input file "{inp_file}" for validation.')
 
@@ -337,6 +350,8 @@ def validation_checks(
     if not os.path.exists(orca_inp_path):
         if verbose:
             print(f"Missing orca.inp file at {orca_inp_path}.")
+        if logger:
+            logger.error(f"Missing orca.inp file at {orca_inp_path}.")
         return False
     dft_dict = dft_inp_to_dict(orca_inp_path, parse_charge_spin=True)
     # print("log dict: ", str(dft_dict))
@@ -346,6 +361,8 @@ def validation_checks(
 
     if verbose:
         print(f"n_atoms: {n_atoms}, spin: {spin}, charge: {charge}")
+    if logger:
+        logger.info(f"n_atoms: {n_atoms}, spin: {spin}, charge: {charge}")
 
     if spin != 1:
         spin_tf = True
@@ -363,6 +380,8 @@ def validation_checks(
     if not validate_timing_dict(
         timing_json_loc, verbose=verbose, full_set=full_set, spin_tf=spin_tf
     ):
+        if logger:
+            logger.error(f"Timing json validation failed in folder: {folder}")
         return False
 
     if not validate_fuzzy_dict(
@@ -372,17 +391,27 @@ def validation_checks(
         verbose=verbose,
         full_set=full_set,
     ):
+        if logger:
+            logger.error(f"Fuzzy json validation failed in folder: {folder}")
         return False
     if not validate_other_dict(other_dict_loc, verbose=verbose):
+        if logger:
+            logger.error(f"Other json validation failed in folder: {folder}")
         return False
 
     if not validate_charge_dict(charge_json_loc, n_atoms=n_atoms, verbose=verbose):
+        if logger:
+            logger.error(f"Charge json validation failed in folder: {folder}")
         return False
 
     if not validate_qtaim_dict(qtaim_json_loc, n_atoms=n_atoms, verbose=verbose):
+        if logger:
+            logger.error(f"QTAIM json validation failed in folder: {folder}")
         return False
 
     if not validate_bond_dict(bond_json_loc, verbose=verbose, full_set=full_set):
+        if logger:
+            logger.error(f"Bond json validation failed in folder: {folder}")
         return False
 
     if verbose:
