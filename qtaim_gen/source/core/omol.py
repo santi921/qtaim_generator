@@ -491,7 +491,8 @@ def run_jobs(
                     timings = json.load(f)
                     if order in timings.keys():
                         continue
-
+        else: 
+            folder_check = folder
         if prof_mem:
             memory = {}
 
