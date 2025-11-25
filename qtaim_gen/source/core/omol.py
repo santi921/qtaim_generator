@@ -1111,6 +1111,7 @@ def gbw_analysis(
 
     if move_results:
         results_folder = os.path.join(folder, "generator")
+        
         if not os.path.exists(results_folder):
             os.mkdir(results_folder)
 
@@ -1127,13 +1128,16 @@ def gbw_analysis(
                         if isinstance(data_existing, dict) and isinstance(
                             data_new, dict
                         ):
+                            
                             data_merged = {**data_existing, **data_new}
                         else:
                             data_merged = data_new  # if not dict, just overwrite
                         with open(os.path.join(results_folder, file), "w") as f:
                             json.dump(data_merged, f, indent=4)
+                        
                         logger.info(f"Merged {file} into results folder")
                         # remove the original file
+                        
                         if clean:
                             os.remove(os.path.join(folder, file))
                     except Exception as e:

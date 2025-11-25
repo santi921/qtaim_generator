@@ -9,6 +9,7 @@ def validate_timing_dict(
     verbose: bool = False,
     full_set: int = 0,
     spin_tf: bool = False,
+    logger: any = None
 ):
     """
     Basic check that the timing json file has the expected structure.
@@ -54,12 +55,16 @@ def validate_timing_dict(
 
     for key in expected_keys:
         if key not in timing_dict:
+            if logger:
+                logger.error(f"Missing expected key '{key}' in timing json.")
             if verbose:
                 print(f"Missing expected key '{key}' in timing json.")
             return False
 
         # check that the times aren't tiny
         if timing_dict[key] < 1e-6 and key != "convert":
+            if logger:
+                logger.error(f"Timing for '{key}' is too small: {timing_dict[key]} seconds.")
             print(f"Timing for '{key}' is too small: {timing_dict[key]} seconds.")
             return
 
@@ -68,6 +73,8 @@ def validate_timing_dict(
             if key not in timing_dict:
                 if verbose:
                     print(f"Missing expected spin key '{key}' in timing json.")
+                if logger:
+                    logger.error(f"Missing expected spin key '{key}' in timing json.")
                 return False
 
     if verbose:
@@ -75,7 +82,11 @@ def validate_timing_dict(
     return True
 
 
-def validate_bond_dict(bond_json_loc: str, verbose: bool = False, full_set: int = 0):
+def validate_bond_dict(
+        bond_json_loc: str, 
+        verbose: bool = False, 
+        full_set: int = 0,
+        logger: any = None):
     """
     Basic check that the bond json file has the expected structure.
     Check that it has the keys 'fuzzy_bond', 'ibsi_bond', and 'laplacian_bond'.
@@ -94,6 +105,8 @@ def validate_bond_dict(bond_json_loc: str, verbose: bool = False, full_set: int 
         if key not in bond_dict:
             if verbose:
                 print(f"Missing expected key '{key}' in bond json.")
+            if logger:
+                logger.error(f"Missing expected key '{key}' in bond json.")
             return False
 
     if verbose:
@@ -108,6 +121,7 @@ def validate_fuzzy_dict(
     spin_tf: bool = False,
     verbose: bool = False,
     full_set: int = 0,
+    logger: any = None,
 ):
     """
     Basic check that the fuzzy json file has the expected structure.
@@ -133,11 +147,16 @@ def validate_fuzzy_dict(
 
     for key in expected_keys:
         if key not in fuzzy_dict:
-            raise ValueError(f"Missing expected key '{key}' in fuzzy json.")
+            if logger:
+                logger.error(f"Missing expected key '{key}' in fuzzy json.")
         if n_atoms is not None:
             if len(fuzzy_dict[key]) != n_atoms + 2:
                 if verbose:
                     print(
+                        f"Number of fuzzy points ({len(fuzzy_dict[key])}) does not match expected ({n_atoms})."
+                    )
+                if logger:
+                    logger.error(
                         f"Number of fuzzy points ({len(fuzzy_dict[key])}) does not match expected ({n_atoms})."
                     )
                 return False
@@ -146,7 +165,7 @@ def validate_fuzzy_dict(
     return True
 
 
-def validate_other_dict(other_dict_loc: str, verbose: bool = False):
+def validate_other_dict(other_dict_loc: str, verbose: bool = False, logger: any = None):
     """
     Basic check that the other json file has the expected structure.
     Check that it has the keys 'atoms', 'bonds', 'charges', and 'fuzzy'.
@@ -196,6 +215,10 @@ def validate_other_dict(other_dict_loc: str, verbose: bool = False):
                 print(
                     f"Warning: Missing expected key '{key}' in other json. This may not be critical."
                 )
+            if logger:
+                logger.warning(
+                    f"Missing expected key '{key}' in other json. This may not be critical."
+                )   
             return False
 
     if verbose:
@@ -204,7 +227,7 @@ def validate_other_dict(other_dict_loc: str, verbose: bool = False):
 
 
 def validate_charge_dict(
-    charge_json_loc: str, n_atoms: int = None, verbose: bool = False, full_set: int = 0
+    charge_json_loc: str, n_atoms: int = None, verbose: bool = False, full_set: int = 0, logger: any = None
 ):
     """
     Basic check that the charge json file has the expected structure.
@@ -225,17 +248,25 @@ def validate_charge_dict(
         if key not in charge_dict:
             if verbose:
                 print(f"Warning: Missing expected key '{key}' in charge json. ")
+            if logger:
+                logger.warning(f"Warning: Missing expected key '{key}' in charge json. ")
             return False
 
     for key in expected_keys:
         if "charge" not in charge_dict[key]:
             if verbose:
                 print(f"Missing 'charge' key in '{key}' of charge json.")
+            if logger:
+                logger.error(f"Missing 'charge' key in '{key}' of charge json.")
             return False
         if n_atoms is not None:
             if len(charge_dict[key]["charge"]) != n_atoms:
                 if verbose:
                     print(
+                        f"Number of charges in '{key}' ({len(charge_dict[key]['charge'])}) does not match expected ({n_atoms})."
+                    )
+                if logger:
+                    logger.error(
                         f"Number of charges in '{key}' ({len(charge_dict[key]['charge'])}) does not match expected ({n_atoms})."
                     )
                 return False
@@ -245,7 +276,7 @@ def validate_charge_dict(
 
 
 def validate_qtaim_dict(
-    qtaim_json_loc: str, n_atoms: int = None, verbose: bool = False
+    qtaim_json_loc: str, n_atoms: int = None, verbose: bool = False, logger: any = None
 ):
     """
     Basic check that the qtaim json file has the expected structure
@@ -270,6 +301,10 @@ def validate_qtaim_dict(
         if len(dict_ncps) != n_atoms:
             if verbose:
                 print(
+                    f"Number of nuclear critical points ({len(dict_ncps)}) does not match expected ({n_atoms})."
+                )
+            if logger:
+                logger.error(
                     f"Number of nuclear critical points ({len(dict_ncps)}) does not match expected ({n_atoms})."
                 )
             return False
@@ -390,26 +425,27 @@ def validation_checks(
         spin_tf=spin_tf,
         verbose=verbose,
         full_set=full_set,
+        logger=logger,
     ):
         if logger:
             logger.error(f"Fuzzy json validation failed in folder: {folder}")
         return False
-    if not validate_other_dict(other_dict_loc, verbose=verbose):
+    if not validate_other_dict(other_dict_loc, verbose=verbose, logger=logger):
         if logger:
             logger.error(f"Other json validation failed in folder: {folder}")
         return False
 
-    if not validate_charge_dict(charge_json_loc, n_atoms=n_atoms, verbose=verbose):
+    if not validate_charge_dict(charge_json_loc, n_atoms=n_atoms, verbose=verbose, logger=logger):
         if logger:
             logger.error(f"Charge json validation failed in folder: {folder}")
         return False
 
-    if not validate_qtaim_dict(qtaim_json_loc, n_atoms=n_atoms, verbose=verbose):
+    if not validate_qtaim_dict(qtaim_json_loc, n_atoms=n_atoms, verbose=verbose, logger=logger):
         if logger:
             logger.error(f"QTAIM json validation failed in folder: {folder}")
         return False
 
-    if not validate_bond_dict(bond_json_loc, verbose=verbose, full_set=full_set):
+    if not validate_bond_dict(bond_json_loc, verbose=verbose, full_set=full_set, logger=logger):
         if logger:
             logger.error(f"Bond json validation failed in folder: {folder}")
         return False
