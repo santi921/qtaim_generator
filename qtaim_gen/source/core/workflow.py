@@ -5,6 +5,8 @@ from parsl import python_app
 from qtaim_gen.source.core.omol import gbw_analysis
 from typing import Optional, Dict, Any, List
 import shutil
+from qtaim_gen.source.utils.validation import validation_checks
+
 
 def setup_logger_for_folder(folder: str, name: str = "gbw_analysis") -> logging.Logger:
     logger: logging.Logger = logging.getLogger(f"{name}-{folder}")
@@ -95,10 +97,24 @@ def process_folder(
                 "charge.json",
             )
         )
+
         if outputs_present and not overwrite:
             logger.info("Skipping %s: already processed", folder)
-            result["status"] = "skipped"
-            return result
+
+            tf_validation = validation_checks(
+                folder, 
+                full_set=full_set, 
+                verbose=False,
+                move_results=move_results,
+                logger=logger
+            )
+
+            if not tf_validation:
+                logger.info("Validation failed for %s: reprocessing", folder)
+            else:
+                logger.info("Validation passed for %s: skipping", folder)
+                result["status"] = "skipped"
+                return result
 
         # optional: check mwfn files, multiple mwfn guard
         mwfn_files: List[str] = [f for f in os.listdir(folder) if f.endswith(".mwfn")]
@@ -226,8 +242,17 @@ def process_folder_alcf(
                 "charge.json",
             )
         )
-        if outputs_present and not overwrite:
-            logger.info("Skipping %s: already processed", folder)
+
+        tf_validation = validation_checks(
+            folder, 
+            full_set=full_set, 
+            verbose=False,
+            move_results=move_results,
+            logger=logger
+        )
+
+        if outputs_present and not overwrite and tf_validation:
+            logger.info("Skipping %s: already processed and validated", folder)
             result["status"] = "skipped"
             return result
 

@@ -4,12 +4,13 @@
 
 import os
 import logging
-import random
 import argparse
 import resource
 import time
-from qtaim_gen.source.core.omol import gbw_analysis
 from typing import Optional, Dict, Any, List
+
+from qtaim_gen.source.core.omol import gbw_analysis
+from qtaim_gen.source.utils.validation import validation_checks
 
 
 def setup_logger_for_folder(folder: str, name: str = "gbw_analysis") -> logging.Logger:
@@ -153,8 +154,15 @@ def main(argv=None):
             "charge.json",
         )
     )
-    if outputs_present and not overwrite:
-        logger.info("Skipping %s: already processed", folder)
+    tf_validation = validation_checks(
+        folder, 
+        full_set=full_set, 
+        verbose=False,
+        move_results=move_results,
+        logger=logger
+    )
+    if outputs_present and not overwrite and tf_validation:
+        logger.info("Skipping %s: already processed and validated", folder)
         result["status"] = "skipped"
         return result
 
