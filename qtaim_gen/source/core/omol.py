@@ -496,6 +496,7 @@ def run_jobs(
             memory = {}
 
         mfwn_file = os.path.join(folder, "props_{}.mfwn".format(order))
+        
         try:
             logger.info(f"Running {mfwn_file}")
             start = time.time()
@@ -519,11 +520,14 @@ def run_jobs(
 
         # save timings to file in folder - at each step for check pointing
         try:
-            with open(os.path.join(folder, "timings.json"), "w") as f:
+            with open(os.path.join(folder_check, "timings.json"), "w") as f:
                 json.dump(timings, f, indent=4)
+                logger.info(f"Saved timings.json in {folder}")
+            
             if prof_mem:
-                with open(os.path.join(folder, "memory.json"), "w") as f:
+                with open(os.path.join(folder_check, "memory.json"), "w") as f:
                     json.dump(memory, f, indent=4)
+        
         except Exception as e:
             logger.error(f"Error saving timings.json: {e}")
 
