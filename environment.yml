@@ -5,9 +5,11 @@ channels:
 dependencies:
   - python=3.10
   - rdkit
-  - pymatgen>=2024.0.0
+  - pymatgen=2023.3.23
   - lmdb
   - pip
   - pip:
       - bson
+      - numpy==2.3.4
+
     # keep pip-only extras here if needed

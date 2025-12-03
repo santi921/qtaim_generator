@@ -64,5 +64,5 @@ dependencies = [
     "python=3.9",
     "rdkit",
     "pymatgen>=2024.0.0",
-    "lmdb",
+    "lmdb>=1.4.0"
 ]
