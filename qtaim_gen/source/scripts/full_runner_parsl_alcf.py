@@ -9,7 +9,7 @@ from typing import Optional, List
 import resource
 
 from qtaim_gen.source.core.workflow import run_folder_task_alcf
-from qtaim_gen.source.utils.parsl_configs import alcf_config, base_config
+from qtaim_gen.source.utils.parsl_configs import alcf_config, base_config, alcf_config_single_pbs
 from qtaim_gen.source.utils.io import sample_lines
 
 should_stop = False
@@ -194,7 +194,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         parsl_config = base_config(n_workers=n_threads)
 
     else:
-        parsl_config, n_threads_per_job = alcf_config(
+        """parsl_config, n_threads_per_job = alcf_config(
             queue=queue,
             walltime=timeout_str,
             threads_per_task=n_threads,
@@ -202,7 +202,15 @@ def main(argv: Optional[List[str]] = None) -> int:
             n_jobs=n_nodes,
             monitoring=False
         )
-
+        """
+        parsl_config, n_threads_per_job = alcf_config_single_pbs(
+            queue=queue,
+            #walltime=timeout_str,
+            #threads_per_task=n_threads,
+            safety_factor=safety_factor,
+            n_jobs=n_nodes,
+            monitoring=False,
+        )
     ##################### Gather Configs for Parsl
     parsl.clear()
     parsl.load(parsl_config)
@@ -227,16 +235,22 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 2
     folder_file = os.path.join(job_file)
 
-    # this is more effecient, add when we're going prod
-    #folders = sample_lines(job_file, num_folders)
+
     
-    # read folder file and randomly select a folder - THIS READS EVERY LINE
-    with open(folder_file, "r") as f:
-        folders = f.readlines()
+    # Option 1: read folder file and randomly select a folder - THIS READS EVERY LINE
+    #with open(folder_file, "r") as f:
+    #    folders = f.readlines()
+    
+    # Option 2: this is more effecient, add when we're going prod
+    #if num_folders < n_fo
+    folders = sample_lines(folder_file, num_folders)
+
     folders = [f.strip() for f in folders if f.strip()]  # remove empty lines
+    
     if not folders:
         print(f"No folders found in {job_file}")
         return 0
+    
     # make dir for results root 
     if root_omol_results:
         os.makedirs(root_omol_results, exist_ok=True)
@@ -271,11 +285,11 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 0
 
     # randomly sample num_folders folders without replacement
-    if num_folders > len(folders):
-        print(
-            f"Requested num_folders {num_folders} exceeds available folders {len(folders)}. Reducing to {len(folders)}."
-        )
-        num_folders = len(folders)
+    #if num_folders > len(folders):
+    #    print(
+    #        f"Requested num_folders {num_folders} exceeds available folders {len(folders)}. Reducing to {len(folders)}."
+    #    )
+    num_folders = len(folders)
     # shuffle folders
     random.shuffle(folders)
     folders_run = folders[:num_folders]
