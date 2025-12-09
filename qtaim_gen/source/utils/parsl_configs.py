@@ -91,8 +91,7 @@ def alcf_config(
                     # Change if data/modules located on other filesystem
                     scheduler_options="#PBS -l filesystems=home:eagle",
                     # Ensures 1 manger per node; the manager will distribute work to its 12 workers, one per tile
-                    launcher=MpiExecLauncher(
-                    ),
+                    launcher=MpiExecLauncher(bind_cmd="--cpu-bind"),
                     # options added to #PBS -l select aside from ncpus
                     select_options="",
                     # How many nodes per PBS job:

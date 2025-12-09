@@ -13,10 +13,7 @@ authors = [ { name = "Santiago Vargas" } ]
 # Dependencies
 # Note: RDKit is best installed from conda (conda-forge) for full functionality and C++ dependencies.
 # If you prefer pip, there is a PyPI package `rdkit-pypi` but it may be limited compared to the conda build.
-dependencies = [
-    "pymatgen>=2024.0.0",
-    "lmdb>=1.4.0"
-]
+dependencies = []
 # optional dependencies for parsl 
 [project.optional-dependencies]
 parsl = ["parsl[monitoring]>=2024.5.27; platform_system!='Windows'"]
