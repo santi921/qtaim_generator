@@ -282,8 +282,10 @@ def sample_lines(filename, n):
         total_lines = sum(1 for _ in f)
 
     if n > total_lines:
-        raise ValueError(f"Requested {n} lines, but file has only {total_lines}")
-
+        # just return all lines
+        with open(filename, "r") as f:
+            return f.readlines()
+            
     # Choose n distinct line indices in C and sort them
     chosen_indices = sorted(random.sample(range(total_lines), n))
 
