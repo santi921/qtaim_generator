@@ -220,8 +220,9 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     # set env vars - this is only for the main process; workers set their own envs
     if resource == "local":
+        # set stack size threads_per_task*1024
         resource.setrlimit(
-            resource.RLIMIT_STACK, (resource.RLIM_INFINITY, resource.RLIM_INFINITY)
+            resource.RLIMIT_STACK, (1800000, 2000000)
         )
 
     # to handle early stops on the pilot job
@@ -344,3 +345,10 @@ def main(argv: Optional[List[str]] = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+
+
+full-runner-parsl-alcf --num_folders 10 --orca_2mkl_cmd $HOME/orca_6_0_0/orca_2mkl \
+    --multiwfn_cmd $HOME/Multiwfn_3_8/Multiwfn_noGUI --clean --job_file     ./test.txt \
+        --full_set 0 --type_runner local     --n_threads 10 --safety_factor 3.0 --move_results \
+            --preprocess_compressed --timeout_hr 3     --queue workq-route  --restart  --n_nodes 1 --type_runner hpc --job_file ../jobs_by_topdir/noble_gas.txt      --preprocess_compressed --root_omol_results /lus/eagle/projects/generator/OMol25_postprocessing/ --root_omol_inputs /lus/eagle/projects/OMol25/
