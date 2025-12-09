@@ -228,14 +228,14 @@ def main(argv: Optional[List[str]] = None) -> int:
         """
         # set OMP_NUM_THREADS
         os.environ["OMP_NUM_THREADS"] = str(n_threads_per_job)
-        os.environ["MKL_NUM_THREADS"] = str(n_threads_per_job)
+        #os.environ["MKL_NUM_THREADS"] = str(n_threads_per_job)
         os.environ["KMP_STACKSIZE"] = "200M"
         # set omp_stacksize, openblas_num_threads, OMP_PROC_BIND, OMP_PLACES, MKL_NUM_THREADS
-        os.environ["OPENBLAS_NUM_THREADS"] = str(n_threads_per_job)
-        os.environ["OMP_PROC_BIND"] = "true"
-        os.environ["OMP_PLACES"] = "cores"
+        #os.environ["OPENBLAS_NUM_THREADS"] = str(n_threads_per_job)
+        #os.environ["OMP_PROC_BIND"] = "true"
+        #os.environ["OMP_PLACES"] = "cores"
         # set ulimit -s 300000
-        os.system("ulimit -s 300000")
+        #os.system("ulimit -s 300000")
     
     # to handle early stops on the pilot job
     signal.signal(signal.SIGINT, handle_signal)
