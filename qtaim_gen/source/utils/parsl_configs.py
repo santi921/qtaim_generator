@@ -79,14 +79,14 @@ def alcf_config(
                         # Go to working dir
                         f"cd {execute_dir} || {{ echo 'cd {execute_dir} failed'; exit 1; }}; "
                         "pwd; "
-                        f"export OMP_NUM_THREADS={threads_per_task}; "
+                        #f"export OMP_NUM_THREADS={threads_per_task}; "
                         #f"export OMP_STACKSIZE={threads_per_task*1024}M; "
                         #f"export OPENBLAS_NUM_THREADS={threads_per_task}; "
                         #f"export OMP_PROC_BIND=true; "
                         #f"export OMP_PLACES=cores ; "
                         #f"export MKL_NUM_THREADS={threads_per_task}; "
                         #"ulimit -s 300000; " 
-                        "export KMP_STACKSIZE=200M; "
+                        #"export KMP_STACKSIZE=200M; "
                     ),
                     # Wall time for batch jobs
                     walltime=walltime, 

@@ -204,7 +204,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         )
         """
         parsl_config, n_threads_per_job = alcf_config_single_pbs(
-            queue=queue,
+            #queue=queue,
             #walltime=timeout_str,
             #threads_per_task=n_threads,
             safety_factor=safety_factor,
@@ -226,10 +226,10 @@ def main(argv: Optional[List[str]] = None) -> int:
             resource.RLIMIT_STACK, (1800000, 2000000)
         )
         """
-        # set OMP_NUM_THREADS
-        os.environ["OMP_NUM_THREADS"] = str(n_threads_per_job)
+        # set OMP_NUM_THREADS-
+        #os.environ["OMP_NUM_THREADS"] = str(n_threads_per_job)
         #os.environ["MKL_NUM_THREADS"] = str(n_threads_per_job)
-        os.environ["KMP_STACKSIZE"] = "200M"
+        #os.environ["KMP_STACKSIZE"] = "200M"
         # set omp_stacksize, openblas_num_threads, OMP_PROC_BIND, OMP_PLACES, MKL_NUM_THREADS
         #os.environ["OPENBLAS_NUM_THREADS"] = str(n_threads_per_job)
         #os.environ["OMP_PROC_BIND"] = "true"
@@ -368,3 +368,4 @@ full-runner-parsl-alcf --num_folders 10 --orca_2mkl_cmd $HOME/orca_6_0_0/orca_2m
                 --root_omol_results /lus/eagle/projects/generator/OMol25_postprocessing/ \
                 --root_omol_inputs /lus/eagle/projects/OMol25/ --n_threads 4
 """
+
