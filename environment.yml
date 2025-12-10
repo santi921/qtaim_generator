@@ -6,10 +6,13 @@ dependencies:
   - python=3.10
   - rdkit
   - pymatgen=2023.3.23
-  - lmdb
   - pip
+  - pytest
+  - numpy==2.3.4 # might need to install this after b/c of install order issues
+
   - pip:
       - bson
       - numpy==2.3.4
+      - lmdb
 
     # keep pip-only extras here if needed

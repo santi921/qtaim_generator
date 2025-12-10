@@ -3,6 +3,39 @@ import os
 import json
 from qtaim_gen.source.core.parse_qtaim import dft_inp_to_dict
 
+def get_charge_spin_n_atoms_from_folder(folder: str, logger=None, verbose=False) -> tuple:
+    # check for a file ending with .inp
+    inp_files = [f for f in os.listdir(folder) if f.endswith(".inp")]
+    # add *.in files to list
+    inp_files += [f for f in os.listdir(folder) if f.endswith(".in")]
+    # remove convert.in
+    inp_files = [f for f in inp_files if f != "convert.in"]
+
+    if not inp_files:
+        if logger:
+            logger.error(f"No .inp file found in folder: {folder}.")
+        if verbose:
+            print(f"No .inp file found in folder: {folder}.")
+        return False
+    inp_file = inp_files[0]  # take the first .inp file found
+
+    if logger:
+        logger.info(f'Using input file "{inp_file}" for validation.')
+        
+    if verbose:
+        print(f'Using input file "{inp_file}" for validation.')
+
+    # gather n_atoms, spin, charge from the orca.inp file
+    orca_inp_path = os.path.join(folder, inp_file)  # might need to change this name
+    if not os.path.exists(orca_inp_path):
+        if verbose:
+            print(f"Missing orca.inp file at {orca_inp_path}.")
+        if logger:
+            logger.error(f"Missing orca.inp file at {orca_inp_path}.")
+        return False
+    return dft_inp_to_dict(orca_inp_path, parse_charge_spin=True)
+
+    
 
 def validate_timing_dict(
     timing_json_loc: str,
@@ -359,36 +392,11 @@ def validation_checks(
     if not tf:
         return False
 
-    # check for a file ending with .inp
-    inp_files = [f for f in os.listdir(folder) if f.endswith(".inp")]
-    # add *.in files to list
-    inp_files += [f for f in os.listdir(folder) if f.endswith(".in")]
-    # remove convert.in
-    inp_files = [f for f in inp_files if f != "convert.in"]
-
-    if not inp_files:
-        if logger:
-            logger.error(f"No .inp file found in folder: {folder}.")
-        if verbose:
-            print(f"No .inp file found in folder: {folder}.")
+    dft_dict = get_charge_spin_n_atoms_from_folder(
+        folder, logger=logger, verbose=verbose
+    )
+    if not dft_dict:
         return False
-    inp_file = inp_files[0]  # take the first .inp file found
-
-    if logger:
-        logger.info(f'Using input file "{inp_file}" for validation.')
-        
-    if verbose:
-        print(f'Using input file "{inp_file}" for validation.')
-
-    # gather n_atoms, spin, charge from the orca.inp file
-    orca_inp_path = os.path.join(folder, inp_file)  # might need to change this name
-    if not os.path.exists(orca_inp_path):
-        if verbose:
-            print(f"Missing orca.inp file at {orca_inp_path}.")
-        if logger:
-            logger.error(f"Missing orca.inp file at {orca_inp_path}.")
-        return False
-    dft_dict = dft_inp_to_dict(orca_inp_path, parse_charge_spin=True)
     # print("log dict: ", str(dft_dict))
     n_atoms = len(dft_dict["mol"])
     spin = dft_dict.get("spin", None)
@@ -430,6 +438,7 @@ def validation_checks(
         if logger:
             logger.error(f"Fuzzy json validation failed in folder: {folder}")
         return False
+    
     if not validate_other_dict(other_dict_loc, verbose=verbose, logger=logger):
         if logger:
             logger.error(f"Other json validation failed in folder: {folder}")

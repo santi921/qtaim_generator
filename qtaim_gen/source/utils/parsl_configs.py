@@ -63,30 +63,22 @@ def alcf_config(
                     queue=queue,
                     # Commands run before workers launched
                     # Make sure to activate your environment where Parsl is installed
-                    worker_init=(                      # Debugging
-                        "set -x; "  # print every command as it runs
-                        "echo '--- WORKER_INIT START ---'; "
-                        "hostname; "
-                        "date; "
-                        "module use /soft/modulefiles; "
-                        "source /soft/datascience/conda/2025-06-03/etc/profile.d/conda.sh; "
-                        "echo 'Loaded conda module'; "
-                        # Sanity check Python / Parsl
-                        "which python || { echo 'python not found'; exit 1; }; "
-                        "python -c 'import sys, parsl; "
-                        "print(\"PYOK\", sys.version); "
-                        "print(\"PARSL\", parsl.__version__)' || { echo 'Python/parsl import failed'; exit 1; }; "
-                        # Go to working dir
-                        f"cd {execute_dir} || {{ echo 'cd {execute_dir} failed'; exit 1; }}; "
-                        "pwd; "
-                        #f"export OMP_NUM_THREADS={threads_per_task}; "
-                        #f"export OMP_STACKSIZE={threads_per_task*1024}M; "
-                        #f"export OPENBLAS_NUM_THREADS={threads_per_task}; "
-                        #f"export OMP_PROC_BIND=true; "
-                        #f"export OMP_PLACES=cores ; "
-                        #f"export MKL_NUM_THREADS={threads_per_task}; "
-                        #"ulimit -s 300000; " 
-                        #"export KMP_STACKSIZE=200M; "
+                    worker_init=( # Debugging
+                            "set -x; "  # print every command as it runs
+                            "echo '--- WORKER_INIT START ---'; "
+                            "hostname; "
+                            "date; "
+                            "module use /soft/modulefiles; "
+                            "source /soft/datascience/conda/2025-06-03/etc/profile.d/conda.sh; "
+                            "echo 'Loaded conda module'; "
+                            # Sanity check Python / Parsl
+                            "which python || { echo 'python not found'; exit 1; }; "
+                            "python -c 'import sys, parsl; print(\"PYOK\", sys.version); print(\"PARSL\", parsl.__version__)' || { echo 'Python/parsl import failed'; exit 1; }; "
+                            # Go to working dir
+                            f"cd {execute_dir} || {{ echo 'cd {execute_dir} failed'; exit 1; }}; "
+                            "pwd; "
+                            f"export OMP_NUM_THREADS={threads_per_task}; "
+                            "export KMP_STACKSIZE=200M; "
                     ),
                     # Wall time for batch jobs
                     walltime=walltime, 
@@ -96,12 +88,9 @@ def alcf_config(
                     launcher=MpiExecLauncher(bind_cmd="--cpu-bind", overrides="--ppn 1"),
                     # options added to #PBS -l select aside from ncpus
                     select_options="",
-                    # How many nodes per PBS job:
                     nodes_per_block=nodes_per_job,
-                    # Min/max *concurrent* PBS jobs (blocks) that Parsl can have in the queue:
                     min_blocks=1,
                     max_blocks=n_jobs,
-                    # Tell Parsl / PBS how many hardware threads there are per node:
                     cpus_per_node=threads_per_node,
                 ),
             ),
@@ -169,19 +158,16 @@ def alcf_config_single_pbs(
     aurora_single_pbs_config = Config(
         executors=[
             HighThroughputExecutor(
-                label="htex_cpu",
-                # Ensures one worker per GPU tile on each node
                 max_workers_per_node=workers_per_node,
-                cpu_affinity=cpu_affinity,
-                prefetch_capacity=10,
+                cpu_affinity='block',
+                prefetch_capacity=0,
                 # Options that specify properties of PBS Jobs
                 provider=LocalProvider(
-                    # Number of nodes job
                     nodes_per_block=n_jobs,
                     launcher=MpiExecLauncher(bind_cmd="--cpu-bind", overrides="--ppn 1"),
                     init_blocks=1,
                     max_blocks=1,
-                    worker_init=(                      # Debugging
+                    worker_init=( # Debugging
                             "set -x; "  # print every command as it runs
                             "echo '--- WORKER_INIT START ---'; "
                             "hostname; "
@@ -191,19 +177,11 @@ def alcf_config_single_pbs(
                             "echo 'Loaded conda module'; "
                             # Sanity check Python / Parsl
                             "which python || { echo 'python not found'; exit 1; }; "
-                            "python -c 'import sys, parsl; "
-                            "print(\"PYOK\", sys.version); "
-                            "print(\"PARSL\", parsl.__version__)' || { echo 'Python/parsl import failed'; exit 1; }; "
+                            "python -c 'import sys, parsl; print(\"PYOK\", sys.version); print(\"PARSL\", parsl.__version__)' || { echo 'Python/parsl import failed'; exit 1; }; "
                             # Go to working dir
                             f"cd {execute_dir} || {{ echo 'cd {execute_dir} failed'; exit 1; }}; "
                             "pwd; "
                             f"export OMP_NUM_THREADS={threads_per_task}; "
-                            #f"export OMP_STACKSIZE={threads_per_task*1024}M; "
-                            #f"export OPENBLAS_NUM_THREADS={threads_per_task}; "
-                            #f"export OMP_PROC_BIND=true; "
-                            #f"export OMP_PLACES=cores ; "
-                            #f"export MKL_NUM_THREADS={threads_per_task}; "
-                            #"ulimit -s 300000; " 
                             "export KMP_STACKSIZE=200M; "
                     ),
                 ),
