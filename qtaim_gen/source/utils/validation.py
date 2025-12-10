@@ -2,6 +2,7 @@ from asyncio.log import logger
 import os
 import json
 from qtaim_gen.source.core.parse_qtaim import dft_inp_to_dict
+import numpy as np 
 
 def get_charge_spin_n_atoms_from_folder(folder: str, logger=None, verbose=False) -> tuple:
     # check for a file ending with .inp
