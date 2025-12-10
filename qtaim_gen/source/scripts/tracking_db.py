@@ -67,7 +67,7 @@ def get_information_from_job_folder(folder: str, full_set: int) -> dict:
     
     if 'generator' in os.listdir(folder):
         print("Found generator subfolder.")
-        gen_folder = folder.split('/generator/')[0] + '/generator/'
+        gen_folder = folder + '/generator/'
         timings_file = os.path.join(gen_folder, 'timings.json')
         
         if os.path.exists(timings_file):
@@ -148,12 +148,13 @@ def get_information_from_job_folder(folder: str, full_set: int) -> dict:
             
             for col in timings.keys():
                 info[f't_{col}'] = timings[col]
-        edit_time = os.path.getmtime(timings_file)
-        # Convert the timestamp to a datetime object
-        mtime_datetime = datetime.fromtimestamp(edit_time)
-        # Format the datetime object into a human-readable string
-        human_readable_mtime = mtime_datetime.strftime("%Y-%m-%d %H:%M:%S")
-        info['last_edit_time'] = human_readable_mtime
+
+            edit_time = os.path.getmtime(timings_file)
+            # Convert the timestamp to a datetime object
+            mtime_datetime = datetime.fromtimestamp(edit_time)
+            # Format the datetime object into a human-readable string
+            human_readable_mtime = mtime_datetime.strftime("%Y-%m-%d %H:%M:%S")
+            info['last_edit_time'] = human_readable_mtime
 
         dict_val = get_val_breakdown_from_folder(folder, n_atoms=n_atoms, full_set=full_set, spin_tf=spin_tf)
         info.update(dict_val)
@@ -168,14 +169,14 @@ def scan_test(root_dir, db_path, full_set=0, max_workers=8):
     # Gather all folder paths to process
     jobs = []
     for job_id in os.listdir(root_dir):
-        job_path = os.path.join(root_dir, job_id)
-        if not os.path.isdir(job_path):
+        cat_path_path = os.path.join(root_dir, job_id)
+        if not os.path.isdir(cat_path_path):
             continue
-        for subset in os.listdir(job_path):
-            subset_path = os.path.join(job_path, subset)
+        for subset in os.listdir(cat_path_path):
+            subset_path = os.path.join(cat_path_path, subset)
             if not os.path.isdir(subset_path):
                 continue
-            jobs.append((subset_path, full_set, job_id, subset))
+            jobs.append((subset_path, full_set, subset, job_id))
     # Parallel processing
     print(f"Total jobs to process: {len(jobs)}")
     print("jobs sample: ", jobs[:5])
@@ -183,13 +184,11 @@ def scan_test(root_dir, db_path, full_set=0, max_workers=8):
     # just do sequentially 
     for job in jobs:
         subset_path, full_set, job_id, subset = job
-        for folder in os.listdir(subset_path):
-            folder_path = os.path.join(subset_path, folder)
-            if os.path.isdir(folder_path):
-                info = get_information_from_job_folder(folder_path, full_set)
-                info.update({"job_id": job_id, "subset": subset, "folder": folder})
-                results.append(info)
-        
+        if os.path.isdir(subset_path):
+            info = get_information_from_job_folder(subset_path, full_set)
+            info.update({"job_id": job_id, "subset": subset, "folder": subset_path})
+            results.append(info)
+    
 """
 def scan_and_store_parallel(root_dir, db_path, full_set=0, max_workers=8):
     # Gather all folder paths to process
