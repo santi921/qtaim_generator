@@ -35,6 +35,73 @@ def get_charge_spin_n_atoms_from_folder(folder: str, logger=None, verbose=False)
         return False
     return dft_inp_to_dict(orca_inp_path, parse_charge_spin=True)
 
+
+def get_val_breakdown_from_folder(
+        folder: str, 
+        full_set: int, 
+        spin_tf: bool, 
+        n_atoms: int
+    ) -> dict:
+        
+        info = {
+            "total_time": None,
+            "t_qtaim": None,
+            "t_charge": None,
+            "t_bond": None,
+            "t_fuzzy": None,
+            "t_other": None,
+            "val_time": None,
+            "val_qtaim": None,
+            "val_charge": None,
+            "val_bond": None,
+            "val_fuzzy": None,
+            "val_other": None,
+        }   
+
+        # check timings
+        timings_file = os.path.join(folder, 'timings.json')
+        if os.path.exists(timings_file):
+            with open(timings_file, 'r') as f:
+                timings = json.load(f)
+            total_time = np.array(list(timings.values())).sum()
+            info['total_time'] = total_time
+            
+            for col in timings.keys():
+                info[f't_{col}'] = timings[col]
+            val_time = validate_timing_dict(timings_file, logger=None, full_set=full_set, spin_tf=spin_tf)
+            info['val_time'] = val_time
+
+        # check fuzzy    
+        fuzzy_file = os.path.join(folder, 'fuzzy_full.json')
+        if os.path.exists(fuzzy_file):
+            tf_fuzzy = validate_fuzzy_dict(fuzzy_file, logger=None, n_atoms=n_atoms, spin_tf=spin_tf, full_set=full_set,)
+            info['val_fuzzy'] = tf_fuzzy
+        
+        # check charge
+        charge_file = os.path.join(folder, 'charge.json')
+        if os.path.exists(charge_file):
+            tf_charge = validate_charge_dict(charge_file, logger=None)
+            info['val_charge'] = tf_charge
+        
+        # check bond
+        bond_file = os.path.join(folder, 'bond.json')
+        if os.path.exists(bond_file):
+            tf_bond = validate_bond_dict(bond_file, logger=None)
+            info['val_bond'] = tf_bond
+        
+        # check qtaim
+        qtaim_file = os.path.join(folder, 'qtaim.json')
+        if os.path.exists(qtaim_file):
+            tf_qtaim = validate_qtaim_dict(qtaim_file, n_atoms=n_atoms, logger=None)
+            info['val_qtaim'] = tf_qtaim
+
+        # echeck other 
+        other_file = os.path.join(folder, 'other.json')
+        if os.path.exists(other_file):
+            tf_other = validate_timing_dict(other_file, logger=None, full_set=full_set, spin_tf=spin_tf)
+            info['val_other'] = tf_other
+
+        return info
     
 
 def validate_timing_dict(
