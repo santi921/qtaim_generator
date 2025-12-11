@@ -77,6 +77,7 @@ def alcf_config(
                             # Go to working dir
                             f"cd {execute_dir} || {{ echo 'cd {execute_dir} failed'; exit 1; }}; "
                             "pwd; "
+                            "export TMPDIR=/tmp; "
                             f"export OMP_NUM_THREADS={threads_per_task}; "
                             "export KMP_STACKSIZE=200M; "
                     ),
@@ -187,6 +188,7 @@ def alcf_config_single_pbs(
                 ),
             ),
         ],
+        retries=1,
     )
     return aurora_single_pbs_config, threads_per_node
 

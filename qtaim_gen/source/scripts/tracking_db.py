@@ -1,5 +1,5 @@
 ### generates monitoring db for tracking qtaim runs on OMol - 4M 
-#import sqlite3
+import sqlite3
 import pandas as pd
 import json
 import os 
@@ -63,10 +63,10 @@ def get_information_from_job_folder(folder: str, full_set: int) -> dict:
     
     
     # check is there is a generator subfolder
-    print("Folder to analyze: ", folder)
+    #print("Folder to analyze: ", folder)
     
     if 'generator' in os.listdir(folder):
-        print("Found generator subfolder.")
+        #print("Found generator subfolder.")
         gen_folder = folder + '/generator/'
         timings_file = os.path.join(gen_folder, 'timings.json')
         
@@ -161,119 +161,10 @@ def get_information_from_job_folder(folder: str, full_set: int) -> dict:
 
     return info
     
+
 def validate_folder(folder_path):
     # Replace with your actual validation logic
     return os.path.exists(folder_path)  # Example: just checks existence
-
-def scan_test(root_dir, db_path, full_set=0, max_workers=8):
-    # Gather all folder paths to process
-    jobs = []
-    for job_id in os.listdir(root_dir):
-        cat_path_path = os.path.join(root_dir, job_id)
-        if not os.path.isdir(cat_path_path):
-            continue
-        for subset in os.listdir(cat_path_path):
-            subset_path = os.path.join(cat_path_path, subset)
-            if not os.path.isdir(subset_path):
-                continue
-            jobs.append((subset_path, full_set, subset, job_id))
-    # Parallel processing
-    print(f"Total jobs to process: {len(jobs)}")
-    print("jobs sample: ", jobs[:5])
-    results = []
-    # just do sequentially 
-    for job in jobs:
-        subset_path, full_set, job_id, subset = job
-        if os.path.isdir(subset_path):
-            info = get_information_from_job_folder(subset_path, full_set)
-            info.update({"job_id": job_id, "subset": subset, "folder": subset_path})
-            results.append(info)
-    
-"""
-def scan_and_store_parallel(root_dir, db_path, full_set=0, max_workers=8):
-    # Gather all folder paths to process
-    jobs = []
-    for job_id in os.listdir(root_dir):
-        job_path = os.path.join(root_dir, job_id)
-        if not os.path.isdir(job_path):
-            continue
-        for subset in os.listdir(job_path):
-            subset_path = os.path.join(job_path, subset)
-            if not os.path.isdir(subset_path):
-                continue
-            for folder in os.listdir(subset_path):
-                folder_path = os.path.join(subset_path, folder)
-                if os.path.isdir(folder_path):
-                    jobs.append((folder_path, full_set, job_id, subset, folder))
-
-    # Parallel processing
-    results = []
-    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-        future_to_job = {executor.submit(get_information_from_job_folder, job[0], job[1]): job for job in jobs}
-        for future in concurrent.futures.as_completed(future_to_job):
-            job = future_to_job[future]
-            info = future.result()
-            info.update({"job_id": job[2], "subset": job[3], "folder": job[4]})
-            results.append(info)
-
-    # Write to DB in a single thread
-    conn = sqlite3.connect(db_path)
-    c = conn.cursor()
-    columns = list(results[0].keys())
-    col_defs = ", ".join([f"{col} TEXT" for col in columns])
-    c.execute(f"CREATE TABLE IF NOT EXISTS validation ({col_defs}, PRIMARY KEY(job_id, subset, folder))")
-    for info in results:
-        job_id = info["job_id"]
-        subset = info["subset"]
-        folder = info["folder"]
-        values = [str(info.get(col, "")) for col in columns]
-        # Check if row exists
-        c.execute("SELECT * FROM validation WHERE job_id=? AND subset=? AND folder=?", (job_id, subset, folder))
-        existing = c.fetchone()
-        if existing:
-            # Compare values, update only if different
-            existing_dict = dict(zip(columns, existing))
-            if any(existing_dict.get(col, "") != str(info.get(col, "")) for col in columns):
-                set_clause = ", ".join([f"{col}=?" for col in columns])
-                c.execute(f"UPDATE validation SET {set_clause} WHERE job_id=? AND subset=? AND folder=?", values + [job_id, subset, folder])
-        else:
-            placeholders = ", ".join(["?"] * len(columns))
-            c.execute(f"INSERT INTO validation ({', '.join(columns)}) VALUES ({placeholders})", values)
-    conn.commit()
-    conn.close()
-
-def print_summary(db_path):
-    conn = sqlite3.connect(db_path)
-    c = conn.cursor()
-
-    # 1. Jobs with all validation columns True
-    validation_cols = [
-        'val_qtaim', 'val_charge', 'val_bond', 'val_fuzzy', 'val_other', 'val_time'
-    ]
-    where_clause = " AND ".join([f"{col}='True'" for col in validation_cols])
-    c.execute(f"SELECT COUNT(DISTINCT job_id) FROM validation WHERE {where_clause}")
-    all_valid_jobs = c.fetchone()[0]
-    print(f"Jobs with all validation columns True: {all_valid_jobs}")
-
-    # 2. Number of jobs done per category (by subset)
-    c.execute("SELECT subset, COUNT(DISTINCT job_id) FROM validation GROUP BY subset")
-    print("Number of jobs per category (subset):")
-    for subset, count in c.fetchall():
-        print(f"  {subset}: {count}")
-
-    # 3. Average total_time per domain (subset)
-    c.execute("SELECT subset, AVG(CAST(total_time AS FLOAT)) FROM validation GROUP BY subset")
-    print("Average total_time per category (subset):")
-    for subset, avg_time in c.fetchall():
-        print(f"  {subset}: {avg_time:.2f}")
-
-    # 4. Average number of atoms per domain (subset)
-    c.execute("SELECT subset, AVG(CAST(n_atoms AS FLOAT)) FROM validation GROUP BY subset")
-    print("Average number of atoms per category (subset):")
-    for subset, avg_atoms in c.fetchall():
-        print(f"  {subset}: {avg_atoms:.2f}")
-
-    conn.close()
 
 def scan_and_store(root_dir, db_path, full_set=0):
     conn = sqlite3.connect(db_path)
@@ -282,19 +173,13 @@ def scan_and_store(root_dir, db_path, full_set=0):
     # Get all possible columns from a sample info dict
     sample_folder = None
     for job_id in os.listdir(root_dir):
-        job_path = os.path.join(root_dir, job_id)
-        if not os.path.isdir(job_path):
+        cat_path_path = os.path.join(root_dir, job_id)
+        if not os.path.isdir(cat_path_path):
             continue
-        for subset in os.listdir(job_path):
-            subset_path = os.path.join(job_path, subset)
-            if not os.path.isdir(subset_path):
-                continue
-            for folder in os.listdir(subset_path):
-                folder_path = os.path.join(subset_path, folder)
-                if os.path.isdir(folder_path):
-                    sample_folder = folder_path
-                    break
-            if sample_folder:
+        for subset in os.listdir(cat_path_path):
+            subset_path = os.path.join(cat_path_path, subset)
+            if os.path.isdir(subset_path):
+                sample_folder = subset_path
                 break
         if sample_folder:
             break
@@ -311,40 +196,136 @@ def scan_and_store(root_dir, db_path, full_set=0):
     c.execute(f"CREATE TABLE IF NOT EXISTS validation ({col_defs}, PRIMARY KEY(job_id, subset, folder))")
 
     for job_id in os.listdir(root_dir):
-        job_path = os.path.join(root_dir, job_id)
-        if not os.path.isdir(job_path):
+        cat_path_path = os.path.join(root_dir, job_id)
+        if not os.path.isdir(cat_path_path):
             continue
-        for subset in os.listdir(job_path):
-            subset_path = os.path.join(job_path, subset)
+        for subset in os.listdir(cat_path_path):
+            subset_path = os.path.join(cat_path_path, subset)
             if not os.path.isdir(subset_path):
                 continue
-            for folder in os.listdir(subset_path):
-                folder_path = os.path.join(subset_path, folder)
-                if not os.path.isdir(folder_path):
-                    continue
-                info = get_information_from_job_folder(folder_path, full_set)
-                info.update({"job_id": job_id, "subset": subset, "folder": folder})
+            folder = subset_path  # treat subset_path as the folder
+            if not os.path.isdir(folder):
+                continue
+            try: 
+                info = get_information_from_job_folder(folder, full_set)
+                info.update({"job_id": subset, "subset": job_id, "folder": folder})
                 values = [str(info.get(col, "")) for col in columns]
                 # Check if row exists
-                c.execute("SELECT * FROM validation WHERE job_id=? AND subset=? AND folder=?", (job_id, subset, folder))
+                c.execute("SELECT * FROM validation WHERE job_id=? AND subset=? AND folder=?", (subset, job_id, folder))
                 existing = c.fetchone()
                 if existing:
                     # Compare values, update only if different
                     existing_dict = dict(zip(columns, existing))
                     if any(existing_dict.get(col, "") != str(info.get(col, "")) for col in columns):
                         set_clause = ", ".join([f"{col}=?" for col in columns])
-                        c.execute(f"UPDATE validation SET {set_clause} WHERE job_id=? AND subset=? AND folder=?", values + [job_id, subset, folder])
+                        c.execute(f"UPDATE validation SET {set_clause} WHERE job_id=? AND subset=? AND folder=?", values + [subset, job_id, folder])
                 else:
                     placeholders = ", ".join(["?"] * len(columns))
                     c.execute(f"INSERT INTO validation ({', '.join(columns)}) VALUES ({placeholders})", values)
+            except Exception as e:
+                print(f"Error processing folder {folder}: {e}")
     conn.commit()
     conn.close()
 
-"""
+def create_overall_count_db(folder_jobs_OMol="/lus/eagle/projects/generator/jobs_by_topdir", db_path="/lus/eagle/projects/generator/jobs_by_topdir/overall_counts.sqlite"):
+    conn = sqlite3.connect(db_path)
+    c = conn.cursor()
+
+    # iterate through the .txt files in folder_jobs_OMol, count the lines in each file, name the key in the db the file name without .txt
+    for file_name in os.listdir(folder_jobs_OMol):
+        if file_name.endswith(".txt"):
+            subset_name = file_name[:-4]  # remove .txt
+            file_path = os.path.join(folder_jobs_OMol, file_name)
+            with open(file_path, 'r') as f:
+                line_count = sum(1 for line in f)
+            # create table if not exists
+            c.execute(f"CREATE TABLE IF NOT EXISTS overall_counts (subset TEXT PRIMARY KEY, count INTEGER)")
+            # insert or replace count
+            c.execute(f"INSERT OR REPLACE INTO overall_counts (subset, count) VALUES (?, ?)", (subset_name, line_count))
+    
+    conn.commit()
+    conn.close()
+
+def print_summary(db_path="/lus/eagle/projects/generator/jobs_by_topdir", path_to_overall_counts_db="/lus/eagle/projects/generator/jobs_by_topdir/overall_counts.sqlite"):
+    if path_to_overall_counts_db: 
+        counts_overall = {}       
+        # read overall counts and add them to the summary
+        overall_conn = sqlite3.connect(path_to_overall_counts_db)
+        overall_c = overall_conn.cursor()
+        overall_c.execute("SELECT subset, count FROM overall_counts")
+        print("Overall job counts per category (subset):")
+        for subset, count in overall_c.fetchall():
+            counts_overall[subset] = count
+        overall_conn.close()
+
+
+    conn = sqlite3.connect(db_path)
+    c = conn.cursor()
+
+    # 1. Jobs with all validation columns True
+    validation_cols = [
+        'val_qtaim', 'val_charge', 'val_bond', 'val_fuzzy', 'val_other', 'val_time'
+    ]
+    where_clause = " AND ".join([f"{col}='True'" for col in validation_cols])
+    c.execute(f"SELECT COUNT(DISTINCT job_id) FROM validation WHERE {where_clause}")
+    all_valid_jobs = c.fetchone()[0]
+    print(f"Jobs with all validation columns True: {all_valid_jobs}")
+
+    # valid jobs per category
+    c.execute(f"""SELECT subset, COUNT(DISTINCT job_id) FROM validation WHERE {where_clause} GROUP BY subset""")
+    print(f"Subset valid jobs per category (Total - {all_valid_jobs}):")
+    for subset, count in c.fetchall():
+        if path_to_overall_counts_db:
+            print(f"  {subset}: \t {count} / {counts_overall.get(subset, 'N/A')}")
+        else: 
+            print(f"  {subset}: \t {count}")
+
+    # 2. Number of jobs done per category (by subset)
+    c.execute("SELECT subset, COUNT(DISTINCT job_id) FROM validation GROUP BY subset")
+    print("Number of jobs per category (subset):")
+    for subset, count in c.fetchall():
+        if path_to_overall_counts_db:
+            print(f"  {subset}: \t {count} / {counts_overall.get(subset, 'N/A')}")
+        else:
+            print(f"  {subset}: {count}")
+
+    # 3. Average total_time per category (subset)
+    c.execute("SELECT subset, AVG(CAST(total_time AS FLOAT)) FROM validation GROUP BY subset")
+    print("Average total_time per category (subset):")
+    for subset, avg_time in c.fetchall():
+        print(f"  {subset}: \t {avg_time:.2f}")
+
+    # 4. Average number of atoms per category (subset)
+    c.execute("SELECT subset, AVG(CAST(n_atoms AS FLOAT)) FROM validation GROUP BY subset")
+    print("Average number of atoms per category (subset):")
+    for subset, avg_atoms in c.fetchall():
+        print(f"  {subset}: \t {avg_atoms:.2f}")
+
+
+    # 5. Calcs completed over the last 24 hours    since_time = (datetime.now() - pd.Timedelta(days=1)).strftime("%Y-%m-%d %H:%M:%S")
+    since_time = (datetime.now() - pd.Timedelta(days=1)).strftime("%Y-%m-%d %H:%M:%S")
+    c.execute("SELECT COUNT(DISTINCT job_id) FROM validation WHERE last_edit_time > ?", (since_time,))
+    recent_jobs = c.fetchone()[0]
+
+    # 6. Calcs over last 24 hours per category
+    c.execute("SELECT subset, COUNT(DISTINCT job_id) FROM validation WHERE last_edit_time > ? GROUP BY subset", (since_time,))
+    print(f"Subset jobs completed in the last 24 hours (Total - {recent_jobs}):")
+    for subset, count in c.fetchall():
+        print(f"  {subset}: \t {count}")
+
+    conn.close()
+    #
 
 if __name__ == "__main__":
     root_dir = "/lus/eagle/projects/generator/OMol25_postprocessing/"  # Change to your root directory
     db_path = "validation_results.sqlite"
-    scan_test(root_dir, db_path)
+    #scan_test(root_dir, db_path)
     #scan_and_store_parallel(root_dir, db_path)
-    #print_summary(db_path)
+    print_summary(db_path)
+
+
+    root_data_dir = "/usr/workspace/vargas58/orca_test/wave_2_benchmarks_filtered/"
+    calc_root_dir = "/p/lustre5/vargas58/maria_benchmarks/wave2_omol_sp_tight/"
+    
+    root_data_dir = "/usr/workspace/vargas58/orca_test/wave_2_benchmarks_filtered/"
+    calc_root_dir = "/p/lustre5/vargas58/maria_benchmarks/wave2_omol_opt_tight/"
