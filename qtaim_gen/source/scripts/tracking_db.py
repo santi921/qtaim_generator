@@ -5,6 +5,8 @@ import json
 import os 
 from datetime import datetime
 #import concurrent.futures
+import concurrent.futures
+from tqdm import tqdm
 
 from qtaim_gen.source.utils.validation import (
     validation_checks, 
@@ -189,7 +191,8 @@ def scan_and_store(root_dir, db_path, full_set=0):
         return
 
     info = get_information_from_job_folder(sample_folder, full_set)
-    columns = list(info.keys()) + ["job_id", "subset", "folder"]
+    columns = list(info.keys()) + ["job_id", "subset", "folder", "t_hirsh_fuzzy_spin"]
+    columns = list(set(columns))  # ensure uniqueness
 
     # Create table with dynamic columns
     col_defs = ", ".join([f"{col} TEXT" for col in columns])
@@ -224,6 +227,79 @@ def scan_and_store(root_dir, db_path, full_set=0):
                     c.execute(f"INSERT INTO validation ({', '.join(columns)}) VALUES ({placeholders})", values)
             except Exception as e:
                 print(f"Error processing folder {folder}: {e}")
+    conn.commit()
+    conn.close()
+
+
+def scan_and_store_parallel(root_dir, db_path, full_set=0, max_workers=8):
+    import sqlite3
+
+    # Gather all folders to process
+    jobs = []
+    for job_id in os.listdir(root_dir):
+        cat_path_path = os.path.join(root_dir, job_id)
+        if not os.path.isdir(cat_path_path):
+            continue
+        for subset in os.listdir(cat_path_path):
+            subset_path = os.path.join(cat_path_path, subset)
+            if os.path.isdir(subset_path):
+                jobs.append((subset_path, full_set, subset, job_id, subset_path))
+
+    # Use a sample folder to infer columns
+    sample_folder = jobs[0][0] if jobs else None
+    if sample_folder is None:
+        print("No valid folder found for schema inference.")
+        return
+
+    info = get_information_from_job_folder(sample_folder, full_set)
+    columns = list(info.keys()) + ["job_id", "subset", "folder", "t_hirsh_fuzzy_spin"]
+    columns = list(set(columns))  # ensure uniqueness
+
+    # Parallel folder processing with tqdm
+    results = []
+    def process_job(args):
+        folder, full_set, subset, job_id, folder_path = args
+        try:
+            info = get_information_from_job_folder(folder, full_set)
+            info.update({"job_id": subset, "subset": job_id, "folder": folder_path})
+            return info
+        except Exception as e:
+            print(f"Error processing folder {folder}: {e}")
+            return None
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        for info in tqdm(executor.map(process_job, jobs), total=len(jobs), desc="Processing folders"):
+            if info is not None:
+                results.append(info)
+
+    # Serial DB write with tqdm
+    conn = sqlite3.connect(db_path)
+    c = conn.cursor()
+    col_defs = ", ".join([f"{col} TEXT" for col in columns])
+    c.execute(f"CREATE TABLE IF NOT EXISTS validation ({col_defs}, PRIMARY KEY(job_id, subset, folder))")
+
+    for info in tqdm(results, desc="Writing to DB"):
+        values = [str(info.get(col, "")) for col in columns]
+        job_id = info["job_id"]
+        subset = info["subset"]
+        folder = info["folder"]
+        # Check if row exists
+        c.execute("SELECT * FROM validation WHERE job_id=? AND subset=? AND folder=?", (job_id, subset, folder))
+        existing = c.fetchone()
+        if existing:
+            existing_dict = dict(zip(columns, existing))
+            if any(existing_dict.get(col, "") != str(info.get(col, "")) for col in columns):
+                set_clause = ", ".join([f"{col}=?" for col in columns])
+                c.execute(
+                    f"UPDATE validation SET {set_clause} WHERE job_id=? AND subset=? AND folder=?",
+                    values + [job_id, subset, folder]
+                )
+        else:
+            placeholders = ", ".join(["?"] * len(columns))
+            c.execute(
+                f"INSERT INTO validation ({', '.join(columns)}) VALUES ({placeholders})",
+                values
+            )
     conn.commit()
     conn.close()
 
@@ -313,8 +389,14 @@ def print_summary(db_path="/lus/eagle/projects/generator/jobs_by_topdir", path_t
     for subset, count in c.fetchall():
         print(f"  {subset}: \t {count}")
 
+    # 7. print all counts from overall counts db
+    if path_to_overall_counts_db:
+        print("Overall job counts per category (subset):")
+        for subset, count in counts_overall.items():
+            print(f"  {subset}: \t {count}")    
+
     conn.close()
-    #
+
 
 if __name__ == "__main__":
     root_dir = "/lus/eagle/projects/generator/OMol25_postprocessing/"  # Change to your root directory

@@ -190,11 +190,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
     assert type_runner in ["local", "hpc"], "type_runner must be 'local' or 'hpc'"
     if type_runner == "local":
-        n_threads_per_job = max(1, int(n_threads // safety_factor))
-        parsl_config = base_config(n_workers=n_threads)
+        n_threads_total = max(1, int(n_threads))
+        n_threads_per_job = 1
+        parsl_config = base_config(n_workers=n_threads_total)
 
     else:
-        """parsl_config, n_threads_per_job = alcf_config(
+        parsl_config, n_threads_per_job = alcf_config(
             queue=queue,
             walltime=timeout_str,
             threads_per_task=n_threads,
@@ -211,6 +212,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             n_jobs=n_nodes,
             monitoring=False,
         )
+        """
     ##################### Gather Configs for Parsl
     parsl.clear()
     parsl.load(parsl_config)
@@ -220,22 +222,8 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     # set env vars - this is only for the main process; workers set their own envs
     if resource == "local":
-        """
-        # set stack size threads_per_task*1024
-        resource.setrlimit(
-            resource.RLIMIT_STACK, (1800000, 2000000)
-        )
-        """
-        # set OMP_NUM_THREADS-
-        #os.environ["OMP_NUM_THREADS"] = str(n_threads_per_job)
-        #os.environ["MKL_NUM_THREADS"] = str(n_threads_per_job)
-        #os.environ["KMP_STACKSIZE"] = "200M"
-        # set omp_stacksize, openblas_num_threads, OMP_PROC_BIND, OMP_PLACES, MKL_NUM_THREADS
-        #os.environ["OPENBLAS_NUM_THREADS"] = str(n_threads_per_job)
-        #os.environ["OMP_PROC_BIND"] = "true"
-        #os.environ["OMP_PLACES"] = "cores"
-        # set ulimit -s 300000
-        #os.system("ulimit -s 300000")
+        os.environ["OMP_NUM_THREADS"] = "1"
+        n_threads_per_job = 1
     
     # to handle early stops on the pilot job
     signal.signal(signal.SIGINT, handle_signal)
