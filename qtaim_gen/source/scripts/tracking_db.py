@@ -48,7 +48,10 @@ def get_information_from_job_folder(folder: str, full_set: int) -> dict:
     
     # get .inp file in the folder for spin, charge, n_atoms
     dft_dict = get_charge_spin_n_atoms_from_folder(folder, logger=None, verbose=False)
-    print("DFT dict: ", dft_dict)
+    #print("DFT dict: ", dft_dict)
+    if not dft_dict: 
+        return info  # return empty info if dft_dict is None or empty
+    
     n_atoms = len(dft_dict["mol"])
     spin = dft_dict.get("spin", None)
     charge = dft_dict.get("charge", None)
@@ -71,7 +74,7 @@ def get_information_from_job_folder(folder: str, full_set: int) -> dict:
         gen_folder = folder + '/generator/'
         timings_file = os.path.join(gen_folder, 'timings.json')
         
-        if os.path.exists(timings_file):
+        if os.path.exists(timings_file) and os.path.getsize(timings_file) > 0:
             with open(timings_file, 'r') as f:
                 timings = json.load(f)
             total_time = float(np.array(list(timings.values())).sum())

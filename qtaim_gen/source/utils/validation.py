@@ -61,7 +61,7 @@ def get_val_breakdown_from_folder(
 
         # check timings
         timings_file = os.path.join(folder, 'timings.json')
-        if os.path.exists(timings_file):
+        if os.path.exists(timings_file) and os.path.getsize(timings_file) > 0:
             with open(timings_file, 'r') as f:
                 timings = json.load(f)
             total_time = np.array(list(timings.values())).sum()
@@ -74,31 +74,31 @@ def get_val_breakdown_from_folder(
 
         # check fuzzy    
         fuzzy_file = os.path.join(folder, 'fuzzy_full.json')
-        if os.path.exists(fuzzy_file):
+        if os.path.exists(fuzzy_file) and os.path.getsize(fuzzy_file) > 0:
             tf_fuzzy = validate_fuzzy_dict(fuzzy_file, logger=None, n_atoms=n_atoms, spin_tf=spin_tf, full_set=full_set,)
             info['val_fuzzy'] = tf_fuzzy
         
         # check charge
         charge_file = os.path.join(folder, 'charge.json')
-        if os.path.exists(charge_file):
+        if os.path.exists(charge_file) and os.path.getsize(charge_file) > 0:
             tf_charge = validate_charge_dict(charge_file, logger=None)
             info['val_charge'] = tf_charge
         
         # check bond
         bond_file = os.path.join(folder, 'bond.json')
-        if os.path.exists(bond_file):
+        if os.path.exists(bond_file) and os.path.getsize(bond_file) > 0:
             tf_bond = validate_bond_dict(bond_file, logger=None)
             info['val_bond'] = tf_bond
         
         # check qtaim
         qtaim_file = os.path.join(folder, 'qtaim.json')
-        if os.path.exists(qtaim_file):
+        if os.path.exists(qtaim_file) and os.path.getsize(qtaim_file) > 0:
             tf_qtaim = validate_qtaim_dict(qtaim_file, n_atoms=n_atoms, logger=None)
             info['val_qtaim'] = tf_qtaim
 
         # echeck other 
         other_file = os.path.join(folder, 'other.json')
-        if os.path.exists(other_file):
+        if os.path.exists(other_file) and os.path.getsize(other_file) > 0:
             tf_other = validate_timing_dict(other_file, logger=None, full_set=full_set, spin_tf=spin_tf)
             info['val_other'] = tf_other
 
