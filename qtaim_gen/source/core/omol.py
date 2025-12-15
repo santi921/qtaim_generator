@@ -567,12 +567,15 @@ def parse_multiwfn(
         [routine_list.append(i) for i in charge_dict.keys()]
         [routine_list.append(i) for i in bond_dict.keys()]
         [routine_list.append(i) for i in fuzzy_dict.keys()]
-        if "charge_separate" in routine_list:
-            routine_list.remove("charge_separate")
-        if "bond_separate" in routine_list:
-            routine_list.remove("bond_separate")
-        if "fuzzy_full" in routine_list:
-            routine_list.remove("fuzzy_full")
+        #print("routine_list: {}".format(routine_list))
+        
+        #if "charge_separate" in routine_list:
+        #    routine_list.remove("charge_separate")
+        #if "bond_separate" in routine_list:
+        #    routine_list.remove("bond_separate")
+        #if "fuzzy_full" in routine_list:
+        #    routine_list.remove("fuzzy_full")
+    
     else:
         routine_list = ORDER_OF_OPERATIONS
 
@@ -687,7 +690,7 @@ def parse_multiwfn(
                         elif routine in list(fuzzy_dict.keys()):
                             data = parse_fuzzy_real_space(file_full_path)
 
-                        # elif routine == "qtaim":
+                        #elif routine == "qtaim":
                         #    pass
 
                         else:
