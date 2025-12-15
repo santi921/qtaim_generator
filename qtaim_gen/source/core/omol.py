@@ -1038,7 +1038,7 @@ def gbw_analysis(
         else:
             timings_path = os.path.join(folder, "timings.json")
             
-        if not os.path.exists(timings_path) and os.path.getsize(timings_path) > 0 :
+        if not os.path.exists(timings_path) or os.path.getsize(timings_path) == 0 :
             logger.warning("No timings file found - starting from scratch!")
             restart = False
 
