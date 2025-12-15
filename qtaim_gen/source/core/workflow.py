@@ -214,14 +214,16 @@ def process_folder_alcf(
         os.makedirs(folder_outputs)
     
     for item in os.listdir(folder_inputs):
-        s = os.path.join(folder_inputs, item)
-        d = os.path.join(folder_outputs, item)
-        if os.path.isdir(s):
-            if not os.path.exists(d):
-                os.makedirs(d)
-        else:
-            if not os.path.exists(d):
-                shutil.copy2(s, d)
+        # skip "density_mat.npz"
+        if item != "density_mat.npz":
+            s = os.path.join(folder_inputs, item)
+            d = os.path.join(folder_outputs, item)
+            if os.path.isdir(s):
+                if not os.path.exists(d):
+                    os.makedirs(d)
+            else:
+                if not os.path.exists(d):
+                    shutil.copy2(s, d)
     
     folder = os.path.abspath(folder_outputs)
     logger: logging.Logger = setup_logger_for_folder(folder)
