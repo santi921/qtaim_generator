@@ -225,7 +225,8 @@ def create_jobs(
             file_wfn_search = os.path.join(folder, file)
 
     bool_gbw = False
-
+    file_read = None
+    
     for file in os.listdir(folder):
         if file.endswith(".gbw"):
             bool_gbw = True
@@ -243,6 +244,8 @@ def create_jobs(
             file_molden = file.replace(".gbw", ".molden.input")
             file_molden = os.path.join(folder, file_molden)
             file_read = os.path.join(folder, file_wfn)
+
+    
 
     if not wfn_present and bool_gbw:
         logger.info(f"file_gbw: {file_gbw}")
@@ -435,13 +438,14 @@ def run_jobs(
         spin_tf = check_spin(folder)
         fuzzy_dict = fuzzy_data(spin=spin_tf, full_set=full_set)
         [order_of_operations.append(i) for i in fuzzy_dict.keys()]
-        # remove "charge_separate" and "bond_separate" from list
+        
+        """# remove "charge_separate" and "bond_separate" from list
         if "charge_separate" in order_of_operations:
             order_of_operations.remove("charge_separate")
         if "bond_separate" in order_of_operations:
             order_of_operations.remove("bond_separate")
         if "fuzzy_full" in order_of_operations:
-            order_of_operations.remove("fuzzy_full")
+            order_of_operations.remove("fuzzy_full")"""
     else:
         order_of_operations = ORDER_OF_OPERATIONS
 
