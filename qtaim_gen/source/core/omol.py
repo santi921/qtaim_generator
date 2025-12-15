@@ -1005,14 +1005,6 @@ def gbw_analysis(
                     except Exception as e:
                         logger.error(f"Error extracting tar {tar_file_name}: {e}")
 
-                    # remove the tar file after extracting, also remove .zstd file
-                    if os.path.exists(os.path.join(folder, tar_file_out)):
-                        logger.info(f"Removing tar file: {tar_file_out}")
-                        os.remove(os.path.join(folder, tar_file_out))
-                    if os.path.exists(os.path.join(folder, zstd_file)):
-                        logger.info(f"Removing zstd file: {zstd_file}")
-                        os.remove(os.path.join(folder, zstd_file))
-
                     # After extracting in-place (cwd=folder), expected files should be in folder
                     found_any = False
                     for file2 in os.listdir(folder):
@@ -1045,11 +1037,16 @@ def gbw_analysis(
                         )
                     except Exception as e:
                         logger.error(f"Error running unzstd for gbw {zstd_file}: {e}")
-                    # remove the compressed file
-
-                    if os.path.exists(os.path.join(folder, zstd_file)):
-                        os.remove(os.path.join(folder, zstd_file))
-
+                    
+            for file in os.listdir(folder):
+                # clean files ending in .tar, .tar.zst, .tgz, .gbw.zstd0, .zstd, .npz
+                check_list = [".tar", ".tar.zst", ".tgz", ".gbw.zstd0", ".zstd", ".npz"]
+                if any(file.endswith(ext) for ext in check_list):
+                    try:
+                        os.remove(os.path.join(folder, file))
+                        logger.info(f"Removed intermediate file: {file}")
+                    except Exception as e:
+                        logger.error(f"Error removing intermediate file {file}: {e}")
     if restart:
         logger.info("Restarting from last step in timings.json")
         # check if the timings file exists
