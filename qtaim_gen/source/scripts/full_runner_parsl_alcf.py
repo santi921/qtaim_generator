@@ -208,7 +208,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     assert type_runner in ["local", "hpc"], "type_runner must be 'local' or 'hpc'"
     if type_runner == "local":
         n_threads_per_job = n_threads_per_job
-        parsl_config = base_config(n_workers=n_threads / n_threads_per_job)
+        parsl_config = base_config(n_workers=int(n_threads / n_threads_per_job))
 
     else:
         parsl_config, n_threads_per_job = alcf_config(
