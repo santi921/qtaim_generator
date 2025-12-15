@@ -276,14 +276,14 @@ def create_jobs(
 
             elif routine == "fuzzy_full":
                 # job_dict["fuzzy_full"] = os.path.join(folder, "fuzzy_full.txt")
-                with open(os.path.join(folder, "fuzzy_full.txt"), "w") as f:
-                    spin_tf = check_spin(folder)
-                    print("spin_tf: {}".format(spin_tf))
-                    fuzzy_dict = fuzzy_data(spin=spin_tf, full_set=full_set)
-                    for key, value in fuzzy_dict.items():
-                        job_dict[key] = os.path.join(folder, "{}.txt".format(key))
-                        with open(os.path.join(folder, "{}.txt".format(key)), "w") as f:
-                            f.write(value)
+                #with open(os.path.join(folder, "fuzzy_full.txt"), "w") as f:
+                spin_tf = check_spin(folder)
+                print("spin_tf: {}".format(spin_tf))
+                fuzzy_dict = fuzzy_data(spin=spin_tf, full_set=full_set)
+                for key, value in fuzzy_dict.items():
+                    job_dict[key] = os.path.join(folder, "{}.txt".format(key))
+                    with open(os.path.join(folder, "{}.txt".format(key)), "w") as f:
+                        f.write(value)
                     # f.write(data)
 
             elif routine == "bond":
@@ -433,7 +433,13 @@ def run_jobs(
         spin_tf = check_spin(folder)
         fuzzy_dict = fuzzy_data(spin=spin_tf, full_set=full_set)
         [order_of_operations.append(i) for i in fuzzy_dict.keys()]
-
+        # remove "charge_separate" and "bond_separate" from list
+        if "charge_separate" in order_of_operations:
+            order_of_operations.remove("charge_separate")
+        if "bond_separate" in order_of_operations:
+            order_of_operations.remove("bond_separate")
+        if "fuzzy_full" in order_of_operations:
+            order_of_operations.remove("fuzzy_full")
     else:
         order_of_operations = ORDER_OF_OPERATIONS
 
@@ -561,7 +567,12 @@ def parse_multiwfn(
         [routine_list.append(i) for i in charge_dict.keys()]
         [routine_list.append(i) for i in bond_dict.keys()]
         [routine_list.append(i) for i in fuzzy_dict.keys()]
-
+        if "charge_separate" in routine_list:
+            routine_list.remove("charge_separate")
+        if "bond_separate" in routine_list:
+            routine_list.remove("bond_separate")
+        if "fuzzy_full" in routine_list:
+            routine_list.remove("fuzzy_full")
     else:
         routine_list = ORDER_OF_OPERATIONS
 
