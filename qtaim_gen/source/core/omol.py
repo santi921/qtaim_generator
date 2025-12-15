@@ -424,7 +424,9 @@ def run_jobs(
         logger = logging.getLogger("gbw_analysis")
 
     if separate:
-        order_of_operations = ORDER_OF_OPERATIONS_separate
+        # copy the ORDER_OF_OPERATIONS_separate list
+        order_of_operations = ORDER_OF_OPERATIONS_separate.copy()
+        #order_of_operations = ORDER_OF_OPERATIONS_separate
         # order_of_operations = ["qtaim"]
         charge_dict = charge_data_dict(full_set=full_set)
         [order_of_operations.append(i) for i in charge_dict.keys()]
@@ -558,7 +560,7 @@ def parse_multiwfn(
     #    compiled_dicts = {}
 
     if separate:
-        routine_list = ORDER_OF_OPERATIONS_separate
+        routine_list = ORDER_OF_OPERATIONS_separate.copy()
         charge_dict = charge_data_dict(full_set=full_set)
         bond_dict = bond_order_dict(full_set=full_set)
         spin_tf = check_spin(folder)
@@ -830,7 +832,7 @@ def clean_jobs(
     logger.info("Cleaning up jobs in folder: {}".format(folder))
 
     if separate:
-        order_of_operations = ORDER_OF_OPERATIONS_separate
+        order_of_operations = ORDER_OF_OPERATIONS_separate.copy()
         charge_dict = charge_data_dict(full_set=full_set)
         [order_of_operations.append(i) for i in charge_dict.keys()]
         bond_dict = bond_order_dict(full_set=full_set)
