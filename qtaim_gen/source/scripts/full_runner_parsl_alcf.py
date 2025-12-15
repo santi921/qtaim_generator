@@ -105,7 +105,14 @@ def main(argv: Optional[List[str]] = None) -> int:
         "--n_threads",
         type=int,
         default=4,
-        help="number of threads to use per job, in local mode this is total # threads, in HPC it is threads per job",
+        help="Only used in local mode: total number of threads to use in threadpool",
+    )
+
+    parser.add_argument(
+        "--n_threads_per_job",
+        type=int,
+        default=4,
+        help="Number of threads to allocate per job",
     )
 
     parser.add_argument(
@@ -178,7 +185,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     clean: bool = bool(getattr(args, "clean", False))
     parse_only: bool = bool(getattr(args, "parse_only", False))
     num_folders: int = int(getattr(args, "num_folders", 100))
-    n_threads: int = int(getattr(args, "n_threads", 4))
+    n_threads: int = int(getattr(args, "n_threads", 128))
+    n_threads_per_job: int = int(getattr(args, "n_threads_per_job", 4))
     full_set: int = int(getattr(args, "full_set", 0))
     move_results: bool = bool(getattr(args, "move_results", False))
     job_file: str = getattr(args, "job_file")
@@ -199,15 +207,14 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
     assert type_runner in ["local", "hpc"], "type_runner must be 'local' or 'hpc'"
     if type_runner == "local":
-        n_threads_total = max(1, int(n_threads))
-        n_threads_per_job = 1
-        parsl_config = base_config(n_workers=n_threads_total)
+        n_threads_per_job = n_threads_per_job
+        parsl_config = base_config(n_workers=n_threads)
 
     else:
         parsl_config, n_threads_per_job = alcf_config(
             queue=queue,
             walltime=timeout_str,
-            threads_per_task=n_threads,
+            threads_per_task=n_threads_per_job,
             safety_factor=safety_factor,
             n_jobs=n_nodes,
             monitoring=False,
@@ -231,8 +238,8 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     # set env vars - this is only for the main process; workers set their own envs
     if resource == "local":
-        os.environ["OMP_NUM_THREADS"] = "1"
-        n_threads_per_job = 1
+        os.environ["OMP_NUM_THREADS"] = "{}".format(n_threads_per_job)
+        #threads_per = n_threads_per_job
 
     # to handle early stops on the pilot job
     signal.signal(signal.SIGINT, handle_signal)
@@ -355,19 +362,19 @@ if __name__ == "__main__":
 
 
 """
-full-runner-parsl-alcf --num_folders 10 --orca_2mkl_cmd $HOME/orca_6_0_0/orca_2mkl \
-    --multiwfn_cmd $HOME/Multiwfn_3_8/Multiwfn_noGUI --clean --job_file     ./test.txt \
+full-runner-parsl-alcf --num_folders 20000 --orca_2mkl_cmd $HOME/orca_6_0_0/orca_2mkl \
+    --multiwfn_cmd $HOME/Multiwfn_3_8/Multiwfn_noGUI --clean \
         --full_set 0 --type_runner local --safety_factor 3.0 --move_results \
-            --preprocess_compressed --timeout_hr 3     --queue workq-route  --restart  --n_nodes 1 \
-            --job_file ../jobs_by_topdir/noble_gas.txt --preprocess_compressed \
+            --preprocess_compressed --timeout_hr 5     --queue workq-route  --restart  --n_nodes 1 \
+            --job_file ../jobs_by_topdir/orbnet_denali.txt --preprocess_compressed \
                 --root_omol_results /lus/eagle/projects/generator/OMol25_postprocessing/ \
-                --root_omol_inputs /lus/eagle/projects/OMol25/ --n_threads 4
+                --root_omol_inputs /lus/eagle/projects/OMol25/ --n_threads_per_job 4
 
                 
 full-runner-parsl-alcf --num_folders 3000 --orca_2mkl_cmd $HOME/orca_6_0_0/orca_2mkl \
     --multiwfn_cmd $HOME/Multiwfn_3_8/Multiwfn_noGUI --clean --job_file \
 ./test.txt --full_set 0 --type_runner local \
---n_threads 10 --safety_factor 1.0 --move_results --preprocess_compressed --timeout_hr 3 \
+--n_threads_per_job 10 --safety_factor 1.0 --move_results --preprocess_compressed --timeout_hr 3 \
 --queue workq-route  --restart  --n_nodes 1 --job_file ../jobs_by_topdir/noble_gas.txt  \
 --preprocess_compressed --root_omol_results /lus/eagle/projects/generator/OMol25_postprocessing/ --root_omol_inputs /lus/eagle/projects/OMol25/
 """
