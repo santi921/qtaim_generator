@@ -285,7 +285,7 @@ def sample_lines(filename, n):
         # just return all lines
         with open(filename, "r") as f:
             return f.readlines()
-            
+
     # Choose n distinct line indices in C and sort them
     chosen_indices = sorted(random.sample(range(total_lines), n))
 

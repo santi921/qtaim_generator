@@ -102,11 +102,11 @@ def process_folder(
             logger.info("Skipping %s: already processed", folder)
 
             tf_validation = validation_checks(
-                folder, 
-                full_set=full_set, 
+                folder,
+                full_set=full_set,
                 verbose=False,
                 move_results=move_results,
-                logger=logger
+                logger=logger,
             )
 
             if not tf_validation:
@@ -184,8 +184,10 @@ def process_folder_alcf(
     orca_6: bool = True,
     full_set: bool = False,
     move_results: bool = True,
-    root_omol_results: Optional[str] = None, # root where to store results, should mimic root_omol_inputs
-    root_omol_inputs: Optional[str] = None, # root where input folders are located
+    root_omol_results: Optional[
+        str
+    ] = None,  # root where to store results, should mimic root_omol_inputs
+    root_omol_inputs: Optional[str] = None,  # root where input folders are located
 ) -> Dict[str, Any]:
     """Process a single folder and return a small status dict.
 
@@ -203,16 +205,16 @@ def process_folder_alcf(
         "error": None,
     }
     # normalize to absolute path and set up logger
-    # remove root_omol_status from folder name 
-    folder_inputs = folder 
+    # remove root_omol_status from folder name
+    folder_inputs = folder
     if root_omol_inputs and folder_inputs.startswith(root_omol_inputs):
         folder_relative = folder_inputs[len(root_omol_inputs) :].lstrip(os.sep)
-    
+
     folder_outputs = root_omol_results + os.sep + folder_relative
     # copy files from folder_inputs to folder_outputs if they don't exist
     if not os.path.exists(folder_outputs):
         os.makedirs(folder_outputs)
-    
+
     for item in os.listdir(folder_inputs):
         # skip "density_mat.npz"
         if item != "density_mat.npz":
@@ -224,7 +226,7 @@ def process_folder_alcf(
             else:
                 if not os.path.exists(d):
                     shutil.copy2(s, d)
-    
+
     folder = os.path.abspath(folder_outputs)
     logger: logging.Logger = setup_logger_for_folder(folder)
 
@@ -247,11 +249,11 @@ def process_folder_alcf(
         )
 
         tf_validation = validation_checks(
-            folder, 
-            full_set=full_set, 
+            folder,
+            full_set=full_set,
             verbose=False,
             move_results=move_results,
-            logger=logger
+            logger=logger,
         )
 
         if outputs_present and not overwrite and tf_validation:
@@ -293,7 +295,6 @@ def process_folder_alcf(
         result["elapsed"] = t1 - t0
         result["status"] = "ok"
         logger.info("Completed folder %s in %.2f s", folder, result["elapsed"])
-        
 
         # remove density_mat.npz, orca.gbw.zstd0, orca.gbw, orca.tar.zst from results folder
         files_to_remove = [
@@ -301,12 +302,11 @@ def process_folder_alcf(
             "orca.gbw.zstd0",
             "orca.gbw",
             "orca.tar.zst",
-            "orca.inp.orig", 
-            "orca.property.txt", 
+            "orca.inp.orig",
+            "orca.property.txt",
             "orca.out",
-            "orca.engrad", 
+            "orca.engrad",
             "orca_stderr",
-
         ]
         results_folder = os.path.join(folder, "generator")
         for fn in files_to_remove:
@@ -317,7 +317,7 @@ def process_folder_alcf(
                 logger.info("Removed file %s to save space", fp)
 
         return result
-    
+
     except Exception as exc:
         logger.exception("Error processing %s: %s", folder, exc)
         result["status"] = "error"
@@ -331,7 +331,6 @@ def process_folder_alcf(
         except Exception:
             # best-effort restore; if this fails, log to stderr
             print(f"Warning: failed to restore cwd to {orig_cwd}")
-
 
 
 @python_app

@@ -16,7 +16,9 @@ SPECIAL_OMOL_PATHS = [
 ]
 
 
-def find_zst_folders(root_dir, output_file, counts_file, alternative_root=None, count_level="top"):
+def find_zst_folders(
+    root_dir, output_file, counts_file, alternative_root=None, count_level="top"
+):
     """
     Scan:
       - All top-level dirs under root_dir EXCEPT 'omol'
@@ -95,11 +97,12 @@ def find_zst_folders(root_dir, output_file, counts_file, alternative_root=None, 
     print(f"Paths written to: {output_file}")
     print(f"Counts written to: {counts_file}")
 
+
 if __name__ == "__main__":
     # can you iterate over top-level dirs in /lus/eagle/projects/OMol25
     root_directory = "/lus/eagle/projects/OMol25"
-    # save to different files in one directory 
-    project_dir = '/lus/eagle/projects/generator/job_lists/'
+    # save to different files in one directory
+    project_dir = "/lus/eagle/projects/generator/job_lists/"
     folder_list = [
         "pdb_pockets_300K",
         "trans1x",
@@ -142,24 +145,29 @@ if __name__ == "__main__":
         "omol/metal_organics/outputs_072324",
         "omol/metal_organics/outputs_ln_082524",
         "omol/metal_organics/outputs_low_spin_241118",
-        "omol/metal_organics/restart5to6"
+        "omol/metal_organics/restart5to6",
     ]
-
-    
 
     print("Starting job folder scan... number of folder lists:", len(folder_list))
 
     def run_scan(folder, count_level="top"):
         root_dir = os.path.join(root_directory, folder)
-        output_file = os.path.join(project_dir, f"{folder.replace('/', '_')}_zst_folders.txt")
-        counts_file = os.path.join(project_dir, f"{folder.replace('/', '_')}_zst_counts.txt")
+        output_file = os.path.join(
+            project_dir, f"{folder.replace('/', '_')}_zst_folders.txt"
+        )
+        counts_file = os.path.join(
+            project_dir, f"{folder.replace('/', '_')}_zst_counts.txt"
+        )
         find_zst_folders(root_dir, output_file, counts_file, count_level=count_level)
         return folder
 
     with ThreadPoolExecutor(max_workers=8) as executor:  # adjust max_workers as needed
         # Change count_level here: "top" for top-level, "sub" for immediate subdirs
         count_level = "top"  # or "sub"
-        futures = {executor.submit(run_scan, folder, count_level): folder for folder in folder_list}
+        futures = {
+            executor.submit(run_scan, folder, count_level): folder
+            for folder in folder_list
+        }
         for future in as_completed(futures):
             folder = futures[future]
             try:

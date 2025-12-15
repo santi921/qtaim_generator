@@ -10,6 +10,7 @@ from parsl.executors.threads import ThreadPoolExecutor
 from parsl.addresses import address_by_hostname
 from parsl.monitoring.monitoring import MonitoringHub
 
+
 def alcf_config(
     threads_per_task: int = 8,
     safety_factor: float = 1.0,
@@ -63,30 +64,32 @@ def alcf_config(
                     queue=queue,
                     # Commands run before workers launched
                     # Make sure to activate your environment where Parsl is installed
-                    worker_init=( # Debugging
-                            "set -x; "  # print every command as it runs
-                            "echo '--- WORKER_INIT START ---'; "
-                            "hostname; "
-                            "date; "
-                            "module use /soft/modulefiles; "
-                            "source /soft/datascience/conda/2025-06-03/etc/profile.d/conda.sh; "
-                            "echo 'Loaded conda module'; "
-                            # Sanity check Python / Parsl
-                            "which python || { echo 'python not found'; exit 1; }; "
-                            "python -c 'import sys, parsl; print(\"PYOK\", sys.version); print(\"PARSL\", parsl.__version__)' || { echo 'Python/parsl import failed'; exit 1; }; "
-                            # Go to working dir
-                            f"cd {execute_dir} || {{ echo 'cd {execute_dir} failed'; exit 1; }}; "
-                            "pwd; "
-                            "export TMPDIR=/tmp; "
-                            f"export OMP_NUM_THREADS={threads_per_task}; "
-                            "export KMP_STACKSIZE=200M; "
+                    worker_init=(  # Debugging
+                        "set -x; "  # print every command as it runs
+                        "echo '--- WORKER_INIT START ---'; "
+                        "hostname; "
+                        "date; "
+                        "module use /soft/modulefiles; "
+                        "source /soft/datascience/conda/2025-06-03/etc/profile.d/conda.sh; "
+                        "echo 'Loaded conda module'; "
+                        # Sanity check Python / Parsl
+                        "which python || { echo 'python not found'; exit 1; }; "
+                        "python -c 'import sys, parsl; print(\"PYOK\", sys.version); print(\"PARSL\", parsl.__version__)' || { echo 'Python/parsl import failed'; exit 1; }; "
+                        # Go to working dir
+                        f"cd {execute_dir} || {{ echo 'cd {execute_dir} failed'; exit 1; }}; "
+                        "pwd; "
+                        "export TMPDIR=/tmp; "
+                        f"export OMP_NUM_THREADS={threads_per_task}; "
+                        "export KMP_STACKSIZE=200M; "
                     ),
                     # Wall time for batch jobs
-                    walltime=walltime, 
+                    walltime=walltime,
                     # Change if data/modules located on other filesystem
                     scheduler_options="#PBS -l filesystems=home:eagle",
                     # Ensures 1 manger per node; the manager will distribute work to its 12 workers, one per tile
-                    launcher=MpiExecLauncher(bind_cmd="--cpu-bind", overrides="--ppn 1"),
+                    launcher=MpiExecLauncher(
+                        bind_cmd="--cpu-bind", overrides="--ppn 1"
+                    ),
                     # options added to #PBS -l select aside from ncpus
                     select_options="",
                     nodes_per_block=nodes_per_job,
@@ -100,9 +103,10 @@ def alcf_config(
         # this is necessary if you have tasks that are interrupted by a PBS job ending
         # so that they will restart in the next job
         retries=1,
-        #monitoring=monitoring,
+        # monitoring=monitoring,
     )
     return aurora_single_tile_config, threads_per_node
+
 
 """
 crux configs 
@@ -120,6 +124,7 @@ NUMA 6: cores 96-111,224-239
 NUMA 7: cores 112-127,240-255
 """
 cpu_affinity = "list:0-15,128-143;16-31,144-159;32-47,160-175;48-63,176-191;64-79,192-207;80-95,208-223;96-111,224-239;112-127,240-255"
+
 
 def alcf_config_single_pbs(
     threads_per_task: int = 8,
@@ -160,30 +165,32 @@ def alcf_config_single_pbs(
         executors=[
             HighThroughputExecutor(
                 max_workers_per_node=workers_per_node,
-                cpu_affinity='block',
+                cpu_affinity="block",
                 prefetch_capacity=0,
                 # Options that specify properties of PBS Jobs
                 provider=LocalProvider(
                     nodes_per_block=n_jobs,
-                    launcher=MpiExecLauncher(bind_cmd="--cpu-bind", overrides="--ppn 1"),
+                    launcher=MpiExecLauncher(
+                        bind_cmd="--cpu-bind", overrides="--ppn 1"
+                    ),
                     init_blocks=1,
                     max_blocks=1,
-                    worker_init=( # Debugging
-                            "set -x; "  # print every command as it runs
-                            "echo '--- WORKER_INIT START ---'; "
-                            "hostname; "
-                            "date; "
-                            "module use /soft/modulefiles; "
-                            "source /soft/datascience/conda/2025-06-03/etc/profile.d/conda.sh; "
-                            "echo 'Loaded conda module'; "
-                            # Sanity check Python / Parsl
-                            "which python || { echo 'python not found'; exit 1; }; "
-                            "python -c 'import sys, parsl; print(\"PYOK\", sys.version); print(\"PARSL\", parsl.__version__)' || { echo 'Python/parsl import failed'; exit 1; }; "
-                            # Go to working dir
-                            f"cd {execute_dir} || {{ echo 'cd {execute_dir} failed'; exit 1; }}; "
-                            "pwd; "
-                            f"export OMP_NUM_THREADS={threads_per_task}; "
-                            "export KMP_STACKSIZE=200M; "
+                    worker_init=(  # Debugging
+                        "set -x; "  # print every command as it runs
+                        "echo '--- WORKER_INIT START ---'; "
+                        "hostname; "
+                        "date; "
+                        "module use /soft/modulefiles; "
+                        "source /soft/datascience/conda/2025-06-03/etc/profile.d/conda.sh; "
+                        "echo 'Loaded conda module'; "
+                        # Sanity check Python / Parsl
+                        "which python || { echo 'python not found'; exit 1; }; "
+                        "python -c 'import sys, parsl; print(\"PYOK\", sys.version); print(\"PARSL\", parsl.__version__)' || { echo 'Python/parsl import failed'; exit 1; }; "
+                        # Go to working dir
+                        f"cd {execute_dir} || {{ echo 'cd {execute_dir} failed'; exit 1; }}; "
+                        "pwd; "
+                        f"export OMP_NUM_THREADS={threads_per_task}; "
+                        "export KMP_STACKSIZE=200M; "
                     ),
                 ),
             ),
@@ -192,7 +199,8 @@ def alcf_config_single_pbs(
     )
     return aurora_single_pbs_config, threads_per_node
 
-def base_config(n_workers: int = 4) -> Config:
+
+def base_config(n_workers: int = 128) -> Config:
     """Returns a basic Parsl config using local threads executor.
 
     Returns:

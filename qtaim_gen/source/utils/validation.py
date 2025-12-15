@@ -2,9 +2,12 @@ from asyncio.log import logger
 import os
 import json
 from qtaim_gen.source.core.parse_qtaim import dft_inp_to_dict
-import numpy as np 
+import numpy as np
 
-def get_charge_spin_n_atoms_from_folder(folder: str, logger=None, verbose=False) -> tuple:
+
+def get_charge_spin_n_atoms_from_folder(
+    folder: str, logger=None, verbose=False
+) -> tuple:
     # check for a file ending with .inp
     inp_files = [f for f in os.listdir(folder) if f.endswith(".inp")]
     # add *.in files to list
@@ -22,7 +25,7 @@ def get_charge_spin_n_atoms_from_folder(folder: str, logger=None, verbose=False)
 
     if logger:
         logger.info(f'Using input file "{inp_file}" for validation.')
-        
+
     if verbose:
         print(f'Using input file "{inp_file}" for validation.')
 
@@ -38,79 +41,86 @@ def get_charge_spin_n_atoms_from_folder(folder: str, logger=None, verbose=False)
 
 
 def get_val_breakdown_from_folder(
-        folder: str, 
-        full_set: int, 
-        spin_tf: bool, 
-        n_atoms: int
-    ) -> dict:
-        
-        info = {
-            "total_time": None,
-            "t_qtaim": None,
-            "t_charge": None,
-            "t_bond": None,
-            "t_fuzzy": None,
-            "t_other": None,
-            "val_time": None,
-            "val_qtaim": None,
-            "val_charge": None,
-            "val_bond": None,
-            "val_fuzzy": None,
-            "val_other": None,
-        }   
+    folder: str, full_set: int, spin_tf: bool, n_atoms: int
+) -> dict:
 
-        # check timings
-        timings_file = os.path.join(folder, 'timings.json')
-        if os.path.exists(timings_file) and os.path.getsize(timings_file) > 0:
-            with open(timings_file, 'r') as f:
-                timings = json.load(f)
-            total_time = np.array(list(timings.values())).sum()
-            info['total_time'] = total_time
-            
-            for col in timings.keys():
-                info[f't_{col}'] = timings[col]
-            val_time = validate_timing_dict(timings_file, logger=None, full_set=full_set, spin_tf=spin_tf)
-            info['val_time'] = val_time
+    info = {
+        "total_time": None,
+        "t_qtaim": None,
+        "t_charge": None,
+        "t_bond": None,
+        "t_fuzzy": None,
+        "t_other": None,
+        "val_time": None,
+        "val_qtaim": None,
+        "val_charge": None,
+        "val_bond": None,
+        "val_fuzzy": None,
+        "val_other": None,
+    }
 
-        # check fuzzy    
-        fuzzy_file = os.path.join(folder, 'fuzzy_full.json')
-        if os.path.exists(fuzzy_file) and os.path.getsize(fuzzy_file) > 0:
-            tf_fuzzy = validate_fuzzy_dict(fuzzy_file, logger=None, n_atoms=n_atoms, spin_tf=spin_tf, full_set=full_set,)
-            info['val_fuzzy'] = tf_fuzzy
-        
-        # check charge
-        charge_file = os.path.join(folder, 'charge.json')
-        if os.path.exists(charge_file) and os.path.getsize(charge_file) > 0:
-            tf_charge = validate_charge_dict(charge_file, logger=None)
-            info['val_charge'] = tf_charge
-        
-        # check bond
-        bond_file = os.path.join(folder, 'bond.json')
-        if os.path.exists(bond_file) and os.path.getsize(bond_file) > 0:
-            tf_bond = validate_bond_dict(bond_file, logger=None)
-            info['val_bond'] = tf_bond
-        
-        # check qtaim
-        qtaim_file = os.path.join(folder, 'qtaim.json')
-        if os.path.exists(qtaim_file) and os.path.getsize(qtaim_file) > 0:
-            tf_qtaim = validate_qtaim_dict(qtaim_file, n_atoms=n_atoms, logger=None)
-            info['val_qtaim'] = tf_qtaim
+    # check timings
+    timings_file = os.path.join(folder, "timings.json")
+    if os.path.exists(timings_file) and os.path.getsize(timings_file) > 0:
+        with open(timings_file, "r") as f:
+            timings = json.load(f)
+        total_time = np.array(list(timings.values())).sum()
+        info["total_time"] = total_time
 
-        # echeck other 
-        other_file = os.path.join(folder, 'other.json')
-        if os.path.exists(other_file) and os.path.getsize(other_file) > 0:
-            tf_other = validate_timing_dict(other_file, logger=None, full_set=full_set, spin_tf=spin_tf)
-            info['val_other'] = tf_other
+        for col in timings.keys():
+            info[f"t_{col}"] = timings[col]
+        val_time = validate_timing_dict(
+            timings_file, logger=None, full_set=full_set, spin_tf=spin_tf
+        )
+        info["val_time"] = val_time
 
-        return info
-    
+    # check fuzzy
+    fuzzy_file = os.path.join(folder, "fuzzy_full.json")
+    if os.path.exists(fuzzy_file) and os.path.getsize(fuzzy_file) > 0:
+        tf_fuzzy = validate_fuzzy_dict(
+            fuzzy_file,
+            logger=None,
+            n_atoms=n_atoms,
+            spin_tf=spin_tf,
+            full_set=full_set,
+        )
+        info["val_fuzzy"] = tf_fuzzy
+
+    # check charge
+    charge_file = os.path.join(folder, "charge.json")
+    if os.path.exists(charge_file) and os.path.getsize(charge_file) > 0:
+        tf_charge = validate_charge_dict(charge_file, logger=None)
+        info["val_charge"] = tf_charge
+
+    # check bond
+    bond_file = os.path.join(folder, "bond.json")
+    if os.path.exists(bond_file) and os.path.getsize(bond_file) > 0:
+        tf_bond = validate_bond_dict(bond_file, logger=None)
+        info["val_bond"] = tf_bond
+
+    # check qtaim
+    qtaim_file = os.path.join(folder, "qtaim.json")
+    if os.path.exists(qtaim_file) and os.path.getsize(qtaim_file) > 0:
+        tf_qtaim = validate_qtaim_dict(qtaim_file, n_atoms=n_atoms, logger=None)
+        info["val_qtaim"] = tf_qtaim
+
+    # echeck other
+    other_file = os.path.join(folder, "other.json")
+    if os.path.exists(other_file) and os.path.getsize(other_file) > 0:
+        tf_other = validate_timing_dict(
+            other_file, logger=None, full_set=full_set, spin_tf=spin_tf
+        )
+        info["val_other"] = tf_other
+
+    return info
+
 
 def validate_timing_dict(
     timing_json_loc: str,
     verbose: bool = False,
     full_set: int = 0,
     spin_tf: bool = False,
-    logger: any = None
+    logger: any = None,
 ):
     """
     Basic check that the timing json file has the expected structure.
@@ -165,7 +175,9 @@ def validate_timing_dict(
         # check that the times aren't tiny
         if timing_dict[key] < 1e-6 and key != "convert":
             if logger:
-                logger.error(f"Timing for '{key}' is too small: {timing_dict[key]} seconds.")
+                logger.error(
+                    f"Timing for '{key}' is too small: {timing_dict[key]} seconds."
+                )
             print(f"Timing for '{key}' is too small: {timing_dict[key]} seconds.")
             return
 
@@ -184,10 +196,8 @@ def validate_timing_dict(
 
 
 def validate_bond_dict(
-        bond_json_loc: str, 
-        verbose: bool = False, 
-        full_set: int = 0,
-        logger: any = None):
+    bond_json_loc: str, verbose: bool = False, full_set: int = 0, logger: any = None
+):
     """
     Basic check that the bond json file has the expected structure.
     Check that it has the keys 'fuzzy_bond', 'ibsi_bond', and 'laplacian_bond'.
@@ -306,9 +316,9 @@ def validate_other_dict(other_dict_loc: str, verbose: bool = False, logger: any 
         "ALIE_Positive_surface_area",
         "ALIE_Negative_surface_area",
         "ESP_Overall_skewness",
-        #"ESP_Positive_skewness",
+        # "ESP_Positive_skewness",
         "ALIE_Overall_skewness",
-        #"ALIE_Positive_skewness",
+        # "ALIE_Positive_skewness",
     ]
     for key in expected_keys:
         if key not in other_dict:
@@ -319,7 +329,7 @@ def validate_other_dict(other_dict_loc: str, verbose: bool = False, logger: any 
             if logger:
                 logger.warning(
                     f"Missing expected key '{key}' in other json. This may not be critical."
-                )   
+                )
             return False
 
     if verbose:
@@ -328,7 +338,11 @@ def validate_other_dict(other_dict_loc: str, verbose: bool = False, logger: any 
 
 
 def validate_charge_dict(
-    charge_json_loc: str, n_atoms: int = None, verbose: bool = False, full_set: int = 0, logger: any = None
+    charge_json_loc: str,
+    n_atoms: int = None,
+    verbose: bool = False,
+    full_set: int = 0,
+    logger: any = None,
 ):
     """
     Basic check that the charge json file has the expected structure.
@@ -350,7 +364,9 @@ def validate_charge_dict(
             if verbose:
                 print(f"Warning: Missing expected key '{key}' in charge json. ")
             if logger:
-                logger.warning(f"Warning: Missing expected key '{key}' in charge json. ")
+                logger.warning(
+                    f"Warning: Missing expected key '{key}' in charge json. "
+                )
             return False
 
     for key in expected_keys:
@@ -418,10 +434,10 @@ def validate_qtaim_dict(
 
 def validation_checks(
     folder: str,
-    verbose: bool = False, 
-    full_set: int = 0, 
+    verbose: bool = False,
+    full_set: int = 0,
     move_results: bool = True,
-    logger: any = None
+    logger: any = None,
 ):
     """
     Run all validation checks on the json files in the given folder.
@@ -452,7 +468,9 @@ def validation_checks(
     for file in required_files:
         if not os.path.exists(os.path.join(folder_check_res, file)):
             if logger:
-                logger.error(f"Missing required file: {file} in folder: {folder_check_res}")
+                logger.error(
+                    f"Missing required file: {file} in folder: {folder_check_res}"
+                )
             if verbose:
                 print(f"Missing required file: {file} in folder: {folder_check_res}")
             tf = False
@@ -506,23 +524,29 @@ def validation_checks(
         if logger:
             logger.error(f"Fuzzy json validation failed in folder: {folder}")
         return False
-    
+
     if not validate_other_dict(other_dict_loc, verbose=verbose, logger=logger):
         if logger:
             logger.error(f"Other json validation failed in folder: {folder}")
         return False
 
-    if not validate_charge_dict(charge_json_loc, n_atoms=n_atoms, verbose=verbose, logger=logger):
+    if not validate_charge_dict(
+        charge_json_loc, n_atoms=n_atoms, verbose=verbose, logger=logger
+    ):
         if logger:
             logger.error(f"Charge json validation failed in folder: {folder}")
         return False
 
-    if not validate_qtaim_dict(qtaim_json_loc, n_atoms=n_atoms, verbose=verbose, logger=logger):
+    if not validate_qtaim_dict(
+        qtaim_json_loc, n_atoms=n_atoms, verbose=verbose, logger=logger
+    ):
         if logger:
             logger.error(f"QTAIM json validation failed in folder: {folder}")
         return False
 
-    if not validate_bond_dict(bond_json_loc, verbose=verbose, full_set=full_set, logger=logger):
+    if not validate_bond_dict(
+        bond_json_loc, verbose=verbose, full_set=full_set, logger=logger
+    ):
         if logger:
             logger.error(f"Bond json validation failed in folder: {folder}")
         return False

@@ -736,8 +736,8 @@ def parse_other_doc(other_txt):
             "data_ind": 7,
         },
         "Overall skewness:": {"name": "Overall_skewness", "data_ind": -1},
-        #"Positive skewness:": {"name": "Positive_skewness", "data_ind": -1},
-        #"Negative skewness:": {"name": "Negative_skewness", "data_ind": -1},
+        # "Positive skewness:": {"name": "Positive_skewness", "data_ind": -1},
+        # "Negative skewness:": {"name": "Negative_skewness", "data_ind": -1},
     }
 
     surface_trigger_keys = trigger_dict_surface.keys()

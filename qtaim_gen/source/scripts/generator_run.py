@@ -155,11 +155,11 @@ def main(argv=None):
         )
     )
     tf_validation = validation_checks(
-        folder, 
-        full_set=full_set, 
+        folder,
+        full_set=full_set,
         verbose=False,
         move_results=move_results,
-        logger=logger
+        logger=logger,
     )
     if outputs_present and not overwrite and tf_validation:
         logger.info("Skipping %s: already processed and validated", folder)

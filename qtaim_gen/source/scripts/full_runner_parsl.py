@@ -216,8 +216,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     folder_file = os.path.join(job_file)
 
     # this is more effecient, add when we're going prod
-    #folders = sample_lines(job_file, num_folders)
-    
+    # folders = sample_lines(job_file, num_folders)
+
     # read folder file and randomly select a folder - THIS READS EVERY LINE
     with open(folder_file, "r") as f:
         folders = f.readlines()
@@ -313,6 +313,3 @@ def main(argv: Optional[List[str]] = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
-
-

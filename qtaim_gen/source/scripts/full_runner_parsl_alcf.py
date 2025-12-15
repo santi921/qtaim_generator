@@ -9,7 +9,11 @@ from typing import Optional, List
 import resource
 
 from qtaim_gen.source.core.workflow import run_folder_task_alcf
-from qtaim_gen.source.utils.parsl_configs import alcf_config, base_config, alcf_config_single_pbs
+from qtaim_gen.source.utils.parsl_configs import (
+    alcf_config,
+    base_config,
+    alcf_config_single_pbs,
+)
 from qtaim_gen.source.utils.io import sample_lines
 
 should_stop = False
@@ -147,13 +151,18 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
 
     parser.add_argument(
-        "--root_omol_results", type=str, default=None, help="root where to store results, should mimic root_omol_inputs"
+        "--root_omol_results",
+        type=str,
+        default=None,
+        help="root where to store results, should mimic root_omol_inputs",
     )
 
     parser.add_argument(
-        "--root_omol_inputs", type=str, default=None, help="root where input folders are located"
+        "--root_omol_inputs",
+        type=str,
+        default=None,
+        help="root where input folders are located",
     )
-
 
     args = parser.parse_args(argv)
     # print(args)
@@ -201,7 +210,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             threads_per_task=n_threads,
             safety_factor=safety_factor,
             n_jobs=n_nodes,
-            monitoring=False
+            monitoring=False,
         )
         """
         parsl_config, n_threads_per_job = alcf_config_single_pbs(
@@ -224,7 +233,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     if resource == "local":
         os.environ["OMP_NUM_THREADS"] = "1"
         n_threads_per_job = 1
-    
+
     # to handle early stops on the pilot job
     signal.signal(signal.SIGINT, handle_signal)
     signal.signal(signal.SIGTERM, handle_signal)
@@ -236,23 +245,21 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 2
     folder_file = os.path.join(job_file)
 
-
-    
     # Option 1: read folder file and randomly select a folder - THIS READS EVERY LINE
-    #with open(folder_file, "r") as f:
+    # with open(folder_file, "r") as f:
     #    folders = f.readlines()
-    
+
     # Option 2: this is more effecient, add when we're going prod
-    #if num_folders < n_fo
+    # if num_folders < n_fo
     folders = sample_lines(folder_file, num_folders)
 
     folders = [f.strip() for f in folders if f.strip()]  # remove empty lines
-    
+
     if not folders:
         print(f"No folders found in {job_file}")
         return 0
-    
-    # make dir for results root 
+
+    # make dir for results root
     if root_omol_results:
         os.makedirs(root_omol_results, exist_ok=True)
 
@@ -286,7 +293,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 0
 
     # randomly sample num_folders folders without replacement
-    #if num_folders > len(folders):
+    # if num_folders > len(folders):
     #    print(
     #        f"Requested num_folders {num_folders} exceeds available folders {len(folders)}. Reducing to {len(folders)}."
     #    )
@@ -314,8 +321,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             debug=debug,
             preprocess_compressed=preprocess_compressed,
             move_results=move_results,
-            root_omol_results= root_omol_results,
-            root_omol_inputs= root_omol_inputs
+            root_omol_results=root_omol_results,
+            root_omol_inputs=root_omol_inputs,
         )
         for f in folders_run
     ]
@@ -355,5 +362,12 @@ full-runner-parsl-alcf --num_folders 10 --orca_2mkl_cmd $HOME/orca_6_0_0/orca_2m
             --job_file ../jobs_by_topdir/noble_gas.txt --preprocess_compressed \
                 --root_omol_results /lus/eagle/projects/generator/OMol25_postprocessing/ \
                 --root_omol_inputs /lus/eagle/projects/OMol25/ --n_threads 4
-"""
 
+                
+full-runner-parsl-alcf --num_folders 3000 --orca_2mkl_cmd $HOME/orca_6_0_0/orca_2mkl \
+    --multiwfn_cmd $HOME/Multiwfn_3_8/Multiwfn_noGUI --clean --job_file \
+./test.txt --full_set 0 --type_runner local \
+--n_threads 10 --safety_factor 1.0 --move_results --preprocess_compressed --timeout_hr 3 \
+--queue workq-route  --restart  --n_nodes 1 --job_file ../jobs_by_topdir/noble_gas.txt  \
+--preprocess_compressed --root_omol_results /lus/eagle/projects/generator/OMol25_postprocessing/ --root_omol_inputs /lus/eagle/projects/OMol25/
+"""

@@ -491,13 +491,13 @@ def run_jobs(
                     timings = json.load(f)
                     if order in timings.keys():
                         continue
-        else: 
+        else:
             folder_check = folder
         if prof_mem:
             memory = {}
 
         mfwn_file = os.path.join(folder, "props_{}.mfwn".format(order))
-        
+
         try:
             logger.info(f"Running {mfwn_file}")
             start = time.time()
@@ -524,11 +524,11 @@ def run_jobs(
             with open(os.path.join(folder_check, "timings.json"), "w") as f:
                 json.dump(timings, f, indent=4)
                 logger.info(f"Saved timings.json in {folder}")
-            
+
             if prof_mem:
                 with open(os.path.join(folder_check, "memory.json"), "w") as f:
                     json.dump(memory, f, indent=4)
-        
+
         except Exception as e:
             logger.error(f"Error saving timings.json: {e}")
 
@@ -868,6 +868,7 @@ def clean_jobs(
         except Exception as e:
             logger.info(f"Couldn't rm file {file}: {e}")
 
+
 def setup_logger(folder: str, name: str = "gbw_analysis") -> logging.Logger:
     logger = logging.getLogger(f"{name}-{folder}")
     # Avoid duplicate handlers
@@ -960,7 +961,7 @@ def gbw_analysis(
                 if file.endswith(".tar.zst") or file.endswith(".tgz"):
                     logger.info(f"Found compressed file: {file}")
                     zstd_file = file
-                    
+
                     # run unzstd with cwd=folder so outputs land directly in folder
                     try:
                         subprocess.run(
@@ -968,7 +969,6 @@ def gbw_analysis(
                         )
                     except Exception as e:
                         logger.error(f"Error running unzstd on {zstd_file}: {e}")
-
 
                     # untar resulting file (tar filename is zstd_file with .tar)
                     if zstd_file.endswith(".tar.zst"):
@@ -1026,19 +1026,19 @@ def gbw_analysis(
                     except Exception as e:
                         logger.error(f"Error running unzstd for gbw {zstd_file}: {e}")
                     # remove the compressed file
-                    
+
                     if os.path.exists(os.path.join(folder, zstd_file)):
                         os.remove(os.path.join(folder, zstd_file))
 
     if restart:
         logger.info("Restarting from last step in timings.json")
         # check if the timings file exists
-        if move_results: 
+        if move_results:
             timings_path = os.path.join(folder, "generator", "timings.json")
         else:
             timings_path = os.path.join(folder, "timings.json")
-            
-        if not os.path.exists(timings_path) or os.path.getsize(timings_path) == 0 :
+
+        if not os.path.exists(timings_path) or os.path.getsize(timings_path) == 0:
             logger.warning("No timings file found - starting from scratch!")
             restart = False
 
@@ -1052,19 +1052,18 @@ def gbw_analysis(
         if check_results_exist(folder_check):
             print("Output already exists")
             tf_validation = validation_checks(
-                folder, 
-                full_set=full_set, 
+                folder,
+                full_set=full_set,
                 verbose=False,
                 move_results=move_results,
-                logger=logger
+                logger=logger,
             )
-            
+
             # we might change level-of-analysis so only return if all requested analyses are present
             if tf_validation:
                 logger.info("gbw_analysis completed in folder: {}".format(folder))
                 logger.info("Validation status: {}".format(tf_validation))
                 return
-            
 
     write_settings_file(mem=mem, n_threads=n_threads, folder=folder)
 
@@ -1110,7 +1109,6 @@ def gbw_analysis(
             move_results=move_results,
         )
 
-
     # move all results to a results folder
     results_list = [
         "timings.json",
@@ -1123,7 +1121,7 @@ def gbw_analysis(
 
     if move_results:
         results_folder = os.path.join(folder, "generator")
-        
+
         if not os.path.exists(results_folder):
             os.mkdir(results_folder)
 
@@ -1140,16 +1138,16 @@ def gbw_analysis(
                         if isinstance(data_existing, dict) and isinstance(
                             data_new, dict
                         ):
-                            
+
                             data_merged = {**data_existing, **data_new}
                         else:
                             data_merged = data_new  # if not dict, just overwrite
                         with open(os.path.join(results_folder, file), "w") as f:
                             json.dump(data_merged, f, indent=4)
-                        
+
                         logger.info(f"Merged {file} into results folder")
                         # remove the original file
-                        
+
                         if clean:
                             os.remove(os.path.join(folder, file))
                     except Exception as e:
@@ -1165,11 +1163,11 @@ def gbw_analysis(
                         logger.error(f"Error moving file {file}: {e}")
 
     tf_validation = validation_checks(
-        folder, 
-        full_set=full_set, 
-        verbose=False, 
-        move_results=move_results, 
-        logger=logger
+        folder,
+        full_set=full_set,
+        verbose=False,
+        move_results=move_results,
+        logger=logger,
     )
     logger.info("gbw_analysis completed in folder: {}".format(folder))
     logger.info("Validation status: {}".format(tf_validation))
