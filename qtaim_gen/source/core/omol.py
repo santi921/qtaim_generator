@@ -960,8 +960,8 @@ def gbw_analysis(
                 if file.endswith(".tar.zst") or file.endswith(".tgz"):
                     logger.info(f"Found compressed file: {file}")
                     zstd_file = file
+                    
                     # run unzstd with cwd=folder so outputs land directly in folder
-
                     try:
                         subprocess.run(
                             ["unzstd", "-f", zstd_file], cwd=folder, check=True
@@ -969,8 +969,8 @@ def gbw_analysis(
                     except Exception as e:
                         logger.error(f"Error running unzstd on {zstd_file}: {e}")
 
-                    # untar resulting file (tar filename is zstd_file with .tar)
 
+                    # untar resulting file (tar filename is zstd_file with .tar)
                     if zstd_file.endswith(".tar.zst"):
                         tar_file_name = zstd_file.replace(".tar.zst", ".tar")
                         tar_cmd = ["tar", "-xf", tar_file_name, "--directory", folder]
@@ -985,10 +985,13 @@ def gbw_analysis(
                     except Exception as e:
                         logger.error(f"Error extracting tar {tar_file_name}: {e}")
 
-                    # remove the tar file after extracting
+                    # remove the tar file after extracting, also remove .zstd file
                     if os.path.exists(os.path.join(folder, tar_file_out)):
                         logger.info(f"Removing tar file: {tar_file_out}")
                         os.remove(os.path.join(folder, tar_file_out))
+                    if os.path.exists(os.path.join(folder, zstd_file)):
+                        logger.info(f"Removing zstd file: {zstd_file}")
+                        os.remove(os.path.join(folder, zstd_file))
 
                     # After extracting in-place (cwd=folder), expected files should be in folder
                     found_any = False
@@ -1022,6 +1025,10 @@ def gbw_analysis(
                         )
                     except Exception as e:
                         logger.error(f"Error running unzstd for gbw {zstd_file}: {e}")
+                    # remove the compressed file
+                    
+                    if os.path.exists(os.path.join(folder, zstd_file)):
+                        os.remove(os.path.join(folder, zstd_file))
 
     if restart:
         logger.info("Restarting from last step in timings.json")
