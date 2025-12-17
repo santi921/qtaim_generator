@@ -142,7 +142,7 @@ def validate_timing_dict(
         "hirsh_fuzzy_density",
     ]
 
-    excepted_spin_keys = ["mbis_fuzzy_spin"]
+    excepted_spin_keys = ["hirsh_fuzzy_spin", "becke_fuzzy_spin"]
 
     if full_set > 0:
         expected_keys += [
@@ -154,7 +154,7 @@ def validate_timing_dict(
             "mbis_fuzzy_density",
         ]
 
-        excepted_spin_keys += ["becke_fuzzy_spin"]
+        excepted_spin_keys += ["mbis_fuzzy_spin"]
 
     if full_set > 1:
         expected_keys += [
@@ -163,7 +163,6 @@ def validate_timing_dict(
             "grad_norm_rho_fuzzy",
             "laplacian_rho_fuzzy",
         ]
-        excepted_spin_keys += ["mbis_fuzzy_spin"]
 
     for key in expected_keys:
         if key not in timing_dict:
@@ -506,13 +505,14 @@ def validation_checks(
     qtaim_json_loc = os.path.join(folder_check_res, "qtaim.json")
     bond_json_loc = os.path.join(folder_check_res, "bond.json")
     # bonding_json_loc = os.path.join(folder, "bonding.json")
-
+    tf_cond = True
+    
     if not validate_timing_dict(
         timing_json_loc, verbose=verbose, full_set=full_set, spin_tf=spin_tf
     ):
         if logger:
             logger.error(f"Timing json validation failed in folder: {folder}")
-        return False
+        tf_cond = False
 
     if not validate_fuzzy_dict(
         fuzzy_json_loc,
@@ -524,37 +524,37 @@ def validation_checks(
     ):
         if logger:
             logger.error(f"Fuzzy json validation failed in folder: {folder}")
-        return False
+        tf_cond = False
 
     if not validate_other_dict(other_dict_loc, verbose=verbose, logger=logger):
         if logger:
             logger.error(f"Other json validation failed in folder: {folder}")
-        return False
+        tf_cond = False
 
     if not validate_charge_dict(
         charge_json_loc, n_atoms=n_atoms, verbose=verbose, logger=logger
     ):
         if logger:
             logger.error(f"Charge json validation failed in folder: {folder}")
-        return False
+        tf_cond = False
 
     if not validate_qtaim_dict(
         qtaim_json_loc, n_atoms=n_atoms, verbose=verbose, logger=logger
     ):
         if logger:
             logger.error(f"QTAIM json validation failed in folder: {folder}")
-        return False
+        tf_cond = False
 
     if not validate_bond_dict(
         bond_json_loc, verbose=verbose, full_set=full_set, logger=logger
     ):
         if logger:
             logger.error(f"Bond json validation failed in folder: {folder}")
-        return False
+        tf_cond = False
 
     if verbose:
         print("All validation checks passed.")
-    return True
+    return tf_cond
 
 
 def get_information_from_job_folder(folder: str, full_set: int) -> dict:
