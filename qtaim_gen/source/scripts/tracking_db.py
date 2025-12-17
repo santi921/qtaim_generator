@@ -15,7 +15,9 @@ import logging
 def scan_and_store_parallel(root_dir, db_path, full_set=0, max_workers=8, sub_dirs_to_sweep=None, debug=False):
     import sqlite3
     # Set up logging - save log to file 
---
+    logging.basicConfig(level=logging.INFO, filename='scan_and_store.log', filemode='w', format='%(asctime)s - %(levelname)s - %(message)s')
+    logger = logging.getLogger(__name__)
+    logger.info(f"Scanning root directory: {root_dir}")
 
     # Gather all folders to process
     jobs = []
@@ -135,6 +137,7 @@ def scan_and_store_parallel(root_dir, db_path, full_set=0, max_workers=8, sub_di
     conn.commit()
     conn.close()
     """
+
 
 def create_overall_count_db(
     folder_jobs_OMol="/lus/eagle/projects/generator/jobs_by_topdir",
