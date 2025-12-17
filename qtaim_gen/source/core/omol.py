@@ -861,10 +861,10 @@ def clean_jobs(
                 if file in txt_files:
                     os.remove(os.path.join(folder, file))
                     logger.info(f"Removed {file}")
-            if file.endswith(".out"):
-                if file in txt_files:
-                    os.remove(os.path.join(folder, file))
-                    logger.info(f"Removed {file}")
+            #if file.endswith(".out"):
+            #    if file in txt_files:
+            #        os.remove(os.path.join(folder, file))
+            #        logger.info(f"Removed {file}")
             if file.endswith(".molden.input"):
                 os.remove(os.path.join(folder, file))
                 logger.info(f"Removed {file}")
