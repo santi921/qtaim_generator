@@ -9,21 +9,35 @@ from tqdm import tqdm
 
 from qtaim_gen.source.utils.validation import get_information_from_job_folder
 
+import logging
 
-def scan_and_store_parallel(root_dir, db_path, full_set=0, max_workers=8):
+
+def scan_and_store_parallel(root_dir, db_path, full_set=0, max_workers=8, sub_dirs_to_sweep=None, debug=False):
     import sqlite3
+    # Set up logging - save log to file 
+--
 
     # Gather all folders to process
     jobs = []
     for job_id in os.listdir(root_dir):
-        cat_path_path = os.path.join(root_dir, job_id)
-        if not os.path.isdir(cat_path_path):
-            continue
-        for subset in os.listdir(cat_path_path):
-            subset_path = os.path.join(cat_path_path, subset)
-            if os.path.isdir(subset_path):
-                jobs.append((subset_path, full_set, subset, job_id, subset_path))
+        if sub_dirs_to_sweep is not None and job_id not in sub_dirs_to_sweep:
+            logger.info(f"Skipping subset: {job_id}")
 
+        if sub_dirs_to_sweep is not None and job_id in sub_dirs_to_sweep:
+            logger.info(f"Running subset: {job_id}")
+        
+            cat_path_path = os.path.join(root_dir, job_id)
+            if not os.path.isdir(cat_path_path):
+                continue
+            
+            for subset in os.listdir(cat_path_path):
+                subset_path = os.path.join(cat_path_path, subset)
+                if os.path.isdir(subset_path):
+                    jobs.append((subset_path, full_set, subset, job_id, subset_path))
+    if debug: 
+        jobs = jobs[:100]  # limit for debugging
+    
+    logger.info(f"Total folders to process: {len(jobs)}")
     # Use a sample folder to infer columns
     sample_folder = jobs[0][0] if jobs else None
     if sample_folder is None:
@@ -36,7 +50,6 @@ def scan_and_store_parallel(root_dir, db_path, full_set=0, max_workers=8):
 
     # Parallel folder processing with tqdm
     results = []
-
     def process_job(args):
         folder, full_set, subset, job_id, folder_path = args
         try:
@@ -44,15 +57,22 @@ def scan_and_store_parallel(root_dir, db_path, full_set=0, max_workers=8):
             info.update({"job_id": subset, "subset": job_id, "folder": folder_path})
             return info
         except Exception as e:
-            print(f"Error processing folder {folder}: {e}")
+            logger.error(f"Error processing folder {folder}: {e}")
+            #print(f"Error processing folder {folder}: {e}")
             return None
 
+    
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         for info in tqdm(
             executor.map(process_job, jobs), total=len(jobs), desc="Processing folders"
         ):
             if info is not None:
                 results.append(info)
+    
+    #with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
+    #    for info in tqdm(executor.map(process_job, jobs), total=len(jobs), desc="Processing folders"):
+    #        if info is not None:
+    #            results.append(info)
 
     # Serial DB write with tqdm
     conn = sqlite3.connect(db_path)
@@ -62,6 +82,29 @@ def scan_and_store_parallel(root_dir, db_path, full_set=0, max_workers=8):
         f"CREATE TABLE IF NOT EXISTS validation ({col_defs}, PRIMARY KEY(job_id, subset, folder))"
     )
 
+    upserts = []
+    for info in results:
+        values = [str(info.get(col, "")) for col in columns]
+        job_id = info["job_id"]
+        subset = info["subset"]
+        folder = info["folder"]
+        upserts.append((values, job_id, subset, folder))
+
+    for values, job_id, subset, folder in tqdm(upserts, desc="Writing to DB"):
+        c.execute("SELECT * FROM validation WHERE job_id=? AND subset=? AND folder=?", (job_id, subset, folder))
+        existing = c.fetchone()
+        if existing:
+            existing_dict = dict(zip(columns, existing))
+            if any(existing_dict.get(col, "") != str(val) for col, val in zip(columns, values)):
+                set_clause = ", ".join([f"{col}=?" for col in columns])
+                c.execute(f"UPDATE validation SET {set_clause} WHERE job_id=? AND subset=? AND folder=?", values + [job_id, subset, folder])
+        else:
+            placeholders = ", ".join(["?"] * len(columns))
+            c.execute(f"INSERT INTO validation ({', '.join(columns)}) VALUES ({placeholders})", values)
+    conn.commit()
+    conn.close()
+
+    """NON-Batched
     for info in tqdm(results, desc="Writing to DB"):
         values = [str(info.get(col, "")) for col in columns]
         job_id = info["job_id"]
@@ -91,7 +134,7 @@ def scan_and_store_parallel(root_dir, db_path, full_set=0, max_workers=8):
             )
     conn.commit()
     conn.close()
-
+    """
 
 def create_overall_count_db(
     folder_jobs_OMol="/lus/eagle/projects/generator/jobs_by_topdir",
@@ -178,6 +221,22 @@ def print_summary(
             )
         else:
             print(f"  {subset}: {get_tabs(subset)} {count}")
+
+    # table of number of val True per category
+    print("---" * 30)
+    print("Number of jobs passing each validation per category (subset):")
+    for col in validation_cols:
+        c.execute(
+            f"""SELECT subset, COUNT(DISTINCT job_id) FROM validation WHERE {col}='True' GROUP BY subset"""
+        )
+        print(f"  Validation: {col}")
+        for subset, count in c.fetchall():
+            if path_to_overall_counts_db:
+                print(
+                    f"    {subset}: {get_tabs(subset)} {count} / {counts_overall.get(subset, 'N/A')}"
+                )
+            else:
+                print(f"    {subset}: {get_tabs(subset)} {count}")
 
     # 2. Number of jobs done per category (by subset)
     c.execute("SELECT subset, COUNT(DISTINCT job_id) FROM validation GROUP BY subset")
