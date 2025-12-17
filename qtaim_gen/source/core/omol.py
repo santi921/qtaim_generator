@@ -901,6 +901,68 @@ def setup_logger(folder: str, name: str = "gbw_analysis") -> logging.Logger:
     return logger
 
 
+def move_results_to_folder(folder: str, logger: logging.Logger, clean: bool = True) -> None:
+    """
+    Docstring for move_results_to_folder
+    
+    :param folder: Description
+    :type folder: str
+    :param logger: Description
+    :type logger: logging.Logger
+    :param clean: Description
+    :type clean: bool
+    """
+    results_list = [
+        "timings.json",
+        "charge.json",
+        "bond.json",
+        "fuzzy_full.json",
+        "qtaim.json",
+        "other.json",
+    ]
+    results_folder = os.path.join(folder, "generator")
+
+    if not os.path.exists(results_folder):
+        os.mkdir(results_folder)
+
+    for file in os.listdir(folder):
+        if file in results_list:
+            # if file exists in results folder, merge the jsons
+            if os.path.exists(os.path.join(results_folder, file)):
+                try:
+                    with open(os.path.join(folder, file), "r") as f:
+                        data_new = json.load(f)
+                    with open(os.path.join(results_folder, file), "r") as f:
+                        data_existing = json.load(f)
+                    # merge the two dicts
+                    if isinstance(data_existing, dict) and isinstance(
+                        data_new, dict
+                    ):
+
+                        data_merged = {**data_existing, **data_new}
+                    else:
+                        data_merged = data_new  # if not dict, just overwrite
+                    with open(os.path.join(results_folder, file), "w") as f:
+                        json.dump(data_merged, f, indent=4)
+
+                    logger.info(f"Merged {file} into results folder")
+                    # remove the original file
+
+                    if clean:
+                        os.remove(os.path.join(folder, file))
+                except Exception as e:
+                    logger.error(f"Error merging file {file}: {e}")
+            else:
+                try:
+                    os.rename(
+                        os.path.join(folder, file),
+                        os.path.join(results_folder, file),
+                    )
+                    logger.info(f"Moved {file} to results folder")
+                except Exception as e:
+                    logger.error(f"Error moving file {file}: {e}")
+
+
 def gbw_analysis(
     folder: str,
     multiwfn_cmd: str,
@@ -1047,6 +1109,7 @@ def gbw_analysis(
                         logger.info(f"Removed intermediate file: {file}")
                     except Exception as e:
                         logger.error(f"Error removing intermediate file {file}: {e}")
+    
     if restart:
         logger.info("Restarting from last step in timings.json")
         # check if the timings file exists
@@ -1069,7 +1132,7 @@ def gbw_analysis(
         if check_results_exist(folder_check):
             print("Output already exists")
             tf_validation = validation_checks(
-                folder,
+                folder_check,
                 full_set=full_set,
                 verbose=False,
                 move_results=move_results,
@@ -1078,9 +1141,38 @@ def gbw_analysis(
 
             # we might change level-of-analysis so only return if all requested analyses are present
             if tf_validation:
+                logger.info("Output already exists and is valid - skipping analysis")
                 logger.info("gbw_analysis completed in folder: {}".format(folder))
                 logger.info("Validation status: {}".format(tf_validation))
                 return
+
+
+            # attempt to reparse if output exists but validation failed
+            else:
+                logger.warning(
+                    "Output exists but validation failed - attempting to reparse before re-running analysis"
+                )
+                parse_multiwfn(
+                    folder, separate=separate, debug=debug, logger=logger, full_set=full_set
+                )
+                
+                if move_results:
+                    move_results_to_folder(folder, logger=logger, clean=clean)
+
+
+                tf_validation = validation_checks(
+                    folder_check,
+                    full_set=full_set,
+                    verbose=False,
+                    move_results=move_results,
+                    logger=logger,
+                )
+    
+                if tf_validation:
+                    logger.info("Reparsing successful on 2nd try - skipping analysis")
+                    logger.info("gbw_analysis completed in folder: {}".format(folder))
+                    logger.info("Validation status: {}".format(tf_validation))
+                    return
 
     write_settings_file(mem=mem, n_threads=n_threads, folder=folder)
 
@@ -1115,60 +1207,12 @@ def gbw_analysis(
         folder, separate=separate, debug=debug, logger=logger, full_set=full_set
     )
 
-
     # move all results to a results folder
-    results_list = [
-        "timings.json",
-        "charge.json",
-        "bond.json",
-        "fuzzy_full.json",
-        "qtaim.json",
-        "other.json",
-    ]
+
 
     if move_results:
-        results_folder = os.path.join(folder, "generator")
-
-        if not os.path.exists(results_folder):
-            os.mkdir(results_folder)
-
-        for file in os.listdir(folder):
-            if file in results_list:
-                # if file exists in results folder, merge the jsons
-                if os.path.exists(os.path.join(results_folder, file)):
-                    try:
-                        with open(os.path.join(folder, file), "r") as f:
-                            data_new = json.load(f)
-                        with open(os.path.join(results_folder, file), "r") as f:
-                            data_existing = json.load(f)
-                        # merge the two dicts
-                        if isinstance(data_existing, dict) and isinstance(
-                            data_new, dict
-                        ):
-
-                            data_merged = {**data_existing, **data_new}
-                        else:
-                            data_merged = data_new  # if not dict, just overwrite
-                        with open(os.path.join(results_folder, file), "w") as f:
-                            json.dump(data_merged, f, indent=4)
-
-                        logger.info(f"Merged {file} into results folder")
-                        # remove the original file
-
-                        if clean:
-                            os.remove(os.path.join(folder, file))
-                    except Exception as e:
-                        logger.error(f"Error merging file {file}: {e}")
-                else:
-                    try:
-                        os.rename(
-                            os.path.join(folder, file),
-                            os.path.join(results_folder, file),
-                        )
-                        logger.info(f"Moved {file} to results folder")
-                    except Exception as e:
-                        logger.error(f"Error moving file {file}: {e}")
-
+        move_results_to_folder(folder, logger=logger, clean=clean)
+        
     tf_validation = validation_checks(
         folder,
         full_set=full_set,
