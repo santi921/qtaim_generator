@@ -813,9 +813,31 @@ def parse_fuzzy_doc(fuzzy_loc):
                     line_split = line.split()
                     if line_split[0] == "Summing":
                         if line_split[2] == "absolute":
-                            dict_data_temp["abs_sum"] = float(line_split[-1])
+                            value_str = line_split[-1]
+                            try:
+                                value = float(value_str)
+                            except ValueError:
+                                import re
+                                sci_match = re.match(r'^([+-]?)(\d*\.?\d*)[+](\d+)$', value_str)
+                                if sci_match:
+                                    sign = -1 if sci_match.group(1) == '-' else 1
+                                    value = sign * 1e10
+                                else:
+                                    value = None
+                            dict_data_temp["abs_sum"] = value
                         else:
-                            dict_data_temp["sum"] = float(line_split[-1])
+                            value_str = line_split[-1]
+                            try:
+                                value = float(value_str)
+                            except ValueError:
+                                import re
+                                sci_match = re.match(r'^([+-]?)(\d*\.?\d*)[+](\d+)$', value_str)
+                                if sci_match:
+                                    sign = -1 if sci_match.group(1) == '-' else 1
+                                    value = sign * 1e10
+                                else:
+                                    value = None
+                            dict_data_temp["sum"] = value
                     else:
                         name = line_split[0].replace("(", "_")
                         dict_data_temp[name] = float(line_split[2])

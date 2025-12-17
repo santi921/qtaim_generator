@@ -3,6 +3,7 @@ import os
 import json
 from qtaim_gen.source.core.parse_qtaim import dft_inp_to_dict
 import numpy as np
+from datetime import datetime
 
 
 def get_charge_spin_n_atoms_from_folder(
@@ -107,8 +108,8 @@ def get_val_breakdown_from_folder(
     # echeck other
     other_file = os.path.join(folder, "other.json")
     if os.path.exists(other_file) and os.path.getsize(other_file) > 0:
-        tf_other = validate_timing_dict(
-            other_file, logger=None, full_set=full_set, spin_tf=spin_tf
+        tf_other = validate_other_dict(
+            other_file, logger=None, 
         )
         info["val_other"] = tf_other
 
@@ -554,3 +555,142 @@ def validation_checks(
     if verbose:
         print("All validation checks passed.")
     return True
+
+
+def get_information_from_job_folder(folder: str, full_set: int) -> dict:
+    """Extracts relevant information from the job folder name."""
+
+    # check if folder has /generator/ subdirectory, if so get timings.json in that folder
+
+    info = {
+        "validation_level_0": None,
+        "validation_level_1": None,
+        "validation_level_2": None,
+        "total_time": None,
+        "t_qtaim": None,
+        "t_other": None,
+        "last_edit_time": None,
+        "val_time": None,
+        "val_qtaim": None,
+        "val_charge": None,
+        "val_bond": None,
+        "val_fuzzy": None,
+        "val_other": None,
+        "n_atoms": None,
+        "spin": None,
+        "charge": None,
+    }
+
+    # get .inp file in the folder for spin, charge, n_atoms
+    dft_dict = get_charge_spin_n_atoms_from_folder(folder, logger=None, verbose=False)
+    # print("DFT dict: ", dft_dict)
+    if not dft_dict:
+        return info  # return empty info if dft_dict is None or empty
+
+    n_atoms = len(dft_dict["mol"])
+    spin = dft_dict.get("spin", None)
+    charge = dft_dict.get("charge", None)
+
+    info["n_atoms"] = n_atoms
+    info["spin"] = spin
+    info["charge"] = charge
+
+    if spin != 1:
+        spin_tf = True
+    else:
+        spin_tf = False
+
+    # check is there is a generator subfolder
+    # print("Folder to analyze: ", folder)
+
+    if "generator" in os.listdir(folder):
+        # print("Found generator subfolder.")
+        gen_folder = folder + "/generator/"
+        timings_file = os.path.join(gen_folder, "timings.json")
+
+        if os.path.exists(timings_file) and os.path.getsize(timings_file) > 0:
+            with open(timings_file, "r") as f:
+                timings = json.load(f)
+            total_time = float(np.array(list(timings.values())).sum())
+            info["total_time"] = total_time
+
+            for col in timings.keys():
+                info[f"t_{col}"] = timings[col]
+        else: 
+            return info  # return empty info if timings file is missing or empty
+
+        tf_validation_level_0 = validation_checks(
+            folder, full_set=0, verbose=False, move_results=True, logger=None
+        )
+
+        tf_validation_level_1 = validation_checks(
+            folder, full_set=1, verbose=False, move_results=True, logger=None
+        )
+
+        tf_validation_level_2 = validation_checks(
+            folder, full_set=2, verbose=False, move_results=True, logger=None
+        )
+
+        # set val_qtaim, val_charge, val_bond, val_fuzzy, val_other to True for corresponding level
+        if full_set == 0:
+            status_val = tf_validation_level_0
+        elif full_set == 1:
+            status_val = tf_validation_level_1
+        elif full_set == 2:
+            status_val = tf_validation_level_2
+
+        if status_val:
+            info["val_qtaim"] = True
+            info["val_charge"] = True
+            info["val_bond"] = True
+            info["val_fuzzy"] = True
+            info["val_other"] = True
+            info["val_time"] = True
+        else:
+            dict_val = get_val_breakdown_from_folder(
+                gen_folder, n_atoms=n_atoms, full_set=full_set, spin_tf=spin_tf
+            )
+            info.update(dict_val)
+
+        # check edit date of timings.json
+        mtime_timestamp = os.path.getmtime(timings_file)
+        # Convert the timestamp to a datetime object
+        mtime_datetime = datetime.fromtimestamp(mtime_timestamp)
+        # Format the datetime object into a human-readable string
+        # Example format: YYYY-MM-DD HH:MM:SS
+        human_readable_mtime = mtime_datetime.strftime("%Y-%m-%d %H:%M:%S")
+        info["last_edit_time"] = human_readable_mtime
+
+        info.update(
+            {
+                "validation_level_0": tf_validation_level_0,
+                "validation_level_1": tf_validation_level_1,
+                "validation_level_2": tf_validation_level_2,
+            }
+        )
+
+    else:
+        timings_file = os.path.join(folder, "timings.json")
+
+        if os.path.exists(timings_file):
+            with open(timings_file, "r") as f:
+                timings = json.load(f)
+            total_time = float(np.array(list(timings.values())).sum())
+            info["total_time"] = total_time
+
+            for col in timings.keys():
+                info[f"t_{col}"] = timings[col]
+
+            edit_time = os.path.getmtime(timings_file)
+            # Convert the timestamp to a datetime object
+            mtime_datetime = datetime.fromtimestamp(edit_time)
+            # Format the datetime object into a human-readable string
+            human_readable_mtime = mtime_datetime.strftime("%Y-%m-%d %H:%M:%S")
+            info["last_edit_time"] = human_readable_mtime
+
+        dict_val = get_val_breakdown_from_folder(
+            folder, n_atoms=n_atoms, full_set=full_set, spin_tf=spin_tf
+        )
+        info.update(dict_val)
+
+    return info

@@ -4,19 +4,16 @@ import signal
 import random
 import argparse
 import parsl
-
-from typing import Optional, List
 import resource
+from typing import Optional, List
+
 
 from qtaim_gen.source.core.workflow import run_folder_task_alcf
 from qtaim_gen.source.utils.parsl_configs import (
     alcf_config,
-    base_config,
-    alcf_config_single_pbs,
+    base_config
 )
 from qtaim_gen.source.utils.io import sample_lines
-
-should_stop = False
 
 
 def handle_signal(signum, frame):
@@ -362,19 +359,19 @@ if __name__ == "__main__":
 
 
 """
-full-runner-parsl-alcf --num_folders 20000 --orca_2mkl_cmd $HOME/orca_6_0_0/orca_2mkl \
+full-runner-parsl-alcf --num_folders 50000 --orca_2mkl_cmd $HOME/orca_6_0_0/orca_2mkl \
     --multiwfn_cmd $HOME/Multiwfn_3_8/Multiwfn_noGUI --clean \
-        --full_set 0 --type_runner local --safety_factor 3.0 --move_results \
+        --full_set 0 --type_runner hpc --safety_factor 3.0 --move_results \
             --preprocess_compressed --timeout_hr 5     --queue workq-route  --restart  --n_nodes 1 \
             --job_file ../jobs_by_topdir/orbnet_denali.txt --preprocess_compressed \
                 --root_omol_results /lus/eagle/projects/generator/OMol25_postprocessing/ \
-                --root_omol_inputs /lus/eagle/projects/OMol25/ --n_threads_per_job 4
+                --root_omol_inputs /lus/eagle/projects/OMol25/ --n_threads_per_job 1
 
+full-runner-parsl-alcf --num_folders 50000 --orca_2mkl_cmd $HOME/orca_6_0_0/orca_2mkl \
+    --multiwfn_cmd $HOME/Multiwfn_3_8/Multiwfn_noGUI --clean --full_set 0 --type_runner hpc \
+        --n_threads 1 --safety_factor 1.0 --move_results --preprocess_compressed --timeout_hr 5 \
+            --queue workq-route --restart --n_nodes 3 --type_runner hpc --job_file ../jobs_by_topdir/trans1x.txt \
+                --preprocess_compressed --root_omol_results /lus/eagle/projects/generator/OMol25_postprocessing/ \
+                    --root_omol_inputs /lus/eagle/projects/OMol25/
                 
-full-runner-parsl-alcf --num_folders 3000 --orca_2mkl_cmd $HOME/orca_6_0_0/orca_2mkl \
-    --multiwfn_cmd $HOME/Multiwfn_3_8/Multiwfn_noGUI --clean --job_file \
-./test.txt --full_set 0 --type_runner local \
---n_threads_per_job 10 --safety_factor 1.0 --move_results --preprocess_compressed --timeout_hr 3 \
---queue workq-route  --restart  --n_nodes 1 --job_file ../jobs_by_topdir/noble_gas.txt  \
---preprocess_compressed --root_omol_results /lus/eagle/projects/generator/OMol25_postprocessing/ --root_omol_inputs /lus/eagle/projects/OMol25/
 """
