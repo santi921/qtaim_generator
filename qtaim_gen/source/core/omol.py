@@ -1115,16 +1115,6 @@ def gbw_analysis(
         folder, separate=separate, debug=debug, logger=logger, full_set=full_set
     )
 
-    if clean:
-        #    # clean some of the mess
-        logger.info("... Cleaning up")
-        clean_jobs(
-            folder,
-            separate=separate,
-            logger=logger,
-            full_set=full_set,
-            move_results=move_results,
-        )
 
     # move all results to a results folder
     results_list = [
@@ -1189,7 +1179,18 @@ def gbw_analysis(
     logger.info("gbw_analysis completed in folder: {}".format(folder))
     logger.info("Validation status: {}".format(tf_validation))
     # move log file to results folder
-
+    
+    # ONLY CLEAN IF VALIDATION PASSED
+    if clean and tf_validation:
+        #    # clean some of the mess
+        logger.info("... Cleaning up")
+        clean_jobs(
+            folder,
+            separate=separate,
+            logger=logger,
+            full_set=full_set,
+            move_results=move_results,
+        )
 
 # /global/scratch/users/santiagovargas/gbws_cleaning_lean/ml_elytes/elytes_md_eqv2_electro_512_C3H8O_3_group_133_shell_0_0_1_1341
 #!/bin/bash
