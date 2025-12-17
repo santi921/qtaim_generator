@@ -782,6 +782,29 @@ def parse_other_doc(other_txt):
     return dict_other
 
 
+def fix_float_overflow(value_str):
+    """
+    Function to fix float overflow in multiwfn outputs.
+    Takes:
+        value_str(str): string representation of the float value
+    Returns:
+        value(float): float value
+    """
+
+    try:
+        value = float(value_str)
+    except ValueError:
+        import re
+
+        sci_match = re.match(r"^([+-]?)(\d*\.?\d*)[+](\d+)$", value_str)
+        if sci_match:
+            sign = -1 if sci_match.group(1) == "-" else 1
+            value = sign * 1e10
+        else:
+            value = None
+    return value
+
+
 def parse_fuzzy_doc(fuzzy_loc):
     """
     Function to parse fuzzy doc. This assumes that the fuzzy doc consists of density, grad, laplacian, and elf
@@ -814,33 +837,16 @@ def parse_fuzzy_doc(fuzzy_loc):
                     if line_split[0] == "Summing":
                         if line_split[2] == "absolute":
                             value_str = line_split[-1]
-                            try:
-                                value = float(value_str)
-                            except ValueError:
-                                import re
-                                sci_match = re.match(r'^([+-]?)(\d*\.?\d*)[+](\d+)$', value_str)
-                                if sci_match:
-                                    sign = -1 if sci_match.group(1) == '-' else 1
-                                    value = sign * 1e10
-                                else:
-                                    value = None
+                            value = fix_float_overflow(value_str)
                             dict_data_temp["abs_sum"] = value
                         else:
                             value_str = line_split[-1]
-                            try:
-                                value = float(value_str)
-                            except ValueError:
-                                import re
-                                sci_match = re.match(r'^([+-]?)(\d*\.?\d*)[+](\d+)$', value_str)
-                                if sci_match:
-                                    sign = -1 if sci_match.group(1) == '-' else 1
-                                    value = sign * 1e10
-                                else:
-                                    value = None
+                            value = fix_float_overflow(value_str)
                             dict_data_temp["sum"] = value
                     else:
                         name = line_split[0].replace("(", "_")
-                        dict_data_temp[name] = float(line_split[2])
+                        #dict_data_temp[name] = float(line_split[2])
+                        dict_data_temp[name] = fix_float_overflow(line_split[2])
 
             if trigger_bool_local_block:
                 if line == "\n" or len(line) < 3:
@@ -894,9 +900,13 @@ def parse_fuzzy_real_space(fuzzy_loc):
                     # print(line_split)
                     if line_split[0] == "Summing":
                         if line_split[2] == "absolute":
-                            dict_data_temp["abs_sum"] = float(line_split[-1])
+                            value_str = line_split[-1]
+                            value = fix_float_overflow(value_str)
+                            dict_data_temp["abs_sum"] = value
                         else:
-                            dict_data_temp["sum"] = float(line_split[-1])
+                            value_str = line_split[-1]
+                            value = fix_float_overflow(value_str)
+                            dict_data_temp["sum"] = value
                     else:
                         name = line_split[0].replace("(", "_")
                         # remove )
@@ -906,7 +916,7 @@ def parse_fuzzy_real_space(fuzzy_loc):
                         shift = -1
                         if len(line_split) > 4:
                             shift = 0
-                        dict_data_temp[name] = float(line_split[2 + shift])
+                        dict_data_temp[name] = fix_float_overflow(line_split[2 + shift])
 
             if trigger_data_block in line:
                 trigger_bool_real = True
