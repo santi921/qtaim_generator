@@ -179,7 +179,7 @@ def validate_timing_dict(
                     f"Timing for '{key}' is too small: {timing_dict[key]} seconds."
                 )
             print(f"Timing for '{key}' is too small: {timing_dict[key]} seconds.")
-            return
+            return False
 
     if spin_tf:
         for key in excepted_spin_keys:
@@ -253,6 +253,7 @@ def validate_fuzzy_dict(
 
     if spin_tf:
         expected_keys += ["hirsh_fuzzy_spin", "becke_fuzzy_spin"]
+
         if full_set > 0:
             expected_keys += ["mbis_fuzzy_spin"]
 
@@ -260,6 +261,7 @@ def validate_fuzzy_dict(
         if key not in fuzzy_dict:
             if logger:
                 logger.error(f"Missing expected key '{key}' in fuzzy json.")
+            return False
         if n_atoms is not None:
             if len(fuzzy_dict[key]) != n_atoms + 2:
                 if verbose:
@@ -376,6 +378,7 @@ def validate_charge_dict(
             if logger:
                 logger.error(f"Missing 'charge' key in '{key}' of charge json.")
             return False
+        
         if n_atoms is not None:
             if len(charge_dict[key]["charge"]) != n_atoms:
                 if verbose:
