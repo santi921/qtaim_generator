@@ -146,10 +146,6 @@ def process_folder(
             move_results=move_results,
         )
         t1: float = time.time()
-
-        result["elapsed"] = t1 - t0
-        result["status"] = "ok"
-        logger.info("Completed folder %s in %.2f s", folder, result["elapsed"])
         
         # remove density_mat.npz, orca.gbw.zstd0, orca.gbw, orca.tar.zst from results folder
         files_to_remove = [
@@ -170,7 +166,10 @@ def process_folder(
                 os.remove(fp)
                 # add log
                 logger.info("Removed file %s to save space", fp)
-
+        
+        result["elapsed"] = t1 - t0
+        result["status"] = "ok"
+        logger.info("Completed folder %s in %.2f s", folder, result["elapsed"])
 
         return result
 
@@ -234,6 +233,7 @@ def process_folder_alcf(
 
     folder_outputs = root_omol_results + os.sep + folder_relative
     # copy files from folder_inputs to folder_outputs if they don't exist
+    
     if not os.path.exists(folder_outputs):
         os.makedirs(folder_outputs)
 
@@ -314,9 +314,6 @@ def process_folder_alcf(
         )
         t1: float = time.time()
 
-        result["elapsed"] = t1 - t0
-        result["status"] = "ok"
-        logger.info("Completed folder %s in %.2f s", folder, result["elapsed"])
 
         # remove density_mat.npz, orca.gbw.zstd0, orca.gbw, orca.tar.zst from results folder
         files_to_remove = [
@@ -337,6 +334,10 @@ def process_folder_alcf(
                 os.remove(fp)
                 # add log
                 logger.info("Removed file %s to save space", fp)
+        
+        result["elapsed"] = t1 - t0
+        result["status"] = "ok"
+        logger.info("Completed folder %s in %.2f s", folder, result["elapsed"])
 
         return result
 

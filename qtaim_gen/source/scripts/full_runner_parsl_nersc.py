@@ -8,9 +8,9 @@ import resource
 from typing import Optional, List
 
 
-from qtaim_gen.source.core.workflow import run_folder_task_alcf
+from qtaim_gen.source.core.workflow import run_folder_task
 from qtaim_gen.source.utils.parsl_configs import (
-    alcf_config,
+    nersc_config,
     base_config
 )
 from qtaim_gen.source.utils.io import sample_lines
@@ -208,7 +208,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         parsl_config = base_config(n_workers=int(n_threads / n_threads_per_job))
 
     else:
-        parsl_config, n_threads_per_job = alcf_config(
+        parsl_config, n_threads_per_job = nersc_config(
             queue=queue,
             walltime=timeout_str,
             threads_per_task=n_threads_per_job,
@@ -310,7 +310,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     # into the remote app; each worker will create its own per-folder logger.
 
     futures = [
-        run_folder_task_alcf(
+        run_folder_task(
             folder=f,
             orca_2mkl_cmd=orca6_2mkl,
             multiwfn_cmd=multiwfn_cmd,
@@ -362,26 +362,13 @@ if __name__ == "__main__":
 full-runner-parsl-alcf --num_folders 80000 --orca_2mkl_cmd $HOME/orca_6_0_0/orca_2mkl    \
       --multiwfn_cmd $HOME/Multiwfn_3_8/Multiwfn_noGUI --clean --full_set 0 --type_runner hpc \
         --n_threads 220 --n_threads_per_job 1 --safety_factor 1.0 --move_results --preprocess_compressed \
-        --timeout_hr 5             --queue workq-route --restart --n_nodes 3 --type_runner hpc --job_file ../jobs_by_topdir/ani1xbb.txt \
-        --preprocess_compressed --root_omol_results /lus/eagle/projects/generator/OMol25_postprocessing/  \
-        --root_omol_inputs /lus/eagle/projects/OMol25/ 
-            
+        --timeout_hr 5             --queue workq-route --restart --n_nodes 1 --type_runner hpc --job_file ../jobs_by_topdir/ani1xbb.txt \
+        --preprocess_compressed --root_omol_results /lus/eagle/projects/generator/OMol25_postprocessing/  --root_omol_inputs /lus/eagle/projects/OMol25/ 
 
 
 full-runner-parsl-alcf --num_folders 50000 --orca_2mkl_cmd $HOME/orca_6_0_0/orca_2mkl    \
       --multiwfn_cmd $HOME/Multiwfn_3_8/Multiwfn_noGUI --clean --full_set 0 --type_runner hpc \
         --n_threads 220 --n_threads_per_job 1 --safety_factor 1.0 --move_results --preprocess_compressed \
-        --timeout_hr 5             --queue workq-route --restart --n_nodes 3 --type_runner hpc \
-        --job_file /lus/eagle/projects/generator/jobs_by_topdir/orbnet_denali.txt \
-        --preprocess_compressed --root_omol_results /lus/eagle/projects/generator/OMol25_postprocessing/ \
-        --root_omol_inputs /lus/eagle/projects/OMol25/               
-
-
-full-runner-parsl-alcf --num_folders 100000 --orca_2mkl_cmd $HOME/orca_6_0_0/orca_2mkl    \
-      --multiwfn_cmd $HOME/Multiwfn_3_8/Multiwfn_noGUI --clean --full_set 0 --type_runner hpc \
-        --n_threads 220 --n_threads_per_job 1 --safety_factor 1.0 --move_results --preprocess_compressed \
-        --timeout_hr 4             --queue workq-route --restart --n_nodes 3 --type_runner hpc \
-        --job_file /lus/eagle/projects/generator/jobs_by_topdir/trans1x.txt \
-        --preprocess_compressed --root_omol_results /lus/eagle/projects/generator/OMol25_postprocessing/ \
-        --root_omol_inputs /lus/eagle/projects/OMol25/          
+        --timeout_hr 5             --queue workq-route --restart --n_nodes 1 --type_runner hpc --job_file ../jobs_by_topdir/orbnet_denali.txt \
+        --preprocess_compressed --root_omol_results /lus/eagle/projects/generator/OMol25_postprocessing/                      
 """
