@@ -15,7 +15,7 @@ from qtaim_gen.source.utils.parsl_configs import (
 )
 from qtaim_gen.source.utils.io import sample_lines
 
-
+should_stop = False
 def handle_signal(signum, frame):
     global should_stop
     print(f"Received signal {signum}, initiating graceful shutdown...")
