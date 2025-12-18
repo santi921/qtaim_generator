@@ -154,19 +154,6 @@ def main(argv: Optional[List[str]] = None) -> int:
         "--n_nodes", type=int, default=1, help="number of nodes to use (HPC)"
     )
 
-    parser.add_argument(
-        "--root_omol_results",
-        type=str,
-        default=None,
-        help="root where to store results, should mimic root_omol_inputs",
-    )
-
-    parser.add_argument(
-        "--root_omol_inputs",
-        type=str,
-        default=None,
-        help="root where input folders are located",
-    )
 
     args = parser.parse_args(argv)
     # print(args)
@@ -189,8 +176,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     job_file: str = getattr(args, "job_file")
     dry_run: bool = bool(getattr(args, "dry_run", False))
     overwrite = bool(args.overwrite) if "overwrite" in args else False
-    root_omol_results: Optional[str] = getattr(args, "root_omol_results", None)
-    root_omol_inputs: Optional[str] = getattr(args, "root_omol_inputs", None)
+    #root_omol_results: Optional[str] = getattr(args, "root_omol_results", None)
+    #root_omol_inputs: Optional[str] = getattr(args, "root_omol_inputs", None)
 
     # parsl args
     type_runner: str = str(getattr(args, "type_runner", "local"))
@@ -263,9 +250,6 @@ def main(argv: Optional[List[str]] = None) -> int:
         print(f"No folders found in {job_file}")
         return 0
 
-    # make dir for results root
-    if root_omol_results:
-        os.makedirs(root_omol_results, exist_ok=True)
 
     # verify listed folders exist, warn & skip missing entries
     existing_folders = []
@@ -325,8 +309,6 @@ def main(argv: Optional[List[str]] = None) -> int:
             debug=debug,
             preprocess_compressed=preprocess_compressed,
             move_results=move_results,
-            root_omol_results=root_omol_results,
-            root_omol_inputs=root_omol_inputs,
         )
         for f in folders_run
     ]
