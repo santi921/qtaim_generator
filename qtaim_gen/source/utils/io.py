@@ -6,28 +6,23 @@ import random
 from qtaim_gen.source.core.parse_qtaim import dft_inp_to_dict
 from qtaim_gen.source.utils.validation import validation_checks
 
-def get_folders_from_file(
-    job_file: str, 
-    num_folders: int, 
-    pre_validate: bool=False, 
-    move_results: bool=True, 
-    full_set: int=0,
-) -> List[str]:
-    folder_file = os.path.join(job_file)
-    folders = sample_lines(folder_file, num_folders)
-    folders = [f.strip() for f in folders if f.strip()]  # remove empty lines
-    
-    if not folders:
-        return []
-    
-    # verify listed folders exist, warn & skip missing entries
+def sanitize_folders(folders: List[str]) -> List[str]:
+    """Sanitize folder paths by stripping whitespace and removing empty entries. Also just checks for basic validity.
+
+    Args:
+        folders: List of folder paths as strings.
+    Returns:
+        A sanitized list of folder paths.
+    """
+    sanitized = [f.strip() for f in folders if f.strip()]
     existing_folders = []
     missing = []
-    for f in folders:
+    for f in sanitized:
         if os.path.exists(f) and os.path.isdir(f):
             existing_folders.append(f)
         else:
             missing.append(f)
+            pass
     if missing:
         print(
             f"Warning: {len(missing)} listed paths do not exist or are not directories; they will be skipped."
@@ -37,31 +32,76 @@ def get_folders_from_file(
         if len(missing) > 10:
             print("  ...")
     folders = existing_folders
+    
     if not folders:
         print("No valid folders to run after filtering missing entries.")
         return 0
+    
+    return folders
+    
 
-    num_folders = len(folders)
+def get_folders_from_file(
+    job_file: str, 
+    num_folders: int, 
+    pre_validate: bool=False, 
+    move_results: bool=True, 
+    full_set: int=0,
+    logger: Any=None
+) -> List[str]:
+    
+    print(f"collecting {num_folders} folders from {job_file} with pre_validate={pre_validate}")
+    
+    folder_file = os.path.join(job_file)
+    if pre_validate:
+        num_sample = num_folders * 10 # hack to just attempt to finish folders
+    else:
+        num_sample = num_folders
+
+    folders = sample_lines(folder_file, num_sample)
+    folders = sanitize_folders(folders)
+
+    if not folders:
+        return []
+    
+    #num_folders = len(folders)
     # shuffle folders
     random.shuffle(folders)
+    
     if pre_validate:
         folders_run = []
         for folder in folders:
-            tf_validation = validation_checks(
-                folder,
-                full_set=full_set,
-                verbose=False,
-                move_results=move_results,
-            )
-            if not tf_validation:
+            try:
+                tf_validation = validation_checks(
+                    folder,
+                    full_set=full_set,
+                    verbose=False,
+                    move_results=move_results,
+                    logger=logger,
+                )
+                if not tf_validation:
+                    folders_run.append(folder)
+                    if logger:
+                        logger.info(f"Adding {folder} to run list after pre-validation")
+                
+                else: 
+                    if logger:
+                        logger.info(f"Skipping {folder} due to pre-validation pass")
+            
+            except: 
+                # add folder to run b/c it's likely json io error 
                 folders_run.append(folder)
-            # break if we reached num_folders
+                if logger:
+                    logger.info(f"Adding {folder} to run list after pre-validation exception")
+            
+            
             if len(folders_run) >= num_folders:
-                break
+                print(f"Pre-validation collected {len(folders_run)} folders to run.")
+                return folders_run
     else:
         folders_run = folders[:num_folders]
     
     return folders_run
+
 
 def pull_ecp_dict(orca_out: str) -> Dict[int, Dict[str, Union[str, float]]]:
     """

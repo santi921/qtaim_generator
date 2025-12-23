@@ -195,7 +195,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     full_set: int = int(getattr(args, "full_set", 0))
     move_results: bool = bool(getattr(args, "move_results", False))
     job_file: str = getattr(args, "job_file")
-    pre_validate: bool = bool(getattr(args, "pre_validate", False))
+    prevalidate: bool = bool(getattr(args, "prevalidate", False))
     dry_run: bool = bool(getattr(args, "dry_run", False))
     overwrite = bool(args.overwrite) if "overwrite" in args else False
     root_omol_results: Optional[str] = getattr(args, "root_omol_results", None)
@@ -256,7 +256,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     folders_run = get_folders_from_file(
         job_file, 
         num_folders, 
-        pre_validate=pre_validate, 
+        pre_validate=prevalidate, 
         move_results=move_results, 
         full_set=full_set
     )

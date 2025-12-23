@@ -178,7 +178,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     full_set: int = int(getattr(args, "full_set", 0))
     move_results: bool = bool(getattr(args, "move_results", False))
     job_file: str = getattr(args, "job_file")
-    pre_validate: bool = bool(getattr(args, "pre_validate", False))
+    prevalidate: bool = bool(getattr(args, "prevalidate", False))
     dry_run: bool = bool(getattr(args, "dry_run", False))
     overwrite = bool(args.overwrite) if "overwrite" in args else False
 
@@ -192,6 +192,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     timeout_str: str = (
         f"{int(timeout_hr)}:{int((timeout_hr - int(timeout_hr)) * 60):02d}:00"
     )
+
     assert type_runner in ["local", "hpc"], "type_runner must be 'local' or 'hpc'"
     if type_runner == "local":
         n_threads_per_job = n_threads_per_job
@@ -226,11 +227,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     if not os.path.exists(job_file):
         print(f"Error: job_file '{job_file}' does not exist")
         return 2
-
+    
+    print(f"Reading job file: {job_file}")
     folders_run = get_folders_from_file(
         job_file, 
         num_folders, 
-        pre_validate=pre_validate, 
+        pre_validate=prevalidate, 
         move_results=move_results, 
         full_set=full_set
     )
