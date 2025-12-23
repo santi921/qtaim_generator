@@ -110,14 +110,13 @@ def alcf_config(
 
 
 def nersc_config(
-    threads_per_task: int = 8,
-    safety_factor: float = 1.0,
-    threads_per_node: int = 256,
-    n_jobs: int = 2,
+    threads_per_task: int = 1,
+    threads_per_node: int = 40,
+    n_jobs: int = 1,
     queue: str = "condo_blau",
     walltime: str = "00:30:00",
     monitoring: bool = False,
-    memory: str = "192G"
+    memory: str = 192
 ) -> Config:
     """
     Returns a Parsl config optimized for running on LRC.
@@ -130,7 +129,7 @@ def nersc_config(
     # threads_per_node   = 256        # hardware threads
     # threads_per_task   = 8          # each job uses 8 threads
     workers_per_node = int(
-        threads_per_node // threads_per_task // safety_factor
+        threads_per_node // threads_per_task 
     )  # 256 // 8 = 32
 
     nodes_per_job = 1
@@ -158,7 +157,9 @@ def nersc_config(
                 # Options that specify properties of PBS Jobs
                 provider=SlurmProvider(
                     # Project name
-                    account="blau_lr",
+                    account="lr_blau",
+                    qos=queue,
+                    #partition="cm2",
                     # Commands run before workers launched
                     # Make sure to activate your environment where Parsl is installed
                     worker_init=(  # Debugging
@@ -185,26 +186,22 @@ def nersc_config(
                     walltime=walltime,
                     # Change if data/modules located on other filesystem
                     scheduler_options=(
-                        "#SBATCH --partition=cm2; "
-                        "#SBATCH --account=lr_blau; "
-                        "#SBATCH --qos={queue}; "
-                        "#SBATCH --nodes=1; "
-                        "#SBATCH --ntasks-per-node={threads_per_node}; "
-                        "#SBATCH --time={walltime}; "
-                        "#SBATCH -C lr6_m192; "
-                        "#SBATCH --kill-on-invalid-dep=yes; "
-                        "#SBATCH --mincpus={threads_per_node}; "
+                        f"#SBATCH --partition=cm2\n#SBATCH --mincpus={threads_per_node}\n#SBATCH -p lr6 "
                     ),
                     # Ensures 1 manger per node; the manager will distribute work to its 12 workers, one per tile
                     launcher=MpiExecLauncher(
                         bind_cmd="--cpu-bind", overrides="--ppn 1"
                     ),
                     # options added to #PBS -l select aside from ncpus
-                    select_options="",
+                    #select_options="",
                     nodes_per_block=nodes_per_job,
+                    cores_per_node=threads_per_node,
+                    mem_per_node=memory,
                     min_blocks=1,
+                    constraint="lr6_m192",
                     max_blocks=n_jobs,
-                    cpus_per_node=threads_per_node,
+                    cmd_timeout=120,
+                    #cpus_per_node=threads_per_node,
                 ),
             ),
         ],

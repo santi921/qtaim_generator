@@ -259,6 +259,7 @@ def process_folder_alcf(
         os.chdir(folder)
         # pre-checks (idempotency)
         # e.g. skip if outputs exist and not restart
+        """
         outputs_present: bool = all(
             os.path.exists(os.path.join(folder, fn))
             for fn in (
@@ -269,6 +270,7 @@ def process_folder_alcf(
                 "charge.json",
             )
         )
+        """
 
         tf_validation = validation_checks(
             folder,
@@ -278,7 +280,7 @@ def process_folder_alcf(
             logger=logger,
         )
 
-        if outputs_present and not overwrite and tf_validation:
+        if not overwrite and tf_validation:
             logger.info("Skipping %s: already processed and validated", folder)
             result["status"] = "skipped"
             return result

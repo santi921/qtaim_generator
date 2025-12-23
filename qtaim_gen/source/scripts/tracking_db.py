@@ -2,14 +2,13 @@
 import sqlite3
 import pandas as pd
 import os
+import logging
 from datetime import datetime
 # import concurrent.futures
 import concurrent.futures
 from tqdm import tqdm
 
 from qtaim_gen.source.utils.validation import get_information_from_job_folder
-
-import logging
 
 
 def scan_and_store_parallel(root_dir, db_path, full_set=0, max_workers=8, sub_dirs_to_sweep=None, debug=False):

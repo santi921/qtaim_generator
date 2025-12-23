@@ -1,10 +1,67 @@
 import os
-from typing import Dict, Sequence, Any, Union
+from typing import Dict, Sequence, Any, Union, List
 import time
 import random
 
 from qtaim_gen.source.core.parse_qtaim import dft_inp_to_dict
+from qtaim_gen.source.utils.validation import validation_checks
 
+def get_folders_from_file(
+    job_file: str, 
+    num_folders: int, 
+    pre_validate: bool=False, 
+    move_results: bool=True, 
+    full_set: int=0,
+) -> List[str]:
+    folder_file = os.path.join(job_file)
+    folders = sample_lines(folder_file, num_folders)
+    folders = [f.strip() for f in folders if f.strip()]  # remove empty lines
+    
+    if not folders:
+        return []
+    
+    # verify listed folders exist, warn & skip missing entries
+    existing_folders = []
+    missing = []
+    for f in folders:
+        if os.path.exists(f) and os.path.isdir(f):
+            existing_folders.append(f)
+        else:
+            missing.append(f)
+    if missing:
+        print(
+            f"Warning: {len(missing)} listed paths do not exist or are not directories; they will be skipped."
+        )
+        for m in missing[:10]:
+            print("  missing:", m)
+        if len(missing) > 10:
+            print("  ...")
+    folders = existing_folders
+    if not folders:
+        print("No valid folders to run after filtering missing entries.")
+        return 0
+
+    num_folders = len(folders)
+    # shuffle folders
+    random.shuffle(folders)
+    if pre_validate:
+        folders_run = []
+        for folder in folders:
+            tf_validation = validation_checks(
+                folder,
+                full_set=full_set,
+                verbose=False,
+                move_results=move_results,
+            )
+            if not tf_validation:
+                folders_run.append(folder)
+            # break if we reached num_folders
+            if len(folders_run) >= num_folders:
+                break
+    else:
+        folders_run = folders[:num_folders]
+    
+    return folders_run
 
 def pull_ecp_dict(orca_out: str) -> Dict[int, Dict[str, Union[str, float]]]:
     """

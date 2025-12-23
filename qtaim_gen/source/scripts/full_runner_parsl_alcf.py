@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from asyncio.log import logger
 import os
 import signal
 import random
@@ -13,7 +14,8 @@ from qtaim_gen.source.utils.parsl_configs import (
     alcf_config,
     base_config
 )
-from qtaim_gen.source.utils.io import sample_lines
+
+from qtaim_gen.source.utils.io import get_folders_from_file
 
 should_stop = False
 def handle_signal(signum, frame):
@@ -96,6 +98,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         "--dry-run",
         action="store_true",
         help="Print what would run and exit without executing jobs (Parsl not invoked).",
+    )
+
+    parser.add_argument(
+        "--prevalidate",
+        action="store_true",
+        help="Pre-validate folder jobs before running (checks completion).",
     )
 
     parser.add_argument(
@@ -187,6 +195,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     full_set: int = int(getattr(args, "full_set", 0))
     move_results: bool = bool(getattr(args, "move_results", False))
     job_file: str = getattr(args, "job_file")
+    pre_validate: bool = bool(getattr(args, "pre_validate", False))
     dry_run: bool = bool(getattr(args, "dry_run", False))
     overwrite = bool(args.overwrite) if "overwrite" in args else False
     root_omol_results: Optional[str] = getattr(args, "root_omol_results", None)
@@ -216,16 +225,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             n_jobs=n_nodes,
             monitoring=False,
         )
-        """
-        parsl_config, n_threads_per_job = alcf_config_single_pbs(
-            #queue=queue,
-            #walltime=timeout_str,
-            #threads_per_task=n_threads,
-            safety_factor=safety_factor,
-            n_jobs=n_nodes,
-            monitoring=False,
-        )
-        """
+
     ##################### Gather Configs for Parsl
     parsl.clear()
     parsl.load(parsl_config)
@@ -247,68 +247,34 @@ def main(argv: Optional[List[str]] = None) -> int:
     if not os.path.exists(job_file):
         print(f"Error: job_file '{job_file}' does not exist")
         return 2
-    folder_file = os.path.join(job_file)
-
-    # Option 1: read folder file and randomly select a folder - THIS READS EVERY LINE
-    # with open(folder_file, "r") as f:
-    #    folders = f.readlines()
-
-    # Option 2: this is more effecient, add when we're going prod
-    # if num_folders < n_fo
-    folders = sample_lines(folder_file, num_folders)
-
-    folders = [f.strip() for f in folders if f.strip()]  # remove empty lines
-
-    if not folders:
-        print(f"No folders found in {job_file}")
-        return 0
 
     # make dir for results root
-    if root_omol_results:
+    if not os.path.exists(root_omol_results):
         os.makedirs(root_omol_results, exist_ok=True)
 
-    # verify listed folders exist, warn & skip missing entries
-    existing_folders = []
-    missing = []
-    for f in folders:
-        if os.path.exists(f) and os.path.isdir(f):
-            existing_folders.append(f)
-        else:
-            missing.append(f)
-    if missing:
-        print(
-            f"Warning: {len(missing)} listed paths do not exist or are not directories; they will be skipped."
-        )
-        for m in missing[:10]:
-            print("  missing:", m)
-        if len(missing) > 10:
-            print("  ...")
-    folders = existing_folders
-    if not folders:
-        print("No valid folders to run after filtering missing entries.")
-        return 0
+    
+    folders_run = get_folders_from_file(
+        job_file, 
+        num_folders, 
+        pre_validate=pre_validate, 
+        move_results=move_results, 
+        full_set=full_set
+    )
+    
+    if not folders_run:
+        print(f"No folders found in {job_file}")
+        return []
 
     # If dry-run requested, print a short plan and exit
     if dry_run:
         print("Dry-run: the following folders WOULD be processed (sample):")
-        for p in folders[: min(20, len(folders))]:
+        for p in folders_run[: min(20, len(folders_run))]:
             print("  ", p)
-        print(f"Total folders listed: {len(folders)}")
+        print(f"Total folders listed: {len(folders_run)}")
         return 0
-
-    # randomly sample num_folders folders without replacement
-    # if num_folders > len(folders):
-    #    print(
-    #        f"Requested num_folders {num_folders} exceeds available folders {len(folders)}. Reducing to {len(folders)}."
-    #    )
-    num_folders = len(folders)
-    # shuffle folders
-    random.shuffle(folders)
-    folders_run = folders[:num_folders]
-
+    
     # Submit one Parsl job per selected folder. We do not pass a logger
     # into the remote app; each worker will create its own per-folder logger.
-
     futures = [
         run_folder_task_alcf(
             folder=f,
@@ -359,28 +325,29 @@ if __name__ == "__main__":
 
 
 """
-full-runner-parsl-alcf --num_folders 80000 --orca_2mkl_cmd $HOME/orca_6_0_0/orca_2mkl    \
+- running 12/23
+full-runner-parsl-alcf --num_folders 150000 --orca_2mkl_cmd $HOME/orca_6_0_0/orca_2mkl    \
       --multiwfn_cmd $HOME/Multiwfn_3_8/Multiwfn_noGUI --clean --full_set 0 --type_runner hpc \
         --n_threads 220 --n_threads_per_job 1 --safety_factor 1.0 --move_results --preprocess_compressed \
-        --timeout_hr 5             --queue workq-route --restart --n_nodes 3 --type_runner hpc --job_file ../jobs_by_topdir/ani1xbb.txt \
+        --timeout_hr 5             --queue workq-route --restart --n_nodes 4 --type_runner hpc --job_file ../jobs_by_topdir/ani1xbb.txt \
         --preprocess_compressed --root_omol_results /lus/eagle/projects/generator/OMol25_postprocessing/  \
         --root_omol_inputs /lus/eagle/projects/OMol25/ 
             
 
-
-full-runner-parsl-alcf --num_folders 50000 --orca_2mkl_cmd $HOME/orca_6_0_0/orca_2mkl    \
+- running 12/23
+full-runner-parsl-alcf --num_folders 30000 --orca_2mkl_cmd $HOME/orca_6_0_0/orca_2mkl    \
       --multiwfn_cmd $HOME/Multiwfn_3_8/Multiwfn_noGUI --clean --full_set 0 --type_runner hpc \
         --n_threads 220 --n_threads_per_job 1 --safety_factor 1.0 --move_results --preprocess_compressed \
-        --timeout_hr 5             --queue workq-route --restart --n_nodes 3 --type_runner hpc \
+        --timeout_hr 6             --queue workq-route --restart --n_nodes 4 --type_runner hpc \
         --job_file /lus/eagle/projects/generator/jobs_by_topdir/orbnet_denali.txt \
         --preprocess_compressed --root_omol_results /lus/eagle/projects/generator/OMol25_postprocessing/ \
         --root_omol_inputs /lus/eagle/projects/OMol25/               
 
 
-full-runner-parsl-alcf --num_folders 100000 --orca_2mkl_cmd $HOME/orca_6_0_0/orca_2mkl    \
+full-runner-parsl-alcf --num_folders 40000 --orca_2mkl_cmd $HOME/orca_6_0_0/orca_2mkl    \
       --multiwfn_cmd $HOME/Multiwfn_3_8/Multiwfn_noGUI --clean --full_set 0 --type_runner hpc \
         --n_threads 220 --n_threads_per_job 1 --safety_factor 1.0 --move_results --preprocess_compressed \
-        --timeout_hr 4             --queue workq-route --restart --n_nodes 3 --type_runner hpc \
+        --timeout_hr 2             --queue workq-route --restart --n_nodes 4 --type_runner hpc \
         --job_file /lus/eagle/projects/generator/jobs_by_topdir/trans1x.txt \
         --preprocess_compressed --root_omol_results /lus/eagle/projects/generator/OMol25_postprocessing/ \
         --root_omol_inputs /lus/eagle/projects/OMol25/          

@@ -10,7 +10,7 @@ import resource
 
 from qtaim_gen.source.core.workflow import run_folder_task
 from qtaim_gen.source.utils.parsl_configs import alcf_config, base_config
-from qtaim_gen.source.utils.io import sample_lines
+from qtaim_gen.source.utils.io import get_folders_from_file
 
 should_stop = False
 
@@ -98,6 +98,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
 
     parser.add_argument(
+        "--prevalidate",
+        action="store_true",
+        help="Pre-validate folder jobs before running (checks completion).",
+    )
+
+    parser.add_argument(
         "--n_threads",
         type=int,
         default=4,
@@ -172,6 +178,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     full_set: int = int(getattr(args, "full_set", 0))
     move_results: bool = bool(getattr(args, "move_results", False))
     job_file: str = getattr(args, "job_file")
+    pre_validate: bool = bool(getattr(args, "pre_validate", False))
     dry_run: bool = bool(getattr(args, "dry_run", False))
     overwrite = bool(args.overwrite) if "overwrite" in args else False
 
@@ -219,57 +226,26 @@ def main(argv: Optional[List[str]] = None) -> int:
     if not os.path.exists(job_file):
         print(f"Error: job_file '{job_file}' does not exist")
         return 2
-    folder_file = os.path.join(job_file)
 
-    # this is more effecient, add when we're going prod
-    # folders = sample_lines(job_file, num_folders)
-
-    # read folder file and randomly select a folder - THIS READS EVERY LINE
-    with open(folder_file, "r") as f:
-        folders = f.readlines()
-    folders = [f.strip() for f in folders if f.strip()]  # remove empty lines
-    if not folders:
+    folders_run = get_folders_from_file(
+        job_file, 
+        num_folders, 
+        pre_validate=pre_validate, 
+        move_results=move_results, 
+        full_set=full_set
+    )
+    
+    if not folders_run:
         print(f"No folders found in {job_file}")
-        return 0
-
-    # verify listed folders exist, warn & skip missing entries
-    existing_folders = []
-    missing = []
-    for f in folders:
-        if os.path.exists(f) and os.path.isdir(f):
-            existing_folders.append(f)
-        else:
-            missing.append(f)
-    if missing:
-        print(
-            f"Warning: {len(missing)} listed paths do not exist or are not directories; they will be skipped."
-        )
-        for m in missing[:10]:
-            print("  missing:", m)
-        if len(missing) > 10:
-            print("  ...")
-    folders = existing_folders
-    if not folders:
-        print("No valid folders to run after filtering missing entries.")
-        return 0
+        return []
 
     # If dry-run requested, print a short plan and exit
     if dry_run:
         print("Dry-run: the following folders WOULD be processed (sample):")
-        for p in folders[: min(20, len(folders))]:
+        for p in folders_run[: min(20, len(folders_run))]:
             print("  ", p)
-        print(f"Total folders listed: {len(folders)}")
+        print(f"Total folders listed: {len(folders_run)}")
         return 0
-
-    # randomly sample num_folders folders without replacement
-    if num_folders > len(folders):
-        print(
-            f"Requested num_folders {num_folders} exceeds available folders {len(folders)}. Reducing to {len(folders)}."
-        )
-        num_folders = len(folders)
-    # shuffle folders
-    random.shuffle(folders)
-    folders_run = folders[:num_folders]
 
     # Submit one Parsl job per selected folder. We do not pass a logger
     # into the remote app; each worker will create its own per-folder logger.
