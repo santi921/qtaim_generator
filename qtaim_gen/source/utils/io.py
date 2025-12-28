@@ -42,7 +42,9 @@ def sanitize_folders(folders: List[str]) -> List[str]:
 
 def get_folders_from_file(
     job_file: str, 
-    num_folders: int, 
+    num_folders: int,
+    root_omol_results: str=None, 
+    root_omol_inputs: str=None,
     pre_validate: bool=False, 
     move_results: bool=True, 
     full_set: int=0,
@@ -70,9 +72,15 @@ def get_folders_from_file(
     if pre_validate:
         folders_run = []
         for folder in folders:
+            folder_inputs = folder
+            if root_omol_inputs and root_omol_results and folder_inputs.startswith(root_omol_inputs):
+                folder_relative = folder_inputs[len(root_omol_inputs) :].lstrip(os.sep)
+                folder_outputs = root_omol_results + os.sep + folder_relative
+            else:
+                folder_outputs = folder_inputs  # fallback to same folder if no roots provided
             try:
                 tf_validation = validation_checks(
-                    folder,
+                    folder_outputs,
                     full_set=full_set,
                     verbose=False,
                     move_results=move_results,

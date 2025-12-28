@@ -230,7 +230,6 @@ def process_folder_alcf(
     folder_inputs = folder
     if root_omol_inputs and folder_inputs.startswith(root_omol_inputs):
         folder_relative = folder_inputs[len(root_omol_inputs) :].lstrip(os.sep)
-
     folder_outputs = root_omol_results + os.sep + folder_relative
     # copy files from folder_inputs to folder_outputs if they don't exist
     

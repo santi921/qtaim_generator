@@ -105,37 +105,33 @@ def scan_and_store_parallel(root_dir, db_path, full_set=0, max_workers=8, sub_di
     conn.commit()
     conn.close()
 
-    """NON-Batched
-    for info in tqdm(results, desc="Writing to DB"):
-        values = [str(info.get(col, "")) for col in columns]
-        job_id = info["job_id"]
-        subset = info["subset"]
-        folder = info["folder"]
-        # Check if row exists
-        c.execute(
-            "SELECT * FROM validation WHERE job_id=? AND subset=? AND folder=?",
-            (job_id, subset, folder),
-        )
-        existing = c.fetchone()
-        if existing:
-            existing_dict = dict(zip(columns, existing))
-            if any(
-                existing_dict.get(col, "") != str(info.get(col, "")) for col in columns
-            ):
-                set_clause = ", ".join([f"{col}=?" for col in columns])
-                c.execute(
-                    f"UPDATE validation SET {set_clause} WHERE job_id=? AND subset=? AND folder=?",
-                    values + [job_id, subset, folder],
-                )
-        else:
-            placeholders = ", ".join(["?"] * len(columns))
-            c.execute(
-                f"INSERT INTO validation ({', '.join(columns)}) VALUES ({placeholders})",
-                values,
-            )
-    conn.commit()
+
+def show_rows(db_path="validation_results.sqlite", limit=5, subset=None):
+    conn = sqlite3.connect(db_path)
+    c = conn.cursor()
+    # print available subsets
+    c.execute("SELECT DISTINCT subset FROM validation")
+    subsets = c.fetchall()
+    print("Available subsets:")
+    for s in subsets:
+        print(s[0])
+    # show columns
+    c.execute("PRAGMA table_info(validation)")
+    columns = c.fetchall()
+    print("\nColumns in validation table:")
+    for col in columns:
+        print(f"{col[1]} ({col[2]})")
+
+    print(f"\nShowing up to {limit} rows" + (f" for subset '{subset}'" if subset else "") + ":")
+
+    if subset:
+        c.execute("SELECT * FROM validation WHERE subset=? LIMIT ?", (subset, limit))
+    else:
+        c.execute("SELECT * FROM validation LIMIT ?", (limit,))
+    rows = c.fetchall()
+    for row in rows:
+        print(row)
     conn.close()
-    """
 
 
 def create_overall_count_db(

@@ -256,6 +256,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     folders_run = get_folders_from_file(
         job_file, 
         num_folders, 
+        root_omol_results,
+        root_omol_inputs,
         pre_validate=prevalidate, 
         move_results=move_results, 
         full_set=full_set
@@ -326,7 +328,7 @@ if __name__ == "__main__":
 
 """
 - running 12/23
-full-runner-parsl-alcf --num_folders 150000 --orca_2mkl_cmd $HOME/orca_6_0_0/orca_2mkl    \
+full-runner-parsl-alcf --num_folders 250000 --orca_2mkl_cmd $HOME/orca_6_0_0/orca_2mkl    \
       --multiwfn_cmd $HOME/Multiwfn_3_8/Multiwfn_noGUI --clean --full_set 0 --type_runner hpc \
         --n_threads 220 --n_threads_per_job 1 --safety_factor 1.0 --move_results --preprocess_compressed \
         --timeout_hr 5             --queue workq-route --restart --n_nodes 4 --type_runner hpc --job_file ../jobs_by_topdir/ani1xbb.txt \
@@ -335,20 +337,20 @@ full-runner-parsl-alcf --num_folders 150000 --orca_2mkl_cmd $HOME/orca_6_0_0/orc
             
 
 - running 12/23
-full-runner-parsl-alcf --num_folders 30000 --orca_2mkl_cmd $HOME/orca_6_0_0/orca_2mkl    \
-      --multiwfn_cmd $HOME/Multiwfn_3_8/Multiwfn_noGUI --clean --full_set 0 --type_runner hpc \
-        --n_threads 220 --n_threads_per_job 1 --safety_factor 1.0 --move_results --preprocess_compressed \
-        --timeout_hr 6             --queue workq-route --restart --n_nodes 4 --type_runner hpc \
-        --job_file /lus/eagle/projects/generator/jobs_by_topdir/orbnet_denali.txt \
-        --preprocess_compressed --root_omol_results /lus/eagle/projects/generator/OMol25_postprocessing/ \
-        --root_omol_inputs /lus/eagle/projects/OMol25/               
-
-
 full-runner-parsl-alcf --num_folders 40000 --orca_2mkl_cmd $HOME/orca_6_0_0/orca_2mkl    \
       --multiwfn_cmd $HOME/Multiwfn_3_8/Multiwfn_noGUI --clean --full_set 0 --type_runner hpc \
         --n_threads 220 --n_threads_per_job 1 --safety_factor 1.0 --move_results --preprocess_compressed \
-        --timeout_hr 2             --queue workq-route --restart --n_nodes 4 --type_runner hpc \
+        --timeout_hr 3             --queue workq-route --restart --n_nodes 4 --type_runner hpc \
+        --job_file /lus/eagle/projects/generator/jobs_by_topdir/orbnet_denali.txt \
+        --preprocess_compressed --root_omol_results /lus/eagle/projects/generator/OMol25_postprocessing/ \
+        --root_omol_inputs /lus/eagle/projects/OMol25/ --prevalidate               
+
+
+full-runner-parsl-alcf --num_folders 60000 --orca_2mkl_cmd $HOME/orca_6_0_0/orca_2mkl    \
+      --multiwfn_cmd $HOME/Multiwfn_3_8/Multiwfn_noGUI --clean --full_set 0 --type_runner hpc \
+        --n_threads 220 --n_threads_per_job 1 --safety_factor 1.0 --move_results --preprocess_compressed \
+        --timeout_hr 4             --queue workq-route --restart --n_nodes 1 --type_runner hpc \
         --job_file /lus/eagle/projects/generator/jobs_by_topdir/trans1x.txt \
         --preprocess_compressed --root_omol_results /lus/eagle/projects/generator/OMol25_postprocessing/ \
-        --root_omol_inputs /lus/eagle/projects/OMol25/          
+        --root_omol_inputs /lus/eagle/projects/OMol25/ --prevalidate --dry-run
 """

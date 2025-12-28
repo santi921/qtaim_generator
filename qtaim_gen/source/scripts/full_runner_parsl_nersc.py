@@ -137,13 +137,6 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
 
     parser.add_argument(
-        "--safety_factor",
-        type=float,
-        default=1.0,
-        help="Safety factor for worker allocation. In local it's ratio between total workers and threads per job (HPC)",
-    )
-
-    parser.add_argument(
         "--type_runner",
         type=str,
         default="local",
@@ -154,6 +147,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         "--n_nodes", type=int, default=1, help="number of nodes to use (HPC)"
     )
 
+    parser.add_argument(
+        "--memory", type=str, default="192G", help="memory per node (HPC)"
+    )
 
     args = parser.parse_args(argv)
     # print(args)
@@ -183,8 +179,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     type_runner: str = str(getattr(args, "type_runner", "local"))
     queue: str = str(getattr(args, "queue", "debug"))
     timeout_hr: float = float(getattr(args, "timeout_hr", 0.5))
-    safety_factor: float = float(getattr(args, "safety_factor", 1.0))
     n_nodes: int = int(getattr(args, "n_nodes", 1))
+    memory: int = int(getattr(args, "memory", "192G"))  # str
     # convert timeout_hr to str
     timeout_str: str = (
         f"{int(timeout_hr)}:{int((timeout_hr - int(timeout_hr)) * 60):02d}:00"
@@ -199,8 +195,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             queue=queue,
             walltime=timeout_str,
             threads_per_task=n_threads_per_job,
-            safety_factor=safety_factor,
             n_jobs=n_nodes,
+            memory=memory,
             monitoring=False,
         )
         """
@@ -341,16 +337,9 @@ if __name__ == "__main__":
 
 
 """
-full-runner-parsl-alcf --num_folders 80000 --orca_2mkl_cmd $HOME/orca_6_0_0/orca_2mkl    \
-      --multiwfn_cmd $HOME/Multiwfn_3_8/Multiwfn_noGUI --clean --full_set 0 --type_runner hpc \
-        --n_threads 220 --n_threads_per_job 1 --safety_factor 1.0 --move_results --preprocess_compressed \
-        --timeout_hr 5             --queue workq-route --restart --n_nodes 1 --type_runner hpc --job_file ../jobs_by_topdir/ani1xbb.txt \
-        --preprocess_compressed --root_omol_results /lus/eagle/projects/generator/OMol25_postprocessing/  --root_omol_inputs /lus/eagle/projects/OMol25/ 
+full-runner-parsl-nersc --clean --restart --multiwfn_cmd /global/scratch/users/santiagovargas/Multiwfn/Multiwfn_3.8_dev_bin_Linux/Multiwfn \
+--orca_2mkl_cmd /global/scratch/users/santiagovargas/orca_6_0_1_linux_x86-64_shared_openmpi416/orca_2mkl --n_threads 40 --n_threads_per_job 1 \
+--full_set 0 --move_results --type_runner local --job_file ./dna.txt --num_folders 10 --preprocess_compressed --n_nodes 1 --type_runner hpc \
+--timeout_hr 1 --queue condo_blau --move_results
 
-
-full-runner-parsl-alcf --num_folders 50000 --orca_2mkl_cmd $HOME/orca_6_0_0/orca_2mkl    \
-      --multiwfn_cmd $HOME/Multiwfn_3_8/Multiwfn_noGUI --clean --full_set 0 --type_runner hpc \
-        --n_threads 220 --n_threads_per_job 1 --safety_factor 1.0 --move_results --preprocess_compressed \
-        --timeout_hr 5             --queue workq-route --restart --n_nodes 1 --type_runner hpc --job_file ../jobs_by_topdir/orbnet_denali.txt \
-        --preprocess_compressed --root_omol_results /lus/eagle/projects/generator/OMol25_postprocessing/                      
 """
