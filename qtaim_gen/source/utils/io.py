@@ -2,6 +2,8 @@ import os
 from typing import Dict, Sequence, Any, Union, List
 import time
 import random
+import concurrent.futures
+from tqdm import tqdm
 
 from qtaim_gen.source.core.parse_qtaim import dft_inp_to_dict
 from qtaim_gen.source.utils.validation import validation_checks
@@ -48,14 +50,14 @@ def get_folders_from_file(
     pre_validate: bool=False, 
     move_results: bool=True, 
     full_set: int=0,
-    logger: Any=None
+    logger: Any=None,
+    max_workers: int=8
 ) -> List[str]:
-    
-    print(f"collecting {num_folders} folders from {job_file} with pre_validate={pre_validate}")
-    
+    print(f"collecting {num_folders} folders from {job_file} with pre_validate={pre_validate} (parallelized)")
+
     folder_file = os.path.join(job_file)
     if pre_validate:
-        num_sample = num_folders * 10 # hack to just attempt to finish folders
+        num_sample = num_folders * 10
     else:
         num_sample = num_folders
 
@@ -64,20 +66,17 @@ def get_folders_from_file(
 
     if not folders:
         return []
-    
-    #num_folders = len(folders)
-    # shuffle folders
+
     random.shuffle(folders)
-    
+
     if pre_validate:
-        folders_run = []
-        for folder in folders:
+        def validate_folder(folder):
             folder_inputs = folder
             if root_omol_inputs and root_omol_results and folder_inputs.startswith(root_omol_inputs):
-                folder_relative = folder_inputs[len(root_omol_inputs) :].lstrip(os.sep)
+                folder_relative = folder_inputs[len(root_omol_inputs):].lstrip(os.sep)
                 folder_outputs = root_omol_results + os.sep + folder_relative
             else:
-                folder_outputs = folder_inputs  # fallback to same folder if no roots provided
+                folder_outputs = folder_inputs
             try:
                 tf_validation = validation_checks(
                     folder_outputs,
@@ -87,29 +86,35 @@ def get_folders_from_file(
                     logger=logger,
                 )
                 if not tf_validation:
-                    folders_run.append(folder)
                     if logger:
                         logger.info(f"Adding {folder} to run list after pre-validation")
-                
-                else: 
+                    return folder
+                else:
                     if logger:
                         logger.info(f"Skipping {folder} due to pre-validation pass")
-            
-            except: 
-                # add folder to run b/c it's likely json io error 
-                folders_run.append(folder)
+                    return None
+            except Exception:
                 if logger:
                     logger.info(f"Adding {folder} to run list after pre-validation exception")
-            
-            
-            if len(folders_run) >= num_folders:
-                print(f"Pre-validation collected {len(folders_run)} folders to run.")
-                return folders_run
+                return folder
+
+        folders_run = []
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {executor.submit(validate_folder, folder): folder for folder in folders}
+            with tqdm(total=len(folders), desc="Pre-validating folders", unit="folder") as pbar:
+                for future in concurrent.futures.as_completed(futures):
+                    result = future.result()
+                    pbar.update(1)
+                    if result:
+                        folders_run.append(result)
+                        if len(folders_run) >= num_folders:
+                            print(f"Pre-validation collected {len(folders_run)} folders to run.")
+                            break
+        return folders_run
     else:
         folders_run = folders[:num_folders]
-    
-    return folders_run
 
+    return folders_run
 
 def pull_ecp_dict(orca_out: str) -> Dict[int, Dict[str, Union[str, float]]]:
     """
