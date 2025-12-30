@@ -507,11 +507,10 @@ def run_jobs(
         if restart: 
             dft_dict = get_charge_spin_n_atoms_from_folder(folder, logger=None, verbose=False)
             n_atoms = len(dft_dict["mol"])
-            spin = dft_dict.get("spin", None)
-            charge = dft_dict.get("charge", None)
             dict_val = get_val_breakdown_from_folder(
                 folder, n_atoms=n_atoms, full_set=full_set, spin_tf=spin_tf
             )
+
 
     for order in order_of_operations:
         # if restart, check if timing file exists
@@ -783,6 +782,10 @@ def parse_multiwfn(
                 qtaim_dict = parse_qtaim(
                     cprop_file=cp_prop_path, inp_loc=inp_loc, orca_tf=inp_orca
                 )
+                if qtaim_dict is None or qtaim_dict == {}:
+                    logger.error(f"QTAIM parsing returned empty dictionary for {folder}")
+                    continue
+
                 with open(json_file, "w") as f:
                     json.dump(qtaim_dict, f, indent=4)
                 # if return_dicts:
@@ -1151,7 +1154,7 @@ def gbw_analysis(
                         logger.error(f"Error removing intermediate file {file}: {e}")
     
     if restart:
-        logger.info("Restarting from last step in timings.json")
+        
         # check if the timings file exists
         if move_results:
             timings_path = os.path.join(folder, "generator", "timings.json")
@@ -1161,15 +1164,17 @@ def gbw_analysis(
         if not os.path.exists(timings_path) or os.path.getsize(timings_path) == 0:
             logger.warning("No timings file found - starting from scratch!")
             restart = False
+        else: 
+            logger.info("Timings file found - restarting from last step.")
 
     # check if output already exists
     if not overwrite:
-        if move_results:
-            folder_check = os.path.join(folder, "generator")
-        else:
-            folder_check = folder
+        #if move_results:
+        #    folder_check = os.path.join(folder, "generator")
+        #else:
+        folder_check = folder
 
-        if check_results_exist(folder_check):
+        if check_results_exist(folder_check, move_results=move_results):
             print("Output already exists")
             tf_validation = validation_checks(
                 folder_check,

@@ -354,7 +354,7 @@ def write_input_file_from_pmg_molecule(
         f.write("*\n")
 
 
-def check_results_exist(folder: str) -> bool:
+def check_results_exist(folder: str, move_results: bool) -> bool:
     """
     Check if the results files exist in the folder.
     Takes:
@@ -362,6 +362,8 @@ def check_results_exist(folder: str) -> bool:
     Returns:
         bool: True if results files exist, False otherwise
     """
+    if move_results:
+        folder = os.path.join(folder, "generator")
     required_files = [
         "timings.json",
         "qtaim.json",
