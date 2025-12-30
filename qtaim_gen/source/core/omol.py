@@ -213,7 +213,7 @@ def create_jobs(
         logger = logging.getLogger("gbw_analysis")
 
     if separate:
-        routine_list = ORDER_OF_OPERATIONS_separate
+        routine_list = ORDER_OF_OPERATIONS_separate.copy()
         # routine_list = ["charge_separate"]
     else:
         routine_list = ORDER_OF_OPERATIONS
@@ -249,6 +249,9 @@ def create_jobs(
             file_molden = file.replace(".gbw", ".molden.input")
             file_molden = os.path.join(folder, file_molden)
             file_read = os.path.join(folder, file_wfn)
+
+        if file.endswith(".wfn"):
+            file_read = os.path.join(folder, file)
 
     
 
