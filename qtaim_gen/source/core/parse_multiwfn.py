@@ -637,7 +637,6 @@ def parse_bond_order_ibsi(bond_order_txt):
 
     return ibsi_bond_dict
 
-
 def parse_bond_order_fuzzy(bond_order_txt):
     """
     Method to parse the fuzzy bond order out from multiwfn
@@ -657,7 +656,12 @@ def parse_bond_order_fuzzy(bond_order_txt):
                 if line.strip() == "":
                     fuzzy_bool = False
                 else:
+                    if "alpha" in line.lower():
+                        shift = True
+                    else: 
+                        shift = False
                     split_list = line.split()
+                    #print(split_list)
                     # print("a: \'{}\' b: \'{}\'".format(a, b))
                     # first item with (
                     ind_1 = line.find("(")
@@ -665,10 +669,17 @@ def parse_bond_order_fuzzy(bond_order_txt):
                     ind_2 = line.find("(", ind_1 + 1)
                     a = line[ind_1 - 3 : ind_1 + 3].strip().replace("(", "_")
                     b = line[ind_2 - 3 : ind_2 + 3].strip().replace("(", "_")
+                    
                     # remove ) if present from both
                     a = a.replace(")", "")
                     b = b.replace(")", "")
-                    order = float(split_list[-1])
+                    
+                    if shift: 
+                        ind_alpha = line.find("Alpha:")
+                        ind_beta = line.find("Beta:")
+                        order = float(line[ind_alpha+6:ind_beta-1].strip())
+                    else: 
+                        order = float(split_list[-1])
                     # fuzzy_bond_dict.append((a, b, order))
                     fuzzy_bond_dict["{}_to_{}".format(a, b)] = order
 

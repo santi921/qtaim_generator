@@ -1071,7 +1071,7 @@ def gbw_analysis(
     if preprocess_compressed:
         logger.info("Preprocessing compressed files in folder: {}".format(folder))
         # check if the required files are already uncompressed - .inp, .wfn
-        required_files = [".inp", ".gbw", ".wfn"]
+        required_files = [".inp", ".wfn"]
         uncompressed_files = [
             f for f in os.listdir(folder) if f.endswith(tuple(required_files))
         ]

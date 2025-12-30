@@ -235,6 +235,12 @@ def process_folder_alcf(
     
     if not os.path.exists(folder_outputs):
         os.makedirs(folder_outputs)
+    folder = os.path.abspath(folder_outputs)
+    
+    logger: logging.Logger = setup_logger_for_folder(folder)
+    
+    
+
 
     for item in os.listdir(folder_inputs):
         # skip "density_mat.npz"
@@ -248,9 +254,7 @@ def process_folder_alcf(
             else:
                 if not os.path.exists(d):
                     shutil.copy2(s, d)
-
-    folder = os.path.abspath(folder_outputs)
-    logger: logging.Logger = setup_logger_for_folder(folder)
+                    logger.info(f"Copied {s} to {d}")
 
     # remember current working directory and switch into the folder while processing
     orig_cwd: str = os.getcwd()

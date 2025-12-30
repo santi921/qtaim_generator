@@ -329,51 +329,37 @@ if __name__ == "__main__":
 """
 - running 12/29
 555961 / 737210
-full-runner-parsl-alcf --num_folders 250000 --orca_2mkl_cmd $HOME/orca_6_0_0/orca_2mkl    \
+full-runner-parsl-alcf --num_folders 20000 --orca_2mkl_cmd $HOME/orca_6_0_0/orca_2mkl    \
       --multiwfn_cmd $HOME/Multiwfn_3_8/Multiwfn_noGUI --clean --full_set 0 --type_runner hpc \
-        --n_threads 220 --n_threads_per_job 1 --safety_factor 1.0 --move_results --preprocess_compressed \
-        --timeout_hr 5             --queue workq-route --restart --n_nodes 4 --type_runner hpc --job_file ../jobs_by_topdir/ani1xbb_refined.txt \
+        --n_threads 220 --n_threads_per_job 1 --safety_factor 1.0 --move_results \
+        --timeout_hr 5             --queuef workq-route --restart --n_nodes 1 --type_runner hpc --job_file ../jobs_by_topdir/ani1xbb_refined.txt \
         --preprocess_compressed --root_omol_results /lus/eagle/projects/generator/OMol25_postprocessing/  \
         --root_omol_inputs /lus/eagle/projects/OMol25/ 
 
                     
-212001 / 213731
-full-runner-parsl-alcf --num_folders 120000 --orca_2mkl_cmd $HOMEp/orca_6_0_0/orca_2mkl    \
-      --multiwfn_cmd $HOME/Multiwfn_3_8/Multiwfn_noGUI --clean --full_set 0 --type_runner hpc \
-        --n_threads 220 --n_threads_per_job 1 --safety_factor 1.0 --move_results --preprocess_compressed \
-        --timeout_hr 4             --queue workq-route --restart --n_nodes 1 --type_runner hpc \
-        --job_file /lus/eagle/projects/generator/jobs_by_topdir/trans1x_refined.txt \
-        --preprocess_compressed --root_omol_results /lus/eagle/projects/generator/OMol25_postprocessing/ \
-        --root_omol_inputs /lus/eagle/projects/OMol25/ 
 
         
 - running 12/29
 25218 / 51102
 full-runner-parsl-alcf --num_folders 10000 --orca_2mkl_cmd $HOME/orca_6_0_0/orca_2mkl    \
       --multiwfn_cmd $HOME/Multiwfn_3_8/Multiwfn_noGUI --clean --full_set 0 --type_runner hpc \
-        --n_threads 220 --n_threads_per_job 1 --safety_factor 1.0 --move_results --preprocess_compressed \
-        --timeout_hr 5             --queue workq-route --restart --n_nodes 1 --type_runner hpc \
+        --n_threads 220 --n_threads_per_job 1 --safety_factor 1.0 --move_results  \
+        --timeout_hr 5             --queue workq-route --restart --n_nodes 2 --type_runner hpc \
         --job_file /lus/eagle/projects/generator/jobs_by_topdir/orbnet_denali_refined.txt \
         --preprocess_compressed --root_omol_results /lus/eagle/projects/generator/OMol25_postprocessing/ \
         --root_omol_inputs /lus/eagle/projects/OMol25/                
 
 - running 12/29
-full-runner-parsl-alcf --num_folders 20000 --orca_2mkl_cmd $HOMEp/orca_6_0_0/orca_2mkl    \
+full-runner-parsl-alcf --num_folders 25000 --orca_2mkl_cmd $HOME/orca_6_0_0/orca_2mkl    \
       --multiwfn_cmd $HOME/Multiwfn_3_8/Multiwfn_noGUI --clean --full_set 0 --type_runner hpc \
-        --n_threads 220 --n_threads_per_job 1 --safety_factor 1.0 --move_results --preprocess_compressed \
-        --timeout_hr 4             --queue workq-route --restart --n_nodes 3 --type_runner hpc \
+        --n_threads 220 --n_threads_per_job 1 --safety_factor 1.0 --move_results \
+        --timeout_hr 4             --queue workq-route --restart --n_nodes 4 --type_runner hpc \
         --job_file /lus/eagle/projects/generator/jobs_by_topdir/geom_orca6.txt \
         --preprocess_compressed --root_omol_results /lus/eagle/projects/generator/OMol25_postprocessing/ \
         --root_omol_inputs /lus/eagle/projects/OMol25/ 
 
 
-full-runner-parsl-alcf --num_folders 2 --orca_2mkl_cmd $HOME/orca_6_0_0/orca_2mkl \
-     --multiwfn_cmd $HOME/Multiwfn_3_8/Multiwfn_noGUI --clean --job_file \
-    ./test.txt --full_set 0 --type_runner local --prevalidate \
-    --n_threads 1 --n_threads_per_job 1  --safety_factor 1.0 --move_results --preprocess_compressed --timeout_hr 3 \
-    --queue workq-route  --restart  --n_nodes 1 --job_file ../jobs_by_topdir/noble_gas_test.txt  \
-    --preprocess_compressed --root_omol_results /lus/eagle/projects/generator/OMol25_postprocessing/ \
-        --root_omol_inputs /lus/eagle/projects/OMol25/
+
 """
 
 
