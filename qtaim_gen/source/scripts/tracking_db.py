@@ -7,7 +7,7 @@ from datetime import datetime
 # import concurrent.futures
 import concurrent.futures
 from tqdm import tqdm
-
+import random
 from qtaim_gen.source.utils.validation import get_information_from_job_folder
 
 
@@ -36,6 +36,8 @@ def scan_and_store_parallel(root_dir, db_path, full_set=0, max_workers=8, sub_di
                 if os.path.isdir(subset_path):
                     jobs.append((subset_path, full_set, subset, job_id, subset_path))
     if debug: 
+        # shuffle jobs to get a representative sample
+        random.shuffle(jobs)
         jobs = jobs[:100]  # limit for debugging
     
     logger.info(f"Total folders to process: {len(jobs)}")
@@ -46,7 +48,7 @@ def scan_and_store_parallel(root_dir, db_path, full_set=0, max_workers=8, sub_di
         return
 
     info = get_information_from_job_folder(sample_folder, full_set)
-    columns = list(info.keys()) + ["job_id", "subset", "folder", "t_hirsh_fuzzy_spin", "t_hirsh_fuzzy_density", "t_becke_fuzzy_density", "t_becke_fuzzy_spin"]
+    columns = list(info.keys()) + ["job_id", "subset", "folder", "t_hirsh_fuzzy_spin", "t_hirsh_fuzzy_density", "t_becke_fuzzy_density", "t_becke_fuzzy_spin", "t_bond"]
     columns = list(set(columns))  # ensure uniqueness
 
     # Parallel folder processing with tqdm

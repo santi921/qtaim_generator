@@ -241,6 +241,7 @@ def process_folder_alcf(
         if item != "density_mat.npz":
             s = os.path.join(folder_inputs, item)
             d = os.path.join(folder_outputs, item)
+            
             if os.path.isdir(s):
                 if not os.path.exists(d):
                     os.makedirs(d)
@@ -285,11 +286,14 @@ def process_folder_alcf(
             return result
 
         # optional: check mwfn files, multiple mwfn guard
+        """
         mwfn_files: List[str] = [f for f in os.listdir(folder) if f.endswith(".mwfn")]
+        
         if len(mwfn_files) > 1 and not overrun_running:
             logger.info("Skipping %s: multiple mwfn files found", folder)
             result["status"] = "skipped"
             return result
+        """
         # set env
         # set omp stacksize
         os.environ["OMP_STACKSIZE"] = omp_stacksize

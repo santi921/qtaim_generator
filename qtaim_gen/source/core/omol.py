@@ -3,7 +3,12 @@ import os, stat, json, time, logging
 from typing import Optional, Dict, Any, List
 import subprocess
 
-from qtaim_gen.source.utils.validation import validation_checks
+from qtaim_gen.source.utils.validation import (
+    validation_checks, 
+    get_val_breakdown_from_folder,
+    get_charge_spin_n_atoms_from_folder
+)
+
 from qtaim_gen.source.utils.io import check_results_exist
 
 from qtaim_gen.source.data.multiwfn import (
@@ -491,18 +496,53 @@ def run_jobs(
 
     timings = {}
     # run multiwfn scripts
+    if move_results:
+        folder_check = os.path.join(folder, "generator")
+    else:
+        folder_check = folder
+
+    if os.path.exists(os.path.join(folder_check, "timings.json")):
+        with open(os.path.join(folder_check, "timings.json"), "r") as f:
+            timings = json.load(f)
+        if restart: 
+            dft_dict = get_charge_spin_n_atoms_from_folder(folder, logger=None, verbose=False)
+            n_atoms = len(dft_dict["mol"])
+            spin = dft_dict.get("spin", None)
+            charge = dft_dict.get("charge", None)
+            dict_val = get_val_breakdown_from_folder(
+                folder, n_atoms=n_atoms, full_set=full_set, spin_tf=spin_tf
+            )
+
     for order in order_of_operations:
         # if restart, check if timing file exists
         if restart:
-            if move_results:
-                folder_check = os.path.join(folder, "generator")
-            else:
-                folder_check = folder
-            if os.path.exists(os.path.join(folder_check, "timings.json")):
-                with open(os.path.join(folder_check, "timings.json"), "r") as f:
-                    timings = json.load(f)
-                    if order in timings.keys():
-                        continue
+                if order in timings.keys():
+                    # now check if validation checks pass 
+                    if order == "qtaim": 
+                        if dict_val["val_qtaim"]:
+                            logger.info(f"Skipping {order} in {folder}: already completed successfully.")
+                            continue
+
+                    elif order == "other":
+                        if dict_val["val_other"]:
+                            logger.info(f"Skipping {order} in {folder}: already completed successfully.")
+                            continue
+
+                    elif order in charge_dict.keys():
+                        if dict_val.get(f"val_charge", False):
+                            logger.info(f"Skipping {order} in {folder}: already completed successfully.")
+                            continue
+                    
+                    elif order in bond_dict.keys():
+                        if dict_val.get(f"val_bond", False):
+                            logger.info(f"Skipping {order} in {folder}: already completed successfully.")
+                            continue
+                    
+                    elif order == "fuzzy_full":
+                        if dict_val.get(f"val_fuzzy", False):
+                            logger.info(f"Skipping {order} in {folder}: already completed successfully.")
+                            continue
+
         else:
             folder_check = folder
         if prof_mem:

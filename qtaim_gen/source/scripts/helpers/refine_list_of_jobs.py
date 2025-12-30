@@ -78,6 +78,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         help="whether to move results from temp to final location",
     )
 
+    parser.add_argument(
+        "--check_orphaned",
+        action="store_true",    
+        help="whether to check for orphaned jobs",
+    )
+
     args = parser.parse_args(argv)
     # print(args)
     for key, value in vars(args).items():
@@ -88,6 +94,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     full_set: int = int(getattr(args, "full_set", 0))
     move_results: bool = bool(getattr(args, "move_results", False))
     job_file: str = getattr(args, "job_file")
+    orphaned_check: bool = bool(getattr(args, "check_orphaned", False))
     refined_job_file: str = getattr(args, "refined_job_file", "refined_jobs.txt")
     root_omol_results: Optional[str] = getattr(args, "root_omol_results", None)
     root_omol_inputs: Optional[str] = getattr(args, "root_omol_inputs", None)
@@ -124,35 +131,46 @@ def main(argv: Optional[List[str]] = None) -> int:
         for folder in folders_run:
             f.write(f"{folder}\n")
     
+    if orphaned_check:
+        count_orphaned = 0
+        for folder_inputs in folders_run:
+            # find jobs in root_omol_results that have 
+            if root_omol_inputs and root_omol_results and folder_inputs.startswith(root_omol_inputs):
+                folder_relative = folder_inputs[len(root_omol_inputs):].lstrip(os.sep)
+                folder_outputs = root_omol_results + os.sep + folder_relative
+            else:
+                folder_outputs = folder_inputs
+            # check if folder exists with more than 3 files
+            if os.path.exists(folder_outputs):
+                # check if there is no orca.wfn file in the folder and that there is no gbw_analysis.log file
+                if not os.path.exists(os.path.join(folder_outputs, "orca.wfn")) and os.path.exists(os.path.join(folder_outputs, "gbw_analysis.log")):
+                    print(f"Orphaned job detected: {folder_outputs} missing orca.wfn w log present")
+                    count_orphaned += 1
+                                                                                 
+                #num_files = len(os.listdir(folder_outputs))
+                #if num_files > 3:
+                #    print(f"Orphaned job detected: {folder_outputs} with {num_files} files")
+                #    count_orphaned += 1
 
+        print(f"Total orphaned jobs detected: {count_orphaned}")
 if __name__ == "__main__":
     raise SystemExit(main())
 
 """
-python refine_list_of_jobs.py --root_omol_inputs /lus/eagle/projects/OMol25/ \
---job_file /lus/eagle/projects/generator/jobs_by_topdir/orbnet_denali.txt --move_results \
---refined_job_file /lus/eagle/projects/generator/jobs_by_topdir/orbnet_denali_refined.txt \
-    --full_set 0 --root_omol_results /lus/eagle/projects/generator/OMol25_postprocessing/
-
-python refine_list_of_jobs.py --root_omol_inputs /lus/eagle/projects/OMol25/ \
---job_file /lus/eagle/projects/generator/jobs_by_topdir/trans1x.txt --move_results \
---refined_job_file /lus/eagle/projects/generator/jobs_by_topdir/trans1x_refined.txt \
-    --full_set 0 --root_omol_results /lus/eagle/projects/generator/OMol25_postprocessing/
-
-
-    python refine_list_of_jobs.py --root_omol_inputs /lus/eagle/projects/OMol25/ \
---job_file /lus/eagle/projects/generator/jobs_by_topdir/ani1xbb.txt --move_results \
---refined_job_file /lus/eagle/projects/generator/jobs_by_topdir/ani1xbb_refined.txt \
-    --full_set 0 --root_omol_results /lus/eagle/projects/generator/OMol25_postprocessing/
-
-
 
 
 python refine_list_of_jobs.py --root_omol_inputs /lus/eagle/projects/OMol25/ \
 --job_file /lus/eagle/projects/generator/jobs_by_topdir/droplet.txt --move_results \
 --refined_job_file /lus/eagle/projects/generator/jobs_by_topdir/droplet_refined.txt \
-    --full_set 0 --root_omol_results /lus/eagle/projects/generator/OMol25_postprocessing/
+    --full_set 0 --root_omol_results /lus/eagle/projects/generator/OMol25_postprocessing/ --check_orphaned
 
 
+python refine_list_of_jobs.py --root_omol_inputs /lus/eagle/projects/OMol25/ \
+--job_file /lus/eagle/projects/generator/jobs_by_topdir/ani1xbb.txt --move_results \
+--refined_job_file /lus/eagle/projects/generator/jobs_by_topdir/ani1xbb_refined.txt \
+    --full_set 0 --root_omol_results /lus/eagle/projects/generator/OMol25_postprocessing/ --check_orphaned
 
+
+# print contents of refined job file directories 
+cat /lus/eagle/projects/generator/jobs_by_topdir/noble_gas_refined.txt | xargs -I {} bash -c 'echo "{}"; ls {}/'
 """
