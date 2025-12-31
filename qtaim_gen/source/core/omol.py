@@ -1075,6 +1075,11 @@ def gbw_analysis(
         uncompressed_files = [
             f for f in os.listdir(folder) if f.endswith(tuple(required_files))
         ]
+        # also check these files are not empty
+        uncompressed_files = [
+            f for f in uncompressed_files if os.path.getsize(os.path.join(folder, f)) > 0
+        ]
+
         if uncompressed_files:
             logger.info("Found uncompressed files: {}".format(uncompressed_files))
             logger.info("Skipping uncompression step")
