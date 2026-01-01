@@ -1188,13 +1188,17 @@ def gbw_analysis(
 
         if check_results_exist(folder_check, move_results=move_results):
             print("Output already exists")
-            tf_validation = validation_checks(
-                folder_check,
-                full_set=full_set,
-                verbose=False,
-                move_results=move_results,
-                logger=logger,
-            )
+            try:
+                tf_validation = validation_checks(
+                    folder_check,
+                    full_set=full_set,
+                    verbose=False,
+                    move_results=move_results,
+                    logger=logger,
+                )
+            except Exception as e:
+                logger.error(f"Error during validation checks: {e}")
+                tf_validation = False
 
             # we might change level-of-analysis so only return if all requested analyses are present
             if tf_validation:
@@ -1206,30 +1210,34 @@ def gbw_analysis(
 
             # attempt to reparse if output exists but validation failed
             else:
-                logger.warning(
-                    "Output exists but validation failed - attempting to reparse before re-running analysis"
-                )
-                parse_multiwfn(
-                    folder, separate=separate, debug=debug, logger=logger, full_set=full_set
-                )
-                
-                if move_results:
-                    move_results_to_folder(folder, logger=logger, clean=clean)
+                try: 
+                    logger.warning(
+                        "Output exists but validation failed - attempting to reparse before re-running analysis"
+                    )
+                    parse_multiwfn(
+                        folder, separate=separate, debug=debug, logger=logger, full_set=full_set
+                    )
+                    
+                    if move_results:
+                        move_results_to_folder(folder, logger=logger, clean=clean)
 
 
-                tf_validation = validation_checks(
-                    folder_check,
-                    full_set=full_set,
-                    verbose=False,
-                    move_results=move_results,
-                    logger=logger,
-                )
-    
-                if tf_validation:
-                    logger.info("Reparsing successful on 2nd try - skipping analysis")
-                    logger.info("gbw_analysis completed in folder: {}".format(folder))
-                    logger.info("Validation status: {}".format(tf_validation))
-                    return
+                    tf_validation = validation_checks(
+                        folder_check,
+                        full_set=full_set,
+                        verbose=False,
+                        move_results=move_results,
+                        logger=logger,
+                    )
+        
+                    if tf_validation:
+                        logger.info("Reparsing successful on 2nd try - skipping analysis")
+                        logger.info("gbw_analysis completed in folder: {}".format(folder))
+                        logger.info("Validation status: {}".format(tf_validation))
+                        return
+                except Exception as e:
+                    logger.error(f"Error during reparsing attempt: {e}")
+                    logger.info("Proceeding to re-run full analysis.")
 
     write_settings_file(mem=mem, n_threads=n_threads, folder=folder)
 
