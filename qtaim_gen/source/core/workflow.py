@@ -99,22 +99,27 @@ def process_folder(
         )
 
         if outputs_present and not overwrite:
+            
             logger.info("Skipping %s: already processed", folder)
 
-            tf_validation = validation_checks(
-                folder,
-                full_set=full_set,
-                verbose=False,
+            try:
+                tf_validation = validation_checks(
+                    folder,
+                    full_set=full_set,
+                    verbose=False,
                 move_results=move_results,
                 logger=logger,
             )
 
-            if not tf_validation:
-                logger.info("Validation failed for %s: reprocessing", folder)
-            else:
-                logger.info("Validation passed for %s: skipping", folder)
-                result["status"] = "skipped"
-                return result
+                if not tf_validation:
+                    logger.info("Validation failed for %s: reprocessing", folder)
+                else:
+                    logger.info("Validation passed for %s: skipping", folder)
+                    result["status"] = "skipped"
+                    return result
+            except Exception as e:
+                logger.warning("Validation check failed for %s: %s", folder, str(e))
+                # continue processing
 
         # optional: check mwfn files, multiple mwfn guard
         mwfn_files: List[str] = [f for f in os.listdir(folder) if f.endswith(".mwfn")]
@@ -275,19 +280,22 @@ def process_folder_alcf(
             )
         )
         """
+        try: 
+            tf_validation = validation_checks(
+                folder,
+                full_set=full_set,
+                verbose=False,
+                move_results=move_results,
+                logger=logger,
+            )
 
-        tf_validation = validation_checks(
-            folder,
-            full_set=full_set,
-            verbose=False,
-            move_results=move_results,
-            logger=logger,
-        )
-
-        if not overwrite and tf_validation:
-            logger.info("Skipping %s: already processed and validated", folder)
-            result["status"] = "skipped"
-            return result
+            if not overwrite and tf_validation:
+                logger.info("Skipping %s: already processed and validated", folder)
+                result["status"] = "skipped"
+                return result
+        except Exception as e:
+            logger.warning("Validation check failed for %s: %s", folder, str(e))
+            # continue processing
 
         # optional: check mwfn files, multiple mwfn guard
         """
