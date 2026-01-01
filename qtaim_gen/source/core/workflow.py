@@ -260,8 +260,20 @@ def process_folder_alcf(
     folder = os.path.abspath(folder_outputs)
     logger: logging.Logger = setup_logger_for_folder(folder)
     
-    
-
+    if clean_first:
+        # clean everything except gbw_analysis.log 
+        for item in os.listdir(folder):
+            if item != "gbw_analysis.log":
+                item_path = os.path.join(folder, item)
+                try:
+                    if os.path.isfile(item_path) or os.path.islink(item_path):
+                        os.unlink(item_path)
+                        logger.info(f"Removed file {item_path} due to clean_first flag")
+                    elif os.path.isdir(item_path):
+                        shutil.rmtree(item_path)
+                        logger.info(f"Removed directory {item_path} due to clean_first flag")
+                except Exception as e:
+                    logger.error(f"Failed to remove {item_path}. Reason: {e}")    
 
     for item in os.listdir(folder_inputs):
         # skip "density_mat.npz"
@@ -283,21 +295,6 @@ def process_folder_alcf(
     try:
         os.chdir(folder)
         
-        if clean_first:
-            # clean everything except gbw_analysis.log 
-            for item in os.listdir(folder):
-                if item != "gbw_analysis.log":
-                    item_path = os.path.join(folder, item)
-                    try:
-                        if os.path.isfile(item_path) or os.path.islink(item_path):
-                            os.unlink(item_path)
-                            logger.info(f"Removed file {item_path} due to clean_first flag")
-                        elif os.path.isdir(item_path):
-                            shutil.rmtree(item_path)
-                            logger.info(f"Removed directory {item_path} due to clean_first flag")
-                    except Exception as e:
-                        logger.error(f"Failed to remove {item_path}. Reason: {e}")
-
         # pre-checks (idempotency)
         # e.g. skip if outputs exist and not restart
         """
