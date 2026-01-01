@@ -505,8 +505,12 @@ def run_jobs(
         folder_check = folder
 
     if os.path.exists(os.path.join(folder_check, "timings.json")):
+        
         with open(os.path.join(folder_check, "timings.json"), "r") as f:
-            timings = json.load(f)
+            # check that timings isn't empty
+            if os.path.getsize(os.path.join(folder_check, "timings.json")) > 0:
+                timings = json.load(f)
+
         if restart: 
             dft_dict = get_charge_spin_n_atoms_from_folder(folder, logger=None, verbose=False)
             n_atoms = len(dft_dict["mol"])
