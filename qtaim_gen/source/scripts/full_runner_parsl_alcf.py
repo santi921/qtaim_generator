@@ -176,6 +176,13 @@ def main(argv: Optional[List[str]] = None) -> int:
         help="root where input folders are located",
     )
 
+
+    parser.add_argument(
+        "--clean_first",
+        action="store_true",
+        help="clean folder before running analysis",
+    )
+
     args = parser.parse_args(argv)
     # print(args)
     for key, value in vars(args).items():
@@ -200,6 +207,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     overwrite = bool(args.overwrite) if "overwrite" in args else False
     root_omol_results: Optional[str] = getattr(args, "root_omol_results", None)
     root_omol_inputs: Optional[str] = getattr(args, "root_omol_inputs", None)
+    clean_first: bool = bool(getattr(args, "clean_first", False))
 
     # parsl args
     type_runner: str = str(getattr(args, "type_runner", "local"))
@@ -295,6 +303,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             move_results=move_results,
             root_omol_results=root_omol_results,
             root_omol_inputs=root_omol_inputs,
+            clean_first=clean_first,
         )
         for f in folders_run
     ]
@@ -347,6 +356,15 @@ full-runner-parsl-alcf --num_folders 40000 --orca_2mkl_cmd $HOME/orca_6_0_0/orca
         --n_threads 220 --n_threads_per_job 1 --safety_factor 1.0 --move_results \
         --timeout_hr 4             --queue workq-route --restart --n_nodes 4 --type_runner hpc \
         --job_file /lus/eagle/projects/generator/jobs_by_topdir/geom_orca6_refined.txt \
+        --preprocess_compressed --root_omol_results /lus/eagle/projects/generator/OMol25_postprocessing/ \
+        --root_omol_inputs /lus/eagle/projects/OMol25/ 
+
+
+full-runner-parsl-alcf --num_folders 100000 --orca_2mkl_cmd $HOME/orca_6_0_0/orca_2mkl    \
+      --multiwfn_cmd $HOME/Multiwfn_3_8/Multiwfn_noGUI --clean --full_set 0 --type_runner hpc \
+        --n_threads 220 --n_threads_per_job 1 --safety_factor 1.0 --move_results \
+        --timeout_hr 4             --queue workq-route --restart --n_nodes 4 --type_runner hpc \
+        --job_file /lus/eagle/projects/generator/jobs_by_topdir/ani2x.txt \
         --preprocess_compressed --root_omol_results /lus/eagle/projects/generator/OMol25_postprocessing/ \
         --root_omol_inputs /lus/eagle/projects/OMol25/ 
 

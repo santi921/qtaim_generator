@@ -248,6 +248,7 @@ def validate_fuzzy_dict(
 
     if full_set > 0:
         expected_keys += ["elf_fuzzy", "mbis_fuzzy_density"]
+    
     if full_set > 1:
         expected_keys += ["grad_norm_rho_fuzzy", "laplacian_rho_fuzzy"]
 

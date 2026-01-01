@@ -159,6 +159,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         "--n_nodes", type=int, default=1, help="number of nodes to use (HPC)"
     )
 
+    parser.add_argument(
+        "--clean_first",
+        action="store_true",
+        help="clean folder before running analysis",
+    )
+
     args = parser.parse_args(argv)
     # print(args)
     for key, value in vars(args).items():
@@ -181,6 +187,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     prevalidate: bool = bool(getattr(args, "prevalidate", False))
     dry_run: bool = bool(getattr(args, "dry_run", False))
     overwrite = bool(args.overwrite) if "overwrite" in args else False
+    clean_first: bool = bool(getattr(args, "clean_first", False))
 
     # parsl args
     type_runner: str = str(getattr(args, "type_runner", "local"))
@@ -268,6 +275,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             debug=debug,
             preprocess_compressed=preprocess_compressed,
             move_results=move_results,
+            clean_first=clean_first,
         )
         for f in folders_run
     ]

@@ -57,6 +57,7 @@ def process_folder(
     n_threads: int = 3,
     overwrite: bool = False,
     separate: bool = True,
+    clean_first: bool = False,
     orca_6: bool = True,
     full_set: bool = False,
     move_results: bool = True,
@@ -85,6 +86,21 @@ def process_folder(
 
     try:
         os.chdir(folder)
+        if clean_first:
+            # clean everything except gbw_analysis.log 
+            for item in os.listdir(folder):
+                if item != "gbw_analysis.log":
+                    item_path = os.path.join(folder, item)
+                    try:
+                        if os.path.isfile(item_path) or os.path.islink(item_path):
+                            os.unlink(item_path)
+                            logger.info(f"Removed file {item_path} due to clean_first flag")
+                        elif os.path.isdir(item_path):
+                            shutil.rmtree(item_path)
+                            logger.info(f"Removed directory {item_path} due to clean_first flag")
+                    except Exception as e:
+                        logger.error(f"Failed to remove {item_path}. Reason: {e}")
+
         # pre-checks (idempotency)
         # e.g. skip if outputs exist and not restart
         outputs_present: bool = all(
@@ -99,7 +115,6 @@ def process_folder(
         )
 
         if outputs_present and not overwrite:
-            
             logger.info("Skipping %s: already processed", folder)
 
             try:
@@ -208,6 +223,7 @@ def process_folder_alcf(
     overwrite: bool = False,
     separate: bool = True,
     orca_6: bool = True,
+    clean_first: bool = False,
     full_set: bool = False,
     move_results: bool = True,
     root_omol_results: Optional[
@@ -240,8 +256,8 @@ def process_folder_alcf(
     
     if not os.path.exists(folder_outputs):
         os.makedirs(folder_outputs)
+
     folder = os.path.abspath(folder_outputs)
-    
     logger: logging.Logger = setup_logger_for_folder(folder)
     
     
@@ -266,6 +282,22 @@ def process_folder_alcf(
 
     try:
         os.chdir(folder)
+        
+        if clean_first:
+            # clean everything except gbw_analysis.log 
+            for item in os.listdir(folder):
+                if item != "gbw_analysis.log":
+                    item_path = os.path.join(folder, item)
+                    try:
+                        if os.path.isfile(item_path) or os.path.islink(item_path):
+                            os.unlink(item_path)
+                            logger.info(f"Removed file {item_path} due to clean_first flag")
+                        elif os.path.isdir(item_path):
+                            shutil.rmtree(item_path)
+                            logger.info(f"Removed directory {item_path} due to clean_first flag")
+                    except Exception as e:
+                        logger.error(f"Failed to remove {item_path}. Reason: {e}")
+
         # pre-checks (idempotency)
         # e.g. skip if outputs exist and not restart
         """
