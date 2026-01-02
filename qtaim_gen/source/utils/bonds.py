@@ -60,3 +60,20 @@ def connectedMatrix(struct_pmg, bond_length_dict):
 
     # print(list_of_lists)
     return list_of_lists
+
+
+def convert_get_connected_paths_from_bond_json(bond_data: dict, bond_key: str) -> list[tuple]:
+    """
+    Convert bond data from bond json to list of connected atom index tuples.
+    Takes:
+        bond_data: dict, bond data from bond json
+        bond_key: str, key to access bond data in bond_data dict
+    Returns:
+        ret_list: list of tuples, each tuple contains two atom indices representing a bond
+    """
+    bond_info = bond_data.get(bond_key, None)
+    if bond_info is None:
+        return None
+    key_list = [i.split("_to_") for i in bond_info.keys() ]
+    ret_list = [tuple(sorted(int(temp.split("_")[0]) for temp in i)) for i in key_list]
+    return ret_list

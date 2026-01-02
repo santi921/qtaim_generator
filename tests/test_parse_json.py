@@ -63,7 +63,7 @@ def test_get_data():
         "bader_spin",
         "becke_atomic_dipole",
         "adch_dipole",
-        "ibsi_data"
+        "ibsi_data",
     ]
 
     for key in test_keys:
@@ -280,6 +280,7 @@ def test_merge():
     # convert to pandas dataframe and save as pickle
     df = pd.DataFrame(df)
     pd.to_pickle(df, root_folder + "/" + pkl_file)
+    # df.to_hdf(root_folder + "/" + pkl_file.replace(".pkl", ".h5"), key="df", mode="w")
 
     # check that all the keys are in the dataframe
     assert "molecule" in df.keys(), "molecule not in df"
@@ -294,7 +295,10 @@ def test_merge():
 
 
 def test_output():
-    df = pd.read_pickle(root_folder + "test.pkl")
+    try:
+        df = pd.read_pickle(root_folder + "test.pkl")
+    except:
+        df = pd.read_hdf(root_folder + "test.h5", key="df")
 
     pmg_len_ref = [17, 17, 18, 14]
     bonds_len_ref = [17, 17, 18, 15]

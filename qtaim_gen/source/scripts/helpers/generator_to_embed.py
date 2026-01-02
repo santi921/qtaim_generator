@@ -1,7 +1,7 @@
 import argparse
 
 from qtaim_gen.source.utils.lmdbs import parse_config_gen_to_embed
-from qtaim_gen.source.core.converter import QTAIMEmbedConverter
+from qtaim_gen.source.core.converter import QTAIMConverter
 
 
 if __name__ == "__main__":
@@ -33,6 +33,6 @@ if __name__ == "__main__":
     config_dict = parse_config_gen_to_embed(
         args.config_path, restart=bool(args.restart)
     )
-    scaler = QTAIMEmbedConverter(config_dict, config_path=config_path)
+    scaler = QTAIMConverter(config_dict, config_path=config_path)
     scaler.main_loop()
     scaler.scale_graph_lmdb()
