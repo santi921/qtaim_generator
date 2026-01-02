@@ -119,7 +119,6 @@ def construct_lmdb_database(structures, root_lmdb, strata=None, name_list=None, 
             compositions=list(composition_set)
         )
         
-        
 def construct_lmdb_otf(root_dir, root_lmdb, strata=None):
     """
     Create a LMDB database from a list of ASE Atoms objects.
@@ -131,7 +130,8 @@ def construct_lmdb_otf(root_dir, root_lmdb, strata=None):
     
     """
     composition_set = set()
-
+    if not os.path.exists(root_lmdb):
+        os.makedirs(root_lmdb)
     # figure out chunks later with lmdbs
     asedb_fn = f"{root_lmdb}/asedb.aselmdb"
     num_atoms = []
@@ -143,7 +143,7 @@ def construct_lmdb_otf(root_dir, root_lmdb, strata=None):
     with connect(asedb_fn) as database:
 
         list_dirs = os.listdir(root_dir)
-        for dir_name in list_dirs:
+        for ind, dir_name in enumerate(tqdm(list_dirs)):
             dir_path = os.path.join(root_dir, dir_name)
             orca_input_path = os.path.join(dir_path, "orca.inp")
             if os.path.exists(orca_input_path):
@@ -153,6 +153,7 @@ def construct_lmdb_otf(root_dir, root_lmdb, strata=None):
                 database.write(atoms, data=atoms.info, name=dir_name)
                 num_atoms.append(len(atoms))
                 composition_set.add(atoms.get_chemical_formula())
+
         database.metadata["strata"] = strata_list
         database.metadata["num_atoms"] = num_atoms
 
