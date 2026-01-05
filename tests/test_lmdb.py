@@ -1,11 +1,12 @@
 import lmdb
 import json
 import pickle as pkl
-
+import numpy as np 
 from qtaim_gen.source.utils.lmdbs import json_2_lmdbs, inp_files_2_lmdbs
 
 
 class TestLMDB:
+    
     dir_active = "./test_files/lmdb_tests/"
     chunk_size = 2
 
@@ -35,12 +36,6 @@ class TestLMDB:
         dir_active, dir_active, "merged_geom.lmdb", chunk_size, clean=True
     )
 
-    charge_lmdb = "./test_files/lmdb_tests/merged_charge.lmdb"
-    bond_lmdb = "./test_files/lmdb_tests/merged_bond.lmdb"
-    other_lmdb = "./test_files/lmdb_tests/merged_other.lmdb"
-    qtaim_lmdb = "./test_files/lmdb_tests/merged_qtaim.lmdb"
-    geom_lmdb = "./test_files/lmdb_tests/merged_geom.lmdb"
-    fuzzy_lmdb = "./test_files/lmdb_tests/merged_fuzzy.lmdb"
 
     def read_helper(self, file, lookup):
         env = lmdb.open(
@@ -57,6 +52,13 @@ class TestLMDB:
                 return pkl.loads(value)
 
     def test_write_read(self):
+
+        charge_lmdb = "./test_files/lmdb_tests/merged_charge.lmdb"
+        bond_lmdb = "./test_files/lmdb_tests/merged_bond.lmdb"
+        other_lmdb = "./test_files/lmdb_tests/merged_other.lmdb"
+        qtaim_lmdb = "./test_files/lmdb_tests/merged_qtaim.lmdb"
+        fuzzy_lmdb = "./test_files/lmdb_tests/merged_fuzzy.lmdb"
+
         orca5_rks_bond = "./test_files/lmdb_tests/orca5_rks/bond.json"
         orca5_qtaim = "./test_files/lmdb_tests/orca5/qtaim.json"
         orca5_uks_charge = "./test_files/lmdb_tests/orca5_uks/charge.json"
@@ -67,13 +69,13 @@ class TestLMDB:
         orca5_qtaim_json = json.load(open(orca5_qtaim, "r"))
         orca5_uks_charge_json = json.load(open(orca5_uks_charge, "r"))
         orca6_rks_other_json = json.load(open(orca6_rks_other, "r"))
-        orca5_rks_fuzzy_json = json.load(open(orca5_uks_fuzzy, "r"))
+        orca5_rks_fuzzy_json = json.load(open(orca5_uks_fuzzy, "r")) 
 
-        dict_orca5 = self.read_helper(self.bond_lmdb, "orca5_rks")
-        dict_orca_5 = self.read_helper(self.qtaim_lmdb, "orca5")
-        dict_orca5_uks = self.read_helper(self.charge_lmdb, "orca5_uks")
-        dict_orca6 = self.read_helper(self.other_lmdb, "orca6_rks")
-        dict_orca5_fuzzy = self.read_helper(self.fuzzy_lmdb, "orca5_5ks")
+        dict_orca5 = self.read_helper(bond_lmdb, "orca5_rks")
+        dict_orca_5 = self.read_helper(qtaim_lmdb, "orca5")
+        dict_orca5_uks = self.read_helper(charge_lmdb, "orca5_uks")
+        dict_orca6 = self.read_helper(other_lmdb, "orca6_rks")
+        dict_orca5_fuzzy = self.read_helper(fuzzy_lmdb, "orca5_uks")
 
         assert (
             dict_orca5["ibsi"]["3_O_to_10_H"]
@@ -90,15 +92,26 @@ class TestLMDB:
             dict_orca6["mpp_full"] == orca6_rks_other_json["mpp_full"]
         ), f"Expected {orca6_rks_other_json['mpp_full'] }, got {dict_orca6['mpp_full'] }"
 
+        assert (
+            dict_orca5_fuzzy['mbis_fuzzy_density']['45_Cl'] == orca5_rks_fuzzy_json["mbis_fuzzy_density"]["45_Cl"] 
+        ), f"Expected {orca5_rks_fuzzy_json['mbis_fuzzy_density']['45_Cl'] }, got {dict_orca5_fuzzy['mbis_fuzzy_density']['45_Cl'] }"
+
     def test_merge(self):
 
+        charge_lmdb = "./test_files/lmdb_tests/merged_charge.lmdb"
+        bond_lmdb = "./test_files/lmdb_tests/merged_bond.lmdb"
+        other_lmdb = "./test_files/lmdb_tests/merged_other.lmdb"
+        qtaim_lmdb = "./test_files/lmdb_tests/merged_qtaim.lmdb"
+        geom_lmdb = "./test_files/lmdb_tests/merged_geom.lmdb"
+        fuzzy_lmdb = "./test_files/lmdb_tests/merged_fuzzy.lmdb"
+        
         for lmdb_file in [
-            self.charge_lmdb,
-            self.bond_lmdb,
-            self.other_lmdb,
-            self.qtaim_lmdb,
-            self.fuzzy_lmdb,
-            self.geom_lmdb,
+            charge_lmdb,
+            bond_lmdb,
+            other_lmdb,
+            qtaim_lmdb,
+            fuzzy_lmdb,
+            geom_lmdb,
         ]:
             env = lmdb.open(
                 lmdb_file,
@@ -116,9 +129,10 @@ class TestLMDB:
                     ), f"Expected 4, got {pkl.loads(value)} on {lmdb_file}"
 
 
+"""
+
 dir_active = "./test_files/lmdb_tests/"
 chunk_size = 2
-
 json_2_lmdbs(
     dir_active,
     dir_active,
@@ -171,6 +185,7 @@ inp_files_2_lmdbs(
     dir_active, dir_active, "merged_geom.lmdb", chunk_size, clean=True, merge=False
 )
 
+
 charge_lmdb = "./test_files/lmdb_tests/merged_charge.lmdb"
 bond_lmdb = "./test_files/lmdb_tests/merged_bond.lmdb"
 other_lmdb = "./test_files/lmdb_tests/merged_other.lmdb"
@@ -178,3 +193,6 @@ qtaim_lmdb = "./test_files/lmdb_tests/merged_qtaim.lmdb"
 geom_lmdb = "./test_files/lmdb_tests/merged_geom.lmdb"
 fuzzy_lmdb = "./test_files/lmdb_tests/merged_fuzzy.lmdb"
 obj = TestLMDB()
+"""
+
+#obj = TestLMDB()
