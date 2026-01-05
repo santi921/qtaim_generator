@@ -108,7 +108,6 @@ def alcf_config(
     return nersc_single_tile_config, threads_per_node
 
 
-
 def nersc_config(
     threads_per_task: int = 1,
     threads_per_node: int = 40,
@@ -116,7 +115,7 @@ def nersc_config(
     queue: str = "condo_blau",
     walltime: str = "00:30:00",
     monitoring: bool = False,
-    memory: str = 192
+    memory: str = 192,
 ) -> Config:
     """
     Returns a Parsl config optimized for running on LRC.
@@ -128,9 +127,7 @@ def nersc_config(
 
     # threads_per_node   = 256        # hardware threads
     # threads_per_task   = 8          # each job uses 8 threads
-    workers_per_node = int(
-        threads_per_node // threads_per_task 
-    )  # 256 // 8 = 32
+    workers_per_node = int(threads_per_node // threads_per_task)  # 256 // 8 = 32
 
     nodes_per_job = 1
 
@@ -159,7 +156,7 @@ def nersc_config(
                     # Project name
                     account="lr_blau",
                     qos=queue,
-                    #partition="cm2",
+                    # partition="cm2",
                     # Commands run before workers launched
                     # Make sure to activate your environment where Parsl is installed
                     worker_init=(  # Debugging
@@ -193,7 +190,7 @@ def nersc_config(
                         bind_cmd="--cpu-bind", overrides="--ppn 1"
                     ),
                     # options added to #PBS -l select aside from ncpus
-                    #select_options="",
+                    # select_options="",
                     nodes_per_block=nodes_per_job,
                     cores_per_node=threads_per_node,
                     mem_per_node=memory,
@@ -201,7 +198,7 @@ def nersc_config(
                     constraint="lr6_m192",
                     max_blocks=n_jobs,
                     cmd_timeout=120,
-                    #cpus_per_node=threads_per_node,
+                    # cpus_per_node=threads_per_node,
                 ),
             ),
         ],
@@ -209,9 +206,10 @@ def nersc_config(
         # this is necessary if you have tasks that are interrupted by a PBS job ending
         # so that they will restart in the next job
         retries=1,
-        #monitoring=monitoring,
+        # monitoring=monitoring,
     )
     return lrc_config, threads_per_node
+
 
 """
 crux configs 

@@ -8,6 +8,7 @@ from tqdm import tqdm
 from qtaim_gen.source.core.parse_qtaim import dft_inp_to_dict
 from qtaim_gen.source.utils.validation import validation_checks
 
+
 def sanitize_folders(folders: List[str]) -> List[str]:
     """Sanitize folder paths by stripping whitespace and removing empty entries. Also just checks for basic validity.
 
@@ -34,26 +35,28 @@ def sanitize_folders(folders: List[str]) -> List[str]:
         if len(missing) > 10:
             print("  ...")
     folders = existing_folders
-    
+
     if not folders:
         print("No valid folders to run after filtering missing entries.")
         return 0
-    
+
     return folders
-    
+
 
 def get_folders_from_file(
-    job_file: str, 
+    job_file: str,
     num_folders: int,
-    root_omol_results: str=None, 
-    root_omol_inputs: str=None,
-    pre_validate: bool=False, 
-    move_results: bool=True, 
-    full_set: int=0,
-    logger: Any=None,
-    max_workers: int=8
+    root_omol_results: str = None,
+    root_omol_inputs: str = None,
+    pre_validate: bool = False,
+    move_results: bool = True,
+    full_set: int = 0,
+    logger: Any = None,
+    max_workers: int = 8,
 ) -> List[str]:
-    print(f"collecting {num_folders} folders from {job_file} with pre_validate={pre_validate} (parallelized)")
+    print(
+        f"collecting {num_folders} folders from {job_file} with pre_validate={pre_validate} (parallelized)"
+    )
 
     folder_file = os.path.join(job_file)
     if pre_validate:
@@ -70,13 +73,19 @@ def get_folders_from_file(
     random.shuffle(folders)
 
     if pre_validate:
+
         def validate_folder(folder):
             folder_inputs = folder
-            if root_omol_inputs and root_omol_results and folder_inputs.startswith(root_omol_inputs):
-                folder_relative = folder_inputs[len(root_omol_inputs):].lstrip(os.sep)
+            if (
+                root_omol_inputs
+                and root_omol_results
+                and folder_inputs.startswith(root_omol_inputs)
+            ):
+                folder_relative = folder_inputs[len(root_omol_inputs) :].lstrip(os.sep)
                 folder_outputs = root_omol_results + os.sep + folder_relative
             else:
                 folder_outputs = folder_inputs
+
             try:
                 tf_validation = validation_checks(
                     folder_outputs,
@@ -95,26 +104,35 @@ def get_folders_from_file(
                     return None
             except Exception:
                 if logger:
-                    logger.info(f"Adding {folder} to run list after pre-validation exception")
+                    logger.info(
+                        f"Adding {folder} to run list after pre-validation exception"
+                    )
                 return folder
 
         folders_run = []
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = {executor.submit(validate_folder, folder): folder for folder in folders}
-            with tqdm(total=len(folders), desc="Pre-validating folders", unit="folder") as pbar:
+            futures = {
+                executor.submit(validate_folder, folder): folder for folder in folders
+            }
+            with tqdm(
+                total=len(folders), desc="Pre-validating folders", unit="folder"
+            ) as pbar:
                 for future in concurrent.futures.as_completed(futures):
                     result = future.result()
                     pbar.update(1)
                     if result:
                         folders_run.append(result)
                         if len(folders_run) >= num_folders:
-                            print(f"Pre-validation collected {len(folders_run)} folders to run.")
+                            print(
+                                f"Pre-validation collected {len(folders_run)} folders to run."
+                            )
                             break
         return folders_run
     else:
         folders_run = folders[:num_folders]
 
     return folders_run
+
 
 def pull_ecp_dict(orca_out: str) -> Dict[int, Dict[str, Union[str, float]]]:
     """

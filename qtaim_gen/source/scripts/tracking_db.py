@@ -4,6 +4,7 @@ import pandas as pd
 import os
 import logging
 from datetime import datetime
+
 # import concurrent.futures
 import concurrent.futures
 from tqdm import tqdm
@@ -11,10 +12,18 @@ import random
 from qtaim_gen.source.utils.validation import get_information_from_job_folder
 
 
-def scan_and_store_parallel(root_dir, db_path, full_set=0, max_workers=8, sub_dirs_to_sweep=None, debug=False):
+def scan_and_store_parallel(
+    root_dir, db_path, full_set=0, max_workers=8, sub_dirs_to_sweep=None, debug=False
+):
     import sqlite3
-    # Set up logging - save log to file 
-    logging.basicConfig(level=logging.INFO, filename='scan_and_store.log', filemode='w', format='%(asctime)s - %(levelname)s - %(message)s')
+
+    # Set up logging - save log to file
+    logging.basicConfig(
+        level=logging.INFO,
+        filename="scan_and_store.log",
+        filemode="w",
+        format="%(asctime)s - %(levelname)s - %(message)s",
+    )
     logger = logging.getLogger(__name__)
     logger.info(f"Scanning root directory: {root_dir}")
 
@@ -26,20 +35,20 @@ def scan_and_store_parallel(root_dir, db_path, full_set=0, max_workers=8, sub_di
 
         if sub_dirs_to_sweep is not None and job_id in sub_dirs_to_sweep:
             logger.info(f"Running subset: {job_id}")
-        
+
             cat_path_path = os.path.join(root_dir, job_id)
             if not os.path.isdir(cat_path_path):
                 continue
-            
+
             for subset in os.listdir(cat_path_path):
                 subset_path = os.path.join(cat_path_path, subset)
                 if os.path.isdir(subset_path):
                     jobs.append((subset_path, full_set, subset, job_id, subset_path))
-    if debug: 
+    if debug:
         # shuffle jobs to get a representative sample
         random.shuffle(jobs)
         jobs = jobs[:100]  # limit for debugging
-    
+
     logger.info(f"Total folders to process: {len(jobs)}")
     # Use a sample folder to infer columns
     sample_folder = jobs[0][0] if jobs else None
@@ -48,11 +57,21 @@ def scan_and_store_parallel(root_dir, db_path, full_set=0, max_workers=8, sub_di
         return
 
     info = get_information_from_job_folder(sample_folder, full_set)
-    columns = list(info.keys()) + ["job_id", "subset", "folder", "t_hirsh_fuzzy_spin", "t_hirsh_fuzzy_density", "t_becke_fuzzy_density", "t_becke_fuzzy_spin", "t_bond"]
+    columns = list(info.keys()) + [
+        "job_id",
+        "subset",
+        "folder",
+        "t_hirsh_fuzzy_spin",
+        "t_hirsh_fuzzy_density",
+        "t_becke_fuzzy_density",
+        "t_becke_fuzzy_spin",
+        "t_bond",
+    ]
     columns = list(set(columns))  # ensure uniqueness
 
     # Parallel folder processing with tqdm
     results = []
+
     def process_job(args):
         folder, full_set, subset, job_id, folder_path = args
         try:
@@ -61,18 +80,17 @@ def scan_and_store_parallel(root_dir, db_path, full_set=0, max_workers=8, sub_di
             return info
         except Exception as e:
             logger.error(f"Error processing folder {folder}: {e}")
-            #print(f"Error processing folder {folder}: {e}")
+            # print(f"Error processing folder {folder}: {e}")
             return None
 
-    
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         for info in tqdm(
             executor.map(process_job, jobs), total=len(jobs), desc="Processing folders"
         ):
             if info is not None:
                 results.append(info)
-    
-    #with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
+
+    # with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
     #    for info in tqdm(executor.map(process_job, jobs), total=len(jobs), desc="Processing folders"):
     #        if info is not None:
     #            results.append(info)
@@ -94,16 +112,28 @@ def scan_and_store_parallel(root_dir, db_path, full_set=0, max_workers=8, sub_di
         upserts.append((values, job_id, subset, folder))
 
     for values, job_id, subset, folder in tqdm(upserts, desc="Writing to DB"):
-        c.execute("SELECT * FROM validation WHERE job_id=? AND subset=? AND folder=?", (job_id, subset, folder))
+        c.execute(
+            "SELECT * FROM validation WHERE job_id=? AND subset=? AND folder=?",
+            (job_id, subset, folder),
+        )
         existing = c.fetchone()
         if existing:
             existing_dict = dict(zip(columns, existing))
-            if any(existing_dict.get(col, "") != str(val) for col, val in zip(columns, values)):
+            if any(
+                existing_dict.get(col, "") != str(val)
+                for col, val in zip(columns, values)
+            ):
                 set_clause = ", ".join([f"{col}=?" for col in columns])
-                c.execute(f"UPDATE validation SET {set_clause} WHERE job_id=? AND subset=? AND folder=?", values + [job_id, subset, folder])
+                c.execute(
+                    f"UPDATE validation SET {set_clause} WHERE job_id=? AND subset=? AND folder=?",
+                    values + [job_id, subset, folder],
+                )
         else:
             placeholders = ", ".join(["?"] * len(columns))
-            c.execute(f"INSERT INTO validation ({', '.join(columns)}) VALUES ({placeholders})", values)
+            c.execute(
+                f"INSERT INTO validation ({', '.join(columns)}) VALUES ({placeholders})",
+                values,
+            )
     conn.commit()
     conn.close()
 
@@ -124,7 +154,11 @@ def show_rows(db_path="validation_results.sqlite", limit=5, subset=None):
     for col in columns:
         print(f"{col[1]} ({col[2]})")
 
-    print(f"\nShowing up to {limit} rows" + (f" for subset '{subset}'" if subset else "") + ":")
+    print(
+        f"\nShowing up to {limit} rows"
+        + (f" for subset '{subset}'" if subset else "")
+        + ":"
+    )
 
     if subset:
         c.execute("SELECT * FROM validation WHERE subset=? LIMIT ?", (subset, limit))

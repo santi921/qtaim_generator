@@ -10,14 +10,13 @@ from typing import Optional, List
 
 
 from qtaim_gen.source.core.workflow import run_folder_task_alcf
-from qtaim_gen.source.utils.parsl_configs import (
-    alcf_config,
-    base_config
-)
+from qtaim_gen.source.utils.parsl_configs import alcf_config, base_config
 
 from qtaim_gen.source.utils.io import get_folders_from_file
 
 should_stop = False
+
+
 def handle_signal(signum, frame):
     global should_stop
     print(f"Received signal {signum}, initiating graceful shutdown...")
@@ -176,7 +175,6 @@ def main(argv: Optional[List[str]] = None) -> int:
         help="root where input folders are located",
     )
 
-
     parser.add_argument(
         "--clean_first",
         action="store_true",
@@ -244,7 +242,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     # set env vars - this is only for the main process; workers set their own envs
     if resource == "local":
         os.environ["OMP_NUM_THREADS"] = "{}".format(n_threads_per_job)
-        #threads_per = n_threads_per_job
+        # threads_per = n_threads_per_job
 
     # to handle early stops on the pilot job
     signal.signal(signal.SIGINT, handle_signal)
@@ -260,17 +258,16 @@ def main(argv: Optional[List[str]] = None) -> int:
     if not os.path.exists(root_omol_results):
         os.makedirs(root_omol_results, exist_ok=True)
 
-    
     folders_run = get_folders_from_file(
-        job_file, 
-        num_folders, 
+        job_file,
+        num_folders,
         root_omol_results,
         root_omol_inputs,
-        pre_validate=prevalidate, 
-        move_results=move_results, 
-        full_set=full_set
+        pre_validate=prevalidate,
+        move_results=move_results,
+        full_set=full_set,
     )
-    
+
     if not folders_run:
         print(f"No folders found in {job_file}")
         return []
@@ -282,7 +279,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             print("  ", p)
         print(f"Total folders listed: {len(folders_run)}")
         return 0
-    
+
     # Submit one Parsl job per selected folder. We do not pass a logger
     # into the remote app; each worker will create its own per-folder logger.
     futures = [
@@ -340,36 +337,64 @@ if __name__ == "__main__":
 
         
 - running 12/30
-25218 / 51102
+25218 / 51102               
+
 full-runner-parsl-alcf --num_folders 20000 --orca_2mkl_cmd $HOME/orca_6_0_0/orca_2mkl    \
-      --multiwfn_cmd $HOME/Multiwfn_3_8/Multiwfn_noGUI --clean --full_set 0 --type_runner hpc \
-        --n_threads 220 --n_threads_per_job 1 --safety_factor 1.0 --move_results  \
-        --timeout_hr 5             --queue workq-route --restart --n_nodes 3 --type_runner hpc \
+      --multiwfn_cmd $HOME/Multiwfn_3_8/Multiwfn_noGUI --clean --full_set 0 \
+        --n_threads 220 --n_threads_per_job 1 --safety_factor 1.0 --move_results \
+        --timeout_hr 4             --queue workq-route --restart --n_nodes 2 --type_runner hpc \
         --job_file /lus/eagle/projects/generator/jobs_by_topdir/orbnet_denali_refined.txt \
         --preprocess_compressed --root_omol_results /lus/eagle/projects/generator/OMol25_postprocessing/ \
-        --root_omol_inputs /lus/eagle/projects/OMol25/                
+        --root_omol_inputs /lus/eagle/projects/OMol25/ --clean_first
 
 - running 12/29
-2315 / 199805
-full-runner-parsl-alcf --num_folders 40000 --orca_2mkl_cmd $HOME/orca_6_0_0/orca_2mkl    \
-      --multiwfn_cmd $HOME/Multiwfn_3_8/Multiwfn_noGUI --clean --full_set 0 --type_runner hpc \
+45454 / 199805
+full-runner-parsl-alcf --num_folders 70000 --orca_2mkl_cmd $HOME/orca_6_0_0/orca_2mkl    \
+      --multiwfn_cmd $HOME/Multiwfn_3_8/Multiwfn_noGUI --clean --full_set 0  \
         --n_threads 220 --n_threads_per_job 1 --safety_factor 1.0 --move_results \
-        --timeout_hr 4             --queue workq-route --restart --n_nodes 4 --type_runner hpc \
+        --timeout_hr 4             --queue workq-route --restart --n_nodes 3 --type_runner hpc \
         --job_file /lus/eagle/projects/generator/jobs_by_topdir/geom_orca6_refined.txt \
         --preprocess_compressed --root_omol_results /lus/eagle/projects/generator/OMol25_postprocessing/ \
         --root_omol_inputs /lus/eagle/projects/OMol25/ 
 
 
-full-runner-parsl-alcf --num_folders 100000 --orca_2mkl_cmd $HOME/orca_6_0_0/orca_2mkl    \
-      --multiwfn_cmd $HOME/Multiwfn_3_8/Multiwfn_noGUI --clean --full_set 0 --type_runner hpc \
+full-runner-parsl-alcf --num_folders 40000 --orca_2mkl_cmd $HOME/orca_6_0_0/orca_2mkl    \
+      --multiwfn_cmd $HOME/Multiwfn_3_8/Multiwfn_noGUI --clean --full_set 0  \
         --n_threads 220 --n_threads_per_job 1 --safety_factor 1.0 --move_results \
-        --timeout_hr 4             --queue workq-route --restart --n_nodes 4 --type_runner hpc \
+        --timeout_hr 4             --queue workq-route --restart --n_nodes 2 --type_runner hpc \
         --job_file /lus/eagle/projects/generator/jobs_by_topdir/ani2x.txt \
         --preprocess_compressed --root_omol_results /lus/eagle/projects/generator/OMol25_postprocessing/ \
         --root_omol_inputs /lus/eagle/projects/OMol25/ 
 
+DONE        
+"ani1xbb",
+"trans1x"
+"noble_gas",
+"noble_gas_compounds",
 
+RUNNING
+"orbnet_denali", - 
+"droplet", - 
+"mo_hydrides", - 
+"geom_orca6", - 
+"nakb", 
+"dna", 
+"ani2x", # heavy
+"omol", # HEAVIEST
+"tm_react", # HEAVY
+
+next up
+
+"5A_elytes",
+"scaled_separations_exp"
+"rgd_uks"
+"rna"
+"pdb_fragments_400K"
+"ml_mo"
+"ml_elytes"
+"electrolytes_reactivity"
+"pmechdb"
+"protein_interface"
+"protein_core"
 
 """
-
-

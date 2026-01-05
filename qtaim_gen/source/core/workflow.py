@@ -87,17 +87,21 @@ def process_folder(
     try:
         os.chdir(folder)
         if clean_first:
-            # clean everything except gbw_analysis.log 
+            # clean everything except gbw_analysis.log
             for item in os.listdir(folder):
                 if item != "gbw_analysis.log":
                     item_path = os.path.join(folder, item)
                     try:
                         if os.path.isfile(item_path) or os.path.islink(item_path):
                             os.unlink(item_path)
-                            logger.info(f"Removed file {item_path} due to clean_first flag")
+                            logger.info(
+                                f"Removed file {item_path} due to clean_first flag"
+                            )
                         elif os.path.isdir(item_path):
                             shutil.rmtree(item_path)
-                            logger.info(f"Removed directory {item_path} due to clean_first flag")
+                            logger.info(
+                                f"Removed directory {item_path} due to clean_first flag"
+                            )
                     except Exception as e:
                         logger.error(f"Failed to remove {item_path}. Reason: {e}")
 
@@ -122,9 +126,9 @@ def process_folder(
                     folder,
                     full_set=full_set,
                     verbose=False,
-                move_results=move_results,
-                logger=logger,
-            )
+                    move_results=move_results,
+                    logger=logger,
+                )
 
                 if not tf_validation:
                     logger.info("Validation failed for %s: reprocessing", folder)
@@ -166,7 +170,7 @@ def process_folder(
             move_results=move_results,
         )
         t1: float = time.time()
-        
+
         # remove density_mat.npz, orca.gbw.zstd0, orca.gbw, orca.tar.zst from results folder
         files_to_remove = [
             "density_mat.npz",
@@ -186,7 +190,7 @@ def process_folder(
                 os.remove(fp)
                 # add log
                 logger.info("Removed file %s to save space", fp)
-        
+
         result["elapsed"] = t1 - t0
         result["status"] = "ok"
         logger.info("Completed folder %s in %.2f s", folder, result["elapsed"])
@@ -253,15 +257,15 @@ def process_folder_alcf(
         folder_relative = folder_inputs[len(root_omol_inputs) :].lstrip(os.sep)
     folder_outputs = root_omol_results + os.sep + folder_relative
     # copy files from folder_inputs to folder_outputs if they don't exist
-    
+
     if not os.path.exists(folder_outputs):
         os.makedirs(folder_outputs)
 
     folder = os.path.abspath(folder_outputs)
     logger: logging.Logger = setup_logger_for_folder(folder)
-    
+
     if clean_first:
-        # clean everything except gbw_analysis.log 
+        # clean everything except gbw_analysis.log
         for item in os.listdir(folder):
             if item != "gbw_analysis.log":
                 item_path = os.path.join(folder, item)
@@ -271,16 +275,18 @@ def process_folder_alcf(
                         logger.info(f"Removed file {item_path} due to clean_first flag")
                     elif os.path.isdir(item_path):
                         shutil.rmtree(item_path)
-                        logger.info(f"Removed directory {item_path} due to clean_first flag")
+                        logger.info(
+                            f"Removed directory {item_path} due to clean_first flag"
+                        )
                 except Exception as e:
-                    logger.error(f"Failed to remove {item_path}. Reason: {e}")    
+                    logger.error(f"Failed to remove {item_path}. Reason: {e}")
 
     for item in os.listdir(folder_inputs):
         # skip "density_mat.npz"
         if item != "density_mat.npz":
             s = os.path.join(folder_inputs, item)
             d = os.path.join(folder_outputs, item)
-            
+
             if os.path.isdir(s):
                 if not os.path.exists(d):
                     os.makedirs(d)
@@ -294,7 +300,7 @@ def process_folder_alcf(
 
     try:
         os.chdir(folder)
-        
+
         # pre-checks (idempotency)
         # e.g. skip if outputs exist and not restart
         """
@@ -309,7 +315,7 @@ def process_folder_alcf(
             )
         )
         """
-        try: 
+        try:
             tf_validation = validation_checks(
                 folder,
                 full_set=full_set,
@@ -360,7 +366,6 @@ def process_folder_alcf(
         )
         t1: float = time.time()
 
-
         # remove density_mat.npz, orca.gbw.zstd0, orca.gbw, orca.tar.zst from results folder
         files_to_remove = [
             "density_mat.npz",
@@ -380,7 +385,7 @@ def process_folder_alcf(
                 os.remove(fp)
                 # add log
                 logger.info("Removed file %s to save space", fp)
-        
+
         result["elapsed"] = t1 - t0
         result["status"] = "ok"
         logger.info("Completed folder %s in %.2f s", folder, result["elapsed"])

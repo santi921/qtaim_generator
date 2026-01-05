@@ -51,9 +51,9 @@ def clean_id(key: bytes) -> str:
     return id
 
 
-
-class QTAIMEmbedConverter:
+class QTAIMConverter:
     def __init__(self, config_dict: Dict[str, Any], config_path: str = None):
+
         self.config_dict = config_dict
         self.restart = config_dict["restart"]
         self.config_path = config_path
@@ -166,11 +166,11 @@ class QTAIMEmbedConverter:
         lmdb_dict = {}
 
         assert (
-            "geom_lmdb" in config_dict["lmdb_locations"].keys()
+            "geom_lmdb" in self.config_dict["lmdb_locations"].keys()
         ), "The config file must contain a key 'geom_lmdb'"
 
-        for key in config_dict["lmdb_locations"].keys():
-            lmdb_path = config_dict["lmdb_locations"][key]
+        for key in self.config_dict["lmdb_locations"].keys():
+            lmdb_path = self.config_dict["lmdb_locations"][key]
 
             # check if the path is a file or directory
             if not os.path.exists(lmdb_path):
@@ -347,6 +347,7 @@ class QTAIMEmbedConverter:
                 map_async=True,
             )
 
+            """
             db_non_qtaim = lmdb.open(
                 self.file_non_qtaim,
                 map_size=int(1099511627776 * 2),
@@ -354,18 +355,19 @@ class QTAIMEmbedConverter:
                 meminit=False,
                 map_async=True,
             )
+            """
 
-            scaler.scale_graphs_single(
+            self.scaler.scale_graphs_single(
                 lmdb_file=db_qtaim,
                 label_scaler=self.label_scaler_iterative_qtaim,
                 feature_scaler=self.feature_scaler_iterative_qtaim,
             )
-
-            scaler.scale_graphs_single(
+            """
+            self.scaler.scale_graphs_single(
                 lmdb_file=db_non_qtaim,
                 label_scaler=self.feature_scaler_iterative,
                 feature_scaler=self.feature_scaler_iterative,
-            )
+            )"""
 
         else:
             pass
@@ -732,3 +734,10 @@ class QTAIMEmbedConverter:
             json.dump(self.config_dict, f, indent=4)
             print(f"Config file {file_location} overwritten.")
 
+
+class OMolConverter:
+    pass
+
+
+class ASELMDBConverter:
+    pass

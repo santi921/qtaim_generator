@@ -5,6 +5,8 @@ from typing import Optional, List
 from qtaim_gen.source.utils.io import get_folders_from_file
 
 should_stop = False
+
+
 def handle_signal(signum, frame):
     global should_stop
     print(f"Received signal {signum}, initiating graceful shutdown...")
@@ -80,7 +82,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     parser.add_argument(
         "--check_orphaned",
-        action="store_true",    
+        action="store_true",
         help="whether to check for orphaned jobs",
     )
 
@@ -99,7 +101,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     root_omol_results: Optional[str] = getattr(args, "root_omol_results", None)
     root_omol_inputs: Optional[str] = getattr(args, "root_omol_inputs", None)
     # if not set default to the entire length of the job file
-    
+
     num_folders: int = int(getattr(args, "num_folders", -1))
     if num_folders <= 0:
         with open(job_file, "r") as f:
@@ -111,15 +113,14 @@ def main(argv: Optional[List[str]] = None) -> int:
         print(f"Error: job_file '{job_file}' does not exist")
         return 2
 
-    
     folders_run = get_folders_from_file(
-        job_file, 
-        num_folders, 
+        job_file,
+        num_folders,
         root_omol_results,
         root_omol_inputs,
-        pre_validate=True, 
-        move_results=move_results, 
-        full_set=full_set
+        pre_validate=True,
+        move_results=move_results,
+        full_set=full_set,
     )
 
     if not folders_run:
@@ -130,47 +131,77 @@ def main(argv: Optional[List[str]] = None) -> int:
     with open(refined_job_file, "w") as f:
         for folder in folders_run:
             f.write(f"{folder}\n")
-    
+
     if orphaned_check:
         count_orphaned = 0
         for folder_inputs in folders_run:
-            # find jobs in root_omol_results that have 
-            if root_omol_inputs and root_omol_results and folder_inputs.startswith(root_omol_inputs):
-                folder_relative = folder_inputs[len(root_omol_inputs):].lstrip(os.sep)
+            # find jobs in root_omol_results that have
+            if (
+                root_omol_inputs
+                and root_omol_results
+                and folder_inputs.startswith(root_omol_inputs)
+            ):
+                folder_relative = folder_inputs[len(root_omol_inputs) :].lstrip(os.sep)
                 folder_outputs = root_omol_results + os.sep + folder_relative
             else:
                 folder_outputs = folder_inputs
             # check if folder exists with more than 3 files
             if os.path.exists(folder_outputs):
                 # check if there is no orca.wfn file in the folder and that there is no gbw_analysis.log file
-                if not os.path.exists(os.path.join(folder_outputs, "orca.wfn")) and os.path.exists(os.path.join(folder_outputs, "gbw_analysis.log")):
-                    print(f"Orphaned job detected: {folder_outputs} missing orca.wfn w log present")
+                if not os.path.exists(
+                    os.path.join(folder_outputs, "orca.wfn")
+                ) and os.path.exists(os.path.join(folder_outputs, "gbw_analysis.log")):
+                    print(
+                        f"Orphaned job detected: {folder_outputs} missing orca.wfn w log present"
+                    )
                     count_orphaned += 1
-                                                                                 
-                #num_files = len(os.listdir(folder_outputs))
-                #if num_files > 3:
+
+                # num_files = len(os.listdir(folder_outputs))
+                # if num_files > 3:
                 #    print(f"Orphaned job detected: {folder_outputs} with {num_files} files")
                 #    count_orphaned += 1
 
         print(f"Total orphaned jobs detected: {count_orphaned}")
+
+
 if __name__ == "__main__":
     raise SystemExit(main())
 
 """
 
 
+
+    
 python refine_list_of_jobs.py --root_omol_inputs /lus/eagle/projects/OMol25/ \
---job_file /lus/eagle/projects/generator/jobs_by_topdir/droplet.txt --move_results \
---refined_job_file /lus/eagle/projects/generator/jobs_by_topdir/droplet_refined.txt \
-    --full_set 0 --root_omol_results /lus/eagle/projects/generator/OMol25_postprocessing/ --check_orphaned
+--job_file /lus/eagle/projects/generator/jobs_by_topdir/dna_refined.txt --move_results \
+--refined_job_file /lus/eagle/projects/generator/jobs_by_topdir/dna_refined.txt \
+    --full_set 0 --root_omol_results /lus/eagle/projects/generator/OMol25_postprocessing/ 
 
 
 python refine_list_of_jobs.py --root_omol_inputs /lus/eagle/projects/OMol25/ \
---job_file /lus/eagle/projects/generator/jobs_by_topdir/ani1xbb.txt --move_results \
---refined_job_file /lus/eagle/projects/generator/jobs_by_topdir/ani1xbb_refined.txt \
-    --full_set 0 --root_omol_results /lus/eagle/projects/generator/OMol25_postprocessing/ --check_orphaned
+--job_file /lus/eagle/projects/generator/jobs_by_topdir/nakb_refined.txt --move_results \
+--refined_job_file /lus/eagle/projects/generator/jobs_by_topdir/nakb_refined.txt \
+    --full_set 0 --root_omol_results /lus/eagle/projects/generator/OMol25_postprocessing/ 
+199 left ex: /lus/eagle/projects/generator/OMol25_postprocessing/nakb/5DWX_A19_E_frame0_-3_1
 
+python refine_list_of_jobs.py --root_omol_inputs /lus/eagle/projects/OMol25/ \
+--job_file /lus/eagle/projects/generator/jobs_by_topdir/mo_hydrides.txt --move_results \
+--refined_job_file /lus/eagle/projects/generator/jobs_by_topdir/mo_hydrides_refined.txt \
+    --full_set 0 --root_omol_results /lus/eagle/projects/generator/OMol25_postprocessing/ 
 
-# print contents of refined job file directories 
-cat /lus/eagle/projects/generator/jobs_by_topdir/noble_gas_refined.txt | xargs -I {} bash -c 'echo "{}"; ls {}/'
+366 left ex: /lus/eagle/projects/generator/OMol25_postprocessing/mo_hydrides/5098_12_-1_1
+
+    
+# lrc 
+
+python refine_list_of_jobs.py --root_omol_inputs /global/scratch/users/santiagovargas/OMol4M/ \
+--job_file /global/scratch/users/santiagovargas/OMol4M/pdb_pockets_400K_refined.txt --move_results \
+--refined_job_file /global/scratch/users/santiagovargas/OMol4M/pdb_pockets_400K_refined.txt \
+    --full_set 0 --root_omol_results /global/scratch/users/santiagovargas/OMol4M/
+
+python refine_list_of_jobs.py --root_omol_inputs /global/scratch/users/santiagovargas/OMol4M/ \
+--job_file /global/scratch/users/santiagovargas/OMol4M/pdb_fragments_300K_refined.txt --move_results \
+--refined_job_file /global/scratch/users/santiagovargas/OMol4M/pdb_fragments_300K_refined.txt \
+    --full_set 0 --root_omol_results /global/scratch/users/santiagovargas/OMol4M/
+
 """

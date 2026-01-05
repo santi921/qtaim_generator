@@ -109,7 +109,8 @@ def get_val_breakdown_from_folder(
     other_file = os.path.join(folder, "other.json")
     if os.path.exists(other_file) and os.path.getsize(other_file) > 0:
         tf_other = validate_other_dict(
-            other_file, logger=None, 
+            other_file,
+            logger=None,
         )
         info["val_other"] = tf_other
 
@@ -248,7 +249,7 @@ def validate_fuzzy_dict(
 
     if full_set > 0:
         expected_keys += ["elf_fuzzy", "mbis_fuzzy_density"]
-    
+
     if full_set > 1:
         expected_keys += ["grad_norm_rho_fuzzy", "laplacian_rho_fuzzy"]
 
@@ -379,7 +380,7 @@ def validate_charge_dict(
             if logger:
                 logger.error(f"Missing 'charge' key in '{key}' of charge json.")
             return False
-        
+
         if n_atoms is not None:
             if len(charge_dict[key]["charge"]) != n_atoms:
                 if verbose:
@@ -510,7 +511,7 @@ def validation_checks(
     bond_json_loc = os.path.join(folder_check_res, "bond.json")
     # bonding_json_loc = os.path.join(folder, "bonding.json")
     tf_cond = True
-    
+
     if not validate_timing_dict(
         timing_json_loc, verbose=verbose, full_set=full_set, spin_tf=spin_tf
     ):
@@ -620,7 +621,7 @@ def get_information_from_job_folder(folder: str, full_set: int) -> dict:
 
             for col in timings.keys():
                 info[f"t_{col}"] = timings[col]
-        else: 
+        else:
             return info  # return empty info if timings file is missing or empty
 
         tf_validation_level_0 = validation_checks(

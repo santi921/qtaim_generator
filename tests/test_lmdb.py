@@ -23,8 +23,13 @@ class TestLMDB:
     )
 
     json_2_lmdbs(
-        dir_active, dir_active, "fuzzy_full", "merged_fuzzy.lmdb", chunk_size, clean=True
-    )   
+        dir_active,
+        dir_active,
+        "fuzzy_full",
+        "merged_fuzzy.lmdb",
+        chunk_size,
+        clean=True,
+    )
 
     inp_files_2_lmdbs(
         dir_active, dir_active, "merged_geom.lmdb", chunk_size, clean=True
@@ -85,8 +90,6 @@ class TestLMDB:
             dict_orca6["mpp_full"] == orca6_rks_other_json["mpp_full"]
         ), f"Expected {orca6_rks_other_json['mpp_full'] }, got {dict_orca6['mpp_full'] }"
 
-        
-
     def test_merge(self):
 
         for lmdb_file in [
@@ -108,7 +111,9 @@ class TestLMDB:
 
             for key, value in env.begin().cursor():
                 if key.decode("ascii") == "length":
-                    assert pkl.loads(value) == 4, f"Expected 4, got {pkl.loads(value)} on {lmdb_file}"
+                    assert (
+                        pkl.loads(value) == 4
+                    ), f"Expected 4, got {pkl.loads(value)} on {lmdb_file}"
 
 
 dir_active = "./test_files/lmdb_tests/"
@@ -163,12 +168,7 @@ json_2_lmdbs(
 )
 
 inp_files_2_lmdbs(
-    dir_active, 
-    dir_active, 
-    "merged_geom.lmdb", 
-    chunk_size, 
-    clean=True, 
-    merge=False
+    dir_active, dir_active, "merged_geom.lmdb", chunk_size, clean=True, merge=False
 )
 
 charge_lmdb = "./test_files/lmdb_tests/merged_charge.lmdb"

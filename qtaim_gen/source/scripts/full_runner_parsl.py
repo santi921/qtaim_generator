@@ -234,16 +234,16 @@ def main(argv: Optional[List[str]] = None) -> int:
     if not os.path.exists(job_file):
         print(f"Error: job_file '{job_file}' does not exist")
         return 2
-    
+
     print(f"Reading job file: {job_file}")
     folders_run = get_folders_from_file(
-        job_file, 
-        num_folders, 
-        pre_validate=prevalidate, 
-        move_results=move_results, 
-        full_set=full_set
+        job_file,
+        num_folders,
+        pre_validate=prevalidate,
+        move_results=move_results,
+        full_set=full_set,
     )
-    
+
     if not folders_run:
         print(f"No folders found in {job_file}")
         return []

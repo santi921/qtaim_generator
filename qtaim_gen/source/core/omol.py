@@ -4,9 +4,9 @@ from typing import Optional, Dict, Any, List
 import subprocess
 
 from qtaim_gen.source.utils.validation import (
-    validation_checks, 
+    validation_checks,
     get_val_breakdown_from_folder,
-    get_charge_spin_n_atoms_from_folder
+    get_charge_spin_n_atoms_from_folder,
 )
 
 from qtaim_gen.source.utils.io import check_results_exist
@@ -231,7 +231,7 @@ def create_jobs(
 
     bool_gbw = False
     file_read = None
-    
+
     for file in os.listdir(folder):
         if file.endswith(".gbw"):
             bool_gbw = True
@@ -252,8 +252,6 @@ def create_jobs(
 
         if file.endswith(".wfn"):
             file_read = os.path.join(folder, file)
-
-    
 
     if not wfn_present and bool_gbw:
         logger.info(f"file_gbw: {file_gbw}")
@@ -287,7 +285,7 @@ def create_jobs(
 
             elif routine == "fuzzy_full":
                 # job_dict["fuzzy_full"] = os.path.join(folder, "fuzzy_full.txt")
-                #with open(os.path.join(folder, "fuzzy_full.txt"), "w") as f:
+                # with open(os.path.join(folder, "fuzzy_full.txt"), "w") as f:
                 spin_tf = check_spin(folder)
                 print("spin_tf: {}".format(spin_tf))
                 fuzzy_dict = fuzzy_data(spin=spin_tf, full_set=full_set)
@@ -437,7 +435,7 @@ def run_jobs(
     if separate:
         # copy the ORDER_OF_OPERATIONS_separate list
         order_of_operations = ORDER_OF_OPERATIONS_separate.copy()
-        #order_of_operations = ORDER_OF_OPERATIONS_separate
+        # order_of_operations = ORDER_OF_OPERATIONS_separate
         # order_of_operations = ["qtaim"]
         charge_dict = charge_data_dict(full_set=full_set)
         [order_of_operations.append(i) for i in charge_dict.keys()]
@@ -446,7 +444,7 @@ def run_jobs(
         spin_tf = check_spin(folder)
         fuzzy_dict = fuzzy_data(spin=spin_tf, full_set=full_set)
         [order_of_operations.append(i) for i in fuzzy_dict.keys()]
-        
+
         """# remove "charge_separate" and "bond_separate" from list
         if "charge_separate" in order_of_operations:
             order_of_operations.remove("charge_separate")
@@ -505,49 +503,60 @@ def run_jobs(
         folder_check = folder
 
     if os.path.exists(os.path.join(folder_check, "timings.json")):
-        
+
         with open(os.path.join(folder_check, "timings.json"), "r") as f:
             # check that timings isn't empty
             if os.path.getsize(os.path.join(folder_check, "timings.json")) > 0:
                 timings = json.load(f)
 
-        if restart: 
-            dft_dict = get_charge_spin_n_atoms_from_folder(folder, logger=None, verbose=False)
+        if restart:
+            dft_dict = get_charge_spin_n_atoms_from_folder(
+                folder, logger=None, verbose=False
+            )
             n_atoms = len(dft_dict["mol"])
             dict_val = get_val_breakdown_from_folder(
                 folder, n_atoms=n_atoms, full_set=full_set, spin_tf=spin_tf
             )
 
-
     for order in order_of_operations:
         # if restart, check if timing file exists
         if restart:
-                if order in timings.keys():
-                    # now check if validation checks pass 
-                    if order == "qtaim": 
-                        if dict_val["val_qtaim"]:
-                            logger.info(f"Skipping {order} in {folder}: already completed successfully.")
-                            continue
+            if order in timings.keys():
+                # now check if validation checks pass
+                if order == "qtaim":
+                    if dict_val["val_qtaim"]:
+                        logger.info(
+                            f"Skipping {order} in {folder}: already completed successfully."
+                        )
+                        continue
 
-                    elif order == "other":
-                        if dict_val["val_other"]:
-                            logger.info(f"Skipping {order} in {folder}: already completed successfully.")
-                            continue
+                elif order == "other":
+                    if dict_val["val_other"]:
+                        logger.info(
+                            f"Skipping {order} in {folder}: already completed successfully."
+                        )
+                        continue
 
-                    elif order in charge_dict.keys():
-                        if dict_val.get(f"val_charge", False):
-                            logger.info(f"Skipping {order} in {folder}: already completed successfully.")
-                            continue
-                    
-                    elif order in bond_dict.keys():
-                        if dict_val.get(f"val_bond", False):
-                            logger.info(f"Skipping {order} in {folder}: already completed successfully.")
-                            continue
-                    
-                    elif order == "fuzzy_full":
-                        if dict_val.get(f"val_fuzzy", False):
-                            logger.info(f"Skipping {order} in {folder}: already completed successfully.")
-                            continue
+                elif order in charge_dict.keys():
+                    if dict_val.get(f"val_charge", False):
+                        logger.info(
+                            f"Skipping {order} in {folder}: already completed successfully."
+                        )
+                        continue
+
+                elif order in bond_dict.keys():
+                    if dict_val.get(f"val_bond", False):
+                        logger.info(
+                            f"Skipping {order} in {folder}: already completed successfully."
+                        )
+                        continue
+
+                elif order == "fuzzy_full":
+                    if dict_val.get(f"val_fuzzy", False):
+                        logger.info(
+                            f"Skipping {order} in {folder}: already completed successfully."
+                        )
+                        continue
 
         else:
             folder_check = folder
@@ -619,15 +628,15 @@ def parse_multiwfn(
         [routine_list.append(i) for i in charge_dict.keys()]
         [routine_list.append(i) for i in bond_dict.keys()]
         [routine_list.append(i) for i in fuzzy_dict.keys()]
-        #print("routine_list: {}".format(routine_list))
-        
-        #if "charge_separate" in routine_list:
+        # print("routine_list: {}".format(routine_list))
+
+        # if "charge_separate" in routine_list:
         #    routine_list.remove("charge_separate")
-        #if "bond_separate" in routine_list:
+        # if "bond_separate" in routine_list:
         #    routine_list.remove("bond_separate")
-        #if "fuzzy_full" in routine_list:
+        # if "fuzzy_full" in routine_list:
         #    routine_list.remove("fuzzy_full")
-    
+
     else:
         routine_list = ORDER_OF_OPERATIONS
 
@@ -742,7 +751,7 @@ def parse_multiwfn(
                         elif routine in list(fuzzy_dict.keys()):
                             data = parse_fuzzy_real_space(file_full_path)
 
-                        #elif routine == "qtaim":
+                        # elif routine == "qtaim":
                         #    pass
 
                         else:
@@ -790,7 +799,9 @@ def parse_multiwfn(
                     cprop_file=cp_prop_path, inp_loc=inp_loc, orca_tf=inp_orca
                 )
                 if qtaim_dict is None or qtaim_dict == {}:
-                    logger.error(f"QTAIM parsing returned empty dictionary for {folder}")
+                    logger.error(
+                        f"QTAIM parsing returned empty dictionary for {folder}"
+                    )
                     continue
 
                 with open(json_file, "w") as f:
@@ -911,7 +922,7 @@ def clean_jobs(
                 if file in txt_files:
                     os.remove(os.path.join(folder, file))
                     logger.info(f"Removed {file}")
-            #if file.endswith(".out"):
+            # if file.endswith(".out"):
             #    if file in txt_files:
             #        os.remove(os.path.join(folder, file))
             #        logger.info(f"Removed {file}")
@@ -951,10 +962,12 @@ def setup_logger(folder: str, name: str = "gbw_analysis") -> logging.Logger:
     return logger
 
 
-def move_results_to_folder(folder: str, logger: logging.Logger, clean: bool = True) -> None:
+def move_results_to_folder(
+    folder: str, logger: logging.Logger, clean: bool = True
+) -> None:
     """
     Docstring for move_results_to_folder
-    
+
     :param folder: Description
     :type folder: str
     :param logger: Description
@@ -985,9 +998,7 @@ def move_results_to_folder(folder: str, logger: logging.Logger, clean: bool = Tr
                     with open(os.path.join(results_folder, file), "r") as f:
                         data_existing = json.load(f)
                     # merge the two dicts
-                    if isinstance(data_existing, dict) and isinstance(
-                        data_new, dict
-                    ):
+                    if isinstance(data_existing, dict) and isinstance(data_new, dict):
 
                         data_merged = {**data_existing, **data_new}
                     else:
@@ -1081,7 +1092,9 @@ def gbw_analysis(
         ]
         # also check these files are not empty
         uncompressed_files = [
-            f for f in uncompressed_files if os.path.getsize(os.path.join(folder, f)) > 0
+            f
+            for f in uncompressed_files
+            if os.path.getsize(os.path.join(folder, f)) > 0
         ]
 
         if uncompressed_files:
@@ -1154,7 +1167,7 @@ def gbw_analysis(
                         )
                     except Exception as e:
                         logger.error(f"Error running unzstd for gbw {zstd_file}: {e}")
-                    
+
             for file in os.listdir(folder):
                 # clean files ending in .tar, .tar.zst, .tgz, .gbw.zstd0, .zstd, .npz
                 check_list = [".tar", ".tar.zst", ".tgz", ".gbw.zstd0", ".zstd", ".npz"]
@@ -1164,9 +1177,9 @@ def gbw_analysis(
                         logger.info(f"Removed intermediate file: {file}")
                     except Exception as e:
                         logger.error(f"Error removing intermediate file {file}: {e}")
-    
+
     if restart:
-        
+
         # check if the timings file exists
         if move_results:
             timings_path = os.path.join(folder, "generator", "timings.json")
@@ -1176,14 +1189,14 @@ def gbw_analysis(
         if not os.path.exists(timings_path) or os.path.getsize(timings_path) == 0:
             logger.warning("No timings file found - starting from scratch!")
             restart = False
-        else: 
+        else:
             logger.info("Timings file found - restarting from last step.")
 
     # check if output already exists
     if not overwrite:
-        #if move_results:
+        # if move_results:
         #    folder_check = os.path.join(folder, "generator")
-        #else:
+        # else:
         folder_check = folder
 
         if check_results_exist(folder_check, move_results=move_results):
@@ -1207,20 +1220,22 @@ def gbw_analysis(
                 logger.info("Validation status: {}".format(tf_validation))
                 return
 
-
             # attempt to reparse if output exists but validation failed
             else:
-                try: 
+                try:
                     logger.warning(
                         "Output exists but validation failed - attempting to reparse before re-running analysis"
                     )
                     parse_multiwfn(
-                        folder, separate=separate, debug=debug, logger=logger, full_set=full_set
+                        folder,
+                        separate=separate,
+                        debug=debug,
+                        logger=logger,
+                        full_set=full_set,
                     )
-                    
+
                     if move_results:
                         move_results_to_folder(folder, logger=logger, clean=clean)
-
 
                     tf_validation = validation_checks(
                         folder_check,
@@ -1229,10 +1244,14 @@ def gbw_analysis(
                         move_results=move_results,
                         logger=logger,
                     )
-        
+
                     if tf_validation:
-                        logger.info("Reparsing successful on 2nd try - skipping analysis")
-                        logger.info("gbw_analysis completed in folder: {}".format(folder))
+                        logger.info(
+                            "Reparsing successful on 2nd try - skipping analysis"
+                        )
+                        logger.info(
+                            "gbw_analysis completed in folder: {}".format(folder)
+                        )
                         logger.info("Validation status: {}".format(tf_validation))
                         return
                 except Exception as e:
@@ -1274,10 +1293,9 @@ def gbw_analysis(
 
     # move all results to a results folder
 
-
     if move_results:
         move_results_to_folder(folder, logger=logger, clean=clean)
-        
+
     tf_validation = validation_checks(
         folder,
         full_set=full_set,
@@ -1288,7 +1306,7 @@ def gbw_analysis(
     logger.info("gbw_analysis completed in folder: {}".format(folder))
     logger.info("Validation status: {}".format(tf_validation))
     # move log file to results folder
-    
+
     # ONLY CLEAN IF VALIDATION PASSED
     if clean and tf_validation:
         #    # clean some of the mess
@@ -1300,6 +1318,7 @@ def gbw_analysis(
             full_set=full_set,
             move_results=move_results,
         )
+
 
 # /global/scratch/users/santiagovargas/gbws_cleaning_lean/ml_elytes/elytes_md_eqv2_electro_512_C3H8O_3_group_133_shell_0_0_1_1341
 #!/bin/bash
