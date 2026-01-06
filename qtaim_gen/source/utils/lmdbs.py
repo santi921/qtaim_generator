@@ -5,6 +5,7 @@ import json
 import pickle
 from typing import Dict, List, Tuple, Any, Optional
 from glob import glob
+from dataclasses import dataclass
 
 from pymatgen.core import Molecule
 from pymatgen.analysis.graphs import MoleculeGraph
@@ -320,7 +321,7 @@ def inp_files_2_lmdbs(
         )
 
 
-def get_elements_from_structure_lmdb(structure_lmdb):
+def get_elements_from_structure_lmdb(structure_lmdb: lmdb.Environment) -> set:
     """
     Get the elements from the structure lmdb
     Takes:
@@ -343,7 +344,7 @@ def get_elements_from_structure_lmdb(structure_lmdb):
     return element_set
 
 
-def get_elements_from_structure_lmdb_folder_list(list_lmdb):
+def get_elements_from_structure_lmdb_folder_list(list_lmdb: List[str]):
     """
     Get the elements from the structure lmdb
     Takes:
@@ -353,10 +354,31 @@ def get_elements_from_structure_lmdb_folder_list(list_lmdb):
     """
     element_set = set()
     for lmdb_path in list_lmdb:
-        with lmdb.open(lmdb_path, readonly=True, lock=False) as structure_lmdb:
+        with lmdb.open(
+            lmdb_path, 
+            readonly=True, 
+            lock=False, 
+            subdir=False
+        ) as structure_lmdb:
             element_set.update(get_elements_from_structure_lmdb(structure_lmdb))
 
     return element_set
+
+
+@dataclass
+class config_converter:
+    lmdb_locations: Dict[str, str]
+    lmdb_paths: Dict[str, str]
+    lmdb_names: Dict[str, str]
+    allowed_ring_size: List[int]
+    allowed_charges: List[int]
+    allowed_spins: List[int]
+    filter_list: List[str]
+    graphs_types: List[str] = None
+    element_set: List[str] = None
+    chunk: int = None
+    restart: bool = False
+    save_scaler: bool = False
 
 
 def parse_config_gen_to_embed(
@@ -387,16 +409,29 @@ def parse_config_gen_to_embed(
     if "allowed_spins" not in config_dict.keys():
         config_dict["allowed_spins"] = None
 
+    # create config
+
     return config_dict
 
 
-def parse_charge_data(value_charge, n_atoms):
+def parse_charge_data( 
+    dict_charge:dict, 
+    n_atoms:int
+) -> Tuple[Dict[int, Dict[str, Any]], Dict[str, float]]:
     """
     Parse charge-related data and update atom features.
+
+    Takes:
+        dict_charge (dict): Dictionary containing charge-related data.
+        n_atoms (int): Number of atoms in the structure.
+    Returns:
+        atom_feats_charge (Dict[int, Dict[str, Any]]): Dictionary containing atom features related
+        to charge and spin information.
+        global_dipole_feats (Dict[str, float]): Dictionary containing global dipole features.
     """
     atom_feats_charge = {i: {} for i in range(n_atoms)}
     global_dipole_feats = {}
-    charge_types = list(value_charge.keys())
+    charge_types = list(dict_charge.keys())
     for charge_type in charge_types:
 
         # parse out into atom_feats without for loop
@@ -404,55 +439,76 @@ def parse_charge_data(value_charge, n_atoms):
             atom_feats_charge[int(k.split("_")[0]) - 1].update(
                 {"charge_" + charge_type: v}
             )
-            for k, v in value_charge[charge_type]["charge"].items()
+            for k, v in dict_charge[charge_type]["charge"].items()
         }
 
-        if "dipole" in value_charge[charge_type].keys():
+        if "dipole" in dict_charge[charge_type].keys():
             global_dipole_feats.update(
                 {
                     charge_type
-                    + "_dipole_mag": value_charge[charge_type]["dipole"]["mag"]
+                    + "_dipole_mag": dict_charge[charge_type]["dipole"]["mag"]
                 }
             )
 
-        if "spin" in value_charge[charge_type].keys():
+        if "spin" in dict_charge[charge_type].keys():
             {
                 atom_feats_charge[int(k.split("_")[0]) - 1].update(
                     {"spin_" + charge_type: v}
                 )
-                for k, v in value_charge[charge_type]["spin"].items()
+                for k, v in dict_charge[charge_type]["spin"].items()
             }
 
     return atom_feats_charge, global_dipole_feats
 
 
-def parse_qtaim_data(value_qtaim, atom_feats, bond_feats, atom_keys, bond_keys):
+def parse_qtaim_data(
+        dict_qtaim: dict, 
+        atom_feats: Dict[int, Dict[str, Any]],
+        bond_feats: Dict[Tuple[int, int], Dict[str, Any]],
+        atom_keys: Optional[List[str]] = None, 
+        bond_keys: Optional[List[str]] = None
+    ) -> Tuple[List[str], List[str], Dict[int, Dict[str, Any]], Dict[Tuple[int, int], Dict[str, Any]], List[Tuple[int, int]]]:
     """
-    Parse QTAIM-related data and update atom and bond features.
+    Parse QTAIM-related data and update atom and bond features from incoming dictionaries. If no keys are provided, 
+    all keys will be extracted from the input dictionaries. We also return the list of keys used for atom and bond 
+    features, as well as the list of connected bond paths.
+
+    Takes:
+        dict_qtaim (dict): Dictionary containing QTAIM-related data.
+        atom_feats (Dict[int, Dict[str, Any]]): Dictionary containing atom features to be updated with QTAIM data.
+        bond_feats (Dict[Tuple[int, int], Dict[str, Any]]): Dictionary containing bond features to be updated with QTAIM data.
+        atom_keys (Optional[List[str]]): List of keys to extract for atom features. If None, all keys will be extracted. Defaults to None.
+        bond_keys (Optional[List[str]]): List of keys to extract for bond features. If None, all keys will be extracted. Defaults to None.  
+
+    Returns:
+        atom_keys (List[str]): List of keys used for atom features.
+        bond_keys (List[str]): List of keys used for bond features.
+        atom_feats (Dict[int, Dict[str, Any]]): Updated dictionary containing atom features with
+        QTAIM data.
+        bond_feats (Dict[Tuple[int, int], Dict[str, Any]]): Updated dictionary containing bond features with QTAIM data.
+        connected_bond_paths (List[Tuple[int, int]]): List of tuples representing connected bond paths.
     """
 
     if atom_keys is None:
-        qtaim_atoms = {k: v for k, v in value_qtaim.items() if "_" not in k}
+        qtaim_atoms = {k: v for k, v in dict_qtaim.items() if "_" not in k}
         atom_keys = list(qtaim_atoms[list(qtaim_atoms.keys())[0]].keys())
         # remove "cp_num" from atom_keys
         [atom_keys.remove(i) for i in ["cp_num", "element", "number", "pos_ang"]]
 
     if bond_keys is None:
-        qtaim_bonds = {k: v for k, v in value_qtaim.items() if "_" in k}
+        qtaim_bonds = {k: v for k, v in dict_qtaim.items() if "_" in k}
         bond_keys = list(qtaim_bonds[list(qtaim_bonds.keys())[0]].keys())
         # get first k, v in qtaim_bonds
         [bond_keys.remove(i) for i in ["cp_num", "connected_bond_paths", "pos_ang"]]
 
-    # print("*******atom keys*******: ", atom_keys)
-
     # only get the keys that are in the qtaim_bonds and qtaim_atoms from each dictionary in value_qtaim
     qtaim_atoms = {
         k: get_several_keys(v, atom_keys)
-        for k, v in value_qtaim.items()
+        for k, v in dict_qtaim.items()
         if "_" not in k
     }
     qtaim_bonds = {
-        k: get_several_keys(v, bond_keys) for k, v in value_qtaim.items() if "_" in k
+        k: get_several_keys(v, bond_keys) for k, v in dict_qtaim.items() if "_" in k
     }
 
     for key, value in atom_feats.items():  # update atom_feats with qtaim_atoms
@@ -466,7 +522,13 @@ def parse_qtaim_data(value_qtaim, atom_feats, bond_feats, atom_keys, bond_keys):
     bond_feats = {k: v for k, v in bond_feats.items() if k[0] != k[1]}
     connected_bond_paths = list(bond_feats.keys())
 
-    return atom_keys, bond_keys, atom_feats, bond_feats, connected_bond_paths
+    return (
+        atom_keys, 
+        bond_keys, 
+        atom_feats, 
+        bond_feats, 
+        connected_bond_paths
+    )
 
 
 def get_several_keys(di: Dict[str, Any], keys: List[str]) -> Dict[str, Any]:

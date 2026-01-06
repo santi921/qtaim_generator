@@ -15,13 +15,6 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
-        "--lmdb_name",
-        type=str,
-        default="molecule.lmdb",
-        help="name of output lmdb file",
-    )
-
-    parser.add_argument(
         "--restart",
         action="store_true",
         help="Restart the process, will overwrite the existing lmdb file",
