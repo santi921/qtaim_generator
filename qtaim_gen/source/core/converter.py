@@ -60,7 +60,6 @@ def clean_id(key: bytes) -> str:
 
 
 class Converter:
-
     def __init__(self, config_dict: Dict[str, Any], config_path: str = None):
         self.config_dict = config_dict
         self.restart = config_dict["restart"]
@@ -97,12 +96,13 @@ class Converter:
             self.save_scaler = False
 
         self.skip_keys = config_dict.get("filter_list", ["length", "scaled"])
+
         ####################### Element Set ########################
         if "element_set" in self.config_dict.keys():
             element_set = self.config_dict["element_set"]
         else:
             if self.single_lmdb_in:
-                print("geom_lmdb locs", self.lmdb_dict["geom_lmdb"]["env"])
+                #print("geom_lmdb locs", self.lmdb_dict["geom_lmdb"]["env"])
                 element_set = get_elements_from_structure_lmdb(
                     self.lmdb_dict["geom_lmdb"]["env"]
 
@@ -113,6 +113,37 @@ class Converter:
                 )
         #print(f"Element set: {element_set}")
         self.element_set = sorted(list(element_set))
+
+
+        ####################### LMDB Dir Stuff ########################
+        # make directory for lmdb
+        if not os.path.exists(self.config_dict["lmdb_path"]):
+            os.makedirs(self.config_dict["lmdb_path"])
+
+        if "filter_list" not in self.config_dict.keys():
+            self.config_dict["filter_list"] = ["scaled", "length"]
+
+        if "chunk" not in self.config_dict.keys():
+            self.config_dict["chunk"] = -1
+        
+        # output lmdb file handling - TODO: chunked outputs
+        self.file = os.path.join(
+            self.config_dict["lmdb_path"], 
+            self.config_dict["lmdb_name"]
+        )
+
+        if os.path.exists(self.file) and self.restart:
+            os.remove(self.file)
+
+        self.db = self.connect_db(self.file)
+        
+        # construct scalers for features and labels
+        self.feature_scaler_iterative = HeteroGraphStandardScalerIterative(
+            features_tf=True, mean={}, std={}
+        )
+        self.label_scaler_iterative = HeteroGraphStandardScalerIterative(
+            features_tf=False, mean={}, std={}
+        )
 
 
     def pull_lmdbs(self) -> Dict[str, Any]:
@@ -264,8 +295,18 @@ class Converter:
         """
 
         with lmdb_file.begin(write=False) as txn_in:
+            # go through keys first and check that "scaled" isn't true, if so skip scaling
+            scaled_entry = txn_in.get("scaled".encode("ascii"))
+            if scaled_entry is not None:
+                scaled = pickle.loads(scaled_entry)
+                if scaled:
+                    print("Graphs are already scaled. Skipping scaling.")
+                    return
+
             cursor = txn_in.cursor()
+            
             for key, value in cursor:
+
                 if self.single_lmdb_in:
                     key_str = key.decode("ascii")
                 else: 
@@ -306,7 +347,7 @@ class Converter:
                     txn.commit()
 
 
-    def scale_graph_lmdb(self, key_lmdb: str) -> None:
+    def scale_graph_lmdb(self) -> None:
 
         if self.config_dict["chunk"] == -1:
             db = lmdb.open(
@@ -317,15 +358,16 @@ class Converter:
                 map_async=True,
             )
 
-            self.scaler.scale_graphs_single(
-                lmdb_file=self.lmdb_dict[key_lmdb]["env"],
-                label_scaler=self.label_scaler_iterative_qtaim,
-                feature_scaler=self.feature_scaler_iterative_qtaim,
+            self.scale_graphs_single(
+                lmdb_file=db,
+                label_scaler=self.label_scaler_iterative,
+                feature_scaler=self.feature_scaler_iterative,
             )
 
         else:
-            
-            for key in self.lmdb_dict[key_lmdb]["lmdb_paths"]:
+            # TODO: implement chunking for folder of LMDBs
+            raise NotImplementedError("Chunking for folder of LMDBs is not implemented yet.")
+            """for key in self.lmdb_dict[key_lmdb]["lmdb_paths"]:
                 print(f"Scaling LMDB file: {key}")
                 db = lmdb.open(
                     key,
@@ -335,11 +377,11 @@ class Converter:
                     map_async=True,
                 )
 
-                self.scaler.scale_graphs_single(
+                self.scale_graphs_single(
                     lmdb_file=db,
                     label_scaler=self.label_scaler_iterative_qtaim,
                     feature_scaler=self.feature_scaler_iterative_qtaim,
-                )
+                )"""
 
 
     def overwrite_config(self, file_location=None):
@@ -405,37 +447,11 @@ class BaseConverter(Converter):
         super().__init__(config_dict, config_path)
         self.fail_log_dict = {
             "structure": [],
+            "qtaim": [],
+            "charge": [],
             "graph": [],
             "scaler": [],
         }
-
-        ####################### LMDB Dir Stuff ########################
-        # make directory for lmdb
-        if not os.path.exists(self.config_dict["lmdb_path"]):
-            os.makedirs(self.config_dict["lmdb_path"])
-
-        if "filter_list" not in self.config_dict.keys():
-            self.config_dict["filter_list"] = ["scaled", "length"]
-
-        if "chunk" not in self.config_dict.keys():
-            self.config_dict["chunk"] = -1
-        
-        # 
-        self.file = os.path.join(
-            self.config_dict["lmdb_path"], 
-            self.config_dict["lmdb_name"]
-        )
-        if os.path.exists(self.file) and self.restart:
-            os.remove(self.file)
-        self.db= self.connect_db(self.file)
-
-        self.feature_scaler_iterative = HeteroGraphStandardScalerIterative(
-            features_tf=True, mean={}, std={}
-        )
-        self.label_scaler_iterative = HeteroGraphStandardScalerIterative(
-            features_tf=False, mean={}, std={}
-        )
-    
   
     def process(
         self,
@@ -446,19 +462,6 @@ class BaseConverter(Converter):
         Main loop for processing the LMDB files and generating the graphs.
         """
         keys_to_iterate = self.lmdb_dict["geom_lmdb"]["keys"]
-
-        """# each structure
-        if self.single_lmdb_in:
-            print("Processing single LMDB file...")
-            keys_to_iterate = self.lmdb_dict["geom_lmdb"]["keys"]
-        else:
-            print("Processing folder of LMDB files...")
-            keys_to_iterate = []
-            for key in self.lmdb_dict["geom_lmdb"]["keys"]:
-                keys_to_iterate.append(key)
-        """
-        #print("set keys to iterate: ", keys_to_iterate)
-        #print(self.lmdb_dict["geom_lmdb"])
         
         for key in keys_to_iterate:
             if type(key) == bytes:
@@ -603,10 +606,264 @@ class BaseConverter(Converter):
             print(f"{key}: \t\t {len(self.fail_log_dict[key])} errors")
             if len(self.fail_log_dict[key]) > 0:
                 print(f"error keys: \t{self.fail_log_dict[key]}")
+        # number of keys in the lmdb file
+        print(f"Total number of keys in LMDB: {len(keys_to_iterate)}")
 
 
 
 class QTAIMConverter(Converter):
+    def __init__(self, config_dict: Dict[str, Any], config_path: str = None):
+
+        super().__init__(config_dict, config_path)
+
+        self.fail_log_dict = {
+            "structure": [],
+            "qtaim": [],
+            "graph": [],
+            "scaler": [],
+        }
+   
+    def process(
+        self,
+    ) -> Dict[
+        str, Union[HeteroGraphStandardScalerIterative, HeteroGraphLogMagnitudeScaler]
+    ]:
+        """
+        Main loop for processing the LMDB files and generating the graphs.
+        """
+
+        keys_to_iterate = self.lmdb_dict["geom_lmdb"]["keys"]
+        
+        for key in keys_to_iterate:
+            if type(key) == bytes:
+                key_str = key.decode("ascii")
+            else:
+                key_str = key
+
+            try:
+                # structure keys
+                value_structure = self.__getitem__("geom_lmdb", key)
+
+                if value_structure != None:
+                    mol_graph = value_structure["molecule_graph"]
+                    n_atoms = len(mol_graph)
+                    spin = value_structure["spin"]
+                    charge = value_structure["charge"]
+                    bonds = value_structure["bonds"]
+
+                    if self.single_lmdb_in:
+                        id = clean_id(key)
+                    else: 
+                        id = key_str
+
+                    # global features
+                    global_feats = {
+                        "charge": charge,
+                        "spin": spin,
+                        "n_atoms": n_atoms,
+                        "n_bonds": len(bonds),
+                    }
+
+                    # initialize atom_feats with dictionary whos keys are atom inds and empty dict as values
+                    atom_feats = {i: {} for i in range(n_atoms)}
+                    bond_feats = {}
+
+                    
+                else:
+                    self.fail_log_dict["structure"].append(key.decode("ascii"))
+                    continue
+            except:
+                self.fail_log_dict["structure"].append(key.decode("ascii"))
+                continue
+            
+
+            try:
+                dict_qtaim_raw = self.__getitem__("qtaim_lmdb", key)
+                #print("qtaim raw data: ", dict_qtaim_raw["0"].keys())
+                if dict_qtaim_raw != None:
+                    # parse qtaim data
+                    (
+                        atom_keys_qtaim,
+                        bond_keys_qtaim,
+                        atom_feats,
+                        bond_feats,
+                        connected_bond_paths,
+                    ) = parse_qtaim_data(
+                        dict_qtaim_raw,
+                        atom_feats,
+                        bond_feats,
+                        atom_keys=self.keys_data["atom"],
+                        bond_keys=self.keys_data["bond"],
+                    )
+                    #print("qtaim data")
+                    #print(atom_feats)
+                    #print(bond_feats)
+                    #print(connected_bond_paths)
+                else:
+                    self.fail_log_dict["qtaim"].append(key.decode("ascii"))
+                    continue
+
+            except:
+                self.fail_log_dict["qtaim"].append(key.decode("ascii"))
+                continue
+
+
+            ############################# Molwrapper ####################################
+            mol_wrapper = MoleculeWrapper(
+                mol_graph,
+                functional_group=None,
+                free_energy=None,
+                id=id,
+                bonds=connected_bond_paths,
+                non_metal_bonds=connected_bond_paths,
+                atom_features=atom_feats,
+                bond_features=bond_feats,
+                global_features=global_feats,
+                original_atom_ind=None,
+                original_bond_mapping=None,
+            )
+
+            if not self.grapher:
+                self.grapher = get_grapher(
+                    element_set=self.element_set,
+                    atom_keys=self.keys_data["atom"],
+                    bond_keys=self.keys_data["bond"],
+                    global_keys=self.keys_data["global"],
+                    allowed_ring_size=self.config_dict["allowed_ring_size"],
+                    allowed_charges=self.config_dict["allowed_charges"],
+                    allowed_spins=self.config_dict["allowed_spins"],
+                    self_loop=True,
+                    atom_featurizer_tf=True,
+                    bond_featurizer_tf=True,
+                    global_featurizer_tf=True,
+                )
+                # print("\nbond keys qtaim: ", self.bond_keys)
+
+            # graph generation
+            graph = build_and_featurize_graph(
+                self.grapher, mol_wrapper
+            )
+
+            if self.index_dict == {}:
+
+                self.index_dict = get_include_exclude_indices(
+                    feat_names=self.grapher.feat_names,
+                    target_dict=self.keys_target,
+                )
+                # save self.index_dict to config
+                self.config_dict["index_dict"] = self.index_dict
+                self.overwrite_config()
+            
+            split_graph_labels(
+                graph,
+                include_names=self.index_dict["include_names"],
+                include_locs=self.index_dict["include_locs"],
+                exclude_locs=self.index_dict["exclude_locs"],
+            )
+
+            try:
+                mol_wrapper = MoleculeWrapper(
+                    mol_graph,
+                    functional_group=None,
+                    free_energy=None,
+                    id=id,
+                    bonds=connected_bond_paths,
+                    non_metal_bonds=connected_bond_paths,
+                    atom_features=atom_feats,
+                    bond_features=bond_feats,
+                    global_features=global_feats,
+                    original_atom_ind=None,
+                    original_bond_mapping=None,
+                )
+
+                if not self.grapher:
+                    self.grapher = get_grapher(
+                        element_set=self.element_set,
+                        atom_keys=self.keys_data["atom"],
+                        bond_keys=self.keys_data["bond"],
+                        global_keys=self.keys_data["global"],
+                        allowed_ring_size=self.config_dict["allowed_ring_size"],
+                        allowed_charges=self.config_dict["allowed_charges"],
+                        allowed_spins=self.config_dict["allowed_spins"],
+                        self_loop=True,
+                        atom_featurizer_tf=True,
+                        bond_featurizer_tf=True,
+                        global_featurizer_tf=True,
+                    )
+                    # print("\nbond keys qtaim: ", self.bond_keys)
+
+                # graph generation
+                graph = build_and_featurize_graph(
+                    self.grapher, mol_wrapper
+                )
+
+                if self.index_dict == {}:
+
+                    self.index_dict = get_include_exclude_indices(
+                        feat_names=self.grapher.feat_names,
+                        target_dict=self.keys_target,
+                    )
+                    # save self.index_dict to config
+                    self.config_dict["index_dict"] = self.index_dict
+                    self.overwrite_config()
+                
+                split_graph_labels(
+                    graph,
+                    include_names=self.index_dict["include_names"],
+                    include_locs=self.index_dict["include_locs"],
+                    exclude_locs=self.index_dict["exclude_locs"],
+                )
+
+            except:
+                self.fail_log_dict["graph"].append(key.decode("ascii"))
+                continue
+
+
+            try:
+                self.feature_scaler_iterative.update([graph])
+                self.label_scaler_iterative.update([graph])
+
+                txn = self.db.begin(write=True)
+                txn.put(
+                    f"{key}".encode("ascii"),
+                    pickle.dumps(serialize_dgl_graph(graph, ret=True), protocol=-1),
+                )
+                txn.commit()
+
+            except:
+                self.fail_log_dict["scaler"].append(key.decode("ascii"))
+                continue
+
+        # indicates that the scalers should not be updated anymore 
+        self.feature_scaler_iterative.finalize()
+        self.label_scaler_iterative.finalize()
+
+        if self.save_scaler:
+            lmdb_path_qtaim = self.config_dict["lmdb_path"]
+
+            self.feature_scaler_iterative.save_scaler(
+                lmdb_path_qtaim + "/feature_scaler_iterative.pt"
+            )
+            self.label_scaler_iterative.save_scaler(
+                lmdb_path_qtaim + "/label_scaler_iterative.pt"
+            )
+        
+        # last info on whether the graphs were scaled or not
+        txn = self.db.begin(write=True)
+        txn.put("scaled".encode("ascii"), pickle.dumps(False, protocol=-1))
+        txn.commit()
+        self.db.close()
+
+        print("error dict stats:")
+        for key in self.fail_log_dict.keys():
+            print(f"{key}: \t\t {len(self.fail_log_dict[key])} errors")
+            if len(self.fail_log_dict[key]) > 0:
+                print(f"error keys: \t{self.fail_log_dict[key]}")
+        
+        # number of keys in the lmdb file
+        print(f"Total number of keys in LMDB: {len(keys_to_iterate)}")
+
+class GeneralConverter(Converter):
     def __init__(self, config_dict: Dict[str, Any], config_path: str = None):
 
         super().__init__(config_dict, config_path)
@@ -621,241 +878,8 @@ class QTAIMConverter(Converter):
             "scaler": [],
         }
 
-        ####################### LMDB Dir Stuff ########################
-        # make directory for lmdb
-        if not os.path.exists(self.config_dict["lmdb_path"]):
-            os.makedirs(self.config_dict["lmdb_path"])
+        self.bonding_scheme = self.config_dict.get("bonding_scheme", "qtaim")
 
-        if "filter_list" not in self.config_dict.keys():
-            self.config_dict["filter_list"] = ["scaled", "length"]
-
-        if "chunk" not in self.config_dict.keys():
-            self.config_dict["chunk"] = -1
-
-        if "lmdb_name" not in config_dict.keys():
-            assert (
-                "lmdb_non_qtaim_name" not in config_dict.keys()
-            ), "qtaim and non qtaim names must be not set at the same time"
-            # TODO: folder lmdb wrapper --> this does folder outputs!!! (chunking)
-            pass
-
-        else:
-            self.file = os.path.join(
-                self.config_dict["lmdb_path"], 
-                self.config_dict["lmdb_name"]
-            )
-
-            if os.path.exists(self.file) and self.restart:
-                os.remove(self.file)
-
-            self.db= self.connect_db(self.file)
-
-            self.feature_scaler_iterative= HeteroGraphStandardScalerIterative(
-                features_tf=True, mean={}, std={}
-            )
-            self.label_scaler_iterative = HeteroGraphStandardScalerIterative(
-                features_tf=False, mean={}, std={}
-            )
-
-        print("Starting processing of LMDB files...")
-        self.process()
-
-   
-    def process(
-        self,
-    ) -> Dict[
-        str, Union[HeteroGraphStandardScalerIterative, HeteroGraphLogMagnitudeScaler]
-    ]:
-        """
-        Main loop for processing the LMDB files and generating the graphs.
-        """
-
-        # each structure
-        if self.single_lmdb_in:
-            keys_to_iterate = self.lmdb_dict["geom_lmdb"]["keys"]
-        else:
-            keys_to_iterate = []
-            for key in self.lmdb_dict["geom_lmdb"]["keys"]:
-                keys_to_iterate.append(key)
-
-        for key in keys_to_iterate:
-            if key.decode("ascii") not in self.skip_keys:
-                try:
-                    # structure keys
-                    value_structure = self.__getitem__("geom_lmdb", key)
-                    if value_structure != None:
-                        mol_graph = value_structure["molecule_graph"]
-                        n_atoms = len(mol_graph)
-                        spin = value_structure["spin"]
-                        charge = value_structure["charge"]
-                        bonds = value_structure["bonds"]
-
-                        id = clean_id(key)
-
-                        # global features
-                        global_feats = {
-                            "charge": charge,
-                            "spin": spin,
-                            "n_atoms": n_atoms,
-                            "n_bonds": len(bonds),
-                        }
-
-                        # initialize atom_feats with dictionary whos keys are atom inds and empty dict as values
-                        atom_feats = {i: {} for i in range(n_atoms)}
-                        bond_feats = {}
-                        bond_list = {
-                            tuple(sorted(b)): None for b in bonds if b[0] != b[1]
-                        }
-
-                    else:
-                        self.fail_log_dict["structure"].append(key.decode("ascii"))
-                        continue
-                except:
-                    self.fail_log_dict["structure"].append(key.decode("ascii"))
-                    continue
-
-                try:
-                    value_qtaim = self.__getitem__("qtaim_lmdb", key)
-                    if value_qtaim != None:
-                        # parse qtaim data
-                        (
-                            atom_keys_qtaim,
-                            bond_keys_qtaim,
-                            atom_feats,
-                            bond_feats,
-                            connected_bond_paths,
-                        ) = parse_qtaim_data(
-                            value_qtaim,
-                            atom_feats,
-                            bond_feats,
-                            self.atom_keys,
-                            self.bond_keys,
-                        )
-
-                        if self.keys_data["atom"] == None: 
-                            self.keys_data["atom"] = (
-                                atom_keys_qtaim
-                            )  # update dict
-
-                        if self.keys_data["bond"] == None:
-                            self.keys_data["bond"] = bond_keys_qtaim  # update dict
-                    else:
-                        self.fail_log_dict["qtaim"].append(key.decode("ascii"))
-                        continue
-                
-                except:
-                    self.fail_log_dict["qtaim"].append(key.decode("ascii"))
-                    continue
-
-                ############################# Molwrapper ####################################
-                try:
-                    mol_wrapper_qtaim_bonds = MoleculeWrapper(
-                        mol_graph,
-                        functional_group=None,
-                        free_energy=None,
-                        id=id,
-                        bonds=connected_bond_paths,
-                        non_metal_bonds=connected_bond_paths,
-                        atom_features=atom_feats,
-                        bond_features=bond_feats,
-                        global_features=global_feats,
-                        original_atom_ind=None,
-                        original_bond_mapping=None,
-                    )
-
-                    if not self.grapher_qtaim:
-                        self.grapher_qtaim = get_grapher(
-                            element_set=self.element_set,
-                            atom_keys=self.atom_keys,  # todo
-                            bond_keys=self.bond_keys,
-                            # bond_keys=[],
-                            global_keys=self.global_keys,
-                            allowed_ring_size=self.config_dict["allowed_ring_size"],
-                            allowed_charges=self.config_dict["allowed_charges"],
-                            allowed_spins=self.config_dict["allowed_spins"],
-                            self_loop=True,
-                            atom_featurizer_tf=True,
-                            bond_featurizer_tf=True,
-                            global_featurizer_tf=True,
-                        )
-                        # print("\nbond keys qtaim: ", self.bond_keys)
-
-                    # graph generation
-
-                    graph = build_and_featurize_graph(
-                        self.grapher_qtaim, mol_wrapper_qtaim_bonds
-                    )
-
-                    if self.index_dict_qtaim == {}:
-                        key_target_qtaim = {
-                            "atom": self.atom_keys,
-                            "bond": self.bond_keys,
-                            "global": self.global_keys_target,
-                        }
-                        self.index_dict_qtaim = get_include_exclude_indices(
-                            feat_names=self.grapher_qtaim.feat_names,
-                            target_dict=key_target_qtaim,
-                        )
-                        self.config_dict["index_dict_qtaim"] = self.index_dict_qtaim
-                        self.overwrite_config()
-
-
-                    split_graph_labels(
-                        graph,
-                        include_names=self.index_dict_qtaim["include_names"],
-                        include_locs=self.index_dict_qtaim["include_locs"],
-                        exclude_locs=self.index_dict_qtaim["exclude_locs"],
-                    )
-                
-                except:
-                    self.fail_log_dict["graph"].append(key.decode("ascii"))
-                    continue
-
-                try:
-                    self.feature_scaler_iterative_qtaim.update([graph])
-                    self.label_scaler_iterative_qtaim.update([graph])
-
-                    txn = self.db_qtaim.begin(write=True)
-                    txn.put(
-                        f"{key}".encode("ascii"),
-                        pickle.dumps(serialize_dgl_graph(graph, ret=True), protocol=-1),
-                    )
-                    txn.commit()
-
-                except:
-                    self.fail_log_dict["scaler"].append(key.decode("ascii"))
-                    continue
-
-        # indicates that the scalers should not be updated anymore 
-        self.feature_scaler_iterative_qtaim.finalize()
-        self.label_scaler_iterative_qtaim.finalize()
-
-        if self.save_scaler:
-            lmdb_path_qtaim = self.config_dict["lmdb_path"]
-
-            self.feature_scaler_iterative_qtaim.save_scaler(
-                lmdb_path_qtaim + "/feature_scaler_iterative.pt"
-            )
-            self.label_scaler_iterative_qtaim.save_scaler(
-                lmdb_path_qtaim + "/label_scaler_iterative.pt"
-            )
-        
-        # last info on whether the graphs were scaled or not
-        txn = self.db_qtaim.begin(write=True)
-        txn.put("scaled".encode("ascii"), pickle.dumps(False, protocol=-1))
-        txn.commit()
-        self.db_qtaim.close()
-
-        print("error dict stats:")
-        for key in self.fail_log_dict.keys():
-            print(f"{key}: \t\t {len(self.fail_log_dict[key])} errors")
-            if len(self.fail_log_dict[key]) > 0:
-                print(f"error keys: \t{self.fail_log_dict[key]}")
-
-
-
-class GeneralConverter(Converter):
-    pass
 
 
 
