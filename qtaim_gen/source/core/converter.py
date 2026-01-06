@@ -17,6 +17,8 @@ import numpy as np
 from copy import deepcopy
 from typing import Dict, List, Tuple, Union, Any
 import bisect
+import logging
+from logging.handlers import RotatingFileHandler
 
 
 from qtaim_embed.data.processing import (
@@ -59,11 +61,63 @@ def clean_id(key: bytes) -> str:
     return id
 
 
+def setup_logger(lmdb_path: str, logger_name: str = "Converter") -> logging.Logger:
+    """
+    Setup logger for the converter class.
+
+    Args:
+        lmdb_path (str): The path to the LMDB directory where logs will be saved.
+        logger_name (str): The name of the logger.
+
+    Returns:
+        logging.Logger: The configured logger instance.
+    """
+    logger = logging.getLogger(logger_name)
+    
+    # Remove existing handlers to avoid duplicate logs
+    logger.handlers = []
+    logger.setLevel(logging.DEBUG)
+    
+    # Create logs directory if it doesn't exist
+    logs_dir = os.path.join(lmdb_path, "logs")
+    if not os.path.exists(logs_dir):
+        os.makedirs(logs_dir)
+    
+    # Create file handler
+    log_file = os.path.join(logs_dir, "converter.log")
+    file_handler = RotatingFileHandler(
+        log_file, maxBytes=10*1024*1024, backupCount=5
+    )
+    file_handler.setLevel(logging.DEBUG)
+    
+    # Create console handler
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(logging.INFO)
+    
+    # Create formatter
+    formatter = logging.Formatter(
+        '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+    
+    file_handler.setFormatter(formatter)
+    console_handler.setFormatter(formatter)
+    
+    # Add handlers to logger
+    logger.addHandler(file_handler)
+    logger.addHandler(console_handler)
+    
+    return logger
+
+
 class Converter:
     def __init__(self, config_dict: Dict[str, Any], config_path: str = None):
         self.config_dict = config_dict
         self.restart = config_dict["restart"]
         self.config_path = config_path
+
+        # Setup logging
+        self.logger = self._setup_logger(config_dict["lmdb_path"], logger_name=config_dict.get("lmdb_name", "converter").split(".")[0])
 
         # keys
         self.keys_data = {
@@ -113,12 +167,14 @@ class Converter:
                 )
         #print(f"Element set: {element_set}")
         self.element_set = sorted(list(element_set))
+        self.logger.info(f"Element set: {self.element_set}")
 
 
         ####################### LMDB Dir Stuff ########################
         # make directory for lmdb
         if not os.path.exists(self.config_dict["lmdb_path"]):
             os.makedirs(self.config_dict["lmdb_path"])
+            self.logger.info(f"Created LMDB directory: {self.config_dict['lmdb_path']}")
 
         if "filter_list" not in self.config_dict.keys():
             self.config_dict["filter_list"] = ["scaled", "length"]
@@ -134,8 +190,10 @@ class Converter:
 
         if os.path.exists(self.file) and self.restart:
             os.remove(self.file)
+            self.logger.info(f"Removed existing LMDB file for restart: {self.file}")
 
         self.db = self.connect_db(self.file)
+        self.logger.info(f"Connected to output LMDB: {self.file}")
         
         # construct scalers for features and labels
         self.feature_scaler_iterative = HeteroGraphStandardScalerIterative(
@@ -144,6 +202,19 @@ class Converter:
         self.label_scaler_iterative = HeteroGraphStandardScalerIterative(
             features_tf=False, mean={}, std={}
         )
+
+    def _setup_logger(self, lmdb_path: str, logger_name: str) -> logging.Logger:
+        """
+        Setup logger for the converter instance.
+
+        Args:
+            lmdb_path (str): The path to the LMDB directory where logs will be saved.
+
+        Returns:
+            logging.Logger: The configured logger instance.
+        """
+        return setup_logger(lmdb_path, logger_name=logger_name)
+        
 
 
     def pull_lmdbs(self) -> Dict[str, Any]:
@@ -171,7 +242,7 @@ class Converter:
                 raise ValueError(f"Path '{lmdb_path}' does not exist.")
 
             if os.path.isdir(lmdb_path):
-                # print(f"Path '{lmdb_path}' is a directory.")
+                self.logger.info(f"Connecting to LMDB folder: {lmdb_path} (key: {key})")
                 # if the path is a directory, check if it contains lmdb files
                 lmdb_dict[key] = self.connect_folder_of_dbs(
                     db_path=lmdb_path, key=key.split("_")[0]
@@ -179,6 +250,7 @@ class Converter:
                 self.single_lmdb_in = False
             else:
                 # single lmdb file
+                self.logger.info(f"Connecting to single LMDB file: {lmdb_path} (key: {key})")
                 lmdb_dict[key] = self.connect_db(lmdb_path, with_meta=True)
 
         if self.single_lmdb_in:
@@ -191,8 +263,7 @@ class Converter:
                     lmdb_dict[key]["num_samples"] > 0
                 ), f"The LMDB file is empty: {lmdb_dict[key]}"
 
-
-        
+        self.logger.info(f"Successfully loaded {len(lmdb_dict)} LMDB source(s)")
         return lmdb_dict
 
 
@@ -250,11 +321,13 @@ class Converter:
         if os.path.isdir(db_path):
             db_paths = sorted(glob(f"{db_path}/*{key}*.lmdb"))
             assert len(db_paths) > 0, f"No LMDBs found in '{db_path}'"
+            self.logger.info(f"Found {len(db_paths)} LMDB files in {db_path}")
             # self.metadata_path = self.path / "metadata.npz"
 
             _keys = []
             envs = []
             for db_path in db_paths:
+                self.logger.debug(f"Connecting to LMDB: {db_path}")
                 cur_env = self.connect_db(db_path, with_meta=True, skip_keys=skip_keys)
                 envs.append(cur_env)
                 _keys.append(list(cur_env["keys"]))
@@ -265,6 +338,7 @@ class Converter:
             num_samples = sum(keylens)  # need to be dicts
             # keys will just be a global index for the entire folder of LMDBs, so we need to adjust the keys to be cumulative across all LMDBs
             keys = list(range(num_samples))  
+            self.logger.info(f"Total samples across all LMDBs: {num_samples}")
             return {
                 "envs": envs,
                 "keys": keys,
@@ -300,10 +374,11 @@ class Converter:
             if scaled_entry is not None:
                 scaled = pickle.loads(scaled_entry)
                 if scaled:
-                    print("Graphs are already scaled. Skipping scaling.")
+                    self.logger.info("Graphs are already scaled. Skipping scaling.")
                     return
 
             cursor = txn_in.cursor()
+            scaled_count = 0
             
             for key, value in cursor:
 
@@ -326,6 +401,7 @@ class Converter:
                         ),
                     )
                     txn.commit()
+                    scaled_count += 1
 
                 if key.decode("ascii") == "length":
                     # get the length of the lmdb file
@@ -345,11 +421,14 @@ class Converter:
                         pickle.dumps(True, protocol=-1),
                     )
                     txn.commit()
+            
+            self.logger.info(f"Scaled {scaled_count} graphs.")
 
 
     def scale_graph_lmdb(self) -> None:
 
         if self.config_dict["chunk"] == -1:
+            self.logger.info("Starting graph scaling...")
             db = lmdb.open(
                 self.file,
                 map_size=int(1099511627776 * 2),
@@ -363,9 +442,11 @@ class Converter:
                 label_scaler=self.label_scaler_iterative,
                 feature_scaler=self.feature_scaler_iterative,
             )
+            self.logger.info("Graph scaling completed.")
 
         else:
             # TODO: implement chunking for folder of LMDBs
+            self.logger.error("Chunking for folder of LMDBs is not implemented yet.")
             raise NotImplementedError("Chunking for folder of LMDBs is not implemented yet.")
             """for key in self.lmdb_dict[key_lmdb]["lmdb_paths"]:
                 print(f"Scaling LMDB file: {key}")
@@ -390,7 +471,7 @@ class Converter:
         """
         if file_location is None:
             file_location = self.config_path
-        print(f"Overwriting config file at {file_location} with current config_dict.")
+        self.logger.info(f"Overwriting config file at {file_location}")
         with open(file_location, "w") as f:
             json.dump(self.config_dict, f, indent=4)
             
@@ -421,7 +502,7 @@ class Converter:
             datapoint_pickled = self.lmdb_dict[key_lmdb]["envs"][db_idx]["env"].begin().get(key_in_db)
             
             if datapoint_pickled is None:
-                print(f"Key {key_in_db} not found in LMDB {key_lmdb} at index {idx}.")
+                self.logger.warning(f"Key {key_in_db} not found in LMDB {key_lmdb} at index {idx}.")
                 return None
             data_object = pickle.loads(datapoint_pickled)
 
@@ -431,7 +512,7 @@ class Converter:
             # throw
             # handle if the key is not in the lmdb
             if datapoint_pickled is None:
-                print(f"Key {idx} not found in LMDB {key_lmdb}.")
+                self.logger.warning(f"Key {idx} not found in LMDB {key_lmdb}.")
                 # assert False, f"Key {idx} not found in LMDB {key_lmdb}."
                 return None
             # assert False, f"LMDB file {key_lmdb} is not a folder. Use the key directly."
@@ -461,8 +542,11 @@ class BaseConverter(Converter):
         """
         Main loop for processing the LMDB files and generating the graphs.
         """
+        self.logger.info("Starting BaseConverter processing...")
         keys_to_iterate = self.lmdb_dict["geom_lmdb"]["keys"]
+        self.logger.info(f"Total keys to iterate: {len(keys_to_iterate)}")
         
+        processed_count = 0
         for key in keys_to_iterate:
             if type(key) == bytes:
                 key_str = key.decode("ascii")
@@ -504,9 +588,11 @@ class BaseConverter(Converter):
 
                 else:
                     self.fail_log_dict["structure"].append(key)
+                    self.logger.debug(f"Failed to retrieve structure for key: {key}")
                     continue
-            except:
+            except Exception as e:
                 self.fail_log_dict["structure"].append(key)
+                self.logger.debug(f"Exception retrieving structure for key {key}: {str(e)}")
                 continue
 
 
@@ -540,6 +626,26 @@ class BaseConverter(Converter):
                         bond_featurizer_tf=True,
                         global_featurizer_tf=True,
                     )
+                    # add grapher info to log
+                    self.logger.info(f"Grapher initialized with the following settings:")
+                    self.logger.info(f"Element set: {self.element_set}")
+                    self.logger.info(f"feat_names: {self.grapher.feat_names}")
+                    # global feature info
+                    self.logger.info(f">>>>>   Global features info   <<<<<")
+                    self.logger.info(f"Allowed charges: {self.grapher.global_featurizer.allowed_charges}")
+                    self.logger.info(f"Allowed spins: {self.grapher.global_featurizer.allowed_spins}")
+                    self.logger.info(f"Feature size: {self.grapher.global_featurizer.feature_size}")
+                    self.logger.info(f"Feature names: {self.grapher.global_featurizer._feature_name}")
+                    # print out the atom and bond feature info
+                    self.logger.info(f">>>>>   Atom features info   <<<<<")
+                    self.logger.info(f"Elements set: {self.grapher.atom_featurizer.element_set}")
+                    self.logger.info(f"Feature size: {self.grapher.atom_featurizer.feature_size}")
+                    self.logger.info(f"Feature names: {self.grapher.atom_featurizer._feature_name}")
+                    self.logger.info(f">>>>>   Bond features info   <<<<<")
+                    self.logger.info(f"Allowed ring sizes: {self.grapher.bond_featurizer.allowed_ring_size}")
+                    self.logger.info(f"Feature size: {self.grapher.bond_featurizer.feature_size}")
+                    self.logger.info(f"Feature names: {self.grapher.bond_featurizer._feature_name}")
+
 
                 graph = build_and_featurize_graph(
                     self.grapher, mol_wrapper
@@ -576,9 +682,11 @@ class BaseConverter(Converter):
                     pickle.dumps(serialize_dgl_graph(graph, ret=True), protocol=-1),
                 )
                 txn.commit()
+                processed_count += 1
 
-            except:
+            except Exception as e:
                 self.fail_log_dict["scaler"].append(key.decode("ascii"))
+                self.logger.debug(f"Exception adding graph to scaler for key {key}: {str(e)}")
                 continue
 
         # indicates that the scalers should not be updated anymore 
@@ -594,6 +702,7 @@ class BaseConverter(Converter):
             self.label_scaler_iterative.save_scaler(
                 lmdb_path_qtaim + "/label_scaler_iterative.pt"
             )
+            self.logger.info("Scalers saved successfully.")
         
         # last info on whether the graphs were scaled or not
         txn = self.db.begin(write=True)
@@ -601,13 +710,14 @@ class BaseConverter(Converter):
         txn.commit()
         self.db.close()
 
-        print("error dict stats:")
+        # Log error statistics
+        self.logger.info("Processing complete. Error statistics:")
         for key in self.fail_log_dict.keys():
-            print(f"{key}: \t\t {len(self.fail_log_dict[key])} errors")
+            self.logger.info(f"{key}: {len(self.fail_log_dict[key])} errors")
             if len(self.fail_log_dict[key]) > 0:
-                print(f"error keys: \t{self.fail_log_dict[key]}")
+                self.logger.debug(f"Error keys for {key}: {self.fail_log_dict[key]}")
         # number of keys in the lmdb file
-        print(f"Total number of keys in LMDB: {len(keys_to_iterate)}")
+        self.logger.info(f"Total number of keys processed: {processed_count}/{len(keys_to_iterate)}")
 
 
 
@@ -631,9 +741,11 @@ class QTAIMConverter(Converter):
         """
         Main loop for processing the LMDB files and generating the graphs.
         """
-
+        self.logger.info("Starting QTAIMConverter processing...")
         keys_to_iterate = self.lmdb_dict["geom_lmdb"]["keys"]
+        self.logger.info(f"Total keys to iterate: {len(keys_to_iterate)}")
         
+        processed_count = 0
         for key in keys_to_iterate:
             if type(key) == bytes:
                 key_str = key.decode("ascii")
@@ -671,9 +783,11 @@ class QTAIMConverter(Converter):
                     
                 else:
                     self.fail_log_dict["structure"].append(key.decode("ascii"))
+                    self.logger.debug(f"Failed to retrieve structure for key: {key}")
                     continue
-            except:
+            except Exception as e:
                 self.fail_log_dict["structure"].append(key.decode("ascii"))
+                self.logger.debug(f"Exception retrieving structure for key {key}: {str(e)}")
                 continue
             
 
@@ -701,10 +815,12 @@ class QTAIMConverter(Converter):
                     #print(connected_bond_paths)
                 else:
                     self.fail_log_dict["qtaim"].append(key.decode("ascii"))
+                    self.logger.debug(f"Failed to retrieve QTAIM data for key: {key}")
                     continue
 
-            except:
+            except Exception as e:
                 self.fail_log_dict["qtaim"].append(key.decode("ascii"))
+                self.logger.debug(f"Exception retrieving QTAIM data for key {key}: {str(e)}")
                 continue
 
 
@@ -790,6 +906,27 @@ class QTAIMConverter(Converter):
                         bond_featurizer_tf=True,
                         global_featurizer_tf=True,
                     )
+
+                    # add grapher info to log
+                    self.logger.info(f"Grapher initialized with the following settings:")
+                    self.logger.info(f"Element set: \t\t{self.element_set}")
+                    self.logger.info(f"feat_names: \t\t{self.grapher.feat_names}")
+                    # global feature info
+                    self.logger.info(f">>>>>   Global features info   <<<<<")
+                    self.logger.info(f"Allowed charges: \\tt{self.grapher.global_featurizer.allowed_charges}")
+                    self.logger.info(f"Allowed spins: \t\t{self.grapher.global_featurizer.allowed_spins}")
+                    self.logger.info(f"Feature size: \t\t{self.grapher.global_featurizer.feature_size}")
+                    self.logger.info(f"Feature names: \t\t{self.grapher.global_featurizer._feature_name}")
+                    
+                    # print out the atom and bond feature info
+                    self.logger.info(f">>>>>   Atom features info   <<<<<")
+                    self.logger.info(f"Elements set: \t\t{self.grapher.atom_featurizer.element_set}")
+                    self.logger.info(f"Feature size: \t\t{self.grapher.atom_featurizer.feature_size}")
+                    self.logger.info(f"Feature names: \t\t{self.grapher.atom_featurizer._feature_name}")
+                    self.logger.info(f">>>>>   Bond features info   <<<<<")
+                    self.logger.info(f"Allowed ring sizes: \t{self.grapher.bond_featurizer.allowed_ring_size}")
+                    self.logger.info(f"Feature size: \t\t{self.grapher.bond_featurizer.feature_size}")
+                    self.logger.info(f"Feature names: \t\t{self.grapher.bond_featurizer._feature_name}")
                     # print("\nbond keys qtaim: ", self.bond_keys)
 
                 # graph generation
