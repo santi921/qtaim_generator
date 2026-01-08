@@ -222,6 +222,7 @@ def json_2_lmdbs(
     """
     chunk_ind = 1
     files_target = glob(root_dir + "*/{}.json".format(data_type))
+    #print("Found {} files for data type {}".format(len(files_target), data_type))
 
     for chunk in split_list(files_target, chunk_size):
         data_dict = {}
@@ -234,7 +235,8 @@ def json_2_lmdbs(
         write_lmdb(data_dict, out_dir, f"{data_type}_{chunk_ind}.lmdb")
         chunk_ind += 1
 
-    files_out = glob("{}/{}_*.lmdb".format(root_dir, data_type))
+    files_out = glob("{}/{}_*.lmdb".format(out_dir, data_type))
+    #print("files_out: ", files_out)
 
     if merge:
         merge_lmdbs(files_out, out_dir, out_lmdb)
@@ -275,7 +277,7 @@ def inp_files_2_lmdbs(
         data_dict = {}
 
         for file in chunk:
-            print("Processing file: ", file, " chunk: ", chunk_ind)
+            #print("Processing file: ", file, " chunk: ", chunk_ind)
             charge, spin = get_spin_charge_from_orca_inp(file)
             xyz_file = file.replace(".inp", ".xyz")
             convert_inp_to_xyz(file, xyz_file)
@@ -306,7 +308,7 @@ def inp_files_2_lmdbs(
         write_lmdb(data_dict, out_dir, f"geom_{chunk_ind}.lmdb")
         chunk_ind += 1
 
-    files_out = glob("{}/geom_*.lmdb".format(root_dir))
+    files_out = glob("{}/geom_*.lmdb".format(out_dir))
 
     if merge:
         merge_lmdbs(files_out, out_dir, out_lmdb)
