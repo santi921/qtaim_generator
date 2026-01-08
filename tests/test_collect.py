@@ -79,7 +79,16 @@ class TestParser:
 
     def test_molecule_parsing(self):
         test_root = "./test_files/molecule/"
-        df = pd.read_pickle("./test_files/molecule/libe_qtaim_test.pkl")
+        try:
+            df = pd.read_pickle("./test_files/molecule/libe_qtaim_test.pkl")
+        except:
+            try:
+                df = pd.read_pickle(
+                    "./test_files/molecule/libe_qtaim_test.pkl", encoding="latin1"
+                )
+            except:
+                raise Exception("Could not read test pickle file.")
+
         reaction = False
         define_bonds = "qtaim"
         impute_file = "./test_files/molecule/impute.json"

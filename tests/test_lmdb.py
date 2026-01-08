@@ -10,160 +10,120 @@ from qtaim_gen.source.core.converter import (
     QTAIMConverter,
     GeneralConverter,
 )
-from qtaim_embed.data.lmdb import load_dgl_graph_from_serialized
-
-
-def get_first_graph(converter):
-    db_test = converter.connect_db(converter.file)
-    graph = None
-    with db_test.begin(write=False) as txn:
-        cursor = txn.cursor()
-        for key, value in cursor:
-            try:
-                # get first graph
-                graph = deepcopy(load_dgl_graph_from_serialized(pkl.loads(value)))
-                # print(f"Key: {key.decode('ascii')}, Graph: {graph}")
-                break
-            except:
-                pass
-    return graph
-
-
-def check_graph_equality(graph1, graph2):
-    for graph_level in ["feat", "labels"]:
-        for node_level in graph1.ndata[graph_level].keys():
-            ft_1 = graph1.ndata[graph_level][node_level]
-            ft_2 = graph2.ndata[graph_level][node_level]
-            # assert shape is unchanged
-            assert (
-                ft_1.shape == ft_2.shape
-            ), f"Graph features shapes changed! {graph_level} {node_level}. Graph 1: {ft_1.shape}, Graph 2: {ft_2.shape}"
-            # now assert the are not the saame values
-            assert not np.array_equal(
-                ft_1.cpu().numpy(), ft_2.cpu().numpy()
-            ), f"Graph features are the same! {graph_level} {node_level}. Graph 1: {ft_1.cpu().numpy()}"
-
-
-def get_benchmark_info(converter):
-    info_process = converter.process(return_info=True)
-    first_graph_pre = get_first_graph(converter)
-    info_scale = converter.scale_graph_lmdb(return_info=True)
-    info_scale_restart = converter.scale_graph_lmdb(return_info=True)
-    first_graph_post = get_first_graph(converter)
-    return (
-        info_process,
-        first_graph_pre,
-        info_scale,
-        info_scale_restart,
-        first_graph_post,
-    )
+from tests.utils_lmdb import get_first_graph, check_graph_equality, get_benchmark_info
 
 
 class TestLMDB:
-    dir_data = "./test_files/lmdb_tests/"
-    dir_active = "./test_files/lmdb_tests/generator_lmdbs/"
-    dir_active_merged = "./test_files/lmdb_tests/generator_lmdbs_merged/"
-    # create folder if it doesn't exist
-    if not os.path.exists(dir_active):
-        os.makedirs(dir_active)
-    if not os.path.exists(dir_active_merged):
-        os.makedirs(dir_active_merged)
+    # resolve test_files relative to this test file
+    from pathlib import Path
+
+    base_tests = Path(__file__).parent
+    # json_2_lmdbs and write_lmdb expect directory paths that end with a separator
+    dir_data = str(base_tests / "test_files" / "lmdb_tests") + os.sep
+    dir_active = str(base_tests / "test_files" / "lmdb_tests" / "generator_lmdbs") + os.sep
+    dir_active_merged = str(base_tests / "test_files" / "lmdb_tests" / "generator_lmdbs_merged") + os.sep
 
     chunk_size = 2
 
-    # construct merged inputs
-    merge = True
-    json_2_lmdbs(
-        dir_data,
-        dir_active_merged,
-        "charge",
-        "merged_charge.lmdb",
-        chunk_size,
-        clean=True,
-        merge=merge,
-    )
-    json_2_lmdbs(
-        dir_data,
-        dir_active_merged,
-        "bond",
-        "merged_bond.lmdb",
-        chunk_size,
-        clean=True,
-        merge=merge,
-    )
-    json_2_lmdbs(
-        dir_data,
-        dir_active_merged,
-        "other",
-        "merged_other.lmdb",
-        chunk_size,
-        clean=True,
-        merge=merge,
-    )
-    json_2_lmdbs(
-        dir_data,
-        dir_active_merged,
-        "qtaim",
-        "merged_qtaim.lmdb",
-        chunk_size,
-        clean=True,
-        merge=merge,
-    )
+    @classmethod
+    def setup_class(cls):
+        # create folder if it doesn't exist
+        os.makedirs(cls.dir_active, exist_ok=True)
+        os.makedirs(cls.dir_active_merged, exist_ok=True)
 
-    json_2_lmdbs(
-        dir_data,
-        dir_active_merged,
-        "fuzzy_full",
-        "merged_fuzzy.lmdb",
-        chunk_size,
-        clean=True,
-        merge=merge,
-    )
+        # construct merged inputs
+        merge = True
+        json_2_lmdbs(
+            cls.dir_data,
+            cls.dir_active_merged,
+            "charge",
+            "merged_charge.lmdb",
+            cls.chunk_size,
+            clean=True,
+            merge=merge,
+        )
+        json_2_lmdbs(
+            cls.dir_data,
+            cls.dir_active_merged,
+            "bond",
+            "merged_bond.lmdb",
+            cls.chunk_size,
+            clean=True,
+            merge=merge,
+        )
+        json_2_lmdbs(
+            cls.dir_data,
+            cls.dir_active_merged,
+            "other",
+            "merged_other.lmdb",
+            cls.chunk_size,
+            clean=True,
+            merge=merge,
+        )
+        json_2_lmdbs(
+            cls.dir_data,
+            cls.dir_active_merged,
+            "qtaim",
+            "merged_qtaim.lmdb",
+            cls.chunk_size,
+            clean=True,
+            merge=merge,
+        )
 
-    inp_files_2_lmdbs(
-        dir_data,
-        dir_active_merged,
-        "merged_geom.lmdb",
-        chunk_size,
-        clean=True,
-        merge=merge,
-    )
+        json_2_lmdbs(
+            cls.dir_data,
+            cls.dir_active_merged,
+            "fuzzy_full",
+            "merged_fuzzy.lmdb",
+            cls.chunk_size,
+            clean=True,
+            merge=merge,
+        )
 
-    # construct non_merged inputs
-    merge = False
+        inp_files_2_lmdbs(
+            cls.dir_data,
+            cls.dir_active_merged,
+            "merged_geom.lmdb",
+            cls.chunk_size,
+            clean=True,
+            merge=merge,
+        )
 
-    json_2_lmdbs(
-        dir_data,
-        dir_active,
-        "charge",
-        "charge.lmdb",
-        chunk_size,
-        clean=True,
-        merge=merge,
-    )
-    json_2_lmdbs(
-        dir_data, dir_active, "bond", "bond.lmdb", chunk_size, clean=True, merge=merge
-    )
-    json_2_lmdbs(
-        dir_data, dir_active, "other", "other.lmdb", chunk_size, clean=True, merge=merge
-    )
-    json_2_lmdbs(
-        dir_data, dir_active, "qtaim", "qtaim.lmdb", chunk_size, clean=True, merge=merge
-    )
+        # construct non_merged inputs
+        merge = False
 
-    json_2_lmdbs(
-        dir_data,
-        dir_active,
-        "fuzzy_full",
-        "fuzzy.lmdb",
-        chunk_size,
-        clean=True,
-        merge=merge,
-    )
+        json_2_lmdbs(
+            cls.dir_data,
+            cls.dir_active,
+            "charge",
+            "charge.lmdb",
+            cls.chunk_size,
+            clean=True,
+            merge=merge,
+        )
+        json_2_lmdbs(
+            cls.dir_data, cls.dir_active, "bond", "bond.lmdb", cls.chunk_size, clean=True, merge=merge
+        )
+        json_2_lmdbs(
+            cls.dir_data, cls.dir_active, "other", "other.lmdb", cls.chunk_size, clean=True, merge=merge
+        )
+        json_2_lmdbs(
+            cls.dir_data, cls.dir_active, "qtaim", "qtaim.lmdb", cls.chunk_size, clean=True, merge=merge
+        )
 
-    inp_files_2_lmdbs(
-        dir_data, dir_active, "geom.lmdb", chunk_size, clean=True, merge=merge
-    )
+        json_2_lmdbs(
+            cls.dir_data,
+            cls.dir_active,
+            "fuzzy_full",
+            "fuzzy.lmdb",
+            cls.chunk_size,
+            clean=True,
+            merge=merge,
+        )
+
+        inp_files_2_lmdbs(
+            cls.dir_data, cls.dir_active, "geom.lmdb", cls.chunk_size, clean=True, merge=merge
+        )
 
     def read_helper(self, file, lookup):
         env = lmdb.open(
@@ -180,20 +140,19 @@ class TestLMDB:
                 return pkl.loads(value)
 
     def test_write_read(self):
+        base = self.base_tests / "test_files"
 
-        charge_lmdb = (
-            "./test_files/lmdb_tests/generator_lmdbs_merged/merged_charge.lmdb"
-        )
-        bond_lmdb = "./test_files/lmdb_tests/generator_lmdbs_merged/merged_bond.lmdb"
-        other_lmdb = "./test_files/lmdb_tests/generator_lmdbs_merged/merged_other.lmdb"
-        qtaim_lmdb = "./test_files/lmdb_tests/generator_lmdbs_merged/merged_qtaim.lmdb"
-        fuzzy_lmdb = "./test_files/lmdb_tests/generator_lmdbs_merged/merged_fuzzy.lmdb"
+        charge_lmdb = str(base / "lmdb_tests" / "generator_lmdbs_merged" / "merged_charge.lmdb")
+        bond_lmdb = str(base / "lmdb_tests" / "generator_lmdbs_merged" / "merged_bond.lmdb")
+        other_lmdb = str(base / "lmdb_tests" / "generator_lmdbs_merged" / "merged_other.lmdb")
+        qtaim_lmdb = str(base / "lmdb_tests" / "generator_lmdbs_merged" / "merged_qtaim.lmdb")
+        fuzzy_lmdb = str(base / "lmdb_tests" / "generator_lmdbs_merged" / "merged_fuzzy.lmdb")
 
-        orca5_rks_bond = "./test_files/lmdb_tests/orca5_rks/bond.json"
-        orca5_qtaim = "./test_files/lmdb_tests/orca5/qtaim.json"
-        orca5_uks_charge = "./test_files/lmdb_tests/orca5_uks/charge.json"
-        orca5_uks_fuzzy = "./test_files/lmdb_tests/orca5_uks/fuzzy_full.json"
-        orca6_rks_other = "./test_files/lmdb_tests/orca6_rks/other.json"
+        orca5_rks_bond = str(base / "lmdb_tests" / "orca5_rks" / "bond.json")
+        orca5_qtaim = str(base / "lmdb_tests" / "orca5" / "qtaim.json")
+        orca5_uks_charge = str(base / "lmdb_tests" / "orca5_uks" / "charge.json")
+        orca5_uks_fuzzy = str(base / "lmdb_tests" / "orca5_uks" / "fuzzy_full.json")
+        orca6_rks_other = str(base / "lmdb_tests" / "orca6_rks" / "other.json")
 
         orca5_rks_bond_json = json.load(open(orca5_rks_bond, "r"))
         orca5_qtaim_json = json.load(open(orca5_qtaim, "r"))
@@ -231,14 +190,14 @@ class TestLMDB:
         ), f"Expected {orca5_rks_fuzzy_json['mbis_fuzzy_density']['45_Cl'] }, got {dict_orca5_fuzzy['mbis_fuzzy_density']['45_Cl'] }"
 
     def test_merge(self):
-        charge_lmdb = (
-            "./test_files/lmdb_tests/generator_lmdbs_merged/merged_charge.lmdb"
-        )
-        bond_lmdb = "./test_files/lmdb_tests/generator_lmdbs_merged/merged_bond.lmdb"
-        other_lmdb = "./test_files/lmdb_tests/generator_lmdbs_merged/merged_other.lmdb"
-        qtaim_lmdb = "./test_files/lmdb_tests/generator_lmdbs_merged/merged_qtaim.lmdb"
-        geom_lmdb = "./test_files/lmdb_tests/generator_lmdbs_merged/merged_geom.lmdb"
-        fuzzy_lmdb = "./test_files/lmdb_tests/generator_lmdbs_merged/merged_fuzzy.lmdb"
+        base = self.base_tests / "test_files"
+
+        charge_lmdb = str(base / "lmdb_tests" / "generator_lmdbs_merged" / "merged_charge.lmdb")
+        bond_lmdb = str(base / "lmdb_tests" / "generator_lmdbs_merged" / "merged_bond.lmdb")
+        other_lmdb = str(base / "lmdb_tests" / "generator_lmdbs_merged" / "merged_other.lmdb")
+        qtaim_lmdb = str(base / "lmdb_tests" / "generator_lmdbs_merged" / "merged_qtaim.lmdb")
+        geom_lmdb = str(base / "lmdb_tests" / "generator_lmdbs_merged" / "merged_geom.lmdb")
+        fuzzy_lmdb = str(base / "lmdb_tests" / "generator_lmdbs_merged" / "merged_fuzzy.lmdb")
 
         for lmdb_file in [
             charge_lmdb,
@@ -266,13 +225,13 @@ class TestLMDB:
 
 class TestConverters:
 
-    base_dir = os.path.join(
-        ".", "test_files", "converter", "converter_baseline_testing"
-    )
-    base_dir_data = os.path.join(".", "test_files", "lmdb_tests", "generator_lmdbs")
-    base_dir_data_merged = os.path.join(
-        ".", "test_files", "lmdb_tests", "generator_lmdbs_merged"
-    )
+    # use test-file-relative paths so tests work when run from repo root
+    from pathlib import Path
+
+    _tests_dir = Path(__file__).parent
+    base_dir = str(_tests_dir / "test_files" / "converter" / "converter_baseline_testing")
+    base_dir_data = str(_tests_dir / "test_files" / "lmdb_tests" / "generator_lmdbs")
+    base_dir_data_merged = str(_tests_dir / "test_files" / "lmdb_tests" / "generator_lmdbs_merged")
 
     # default configuration
     default_config_dict = {
@@ -348,43 +307,46 @@ class TestConverters:
         }
     )
 
-    converter_baseline = BaseConverter(config_baseline, config_path=config_path)
-    converter_baseline_folder = BaseConverter(
-        config_folder, config_path=config_folder_path
-    )
-    converter_qtaim = QTAIMConverter(config_qtaim, config_path=config_qtaim_path)
-    converter_qtaim_folder = QTAIMConverter(
-        config_qtaim_folder, config_path=config_qtaim_folder_path
-    )
+    @classmethod
+    def setup_class(cls):
+        # instantiate converters during test class setup (avoid running at import)
+        cls.converter_baseline = BaseConverter(cls.config_baseline, config_path=cls.config_path)
+        cls.converter_baseline_folder = BaseConverter(
+            cls.config_folder, config_path=cls.config_folder_path
+        )
+        cls.converter_qtaim = QTAIMConverter(cls.config_qtaim, config_path=cls.config_qtaim_path)
+        cls.converter_qtaim_folder = QTAIMConverter(
+            cls.config_qtaim_folder, config_path=cls.config_qtaim_folder_path
+        )
 
-    (
-        info_process_baseline,
-        first_graph_pre,
-        info_scale_baseline,
-        info_scale_baseline_restart,
-        first_graph_post,
-    ) = get_benchmark_info(converter_baseline)
-    (
-        info_process_baseline_folder,
-        first_graph_pre_folder,
-        info_scale_baseline_folder,
-        info_scale_baseline_folder_restart,
-        first_graph_post_folder,
-    ) = get_benchmark_info(converter_baseline_folder)
-    (
-        info_process_conv_qtaim,
-        first_graph_pre_qtaim,
-        info_scale_qtaim,
-        info_scale_qtaim_restart,
-        first_graph_pre_qtaim_post,
-    ) = get_benchmark_info(converter_qtaim)
-    (
-        info_process_conv_qtaim_folder,
-        first_graph_pre_qtaim_folder,
-        info_scale_qtaim_folder,
-        info_scale_qtaim_folder_restart,
-        first_graph_pre_qtaim_folder_post,
-    ) = get_benchmark_info(converter_qtaim_folder)
+        (
+            cls.info_process_baseline,
+            cls.first_graph_pre,
+            cls.info_scale_baseline,
+            cls.info_scale_baseline_restart,
+            cls.first_graph_post,
+        ) = get_benchmark_info(cls.converter_baseline)
+        (
+            cls.info_process_baseline_folder,
+            cls.first_graph_pre_folder,
+            cls.info_scale_baseline_folder,
+            cls.info_scale_baseline_folder_restart,
+            cls.first_graph_post_folder,
+        ) = get_benchmark_info(cls.converter_baseline_folder)
+        (
+            cls.info_process_conv_qtaim,
+            cls.first_graph_pre_qtaim,
+            cls.info_scale_qtaim,
+            cls.info_scale_qtaim_restart,
+            cls.first_graph_pre_qtaim_post,
+        ) = get_benchmark_info(cls.converter_qtaim)
+        (
+            cls.info_process_conv_qtaim_folder,
+            cls.first_graph_pre_qtaim_folder,
+            cls.info_scale_qtaim_folder,
+            cls.info_scale_qtaim_folder_restart,
+            cls.first_graph_pre_qtaim_folder_post,
+        ) = get_benchmark_info(cls.converter_qtaim_folder)
 
     def test_restarts(self):
         # assert all the restart are None:
@@ -467,14 +429,3 @@ class TestConverters:
         # check that the features are not the same after scaling for baseline folder converter
         check_graph_equality(self.first_graph_pre_folder, self.first_graph_post_folder)
 
-
-obj_lmdb = TestLMDB()
-obj_lmdb.test_write_read()
-obj_lmdb.test_merge()
-obj_converters = TestConverters()
-obj_converters.test_restarts()
-obj_converters.test_scaling_counts()
-obj_converters.test_process_counts()
-obj_converters.test_feat_names()
-obj_converters.test_scaling_ops_single()
-obj_converters.test_scaling_ops_folder()
