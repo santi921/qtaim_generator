@@ -4,7 +4,10 @@ from qtaim_gen.source.core.parse_qtaim import (
     gather_qtaim_features,
 )
 import pytest
-bondnet = pytest.importorskip("bondnet", reason="bondnet not installed; skipping bondnet test")
+
+bondnet = pytest.importorskip(
+    "bondnet", reason="bondnet not installed; skipping bondnet test"
+)
 
 
 class TestML:
@@ -100,7 +103,7 @@ class TestML:
     mol_df.to_pickle("./test_files/molecule/libe_qtaim_test.pkl")
 
     def test_bondnet(self):
-        
+
         from bondnet.data.dataset import ReactionDatasetGraphs
         from bondnet.model.training_utils import get_grapher
 

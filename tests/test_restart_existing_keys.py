@@ -6,7 +6,11 @@ from qtaim_gen.source.core.converter import BaseConverter
 def test_restart_existing_keys_and_scaled_flag(tmp_path):
     base_tests = os.path.dirname(__file__)
     merged_geom = os.path.join(
-        base_tests, "test_files", "lmdb_tests", "generator_lmdbs_merged", "merged_geom.lmdb"
+        base_tests,
+        "test_files",
+        "lmdb_tests",
+        "generator_lmdbs_merged",
+        "merged_geom.lmdb",
     )
 
     config = {

@@ -34,6 +34,7 @@ from qtaim_gen.source.utils.lmdbs import (
     get_elements_from_structure_lmdb_folder_list,
     parse_charge_data,
     parse_qtaim_data,
+    gather_structure_info
 )
 from qtaim_gen.source.core.qtaim_embed import (
     split_graph_labels,
@@ -464,6 +465,12 @@ class Converter:
 
 
     def scale_graph_lmdb(self, return_info=False) -> None:
+        # If the converter already knows the LMDB is scaled (e.g. restart mode), skip scaling
+        if getattr(self, "scaled", False):
+            self.logger.info("Existing LMDB already scaled. Skipping scaling.")
+            if return_info:
+                return None
+            return
 
         if self.config_dict["chunk"] == -1:
             self.logger.info("Starting graph scaling...")
@@ -650,33 +657,19 @@ class BaseConverter(Converter):
                 value_structure = self.__getitem__("geom_lmdb", key)
                 
                 if value_structure != None:
-                    mol_graph = value_structure["molecule_graph"]
-                    #print(mol_graph)
-                    n_atoms = len(mol_graph)
-                    spin = value_structure["spin"]
-                    charge = value_structure["charge"]
+
+                    mol_graph, global_feats = gather_structure_info(value_structure)
+                    bond_feats = {}
+                    atom_feats = {i: {} for i in range(global_feats["n_atoms"])}
                     bonds = value_structure["bonds"]
-                    
+                    bond_list = {
+                        tuple(sorted(b)): None for b in bonds if b[0] != b[1]
+                    }
+
                     if self.single_lmdb_in:
                         id = clean_id(key)
                     else: 
                         id = key_str
-                    
-
-                    # global features
-                    global_feats = {
-                        "charge": charge,
-                        "spin": spin,
-                        "n_atoms": n_atoms,
-                        "n_bonds": len(bonds),
-                    }
-
-                    # initialize atom_feats with dictionary whos keys are atom inds and empty dict as values
-                    atom_feats = {i: {} for i in range(n_atoms)}
-                    bond_feats = {}
-                    bond_list = {
-                        tuple(sorted(b)): None for b in bonds if b[0] != b[1]
-                    }
 
                 else:
                     self.fail_log_dict["structure"].append(key)
@@ -836,29 +829,16 @@ class QTAIMConverter(Converter):
                 value_structure = self.__getitem__("geom_lmdb", key)
 
                 if value_structure != None:
-                    mol_graph = value_structure["molecule_graph"]
-                    n_atoms = len(mol_graph)
-                    spin = value_structure["spin"]
-                    charge = value_structure["charge"]
+                    
+                    mol_graph, global_feats = gather_structure_info(value_structure)
+                    bond_feats = {}
+                    atom_feats = {i: {} for i in range(global_feats["n_atoms"])}
                     bonds = value_structure["bonds"]
 
                     if self.single_lmdb_in:
                         id = clean_id(key)
                     else: 
                         id = key_str
-
-                    # global features
-                    global_feats = {
-                        "charge": charge,
-                        "spin": spin,
-                        "n_atoms": n_atoms,
-                        "n_bonds": len(bonds),
-                    }
-
-                    # initialize atom_feats with dictionary whos keys are atom inds and empty dict as values
-                    atom_feats = {i: {} for i in range(n_atoms)}
-                    bond_feats = {}
-
                     
                 else:
                     self.fail_log_dict["structure"].append(key.decode("ascii"))
@@ -1018,7 +998,10 @@ class GeneralConverter(Converter):
 
         self.bonding_scheme = self.config_dict.get("bonding_scheme", "qtaim")
         self.data_inputs = self.config_dict.get("data_inputs", ["geom", "qtaim", "charge"]) # add fuzzy_full, bonds, other as possible data inputs
-
+        
+        if config_dict.get("charge_filter", None) is not None:
+            self.charge_filter = config_dict["charge_filter"]
+        
         # assert that for each data input, the corresponding LMDB is in the config dict in "lmdb_locations"
     
         for data_input in self.data_inputs:
@@ -1062,29 +1045,18 @@ class GeneralConverter(Converter):
                 value_structure = self.__getitem__("geom_lmdb", key)
 
                 if value_structure != None:
-                    mol_graph = value_structure["molecule_graph"]
-                    n_atoms = len(mol_graph)
-                    spin = value_structure["spin"]
-                    charge = value_structure["charge"]
+                    mol_graph, global_feats = gather_structure_info(value_structure)
+                    bond_feats = {}
+                    atom_feats = {i: {} for i in range(global_feats["n_atoms"])}
                     bonds = value_structure["bonds"]
+                    bond_list = {
+                        tuple(sorted(b)): None for b in bonds if b[0] != b[1]
+                    }
 
                     if self.single_lmdb_in:
                         id = clean_id(key)
                     else: 
                         id = key_str
-
-                    # global features
-                    global_feats = {
-                        "charge": charge,
-                        "spin": spin,
-                        "n_atoms": n_atoms,
-                        "n_bonds": len(bonds),
-                    }
-
-                    # initialize atom_feats with dictionary whos keys are atom inds and empty dict as values
-                    atom_feats = {i: {} for i in range(n_atoms)}
-                    bond_feats = {}
-
                     
                 else:
                     self.fail_log_dict["structure"].append(key.decode("ascii"))
@@ -1096,10 +1068,34 @@ class GeneralConverter(Converter):
                 self.logger.debug(f"Exception retrieving structure for key {key}: {str(e)}")
                 continue
             
-
+            try:
+                dict_charge_raw = self.__getitem__("charge_lmdb", key)
+                if dict_charge_raw != None:
+                    # parse charge data
+                    atom_feats_charge, global_dipole_feats = parse_charge_data(
+                        dict_charge_raw, global_feats["n_atoms"], self.charge_filter
+                    )
+                    
+                    # add atom_feats[0].keys() and global_feats.keys() to the grapher keys if they are not already there
+                    if not self.grapher:
+                        for key in atom_feats_charge[0].keys():
+                            if key not in self.keys_data["atom"]:
+                                self.keys_data["atom"].append(key)
+                        for key in global_dipole_feats.keys():
+                            if key not in self.keys_data["global"]:
+                                self.keys_data["global"].append(key)
+                                
+                    global_feats.update(global_dipole_feats)
+                    atom_feats.update(atom_feats_charge)
+                else:
+                    self.fail_log_dict["charge"].append(key.decode("ascii"))
+                    continue
+            except:
+                self.fail_log_dict["charge"].append(key.decode("ascii"))
+                continue
+            
             try:
                 dict_qtaim_raw = self.__getitem__("qtaim_lmdb", key)
-                #print("qtaim raw data: ", dict_qtaim_raw["0"].keys())
                 if dict_qtaim_raw != None:
                     # parse qtaim data
                     (
@@ -1115,10 +1111,6 @@ class GeneralConverter(Converter):
                         atom_keys=self.keys_data["atom"],
                         bond_keys=self.keys_data["bond"],
                     )
-                    #print("qtaim data")
-                    #print(atom_feats)
-                    #print(bond_feats)
-                    #print(connected_bond_paths)
                 else:
                     self.fail_log_dict["qtaim"].append(key.decode("ascii"))
                     self.logger.debug(f"Failed to retrieve QTAIM data for key: {key}")
@@ -1128,17 +1120,57 @@ class GeneralConverter(Converter):
                 self.fail_log_dict["qtaim"].append(key.decode("ascii"))
                 self.logger.debug(f"Exception retrieving QTAIM data for key {key}: {str(e)}")
                 continue
-        
-            ############################# Molwrapper ####################################
 
+            try:
+                dict_fuzzy_raw = self.__getitem__("fuzzy_full_lmdb", key)
+                if dict_fuzzy_raw != None:
+                    #TODO
+                    pass
+                    #n_atoms=len(data_raw["mbis_fuzzy_density"])-2 #. or just use n_atoms from above
+
+                else:
+                    self.fail_log_dict["fuzzy"].append(key.decode("ascii"))
+                    self.logger.debug(f"Failed to retrieve Fuzzy data for key: {key}")
+                    continue
+
+            except Exception as e:
+                self.fail_log_dict["fuzzy"].append(key.decode("ascii"))
+                self.logger.debug(f"Exception retrieving Fuzzy data for key {key}: {str(e)}")
+                continue
+        
+            try:
+                dict_other_raw = self.__getitem__("other_lmdb", key)
+                #print("qtaim raw data: ", dict_qtaim_raw["0"].keys())
+                if dict_other_raw != None:
+                    #TODO
+                    pass
+                else:
+                    self.fail_log_dict["other"].append(key.decode("ascii"))
+                    self.logger.debug(f"Failed to retrieve Other data for key: {key}")
+                    continue
+
+            except Exception as e:
+                self.fail_log_dict["other"].append(key.decode("ascii"))
+                self.logger.debug(f"Exception retrieving Other data for key {key}: {str(e)}")
+                continue
+        
+            # TODO: deal with bonding definitions here, select 
+            if self.bonding_scheme == "qtaim":
+                selected_bond_definitions = connected_bond_paths
+            elif self.bonding_scheme == "bonding":
+                selected_bond_definitions = bonding_list_bond_info
+            else:
+                selected_bond_definitions = bond_list
+
+            ############################# Molwrapper ####################################
             try:
                 mol_wrapper = MoleculeWrapper(
                     mol_graph,
                     functional_group=None,
                     free_energy=None,
                     id=id,
-                    bonds=connected_bond_paths,
-                    non_metal_bonds=connected_bond_paths,
+                    bonds=selected_bond_definitions,
+                    non_metal_bonds=selected_bond_definitions,
                     atom_features=atom_feats,
                     bond_features=bond_feats,
                     global_features=global_feats,
@@ -1227,8 +1259,6 @@ class GeneralConverter(Converter):
             return ret_info
 
     
-
-
 class ASELMDBConverter:
     # TODO: last class to implement
     pass

@@ -5,6 +5,7 @@ import numpy as np
 import lmdb
 import pickle
 
+
 def get_first_graph(converter):
     db_test = converter.connect_db(converter.file)
     graph = None

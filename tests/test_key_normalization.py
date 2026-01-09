@@ -10,7 +10,9 @@ from tests.utils_lmdb import get_first_graph
 def test_key_normalization_and_scaling(tmp_path):
     # configure a small folder-based converter output to a temporary directory
     base_tests = os.path.dirname(__file__)
-    input_folder = os.path.join(base_tests, "test_files", "lmdb_tests", "generator_lmdbs")
+    input_folder = os.path.join(
+        base_tests, "test_files", "lmdb_tests", "generator_lmdbs"
+    )
 
     config = {
         "chunk": -1,
@@ -55,13 +57,21 @@ def test_key_normalization_and_scaling(tmp_path):
     # verify output LMDB keys do not look like repr(byte) (e.g., "b'0'")
     out_file = os.path.join(
         config["lmdb_path"],
-        config["lmdb_name"] if config["lmdb_name"].endswith(".lmdb") else f"{config['lmdb_name']}.lmdb",
+        (
+            config["lmdb_name"]
+            if config["lmdb_name"].endswith(".lmdb")
+            else f"{config['lmdb_name']}.lmdb"
+        ),
     )
-    env = lmdb.open(out_file, subdir=False, readonly=True, lock=False, readahead=True, meminit=False)
+    env = lmdb.open(
+        out_file, subdir=False, readonly=True, lock=False, readahead=True, meminit=False
+    )
     with env.begin(write=False) as txn:
         cursor = txn.cursor()
         for key, _ in cursor:
             k = key.decode("ascii")
             if k in config["filter_list"]:
                 continue
-            assert not (k.startswith("b'") or k.startswith('b"')), f"Found non-normalized key in output LMDB: {k}"
+            assert not (
+                k.startswith("b'") or k.startswith('b"')
+            ), f"Found non-normalized key in output LMDB: {k}"

@@ -41,6 +41,11 @@ def main():
     orca_base = "/home/santiagovargas/dev/qtaim_generator/data/omol_profiling/{}_threads/base_test/".format(
         threads
     )
+
+    orca_base = "/home/santiagovargas/dev/qtaim_generator/data/omol_profiling/{}_threads/droplet".format(
+        threads
+    )
+
     orca_6 = "/home/santiagovargas/dev/qtaim_generator/data/omol_profiling/{}_threads/orca6/".format(
         threads
     )
@@ -102,7 +107,7 @@ def main():
                     debug=debug,
                     logger=logging.getLogger("gbw_analysis"),
                     mem=400000000,
-                    nthreads=threads,
+                    n_threads=threads,
                 )  # works!
             except:
 
@@ -131,7 +136,7 @@ def main():
                     debug=debug,
                     logger=logging.getLogger("gbw_analysis"),
                     mem=400000000,
-                    nthreads=threads,
+                    n_threads=threads,
                 )  # works!
             except:
 
@@ -160,7 +165,7 @@ def main():
                     debug=debug,
                     logger=logging.getLogger("gbw_analysis"),
                     mem=400000000,
-                    nthreads=threads,
+                    n_threads=threads,
                 )  # works!
             except:
 
@@ -188,13 +193,37 @@ def main():
                     debug=debug,
                     logger=logging.getLogger("gbw_analysis"),
                     mem=400000000,
-                    nthreads=threads,
+                    n_threads=threads,
                 )  # works!
             except:
 
                 print("Error in gbw_analysis - case 5")
 
         elif test_case == 4:
+            print(orca_base)
+            # create logger in target folder
+            logging.basicConfig(
+                filename=os.path.join(orca_base, "gbw_analysis.log"),
+                level=logging.INFO,
+                format="%(asctime)s - %(levelname)s - %(message)s",
+            )
+
+            # works!
+            gbw_analysis(
+                folder=orca_base,
+                orca_2mkl_cmd=orca6_2mkl,
+                multiwfn_cmd=multiwfn_cmd,
+                parse_only=parse_only,
+                separate=separate,
+                overwrite=True,
+                orca_6=True,
+                clean=False,
+                restart=False,
+                debug=debug,
+                logger=logging.getLogger("gbw_analysis"),
+                mem=400000000,
+                n_threads=threads,
+            )  # works!
             try:
                 print(orca_base)
                 # create logger in target folder
@@ -203,7 +232,7 @@ def main():
                     level=logging.INFO,
                     format="%(asctime)s - %(levelname)s - %(message)s",
                 )
-
+                """
                 # works!
                 gbw_analysis(
                     folder=orca_base,
@@ -218,8 +247,8 @@ def main():
                     debug=debug,
                     logger=logging.getLogger("gbw_analysis"),
                     mem=400000000,
-                    nthreads=threads,
-                )  # works!
+                    n_threads=threads,
+                )  # works!"""
             except:
                 print("Error in gbw_analysis - case 0")
 
@@ -246,7 +275,7 @@ def main():
                     debug=debug,
                     logger=logging.getLogger("gbw_analysis"),
                     mem=400000000,
-                    nthreads=threads,
+                    n_threads=threads,
                 )  # works!
             except:
 
@@ -275,7 +304,7 @@ def main():
                     debug=debug,
                     logger=logging.getLogger("gbw_analysis"),
                     mem=400000000,
-                    nthreads=threads,
+                    n_threads=threads,
                 )  # works!
             except:
                 print("Error in gbw_analysis - case 4")

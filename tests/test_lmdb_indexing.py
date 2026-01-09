@@ -6,7 +6,9 @@ from qtaim_gen.source.core.converter import BaseConverter
 
 def test_folder_indexing_maps_to_correct_env():
     base_tests = os.path.dirname(__file__)
-    input_folder = os.path.join(base_tests, "test_files", "lmdb_tests", "generator_lmdbs")
+    input_folder = os.path.join(
+        base_tests, "test_files", "lmdb_tests", "generator_lmdbs"
+    )
 
     config = {
         "chunk": -1,

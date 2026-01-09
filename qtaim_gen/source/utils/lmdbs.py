@@ -1,12 +1,11 @@
 import os
-import pickle as pkl
 import lmdb
 import json
 import pickle
 from typing import Dict, List, Tuple, Any, Optional
 from glob import glob
 from dataclasses import dataclass
-
+import numpy as np 
 from pymatgen.core import Molecule
 from pymatgen.analysis.graphs import MoleculeGraph
 
@@ -418,7 +417,8 @@ def parse_config_gen_to_embed(
 
 def parse_charge_data( 
     dict_charge:dict, 
-    n_atoms:int
+    n_atoms:int,
+    charge_filter: Optional[List[str]] = None
 ) -> Tuple[Dict[int, Dict[str, Any]], Dict[str, float]]:
     """
     Parse charge-related data and update atom features.
@@ -432,35 +432,72 @@ def parse_charge_data(
         global_dipole_feats (Dict[str, float]): Dictionary containing global dipole features.
     """
     atom_feats_charge = {i: {} for i in range(n_atoms)}
-    global_dipole_feats = {}
-    charge_types = list(dict_charge.keys())
-    for charge_type in charge_types:
+    global_dipole_feats: Dict[str, float] = {}
 
-        # parse out into atom_feats without for loop
-        {
-            atom_feats_charge[int(k.split("_")[0]) - 1].update(
-                {"charge_" + charge_type: v}
-            )
-            for k, v in dict_charge[charge_type]["charge"].items()
-        }
+    for charge_type, data in dict_charge.items():
+        if charge_filter is not None and charge_type not in charge_filter:
+            continue
 
-        if "dipole" in dict_charge[charge_type].keys():
-            global_dipole_feats.update(
-                {
-                    charge_type
-                    + "_dipole_mag": dict_charge[charge_type]["dipole"]["mag"]
-                }
-            )
+        # charges
+        charge_dict = data.get("charge", {})
+        for k, v in charge_dict.items():
+            try:
+                idx = int(k.split("_")[0]) - 1
+            except Exception:
+                continue
+            if 0 <= idx < n_atoms:
+                atom_feats_charge[idx]["charge_" + charge_type] = float(v)
 
-        if "spin" in dict_charge[charge_type].keys():
-            {
-                atom_feats_charge[int(k.split("_")[0]) - 1].update(
-                    {"spin_" + charge_type: v}
-                )
-                for k, v in dict_charge[charge_type]["spin"].items()
-            }
+        # dipole (global)
+        dip = data.get("dipole")
+        if isinstance(dip, dict) and "mag" in dip:
+            global_dipole_feats[charge_type + "_dipole_mag"] = float(dip["mag"])
+
+        # spin
+        spin_dict = data.get("spin", {})
+        for k, v in spin_dict.items():
+            try:
+                idx = int(k.split("_")[0]) - 1
+            except Exception:
+                continue
+            if 0 <= idx < n_atoms:
+                atom_feats_charge[idx]["spin_" + charge_type] = float(v)
 
     return atom_feats_charge, global_dipole_feats
+
+
+def parse_fuzzy_data(dict_fuzzy: dict, n_atoms: int, fuzzy_filter: Optional[List[str]] = None) -> Tuple[Dict[int, Dict[str, Any]], Dict[str, float]]:
+    """
+    Parse fuzzy-related data and update atom features.
+    Takes:
+        dict_fuzzy: dict, dictionary containing fuzzy data
+        n_atoms: int, number of atoms in the molecule
+    Returns:
+        atom_feats_fuzzy: dict, dictionary containing atom features related to fuzzy data
+        global_fuzzy_feats: dict, dictionary containing global features related to fuzzy data
+    """
+    atom_feats_fuzzy = {i: {} for i in range(n_atoms)}
+    global_fuzzy_feats: Dict[str, float] = {}
+
+    for fuzzy_type, payload in dict_fuzzy.items():
+        if fuzzy_filter is not None and fuzzy_type not in fuzzy_filter:
+            continue
+
+        # extract and remove global keys 'sum' and 'abs_sum' if present
+        for gk in ("sum", "abs_sum"):
+            if gk in payload:
+                global_fuzzy_feats[f"fuzzy_{fuzzy_type}_{gk}"] = float(payload.pop(gk))
+
+        # atom-level entries: keys like '1_xxx', '2_yyy' -> parse once and assign
+        for k, v in payload.items():
+            try:
+                idx = int(k.split("_")[0]) - 1
+            except Exception:
+                continue
+            if 0 <= idx < n_atoms:
+                atom_feats_fuzzy[idx][f"fuzzy_{fuzzy_type}"] = float(v)
+
+    return atom_feats_fuzzy, global_fuzzy_feats
 
 
 def parse_qtaim_data(
@@ -491,36 +528,58 @@ def parse_qtaim_data(
         connected_bond_paths (List[Tuple[int, int]]): List of tuples representing connected bond paths.
     """
 
+    # determine atom_keys and bond_keys robustly (avoid errors on empty inputs)
     if atom_keys is None:
-        qtaim_atoms = {k: v for k, v in dict_qtaim.items() if "_" not in k}
-        atom_keys = list(qtaim_atoms[list(qtaim_atoms.keys())[0]].keys())
-        # remove "cp_num" from atom_keys
-        [atom_keys.remove(i) for i in ["cp_num", "element", "number", "pos_ang"]]
+        atom_keys = []
+        for k, v in dict_qtaim.items():
+            if "_" not in k:
+                atom_keys = list(v.keys())
+                break
+        for rem in ("cp_num", "element", "number", "pos_ang"):
+            if rem in atom_keys:
+                atom_keys.remove(rem)
 
     if bond_keys is None:
-        qtaim_bonds = {k: v for k, v in dict_qtaim.items() if "_" in k}
-        bond_keys = list(qtaim_bonds[list(qtaim_bonds.keys())[0]].keys())
-        # get first k, v in qtaim_bonds
-        [bond_keys.remove(i) for i in ["cp_num", "connected_bond_paths", "pos_ang"]]
+        bond_keys = []
+        for k, v in dict_qtaim.items():
+            if "_" in k:
+                bond_keys = list(v.keys())
+                break
+        for rem in ("cp_num", "connected_bond_paths", "pos_ang"):
+            if rem in bond_keys:
+                bond_keys.remove(rem)
 
-    # only get the keys that are in the qtaim_bonds and qtaim_atoms from each dictionary in value_qtaim
-    qtaim_atoms = {
-        k: get_several_keys(v, atom_keys)
-        for k, v in dict_qtaim.items()
-        if "_" not in k
-    }
-    qtaim_bonds = {
-        k: get_several_keys(v, bond_keys) for k, v in dict_qtaim.items() if "_" in k
-    }
+    # Build integer-keyed maps to avoid repeated str/int conversions while updating
+    qtaim_atoms_int: Dict[int, Dict[str, Any]] = {}
+    qtaim_bonds_conv: Dict[Tuple[int, int], Dict[str, Any]] = {}
 
-    for key, value in atom_feats.items():  # update atom_feats with qtaim_atoms
-        atom_feats[key].update(qtaim_atoms[str(key)])
+    for k, v in dict_qtaim.items():
+        if "_" not in k:
+            try:
+                ik = int(k)
+            except Exception:
+                # leave non-integer atom keys out
+                continue
+            qtaim_atoms_int[ik] = get_several_keys(v, atom_keys)
+        else:
+            try:
+                a, b = k.split("_")
+                key_conv = tuple(sorted([int(a), int(b)]))
+            except Exception:
+                continue
+            qtaim_bonds_conv[key_conv] = get_several_keys(v, bond_keys)
 
-    for key, value in qtaim_bonds.items():  # update bond_feats with qtaim_bonds
-        a, b = key.split("_")
-        key_conv = tuple(sorted([int(a), int(b)]))
-        bond_feats[key_conv] = qtaim_bonds[str(key)]
+    # Update atom_feats using integer keys directly (faster than repeated str conversions)
+    for key in list(atom_feats.keys()):
+        vals = qtaim_atoms_int.get(key)
+        if vals:
+            atom_feats[key].update(vals)
 
+    # Update bond_feats with converted tuple keys
+    for key_conv, vals in qtaim_bonds_conv.items():
+        bond_feats[key_conv] = vals
+
+    # filter out degenerate self-bonds and collect connected bond paths
     bond_feats = {k: v for k, v in bond_feats.items() if k[0] != k[1]}
     connected_bond_paths = list(bond_feats.keys())
 
@@ -531,6 +590,25 @@ def parse_qtaim_data(
         bond_feats, 
         connected_bond_paths
     )
+
+
+def parse_other_data(dict_other: dict, other_filter: Optional[List[str]] = None, clean=True) -> Dict[str, Any]:
+    """
+    Parse other-related data and update atom features.
+    Takes:
+        dict_other: dict, dictionary containing other data
+        other_filter: list of str, list of keys to filter in the other data
+        clean: bool, whether to clean nan None, inf values from the data. Set them to 0 
+    """
+    global_other_feats = {}
+    for k, v in dict_other.items():
+        if other_filter is not None and k not in other_filter:
+            continue
+        if clean:
+            if isinstance(v, float) and (np.isnan(v) or np.isinf(v)):
+                v = 0.0
+        global_other_feats["other_" + k] = float(v)
+    return global_other_feats
 
 
 def get_several_keys(di: Dict[str, Any], keys: List[str]) -> Dict[str, Any]:
@@ -545,3 +623,103 @@ def get_several_keys(di: Dict[str, Any], keys: List[str]) -> Dict[str, Any]:
         Dict[str, Any]: A dictionary containing only the specified keys.
     """
     return {k: di.get(k, None) for k in keys}
+
+
+def gather_structure_info(value_structure: dict) -> Tuple[MoleculeGraph, Dict[str, float]]:
+    """
+    Gather structure information from the input dictionary.
+    Args:
+        value_structure (dict): Dictionary containing the structure information.
+    Returns:
+        mol_graph (MoleculeGraph): The molecule graph extracted from the input dictionary.
+        global_feats (Dict[str, float]): A dictionary containing global features such as charge, spin, number of atoms, and number of bonds.
+    """
+    mol_graph = value_structure["molecule_graph"]
+    global_feats = {
+        "charge": value_structure["charge"],
+        "spin": value_structure["spin"],
+        "n_atoms": len(mol_graph),
+        "n_bonds": len(value_structure["bonds"]),
+    }
+    # initialize atom_feats with dictionary whos keys are atom inds and empty dict as values
+    
+    return mol_graph, global_feats
+
+
+def parse_bond_data(
+        dict_bond: dict, 
+        bond_filter: Optional[List[str]] = None, 
+        bond_list_definition="fuzzy", 
+        bond_feats=None, 
+        clean=True, 
+        as_lists=True
+    ) -> Dict[str, Any]:
+    """
+    Parse bond-related data and update bond features.
+    struct of inputs is {'ibsi_bond': {'1_O_to_2_C': 1.28196, '1_O_to_3_C': 0.05902, ...}, "fuzzy_bond": {'1_O_to_2_C': 0.5, '1_O_to_3_C': 0.1, ...}, ...}
+    structure of bond_feats is {(0, 1): {'ibsi_bond': 1.28196, 'fuzzy_bond': 0.5}, (0, 2): {'ibsi_bond': 0.05902, 'fuzzy_bond': 0.1}, ...}
+    Takes:
+        dict_other: dict, dictionary containing other data
+        other_filter: list of str, list of keys to filter in the other data
+        clean: bool, whether to clean nan None, inf values from the data. Set them to 0 
+    """
+    
+    # assert that bond_list_definition is in dict_bond keys
+    if bond_list_definition not in dict_bond.keys() and bond_list_definition+"_bond" not in dict_bond.keys():
+        raise ValueError(f"Bond list definition {bond_list_definition} not found in dict_bond keys")
+    # assert that bond_list_definition is also in bond_filter if bond_filter is not None
+    if bond_filter is not None and (bond_list_definition not in bond_filter and bond_list_definition+"_bond" not in bond_filter):
+        raise ValueError(f"Bond list definition {bond_list_definition} cannot be in bond_filter")
+    
+    def clean_string_for_bond_key(s: str, as_lists: bool = False):
+        # parse '1_O_to_2_C' style keys robustly and cheaply
+        try:
+            left, right = s.split("_to_")
+            a = int(left.split("_")[0]) - 1
+            b = int(right.split("_")[0]) - 1
+        except Exception:
+            raise ValueError(f"Malformed bond key: {s}")
+        if as_lists:
+            return list(sorted([a, b]))
+        return tuple(sorted([a, b]))
+
+    if bond_feats is None:
+        bond_feats = {}
+    bond_list: List[Tuple[int, int]] = []
+
+    # prepare allowed bond-list keys for fast membership checks
+    bond_list_keys = {bond_list_definition, bond_list_definition + "_bond"}
+
+    for k, v in dict_bond.items():
+        # filter by bond_filter if provided (allow both 'fuzzy' and 'fuzzy_bond')
+        if bond_filter is not None:
+            if k in bond_filter:
+                pass
+            elif k.endswith("_bond") and k[:-5] in bond_filter:
+                pass
+            else:
+                continue
+
+        # if this entry lists bonds (e.g., 'fuzzy' or 'fuzzy_bond'), capture bond_list
+        if k in bond_list_keys:
+            # v is a dict with keys like '1_O_to_2_C'
+            bond_list = [clean_string_for_bond_key(i, as_lists=as_lists) for i in v.keys()]
+
+        # put the bond features in the bond_feats dict with keys as tuples of atom indices
+        for bond_key, bond_value in v.items():
+            try:
+                bond_key_tuple = clean_string_for_bond_key(bond_key)
+            except ValueError:
+                # skip malformed bond keys
+                continue
+
+            if clean and isinstance(bond_value, float) and (np.isnan(bond_value) or np.isinf(bond_value)):
+                bond_value = 0.0
+
+            if bond_key_tuple not in bond_feats:
+                bond_feats[bond_key_tuple] = {}
+
+            # store under the original section key (e.g., 'fuzzy' or 'ibsi_bond')
+            bond_feats[bond_key_tuple][k] = float(bond_value)
+
+    return bond_feats, bond_list

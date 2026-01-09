@@ -6,8 +6,6 @@ from qtaim_gen.source.core.converter import Converter
 from tests.utils_lmdb import _make_lmdb
 
 
-
-
 def test_connect_db_with_meta_uses_length_entry(tmp_path):
     lmdb_file = os.path.join(tmp_path, "meta_test.lmdb")
     _make_lmdb(lmdb_file, with_length=True)
