@@ -9,7 +9,8 @@ their environment assumptions are not met.
 
 import importlib.util
 from pathlib import Path
-import pytest
+
+# import pytest
 
 
 def _load_module_by_name(mod_name: str):

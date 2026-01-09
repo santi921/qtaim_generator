@@ -1,3 +1,7 @@
+import pytest
+
+# pytest.skip("test_lmdb.py removed/archived; use tests/test_combined_lmdb_suite.py", allow_module_level=True)
+
 import os
 import lmdb
 import json
@@ -10,7 +14,16 @@ from qtaim_gen.source.core.converter import (
     QTAIMConverter,
     GeneralConverter,
 )
-from tests.utils_lmdb import get_first_graph, check_graph_equality, get_benchmark_info
+from tests.utils_lmdb import check_graph_equality, get_benchmark_info
+from qtaim_gen.source.utils.lmdbs import (
+    parse_charge_data,
+    parse_qtaim_data,
+    parse_bond_data,
+    parse_fuzzy_data,
+    gather_structure_info,
+)
+
+import pytest
 
 
 class TestLMDB:
@@ -18,10 +31,16 @@ class TestLMDB:
     from pathlib import Path
 
     base_tests = Path(__file__).parent
+
     # json_2_lmdbs and write_lmdb expect directory paths that end with a separator
     dir_data = str(base_tests / "test_files" / "lmdb_tests") + os.sep
-    dir_active = str(base_tests / "test_files" / "lmdb_tests" / "generator_lmdbs") + os.sep
-    dir_active_merged = str(base_tests / "test_files" / "lmdb_tests" / "generator_lmdbs_merged") + os.sep
+    dir_active = (
+        str(base_tests / "test_files" / "lmdb_tests" / "generator_lmdbs") + os.sep
+    )
+    dir_active_merged = (
+        str(base_tests / "test_files" / "lmdb_tests" / "generator_lmdbs_merged")
+        + os.sep
+    )
 
     chunk_size = 2
 
@@ -102,13 +121,31 @@ class TestLMDB:
             merge=merge,
         )
         json_2_lmdbs(
-            cls.dir_data, cls.dir_active, "bond", "bond.lmdb", cls.chunk_size, clean=True, merge=merge
+            cls.dir_data,
+            cls.dir_active,
+            "bond",
+            "bond.lmdb",
+            cls.chunk_size,
+            clean=True,
+            merge=merge,
         )
         json_2_lmdbs(
-            cls.dir_data, cls.dir_active, "other", "other.lmdb", cls.chunk_size, clean=True, merge=merge
+            cls.dir_data,
+            cls.dir_active,
+            "other",
+            "other.lmdb",
+            cls.chunk_size,
+            clean=True,
+            merge=merge,
         )
         json_2_lmdbs(
-            cls.dir_data, cls.dir_active, "qtaim", "qtaim.lmdb", cls.chunk_size, clean=True, merge=merge
+            cls.dir_data,
+            cls.dir_active,
+            "qtaim",
+            "qtaim.lmdb",
+            cls.chunk_size,
+            clean=True,
+            merge=merge,
         )
 
         json_2_lmdbs(
@@ -122,7 +159,12 @@ class TestLMDB:
         )
 
         inp_files_2_lmdbs(
-            cls.dir_data, cls.dir_active, "geom.lmdb", cls.chunk_size, clean=True, merge=merge
+            cls.dir_data,
+            cls.dir_active,
+            "geom.lmdb",
+            cls.chunk_size,
+            clean=True,
+            merge=merge,
         )
 
     def read_helper(self, file, lookup):
@@ -142,11 +184,21 @@ class TestLMDB:
     def test_write_read(self):
         base = self.base_tests / "test_files"
 
-        charge_lmdb = str(base / "lmdb_tests" / "generator_lmdbs_merged" / "merged_charge.lmdb")
-        bond_lmdb = str(base / "lmdb_tests" / "generator_lmdbs_merged" / "merged_bond.lmdb")
-        other_lmdb = str(base / "lmdb_tests" / "generator_lmdbs_merged" / "merged_other.lmdb")
-        qtaim_lmdb = str(base / "lmdb_tests" / "generator_lmdbs_merged" / "merged_qtaim.lmdb")
-        fuzzy_lmdb = str(base / "lmdb_tests" / "generator_lmdbs_merged" / "merged_fuzzy.lmdb")
+        charge_lmdb = str(
+            base / "lmdb_tests" / "generator_lmdbs_merged" / "merged_charge.lmdb"
+        )
+        bond_lmdb = str(
+            base / "lmdb_tests" / "generator_lmdbs_merged" / "merged_bond.lmdb"
+        )
+        other_lmdb = str(
+            base / "lmdb_tests" / "generator_lmdbs_merged" / "merged_other.lmdb"
+        )
+        qtaim_lmdb = str(
+            base / "lmdb_tests" / "generator_lmdbs_merged" / "merged_qtaim.lmdb"
+        )
+        fuzzy_lmdb = str(
+            base / "lmdb_tests" / "generator_lmdbs_merged" / "merged_fuzzy.lmdb"
+        )
 
         orca5_rks_bond = str(base / "lmdb_tests" / "orca5_rks" / "bond.json")
         orca5_qtaim = str(base / "lmdb_tests" / "orca5" / "qtaim.json")
@@ -192,12 +244,24 @@ class TestLMDB:
     def test_merge(self):
         base = self.base_tests / "test_files"
 
-        charge_lmdb = str(base / "lmdb_tests" / "generator_lmdbs_merged" / "merged_charge.lmdb")
-        bond_lmdb = str(base / "lmdb_tests" / "generator_lmdbs_merged" / "merged_bond.lmdb")
-        other_lmdb = str(base / "lmdb_tests" / "generator_lmdbs_merged" / "merged_other.lmdb")
-        qtaim_lmdb = str(base / "lmdb_tests" / "generator_lmdbs_merged" / "merged_qtaim.lmdb")
-        geom_lmdb = str(base / "lmdb_tests" / "generator_lmdbs_merged" / "merged_geom.lmdb")
-        fuzzy_lmdb = str(base / "lmdb_tests" / "generator_lmdbs_merged" / "merged_fuzzy.lmdb")
+        charge_lmdb = str(
+            base / "lmdb_tests" / "generator_lmdbs_merged" / "merged_charge.lmdb"
+        )
+        bond_lmdb = str(
+            base / "lmdb_tests" / "generator_lmdbs_merged" / "merged_bond.lmdb"
+        )
+        other_lmdb = str(
+            base / "lmdb_tests" / "generator_lmdbs_merged" / "merged_other.lmdb"
+        )
+        qtaim_lmdb = str(
+            base / "lmdb_tests" / "generator_lmdbs_merged" / "merged_qtaim.lmdb"
+        )
+        geom_lmdb = str(
+            base / "lmdb_tests" / "generator_lmdbs_merged" / "merged_geom.lmdb"
+        )
+        fuzzy_lmdb = str(
+            base / "lmdb_tests" / "generator_lmdbs_merged" / "merged_fuzzy.lmdb"
+        )
 
         for lmdb_file in [
             charge_lmdb,
@@ -229,9 +293,13 @@ class TestConverters:
     from pathlib import Path
 
     _tests_dir = Path(__file__).parent
-    base_dir = str(_tests_dir / "test_files" / "converter" / "converter_baseline_testing")
+    base_dir = str(
+        _tests_dir / "test_files" / "converter" / "converter_baseline_testing"
+    )
     base_dir_data = str(_tests_dir / "test_files" / "lmdb_tests" / "generator_lmdbs")
-    base_dir_data_merged = str(_tests_dir / "test_files" / "lmdb_tests" / "generator_lmdbs_merged")
+    base_dir_data_merged = str(
+        _tests_dir / "test_files" / "lmdb_tests" / "generator_lmdbs_merged"
+    )
 
     # default configuration
     default_config_dict = {
@@ -307,16 +375,45 @@ class TestConverters:
         }
     )
 
+    config_general = deepcopy(default_config_dict)
+    config_general.update(
+        {
+            "lmdb_path": os.path.join(base_dir, "qtaim_converter"),
+            "lmdb_name": "graphs_qtaim.lmdb",
+            "lmdb_locations": {
+                "geom_lmdb": os.path.join(base_dir_data_merged, "merged_geom.lmdb"),
+                "qtaim_lmdb": os.path.join(base_dir_data_merged, "merged_qtaim.lmdb"),
+                "charge_lmdb": os.path.join(base_dir_data_merged, "merged_charge.lmdb"),
+                "bond_lmdb": os.path.join(base_dir_data_merged, "merged_bond.lmdb"),
+                "fuzzy_lmdb": os.path.join(base_dir_data_merged, "merged_fuzzy.lmdb"),
+                "other_lmdb": os.path.join(base_dir_data_merged, "merged_other.lmdb"),
+            },
+            "keys_data": {
+                "atom": ["eta", "lol"],
+                "bond": ["eta", "lol"],
+                "global": ["n_atoms"],
+            },
+        }
+    )
+
     @classmethod
     def setup_class(cls):
         # instantiate converters during test class setup (avoid running at import)
-        cls.converter_baseline = BaseConverter(cls.config_baseline, config_path=cls.config_path)
+        cls.converter_baseline = BaseConverter(
+            cls.config_baseline, config_path=cls.config_path
+        )
         cls.converter_baseline_folder = BaseConverter(
             cls.config_folder, config_path=cls.config_folder_path
         )
-        cls.converter_qtaim = QTAIMConverter(cls.config_qtaim, config_path=cls.config_qtaim_path)
+        cls.converter_qtaim = QTAIMConverter(
+            cls.config_qtaim, config_path=cls.config_qtaim_path
+        )
         cls.converter_qtaim_folder = QTAIMConverter(
             cls.config_qtaim_folder, config_path=cls.config_qtaim_folder_path
+        )
+
+        cls.converter_general = GeneralConverter(
+            cls.config_general, config_path=cls.config_qtaim_path
         )
 
         (
@@ -429,3 +526,228 @@ class TestConverters:
         # check that the features are not the same after scaling for baseline folder converter
         check_graph_equality(self.first_graph_pre_folder, self.first_graph_post_folder)
 
+    def test_parsers(self):
+        # test parsers by using general converter
+        self.converter_general = GeneralConverter(
+            self.config_general, config_path=self.config_qtaim_path
+        )
+        # self.converter_general.process()
+        # get first key
+        struct_raw = self.converter_general.__getitem__(
+            "geom_lmdb", "b'orca5'".encode("ascii")
+        )
+        charge_dict_raw = self.converter_general.__getitem__(
+            "charge_lmdb", "b'orca5'".encode("ascii")
+        )
+        qtaim_dict_raw = self.converter_general.__getitem__(
+            "qtaim_lmdb", "b'orca5'".encode("ascii")
+        )
+        bond_dict_raw = self.converter_general.__getitem__(
+            "bond_lmdb", "b'orca5'".encode("ascii")
+        )
+        fuzzy_dict_raw = self.converter_general.__getitem__(
+            "fuzzy_lmdb", "b'orca5'".encode("ascii")
+        )
+
+        # structure info
+        _, global_feats = gather_structure_info(struct_raw)
+        # charge info
+        atom_feats_charge, global_feats_charge = parse_charge_data(
+            charge_dict_raw, global_feats["n_atoms"]
+        )
+
+        # bond info
+        bond_feats_bond_fuzzy, bond_list_fuzzy = parse_bond_data(
+            bond_dict_raw, bond_list_definition="fuzzy", bond_filter=["fuzzy", "ibsi"]
+        )
+        bond_feats_bond_ibsi, bond_list_ibsi = parse_bond_data(
+            bond_dict_raw, bond_list_definition="ibsi", bond_filter=["fuzzy", "ibsi"]
+        )
+
+        # fuzzy info
+        atom_feats_fuzzy, global_feats_fuzzy = parse_fuzzy_data(
+            fuzzy_dict_raw, global_feats["n_atoms"], fuzzy_filter=None
+        )
+
+        bond_feats_qtaim = {}
+        atom_feats_qtaim = {i: {} for i in range(global_feats["n_atoms"])}
+        # this tests merging in qtaim as well as parsing
+
+        (
+            atom_keys,
+            bond_keys,
+            atom_feats_qtaim,
+            bond_feats_qtaim,
+            connected_bond_paths,
+        ) = parse_qtaim_data(
+            dict_qtaim=qtaim_dict_raw,
+            atom_feats=atom_feats_qtaim,
+            bond_feats=bond_feats_qtaim,
+        )
+
+        # CHARGE tests
+        # iterate through processed_charge_dict and print keys and values
+        for key, value in atom_feats_charge.items():
+            # assert non of the values are {}
+            assert value is not None, f"Expected non-None value for {key}, got {value}"
+            # assert len of dict is 8
+            assert len(value) == 9, f"Expected 9, got {len(value)} for {key}"
+
+        # assert global_feats_charge has 5 keys and non are None
+        assert (
+            len(global_feats_charge) == 5
+        ), f"Expected 5, got {len(global_feats_charge)} for global_feats_charge"
+
+        for key, value in global_feats_charge.items():
+            assert value is not None, f"Expected non-None value for {key}, got {value}"
+
+        # FUZZY tests
+        for key, value in atom_feats_fuzzy.items():
+            assert value is not None, f"Expected non-None value for {key}, got {value}"
+            assert len(value) == 7, f"Expected 7, got {len(value)} for {key}"
+
+        assert (
+            len(global_feats_fuzzy) == 14
+        ), f"Expected 14, got {len(global_feats_fuzzy)} for global_feats_fuzzy"
+        for key, value in global_feats_fuzzy.items():
+            assert value is not None, f"Expected non-None value for {key}, got {value}"
+
+        # BOND tests
+        # check that each bond_list type isn't a list []
+        for bond_list in [bond_list_fuzzy, bond_list_ibsi]:
+            assert isinstance(
+                bond_list, list
+            ), f"Expected non-list, got {type(bond_list)}"
+            # check that each bond in the list is a tuple of length 2
+            for bond in bond_list:
+                assert isinstance(bond, tuple) or isinstance(
+                    bond, list
+                ), f"Expected tuple or list, got {type(bond)}"
+                assert (
+                    len(bond) == 2
+                ), f"Expected length 2, got {len(bond)} for bond {bond}"
+        # check that bond_feats_bond has keys "fuzzy" and "ibsi"
+        # go through every key in bond_feats_bond and check that each sub dict has the same keys as the other subdicts
+        for temp_dict_bond in [bond_feats_bond_fuzzy, bond_feats_bond_ibsi]:
+            for key, value in temp_dict_bond.items():
+                assert (
+                    value is not None
+                ), f"Expected non-None value for {key}, got {value}"
+
+        # QTAIM tests
+        # for connect-bond_paths just check that it's a list of tuple and non of the tuples are empty
+        assert isinstance(connected_bond_paths, list), f"Expected list, got {type(connected_bond_paths)}"
+        for bond_path in connected_bond_paths:
+            assert isinstance(bond_path, tuple) or isinstance(
+                bond_path, list
+            ), f"Expected tuple or list, got {type(bond_path)}"
+            assert len(bond_path) > 0, f"Expected non-empty tuple, got {bond_path}"
+        # for atom feats just check that each key has a non-None valude and that the length of the dict is consistent 
+        for key, value in atom_feats_qtaim.items():
+            assert value is not None, f"Expected non-None value for {key}, got {value}"
+            assert len(value) == 22, f"Expected 22, got {len(value)} for {key}"
+        
+        for key, value in bond_feats_qtaim.items():
+            assert value is not None, f"Expected non-None value for {key}, got {value}"
+            assert len(value) == 22, f"Expected 22, got {len(value)} for {key}"
+        #assert that bond_keys_qtaim is len 22, likewise for atom_keys_qtaim
+        assert len(atom_keys) == 22, f"Expected 22, got {len(atom_keys)} for atom_keys"
+        assert len(bond_keys) == 22, f"Expected 22, got {len(bond_keys)} for bond_keys"
+    
+    def test_parser_merge(self):
+        # test parsers by using general converter
+        self.converter_general = GeneralConverter(
+            self.config_general, config_path=self.config_qtaim_path
+        )
+        # self.converter_general.process()
+        # get first key
+        struct_raw = self.converter_general.__getitem__(
+            "geom_lmdb", "b'orca5'".encode("ascii")
+        )
+        charge_dict_raw = self.converter_general.__getitem__(
+            "charge_lmdb", "b'orca5'".encode("ascii")
+        )
+        qtaim_dict_raw = self.converter_general.__getitem__(
+            "qtaim_lmdb", "b'orca5'".encode("ascii")
+        )
+        bond_dict_raw = self.converter_general.__getitem__(
+            "bond_lmdb", "b'orca5'".encode("ascii")
+        )
+        fuzzy_dict_raw = self.converter_general.__getitem__(
+            "fuzzy_lmdb", "b'orca5'".encode("ascii")
+        )
+
+        
+        # structure info
+        _, global_feats = gather_structure_info(struct_raw)
+        bonds = struct_raw["bonds"]
+        bond_list = {
+            tuple(sorted(b)): None for b in bonds if b[0] != b[1]
+        }
+        bond_feats = {}
+        atom_feats= {i: {} for i in range(global_feats["n_atoms"])}
+
+        # charge info
+        atom_feats_charge, global_feats_charge = parse_charge_data(
+            charge_dict_raw, global_feats["n_atoms"])
+        # fuzzy info
+        atom_feats_fuzzy, global_feats_fuzzy = parse_fuzzy_data(
+            fuzzy_dict_raw, global_feats["n_atoms"], fuzzy_filter=None
+        )
+        # merge charge info into atom_feats and global_feats - batch update the dicts
+
+        for key, value in atom_feats_charge.items():
+            if key in atom_feats:
+                atom_feats[key].update(atom_feats_charge.get(key, {}))
+                atom_feats[key].update(atom_feats_fuzzy.get(key, {}))
+            else:
+                atom_feats[key] = value
+        
+        global_feats.update(global_feats_charge)
+        global_feats.update(global_feats_fuzzy)
+        
+        #print(atom_feats)
+
+        # bond info
+        bond_feats_bond_fuzzy, bond_list_fuzzy = parse_bond_data(
+            bond_dict_raw, bond_list_definition="fuzzy", bond_filter=["fuzzy", "ibsi"]
+        )
+        bond_feats_bond_ibsi, bond_list_ibsi = parse_bond_data(
+            bond_dict_raw, bond_list_definition="ibsi", bond_filter=["fuzzy", "ibsi"]
+        )
+        # merge bond info into bond_feats - batch update the dicts
+        for key, value in bond_feats_bond_fuzzy.items():
+            if key in bond_feats:
+                bond_feats[key].update(bond_feats_bond_fuzzy.get(key, {}))
+            else:
+                bond_feats[key] = value
+
+        # this tests merging in qtaim as well as parsing
+
+        (
+            atom_keys,
+            bond_keys,
+            atom_feats,
+            bond_feats,
+            connected_bond_paths,
+        ) = parse_qtaim_data(
+            dict_qtaim=qtaim_dict_raw,
+            atom_feats=atom_feats,
+            bond_feats=bond_feats,
+        )
+
+        # bond definition options
+        # 1 - connected_bond_paths
+        # 2 - bond_list_fuzzy
+        # 3 - bond_list_ibsi
+        # 4 - bond_list / bond cutoffs 
+        # TODO - write method that filters bond_feats based on bond_list and bond_feats keys, and test that the output is consistent with the input bond list and bond_feats dicts
+
+
+
+# create dummy to just run test_parsers and setups
+if __name__ == "__main__":
+    test_lmdb = TestConverters()
+    test_lmdb.setup_class()
+    test_lmdb.test_parsers()
+    test_lmdb.test_parser_merge()

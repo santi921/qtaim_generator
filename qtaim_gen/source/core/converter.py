@@ -1259,8 +1259,6 @@ class GeneralConverter(Converter):
             return ret_info
 
     
-
-
 class ASELMDBConverter:
     # TODO: last class to implement
     pass

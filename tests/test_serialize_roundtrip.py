@@ -2,8 +2,12 @@ import pytest
 import numpy as np
 import pickle as pkl
 
-pyg = pytest.importorskip("dgl", reason="dgl not installed; skipping serialize roundtrip test")
-torch = pytest.importorskip("torch", reason="torch not installed; skipping serialize roundtrip test")
+pyg = pytest.importorskip(
+    "dgl", reason="dgl not installed; skipping serialize roundtrip test"
+)
+torch = pytest.importorskip(
+    "torch", reason="torch not installed; skipping serialize roundtrip test"
+)
 
 
 from qtaim_embed.data.lmdb import serialize_dgl_graph, load_dgl_graph_from_serialized
@@ -12,9 +16,13 @@ from qtaim_embed.data.lmdb import serialize_dgl_graph, load_dgl_graph_from_seria
 def test_serialize_deserialize_roundtrip_synthetic():
     import dgl
     import torch
+
     # create a small heterograph with one node type and one edge type
 
-    g = dgl.heterograph({("atom", "bond", "atom"): (torch.tensor([0, 1]), torch.tensor([1, 2]))}, num_nodes_dict={"atom": 3})
+    g = dgl.heterograph(
+        {("atom", "bond", "atom"): (torch.tensor([0, 1]), torch.tensor([1, 2]))},
+        num_nodes_dict={"atom": 3},
+    )
 
     # attach node-level feat and label tensors
     g.ndata["feat"] = torch.randn(3, 4)

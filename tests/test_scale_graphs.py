@@ -23,7 +23,9 @@ def _base_config(tmp_path, lmdb_location, lmdb_name="graphs_scale_test.lmdb"):
 
 def test_scale_single_file(tmp_path):
     base_tests = os.path.dirname(__file__)
-    merged_folder = os.path.join(base_tests, "test_files", "lmdb_tests", "generator_lmdbs_merged")
+    merged_folder = os.path.join(
+        base_tests, "test_files", "lmdb_tests", "generator_lmdbs_merged"
+    )
     geom_lmdb = os.path.join(merged_folder, "merged_geom.lmdb")
 
     config = _base_config(tmp_path, geom_lmdb, lmdb_name="graphs_single_scale.lmdb")

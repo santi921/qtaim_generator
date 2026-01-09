@@ -465,6 +465,7 @@ def parse_charge_data(
 
     return atom_feats_charge, global_dipole_feats
 
+
 def parse_fuzzy_data(dict_fuzzy: dict, n_atoms: int, fuzzy_filter: Optional[List[str]] = None) -> Tuple[Dict[int, Dict[str, Any]], Dict[str, float]]:
     """
     Parse fuzzy-related data and update atom features.
@@ -645,13 +646,13 @@ def gather_structure_info(value_structure: dict) -> Tuple[MoleculeGraph, Dict[st
     return mol_graph, global_feats
 
 
-
 def parse_bond_data(
         dict_bond: dict, 
         bond_filter: Optional[List[str]] = None, 
         bond_list_definition="fuzzy", 
         bond_feats=None, 
-        clean=True
+        clean=True, 
+        as_lists=True
     ) -> Dict[str, Any]:
     """
     Parse bond-related data and update bond features.
@@ -670,34 +671,55 @@ def parse_bond_data(
     if bond_filter is not None and (bond_list_definition not in bond_filter and bond_list_definition+"_bond" not in bond_filter):
         raise ValueError(f"Bond list definition {bond_list_definition} cannot be in bond_filter")
     
-    def clean_string_for_bond_key(s, as_lists=False):
-        # just get index of first _to_ and split on that and zero index 
+    def clean_string_for_bond_key(s: str, as_lists: bool = False):
+        # parse '1_O_to_2_C' style keys robustly and cheaply
+        try:
+            left, right = s.split("_to_")
+            a = int(left.split("_")[0]) - 1
+            b = int(right.split("_")[0]) - 1
+        except Exception:
+            raise ValueError(f"Malformed bond key: {s}")
         if as_lists:
-            return list(sorted([int(s.split("_to_")[0].split("_")[0]) - 1, int(s.split("_to_")[1].split("_")[0]) - 1]))
-        else: 
-            return tuple(sorted([int(s.split("_to_")[0].split("_")[0]) - 1, int(s.split("_to_")[1].split("_")[0]) - 1]))
-        
+            return list(sorted([a, b]))
+        return tuple(sorted([a, b]))
+
     if bond_feats is None:
         bond_feats = {}
-    bond_list=[]
+    bond_list: List[Tuple[int, int]] = []
+
+    # prepare allowed bond-list keys for fast membership checks
+    bond_list_keys = {bond_list_definition, bond_list_definition + "_bond"}
 
     for k, v in dict_bond.items():
+        # filter by bond_filter if provided (allow both 'fuzzy' and 'fuzzy_bond')
         if bond_filter is not None:
-            if k not in bond_filter and k[:len(k)-5] not in bond_filter:
-                #print(f"Skipping {k} as it is not in bond_filter")
+            if k in bond_filter:
+                pass
+            elif k.endswith("_bond") and k[:-5] in bond_filter:
+                pass
+            else:
                 continue
-        
-        if k == bond_list_definition or k == bond_list_definition+"_bond":
-            bond_list = [clean_string_for_bond_key(i, as_lists=True) for i in v.keys()]
-        
+
+        # if this entry lists bonds (e.g., 'fuzzy' or 'fuzzy_bond'), capture bond_list
+        if k in bond_list_keys:
+            # v is a dict with keys like '1_O_to_2_C'
+            bond_list = [clean_string_for_bond_key(i, as_lists=as_lists) for i in v.keys()]
+
         # put the bond features in the bond_feats dict with keys as tuples of atom indices
         for bond_key, bond_value in v.items():
-            bond_key_tuple = clean_string_for_bond_key(bond_key)
-            if clean:
-                if isinstance(bond_value, float) and (np.isnan(bond_value) or np.isinf(bond_value)):
-                    bond_value = 0.0
+            try:
+                bond_key_tuple = clean_string_for_bond_key(bond_key)
+            except ValueError:
+                # skip malformed bond keys
+                continue
+
+            if clean and isinstance(bond_value, float) and (np.isnan(bond_value) or np.isinf(bond_value)):
+                bond_value = 0.0
+
             if bond_key_tuple not in bond_feats:
                 bond_feats[bond_key_tuple] = {}
+
+            # store under the original section key (e.g., 'fuzzy' or 'ibsi_bond')
             bond_feats[bond_key_tuple][k] = float(bond_value)
-    
+
     return bond_feats, bond_list

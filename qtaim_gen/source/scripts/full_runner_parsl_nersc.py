@@ -9,13 +9,12 @@ from typing import Optional, List
 
 
 from qtaim_gen.source.core.workflow import run_folder_task
-from qtaim_gen.source.utils.parsl_configs import (
-    nersc_config,
-    base_config
-)
+from qtaim_gen.source.utils.parsl_configs import nersc_config, base_config
 from qtaim_gen.source.utils.io import sample_lines
 
 should_stop = False
+
+
 def handle_signal(signum, frame):
     global should_stop
     print(f"Received signal {signum}, initiating graceful shutdown...")
@@ -172,8 +171,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     job_file: str = getattr(args, "job_file")
     dry_run: bool = bool(getattr(args, "dry_run", False))
     overwrite = bool(args.overwrite) if "overwrite" in args else False
-    #root_omol_results: Optional[str] = getattr(args, "root_omol_results", None)
-    #root_omol_inputs: Optional[str] = getattr(args, "root_omol_inputs", None)
+    # root_omol_results: Optional[str] = getattr(args, "root_omol_results", None)
+    # root_omol_inputs: Optional[str] = getattr(args, "root_omol_inputs", None)
 
     # parsl args
     type_runner: str = str(getattr(args, "type_runner", "local"))
@@ -219,7 +218,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     # set env vars - this is only for the main process; workers set their own envs
     if resource == "local":
         os.environ["OMP_NUM_THREADS"] = "{}".format(n_threads_per_job)
-        #threads_per = n_threads_per_job
+        # threads_per = n_threads_per_job
 
     # to handle early stops on the pilot job
     signal.signal(signal.SIGINT, handle_signal)
@@ -245,7 +244,6 @@ def main(argv: Optional[List[str]] = None) -> int:
     if not folders:
         print(f"No folders found in {job_file}")
         return 0
-
 
     # verify listed folders exist, warn & skip missing entries
     existing_folders = []
