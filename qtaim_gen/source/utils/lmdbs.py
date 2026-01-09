@@ -723,3 +723,48 @@ def parse_bond_data(
             bond_feats[bond_key_tuple][k] = float(bond_value)
 
     return bond_feats, bond_list
+
+
+def filter_bond_feats(
+    bond_feats: Dict[Tuple[int, int], Dict[str, Any]], 
+    bond_list: List[Tuple[int, int]]
+) -> Dict[Tuple[int, int], Dict[str, Any]]:
+    """
+    Filter bond_feats dictionary to only include bonds present in bond_list.
+    
+    Args:
+        bond_feats (Dict[Tuple[int, int], Dict[str, Any]]): Dictionary containing bond features
+            with keys as tuples of atom indices (e.g., (0, 1)) and values as dictionaries
+            of feature names and values.
+        bond_list (List[Tuple[int, int]]): List of bond tuples to keep in the filtered output.
+            Each bond should be a tuple of two integers representing atom indices.
+    
+    Returns:
+        Dict[Tuple[int, int], Dict[str, Any]]: Filtered dictionary containing only bond features
+            for bonds present in bond_list.
+    
+    Examples:
+        >>> bond_feats = {(0, 1): {'fuzzy': 0.5}, (0, 2): {'fuzzy': 0.3}, (1, 2): {'fuzzy': 0.7}}
+        >>> bond_list = [(0, 1), (1, 2)]
+        >>> filtered = filter_bond_feats(bond_feats, bond_list)
+        >>> filtered
+        {(0, 1): {'fuzzy': 0.5}, (1, 2): {'fuzzy': 0.7}}
+    """
+    # Convert bond_list to a set of sorted tuples for efficient lookup
+    bond_set = set()
+    for bond in bond_list:
+        if isinstance(bond, (list, tuple)) and len(bond) == 2:
+            # Ensure consistent ordering by sorting
+            bond_set.add(tuple(sorted(bond)))
+    
+    # Filter bond_feats to only include bonds in bond_set
+    filtered_bond_feats = {}
+    for bond_key, features in bond_feats.items():
+        # Normalize the bond_key to sorted tuple for comparison
+        if isinstance(bond_key, (list, tuple)) and len(bond_key) == 2:
+            normalized_key = tuple(sorted(bond_key))
+            if normalized_key in bond_set:
+                # Keep the original key format from bond_feats
+                filtered_bond_feats[bond_key] = features
+    
+    return filtered_bond_feats

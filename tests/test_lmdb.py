@@ -21,6 +21,7 @@ from qtaim_gen.source.utils.lmdbs import (
     parse_bond_data,
     parse_fuzzy_data,
     gather_structure_info,
+    filter_bond_feats,
 )
 
 import pytest
@@ -741,7 +742,144 @@ class TestConverters:
         # 2 - bond_list_fuzzy
         # 3 - bond_list_ibsi
         # 4 - bond_list / bond cutoffs 
-        # TODO - write method that filters bond_feats based on bond_list and bond_feats keys, and test that the output is consistent with the input bond list and bond_feats dicts
+        # Testing the filter_bond_feats method is now in test_filter_bond_feats
+
+    def test_filter_bond_feats(self):
+        """Test that filter_bond_feats correctly filters bond_feats based on bond_list"""
+        # test parsers by using general converter
+        self.converter_general = GeneralConverter(
+            self.config_general, config_path=self.config_qtaim_path
+        )
+        
+        # get first key
+        struct_raw = self.converter_general.__getitem__(
+            "geom_lmdb", "b'orca5'".encode("ascii")
+        )
+        bond_dict_raw = self.converter_general.__getitem__(
+            "bond_lmdb", "b'orca5'".encode("ascii")
+        )
+        qtaim_dict_raw = self.converter_general.__getitem__(
+            "qtaim_lmdb", "b'orca5'".encode("ascii")
+        )
+
+        # structure info
+        _, global_feats = gather_structure_info(struct_raw)
+        bonds = struct_raw["bonds"]
+        
+        # Parse bond data with different bond_list definitions
+        bond_feats_bond_fuzzy, bond_list_fuzzy = parse_bond_data(
+            bond_dict_raw, bond_list_definition="fuzzy", bond_filter=["fuzzy", "ibsi"]
+        )
+        bond_feats_bond_ibsi, bond_list_ibsi = parse_bond_data(
+            bond_dict_raw, bond_list_definition="ibsi", bond_filter=["fuzzy", "ibsi"]
+        )
+        
+        # Merge bond features
+        bond_feats = {}
+        for key, value in bond_feats_bond_fuzzy.items():
+            if key in bond_feats:
+                bond_feats[key].update(bond_feats_bond_fuzzy.get(key, {}))
+            else:
+                bond_feats[key] = value
+        
+        # Parse QTAIM data to get connected_bond_paths
+        atom_feats = {i: {} for i in range(global_feats["n_atoms"])}
+        (
+            atom_keys,
+            bond_keys,
+            atom_feats,
+            bond_feats,
+            connected_bond_paths,
+        ) = parse_qtaim_data(
+            dict_qtaim=qtaim_dict_raw,
+            atom_feats=atom_feats,
+            bond_feats=bond_feats,
+        )
+        
+        # Store original bond_feats for comparison
+        original_bond_feats_keys = set(bond_feats.keys())
+        original_bond_feats = deepcopy(bond_feats)
+        
+        # Test 1: Filter with fuzzy bond_list
+        filtered_fuzzy = filter_bond_feats(bond_feats, bond_list_fuzzy)
+        
+        # Check that all bonds in filtered result are in the bond_list_fuzzy
+        for bond_key in filtered_fuzzy.keys():
+            normalized_key = tuple(sorted(bond_key))
+            normalized_list = [tuple(sorted(b)) for b in bond_list_fuzzy]
+            assert normalized_key in normalized_list, (
+                f"Bond {bond_key} in filtered result but not in bond_list_fuzzy"
+            )
+        
+        # Check that all bonds from bond_list_fuzzy that exist in original bond_feats are in filtered result
+        for bond in bond_list_fuzzy:
+            normalized_bond = tuple(sorted(bond))
+            # Check if this bond exists in original bond_feats
+            if normalized_bond in original_bond_feats_keys or bond in original_bond_feats_keys:
+                # It should be in the filtered result
+                found = False
+                for key in filtered_fuzzy.keys():
+                    if tuple(sorted(key)) == normalized_bond:
+                        found = True
+                        break
+                assert found, f"Bond {bond} from bond_list_fuzzy not in filtered result"
+        
+        # Check that features are preserved correctly
+        for bond_key, features in filtered_fuzzy.items():
+            assert bond_key in original_bond_feats or tuple(sorted(bond_key)) in [
+                tuple(sorted(k)) for k in original_bond_feats.keys()
+            ], f"Bond {bond_key} in filtered result but not in original"
+            # Features should match the original
+            assert features == original_bond_feats[bond_key], (
+                f"Features for bond {bond_key} don't match original"
+            )
+        
+        # Test 2: Filter with ibsi bond_list
+        filtered_ibsi = filter_bond_feats(bond_feats, bond_list_ibsi)
+        
+        # Check that all bonds in filtered result are in the bond_list_ibsi
+        for bond_key in filtered_ibsi.keys():
+            normalized_key = tuple(sorted(bond_key))
+            normalized_list = [tuple(sorted(b)) for b in bond_list_ibsi]
+            assert normalized_key in normalized_list, (
+                f"Bond {bond_key} in filtered result but not in bond_list_ibsi"
+            )
+        
+        # Test 3: Filter with connected_bond_paths
+        filtered_connected = filter_bond_feats(bond_feats, connected_bond_paths)
+        
+        # Check that all bonds in filtered result are in connected_bond_paths
+        for bond_key in filtered_connected.keys():
+            normalized_key = tuple(sorted(bond_key))
+            normalized_list = [tuple(sorted(b)) for b in connected_bond_paths]
+            assert normalized_key in normalized_list, (
+                f"Bond {bond_key} in filtered result but not in connected_bond_paths"
+            )
+        
+        # Test 4: Filter with bond cutoffs (bonds from structure)
+        bond_list_cutoff = [tuple(sorted(b)) for b in bonds if b[0] != b[1]]
+        filtered_cutoff = filter_bond_feats(bond_feats, bond_list_cutoff)
+        
+        # Check that all bonds in filtered result are in bond_list_cutoff
+        for bond_key in filtered_cutoff.keys():
+            normalized_key = tuple(sorted(bond_key))
+            assert normalized_key in bond_list_cutoff, (
+                f"Bond {bond_key} in filtered result but not in bond_list_cutoff"
+            )
+        
+        # Test 5: Empty bond_list should return empty dict
+        filtered_empty = filter_bond_feats(bond_feats, [])
+        assert len(filtered_empty) == 0, f"Expected empty dict, got {len(filtered_empty)} bonds"
+        
+        # Test 6: bond_list with no matches should return empty dict
+        non_existent_bonds = [(999, 1000), (1001, 1002)]
+        filtered_no_match = filter_bond_feats(bond_feats, non_existent_bonds)
+        assert len(filtered_no_match) == 0, (
+            f"Expected empty dict for non-existent bonds, got {len(filtered_no_match)} bonds"
+        )
+        
+        # Test 7: Check that filtering doesn't modify the original bond_feats
+        assert bond_feats == original_bond_feats, "Original bond_feats was modified by filtering"
 
 
 
@@ -751,3 +889,4 @@ if __name__ == "__main__":
     test_lmdb.setup_class()
     test_lmdb.test_parsers()
     test_lmdb.test_parser_merge()
+    test_lmdb.test_filter_bond_feats()
