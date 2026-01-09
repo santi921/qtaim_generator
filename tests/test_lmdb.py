@@ -21,6 +21,7 @@ from qtaim_gen.source.utils.lmdbs import (
     parse_bond_data,
     parse_fuzzy_data,
     gather_structure_info,
+    filter_bond_feats,
 )
 
 import pytest
@@ -654,6 +655,66 @@ class TestConverters:
         assert len(atom_keys) == 22, f"Expected 22, got {len(atom_keys)} for atom_keys"
         assert len(bond_keys) == 22, f"Expected 22, got {len(bond_keys)} for bond_keys"
     
+    def test_filter_bond_feats(self):
+        """Test the filter_bond_feats function with various inputs."""
+        # Create test data
+        bond_feats = {
+            (0, 1): {'ibsi': 1.2, 'fuzzy': 0.8},
+            (0, 2): {'ibsi': 0.5, 'fuzzy': 0.3},
+            (1, 2): {'ibsi': 0.3, 'fuzzy': 0.2},
+            (2, 3): {'ibsi': 0.9, 'fuzzy': 0.6},
+            (3, 4): {'ibsi': 0.7, 'fuzzy': 0.4},
+        }
+        
+        # Test 1: Filter with a list of bonds
+        bond_list_1 = [(0, 1), (1, 2), (3, 4)]
+        filtered_1 = filter_bond_feats(bond_feats, bond_list_1)
+        
+        assert len(filtered_1) == 3, f"Expected 3 bonds, got {len(filtered_1)}"
+        assert (0, 1) in filtered_1, "Bond (0, 1) should be in filtered result"
+        assert (1, 2) in filtered_1, "Bond (1, 2) should be in filtered result"
+        assert (3, 4) in filtered_1, "Bond (3, 4) should be in filtered result"
+        assert (0, 2) not in filtered_1, "Bond (0, 2) should not be in filtered result"
+        assert (2, 3) not in filtered_1, "Bond (2, 3) should not be in filtered result"
+        
+        # Verify feature values are preserved
+        assert filtered_1[(0, 1)] == bond_feats[(0, 1)], "Features should be unchanged"
+        assert filtered_1[(1, 2)] == bond_feats[(1, 2)], "Features should be unchanged"
+        
+        # Test 2: Filter with a dict of bonds
+        bond_list_2 = {(0, 2): None, (2, 3): None}
+        filtered_2 = filter_bond_feats(bond_feats, bond_list_2)
+        
+        assert len(filtered_2) == 2, f"Expected 2 bonds, got {len(filtered_2)}"
+        assert (0, 2) in filtered_2, "Bond (0, 2) should be in filtered result"
+        assert (2, 3) in filtered_2, "Bond (2, 3) should be in filtered result"
+        
+        # Test 3: Filter with reversed bond tuples (should still match due to normalization)
+        bond_list_3 = [(1, 0), (2, 1)]  # Reversed versions of (0, 1) and (1, 2)
+        filtered_3 = filter_bond_feats(bond_feats, bond_list_3)
+        
+        assert len(filtered_3) == 2, f"Expected 2 bonds, got {len(filtered_3)}"
+        # The original keys should be preserved, not the reversed ones
+        assert (0, 1) in filtered_3, "Bond (0, 1) should be in filtered result"
+        assert (1, 2) in filtered_3, "Bond (1, 2) should be in filtered result"
+        
+        # Test 4: Filter with empty bond list
+        bond_list_4 = []
+        filtered_4 = filter_bond_feats(bond_feats, bond_list_4)
+        
+        assert len(filtered_4) == 0, f"Expected 0 bonds, got {len(filtered_4)}"
+        
+        # Test 5: Filter with all bonds
+        bond_list_5 = list(bond_feats.keys())
+        filtered_5 = filter_bond_feats(bond_feats, bond_list_5)
+        
+        assert len(filtered_5) == len(bond_feats), \
+            f"Expected {len(bond_feats)} bonds, got {len(filtered_5)}"
+        for key in bond_feats.keys():
+            assert key in filtered_5, f"Bond {key} should be in filtered result"
+            assert filtered_5[key] == bond_feats[key], \
+                f"Features for bond {key} should be unchanged"
+    
     def test_parser_merge(self):
         # test parsers by using general converter
         self.converter_general = GeneralConverter(
@@ -741,7 +802,62 @@ class TestConverters:
         # 2 - bond_list_fuzzy
         # 3 - bond_list_ibsi
         # 4 - bond_list / bond cutoffs 
-        # TODO - write method that filters bond_feats based on bond_list and bond_feats keys, and test that the output is consistent with the input bond list and bond_feats dicts
+        
+        # Test filter_bond_feats with different bond list definitions
+        # Store original bond_feats for comparison
+        original_bond_feats = bond_feats.copy()
+        
+        # Test 1: Filter with connected_bond_paths (from QTAIM)
+        filtered_bond_feats_qtaim = filter_bond_feats(bond_feats, connected_bond_paths)
+        # Verify all keys in filtered result are in the original bond_list
+        for bond_key in filtered_bond_feats_qtaim.keys():
+            normalized_key = tuple(sorted(bond_key))
+            assert normalized_key in [tuple(sorted(b)) for b in connected_bond_paths], \
+                f"Bond {bond_key} not in connected_bond_paths"
+        # Verify all bonds in connected_bond_paths that are in bond_feats are in filtered result
+        for bond in connected_bond_paths:
+            normalized_bond = tuple(sorted(bond))
+            if normalized_bond in [tuple(sorted(k)) for k in original_bond_feats.keys()]:
+                # Check if this bond appears in the filtered result
+                found = any(tuple(sorted(k)) == normalized_bond for k in filtered_bond_feats_qtaim.keys())
+                assert found, f"Bond {bond} from connected_bond_paths not in filtered result"
+        
+        # Test 2: Filter with bond_list_fuzzy
+        filtered_bond_feats_fuzzy = filter_bond_feats(bond_feats, bond_list_fuzzy)
+        # Verify all keys in filtered result are in bond_list_fuzzy
+        for bond_key in filtered_bond_feats_fuzzy.keys():
+            normalized_key = tuple(sorted(bond_key))
+            assert normalized_key in [tuple(sorted(b)) for b in bond_list_fuzzy], \
+                f"Bond {bond_key} not in bond_list_fuzzy"
+        # Verify all bonds in bond_list_fuzzy that exist in bond_feats are in filtered result
+        for bond in bond_list_fuzzy:
+            normalized_bond = tuple(sorted(bond))
+            if normalized_bond in [tuple(sorted(k)) for k in original_bond_feats.keys()]:
+                found = any(tuple(sorted(k)) == normalized_bond for k in filtered_bond_feats_fuzzy.keys())
+                assert found, f"Bond {bond} from bond_list_fuzzy not in filtered result"
+        
+        # Test 3: Filter with bond_list_ibsi
+        filtered_bond_feats_ibsi = filter_bond_feats(bond_feats, bond_list_ibsi)
+        # Verify all keys in filtered result are in bond_list_ibsi
+        for bond_key in filtered_bond_feats_ibsi.keys():
+            normalized_key = tuple(sorted(bond_key))
+            assert normalized_key in [tuple(sorted(b)) for b in bond_list_ibsi], \
+                f"Bond {bond_key} not in bond_list_ibsi"
+        
+        # Test 4: Filter with bond_list dict (from structure bonds)
+        filtered_bond_feats_struct = filter_bond_feats(bond_feats, bond_list)
+        # Verify all keys in filtered result are in bond_list dict
+        for bond_key in filtered_bond_feats_struct.keys():
+            normalized_key = tuple(sorted(bond_key))
+            assert normalized_key in [tuple(sorted(k)) for k in bond_list.keys()], \
+                f"Bond {bond_key} not in structure bond_list"
+        
+        # Test 5: Verify filtered results preserve bond feature values
+        for bond_key, bond_value in filtered_bond_feats_qtaim.items():
+            assert bond_key in original_bond_feats, \
+                f"Filtered bond {bond_key} not in original bond_feats"
+            assert bond_value == original_bond_feats[bond_key], \
+                f"Bond features changed for {bond_key}: {bond_value} != {original_bond_feats[bond_key]}"
 
 
 

@@ -723,3 +723,55 @@ def parse_bond_data(
             bond_feats[bond_key_tuple][k] = float(bond_value)
 
     return bond_feats, bond_list
+
+
+def filter_bond_feats(
+        bond_feats: Dict[Tuple[int, int], Dict[str, Any]], 
+        bond_list: List[Tuple[int, int]] | Dict[Tuple[int, int], Any]
+    ) -> Dict[Tuple[int, int], Dict[str, Any]]:
+    """
+    Filter bond features to only include bonds that are in the provided bond_list.
+    
+    Args:
+        bond_feats (Dict[Tuple[int, int], Dict[str, Any]]): Dictionary of bond features 
+            where keys are tuples of atom indices (e.g., (0, 1)) and values are 
+            dictionaries containing bond properties.
+        bond_list (List[Tuple[int, int]] | Dict[Tuple[int, int], Any]): Either a list 
+            of bond tuples or a dictionary with bond tuples as keys. Bonds should be 
+            represented as tuples of two atom indices.
+    
+    Returns:
+        Dict[Tuple[int, int], Dict[str, Any]]: Filtered bond_feats dictionary containing 
+            only bonds that appear in bond_list.
+    
+    Example:
+        >>> bond_feats = {(0, 1): {'ibsi': 1.2}, (0, 2): {'ibsi': 0.5}, (1, 2): {'ibsi': 0.3}}
+        >>> bond_list = [(0, 1), (1, 2)]
+        >>> filtered = filter_bond_feats(bond_feats, bond_list)
+        >>> filtered
+        {(0, 1): {'ibsi': 1.2}, (1, 2): {'ibsi': 0.3}}
+    """
+    # Convert bond_list to a set of tuples for efficient lookup
+    # Handle both list and dict inputs
+    if isinstance(bond_list, dict):
+        bond_set = set(bond_list.keys())
+    else:
+        bond_set = set(bond_list)
+    
+    # Also normalize the bonds to handle both (a, b) and (b, a) representations
+    # by ensuring they are sorted tuples
+    normalized_bond_set = set()
+    for bond in bond_set:
+        if isinstance(bond, (list, tuple)) and len(bond) == 2:
+            normalized_bond_set.add(tuple(sorted(bond)))
+    
+    # Filter bond_feats to only include bonds in the bond_list
+    filtered_bond_feats = {}
+    for bond_key, bond_value in bond_feats.items():
+        # Normalize the bond key for comparison
+        if isinstance(bond_key, (list, tuple)) and len(bond_key) == 2:
+            normalized_key = tuple(sorted(bond_key))
+            if normalized_key in normalized_bond_set:
+                filtered_bond_feats[bond_key] = bond_value
+    
+    return filtered_bond_feats
