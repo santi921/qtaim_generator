@@ -2,7 +2,7 @@ import os
 import lmdb
 import json
 import pickle
-from typing import Dict, List, Tuple, Any, Optional
+from typing import Dict, List, Tuple, Any, Optional, Union
 from glob import glob
 from dataclasses import dataclass
 import numpy as np 
@@ -727,7 +727,7 @@ def parse_bond_data(
 
 def filter_bond_feats(
         bond_feats: Dict[Tuple[int, int], Dict[str, Any]], 
-        bond_list: List[Tuple[int, int]] | Dict[Tuple[int, int], Any]
+        bond_list: Union[List[Tuple[int, int]], Dict[Tuple[int, int], Any]]
     ) -> Dict[Tuple[int, int], Dict[str, Any]]:
     """
     Filter bond features to only include bonds that are in the provided bond_list.

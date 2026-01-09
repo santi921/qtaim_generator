@@ -807,41 +807,50 @@ class TestConverters:
         # Store original bond_feats for comparison
         original_bond_feats = bond_feats.copy()
         
+        # Pre-compute normalized sets for efficient comparison (avoid O(n²) complexity)
+        normalized_connected_paths = {tuple(sorted(b)) for b in connected_bond_paths}
+        normalized_fuzzy = {tuple(sorted(b)) for b in bond_list_fuzzy}
+        normalized_ibsi = {tuple(sorted(b)) for b in bond_list_ibsi}
+        normalized_struct = {tuple(sorted(k)) for k in bond_list.keys()}
+        normalized_original_keys = {tuple(sorted(k)) for k in original_bond_feats.keys()}
+        
         # Test 1: Filter with connected_bond_paths (from QTAIM)
         filtered_bond_feats_qtaim = filter_bond_feats(bond_feats, connected_bond_paths)
         # Verify all keys in filtered result are in the original bond_list
         for bond_key in filtered_bond_feats_qtaim.keys():
             normalized_key = tuple(sorted(bond_key))
-            assert normalized_key in [tuple(sorted(b)) for b in connected_bond_paths], \
+            assert normalized_key in normalized_connected_paths, \
                 f"Bond {bond_key} not in connected_bond_paths"
         # Verify all bonds in connected_bond_paths that are in bond_feats are in filtered result
+        normalized_filtered_qtaim = {tuple(sorted(k)) for k in filtered_bond_feats_qtaim.keys()}
         for bond in connected_bond_paths:
             normalized_bond = tuple(sorted(bond))
-            if normalized_bond in [tuple(sorted(k)) for k in original_bond_feats.keys()]:
+            if normalized_bond in normalized_original_keys:
                 # Check if this bond appears in the filtered result
-                found = any(tuple(sorted(k)) == normalized_bond for k in filtered_bond_feats_qtaim.keys())
-                assert found, f"Bond {bond} from connected_bond_paths not in filtered result"
+                assert normalized_bond in normalized_filtered_qtaim, \
+                    f"Bond {bond} from connected_bond_paths not in filtered result"
         
         # Test 2: Filter with bond_list_fuzzy
         filtered_bond_feats_fuzzy = filter_bond_feats(bond_feats, bond_list_fuzzy)
         # Verify all keys in filtered result are in bond_list_fuzzy
         for bond_key in filtered_bond_feats_fuzzy.keys():
             normalized_key = tuple(sorted(bond_key))
-            assert normalized_key in [tuple(sorted(b)) for b in bond_list_fuzzy], \
+            assert normalized_key in normalized_fuzzy, \
                 f"Bond {bond_key} not in bond_list_fuzzy"
         # Verify all bonds in bond_list_fuzzy that exist in bond_feats are in filtered result
+        normalized_filtered_fuzzy = {tuple(sorted(k)) for k in filtered_bond_feats_fuzzy.keys()}
         for bond in bond_list_fuzzy:
             normalized_bond = tuple(sorted(bond))
-            if normalized_bond in [tuple(sorted(k)) for k in original_bond_feats.keys()]:
-                found = any(tuple(sorted(k)) == normalized_bond for k in filtered_bond_feats_fuzzy.keys())
-                assert found, f"Bond {bond} from bond_list_fuzzy not in filtered result"
+            if normalized_bond in normalized_original_keys:
+                assert normalized_bond in normalized_filtered_fuzzy, \
+                    f"Bond {bond} from bond_list_fuzzy not in filtered result"
         
         # Test 3: Filter with bond_list_ibsi
         filtered_bond_feats_ibsi = filter_bond_feats(bond_feats, bond_list_ibsi)
         # Verify all keys in filtered result are in bond_list_ibsi
         for bond_key in filtered_bond_feats_ibsi.keys():
             normalized_key = tuple(sorted(bond_key))
-            assert normalized_key in [tuple(sorted(b)) for b in bond_list_ibsi], \
+            assert normalized_key in normalized_ibsi, \
                 f"Bond {bond_key} not in bond_list_ibsi"
         
         # Test 4: Filter with bond_list dict (from structure bonds)
@@ -849,7 +858,7 @@ class TestConverters:
         # Verify all keys in filtered result are in bond_list dict
         for bond_key in filtered_bond_feats_struct.keys():
             normalized_key = tuple(sorted(bond_key))
-            assert normalized_key in [tuple(sorted(k)) for k in bond_list.keys()], \
+            assert normalized_key in normalized_struct, \
                 f"Bond {bond_key} not in structure bond_list"
         
         # Test 5: Verify filtered results preserve bond feature values
