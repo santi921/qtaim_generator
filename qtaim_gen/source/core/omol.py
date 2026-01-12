@@ -139,6 +139,7 @@ def write_multiwfn_exe(
     convert_gbw: bool = False,
     overwrite: bool = False,
     mv_cpprop: bool = False,
+    gbw_override: bool = False,
     name: str = "props.mfwn",
 ) -> None:
     """
@@ -167,10 +168,17 @@ def write_multiwfn_exe(
                 f.write("orca_2mkl " + str(Path.home().joinpath(out_folder)) + "\n")
 
             multiwfn_input_file_root = multiwfn_input_file.split("/")[-1].split(".")[0]
+            bare_file = read_file.split("/")[-1]
+            if gbw_override: 
+                # 
+                gbw_loc = bare_file
+            else: 
+                gbw_loc = str(Path.home().joinpath(out_folder, read_file))
 
+            
             f.write(
                 "{} ".format(multi_wfn_cmd)  # multiwfn command
-                + str(Path.home().joinpath(out_folder, read_file))  # wfn/gbw file
+                + gbw_loc  # wfn/gbw file
                 + " < {} | tee ".format(multiwfn_input_file)  # multiwfn input file
                 + str(
                     Path.home().joinpath(
@@ -341,8 +349,9 @@ def create_jobs(
                 job_dict["convert"] = os.path.join(folder, "convert.txt")
                 with open(os.path.join(folder, "convert.txt"), "w") as f:
                     file_wfn = file_gbw.replace(".gbw", ".wfn")
-                    print("file_wfn: {}".format(file_wfn))
-                    data = "100\n2\n5\n{}\n0\nq\n".format(file_wfn)
+                    file_wfn_bare = file_wfn.split("/")[-1]
+                    #print("file_wfn: {}".format(file_wfn))
+                    data = "100\n2\n5\n{}\n0\nq\n".format(file_wfn_bare)
                     f.write(data)
 
             # else:
@@ -402,8 +411,10 @@ def create_jobs(
                     )
             
             elif key == "convert":
+                # use ./ b/c multiwfn throws a fit sometimes
                 write_multiwfn_exe(
                     out_folder=folder,
+                    gbw_override=True,
                     read_file=file_molden,
                     multi_wfn_cmd=multiwfn_cmd,
                     multiwfn_input_file=value,
