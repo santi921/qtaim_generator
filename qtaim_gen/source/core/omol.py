@@ -18,6 +18,7 @@ from qtaim_gen.source.data.multiwfn import (
     bond_order_dict,
     fuzzy_data,
     other_data,
+    other_data_dict,
     qtaim_data,
 )
 from qtaim_gen.source.core.parse_multiwfn import (
@@ -31,6 +32,8 @@ from qtaim_gen.source.core.parse_multiwfn import (
     parse_bond_order_laplace,
     parse_fuzzy_doc,
     parse_other_doc,
+    parse_other_doc_esp, 
+    parse_other_doc_geometry,
     parse_qtaim,
     parse_charge_doc_bader,
     parse_charge_chelpg,
@@ -53,7 +56,7 @@ ORDER_OF_OPERATIONS_separate = [
     "charge_separate",
     "bond_separate",
     "qtaim",
-    "other",  # muting for meta
+    "other_separate",  # muting for meta
 ]
 
 
@@ -202,7 +205,7 @@ def create_jobs(
     Takes:
         folder(str): folder to create jobs in
         multiwfn_cmd(str): command to run multiwfn
-        orca_2mkl_cmd(str): command to run orca_2mklß
+        orca_2mkl_cmd(str): command to run orca_2mkl  
         separate(bool): whether to separate the analysis into different files
         overwrite(bool): whether to overwrite the output files
         orca_6(bool): whether calc is from orca6
@@ -327,6 +330,13 @@ def create_jobs(
                     data = other_data()
                     f.write(data)
 
+            elif routine == "other_separate":
+                other_dict = other_data_dict()
+                for key, value in other_dict.items():
+                    job_dict[key] = os.path.join(folder, "{}.txt".format(key))
+                    with open(os.path.join(folder, "{}.txt".format(key)), "w") as f:
+                        f.write(value)
+
             elif routine == "convert":
                 job_dict["convert"] = os.path.join(folder, "convert.txt")
                 with open(os.path.join(folder, "convert.txt"), "w") as f:
@@ -376,6 +386,21 @@ def create_jobs(
                         name="props_{}.mfwn".format(key),
                         mv_cpprop=mv_cpprop,
                     )
+
+            elif key == "other_separate":
+                other_dict = other_data_dict()
+                for key, value in other_dict.items():
+                    write_multiwfn_exe(
+                        out_folder=folder,
+                        read_file=file_read,
+                        multi_wfn_cmd=multiwfn_cmd,
+                        multiwfn_input_file=value,
+                        convert_gbw=False,
+                        overwrite=True,
+                        name="props_{}.mfwn".format(key),
+                        mv_cpprop=mv_cpprop,
+                    )
+            
             elif key == "convert":
                 write_multiwfn_exe(
                     out_folder=folder,
@@ -438,12 +463,14 @@ def run_jobs(
         # order_of_operations = ORDER_OF_OPERATIONS_separate
         # order_of_operations = ["qtaim"]
         charge_dict = charge_data_dict(full_set=full_set)
-        [order_of_operations.append(i) for i in charge_dict.keys()]
         bond_dict = bond_order_dict(full_set=full_set)
-        [order_of_operations.append(i) for i in bond_dict.keys()]
         spin_tf = check_spin(folder)
         fuzzy_dict = fuzzy_data(spin=spin_tf, full_set=full_set)
+        other_dict = other_data_dict()
+        [order_of_operations.append(i) for i in charge_dict.keys()]
+        [order_of_operations.append(i) for i in bond_dict.keys()]
         [order_of_operations.append(i) for i in fuzzy_dict.keys()]
+        [order_of_operations.append(i) for i in other_dict.keys()]
 
         """# remove "charge_separate" and "bond_separate" from list
         if "charge_separate" in order_of_operations:
@@ -551,6 +578,20 @@ def run_jobs(
                         )
                         continue
 
+                elif order in other_dict.keys():
+                    if dict_val.get(f"val_other", False):
+                        logger.info(
+                            f"Skipping {order} in {folder}: already completed successfully."
+                        )
+                        continue
+
+                elif order in fuzzy_dict.keys():
+                    if dict_val.get(f"val_fuzzy", False):
+                        logger.info(
+                            f"Skipping {order} in {folder}: already completed successfully."
+                        )
+                        continue
+
                 elif order == "fuzzy_full":
                     if dict_val.get(f"val_fuzzy", False):
                         logger.info(
@@ -625,9 +666,11 @@ def parse_multiwfn(
         spin_tf = check_spin(folder)
         # print("spin_tf: {}".format(spin_tf))
         fuzzy_dict = fuzzy_data(spin=spin_tf, full_set=full_set)
+        other_dict = other_data_dict()
         [routine_list.append(i) for i in charge_dict.keys()]
         [routine_list.append(i) for i in bond_dict.keys()]
         [routine_list.append(i) for i in fuzzy_dict.keys()]
+        [routine_list.append(i) for i in other_dict.keys()]
         # print("routine_list: {}".format(routine_list))
 
         # if "charge_separate" in routine_list:
@@ -667,6 +710,15 @@ def parse_multiwfn(
 
                         elif routine == "other":
                             data = parse_other_doc(file_full_path)
+
+                        elif routine == "other_esp":
+                            data = parse_other_doc_esp(file_full_path, ind_surface_prefix="ESP")
+
+                        elif routine == "other_alie":
+                            data = parse_other_doc_esp(file_full_path, ind_surface_prefix="ALIE")
+
+                        elif routine == "other_geometry":
+                            data = parse_other_doc_geometry(file_full_path)
 
                         elif routine == "charge":
                             (
@@ -817,13 +869,15 @@ def parse_multiwfn(
         charge_routines = list(charge_dict.keys())
         bond_routines = list(bond_dict.keys())
         fuzzy_routines = list(fuzzy_data(spin=spin_tf, full_set=full_set).keys())
+        other_routines = list(other_dict.keys())
         charge_dict_compiled = {}
         bond_dict_compiled = {}
         fuzzy_dict_compiled = {}
+        other_dict_compiled = {}
 
         # remove double for loops by combining
         directory_files = os.listdir(folder)
-        combined_routines = charge_routines + bond_routines + fuzzy_routines
+        combined_routines = charge_routines + bond_routines + fuzzy_routines + other_routines
         for routine in combined_routines:
             # json name
             file = routine + ".json"
@@ -836,6 +890,10 @@ def parse_multiwfn(
                             bond_dict_compiled[routine] = json.load(f)
                         elif routine in fuzzy_routines:
                             fuzzy_dict_compiled[routine] = json.load(f)[routine]
+                        elif routine in other_routines:
+                            # json.load will returna. dict with several keys, we just want to update onto compiled 
+                            other_dict_compiled.update(json.load(f))
+                            
                     # remove the file
                     # if os.path.exists(os.path.join(folder, file)):
                     #    logger.info(f"Removing file: {file}")
@@ -861,6 +919,13 @@ def parse_multiwfn(
             # if return_dicts:
             #    compiled_dicts["fuzzy_full"] = fuzzy_dict_compiled
             logger.info("Compiled fuzzy_full.json")
+
+        if other_dict_compiled:
+            with open(os.path.join(folder, "other.json"), "w") as f:
+                json.dump(other_dict_compiled, f, indent=4)
+            # if return_dicts:
+            #    compiled_dicts["other"] = other_dict_compiled
+            logger.info("Compiled other.json")
 
     # clean individual json files if separate AFTER compiled jsons writtent to ensure
     # data isn't lost if error occurs
@@ -922,6 +987,7 @@ def clean_jobs(
                 if file in txt_files:
                     os.remove(os.path.join(folder, file))
                     logger.info(f"Removed {file}")
+            # keeping out files for now since they are needed for parsing - can be removed after parsing is done
             # if file.endswith(".out"):
             #    if file in txt_files:
             #        os.remove(os.path.join(folder, file))
@@ -1299,7 +1365,7 @@ def gbw_analysis(
     tf_validation = validation_checks(
         folder,
         full_set=full_set,
-        verbose=False,
+        verbose=True,
         move_results=move_results,
         logger=logger,
     )

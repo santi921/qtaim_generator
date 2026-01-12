@@ -122,7 +122,7 @@ def validate_timing_dict(
     verbose: bool = False,
     full_set: int = 0,
     spin_tf: bool = False,
-    logger: any = None,
+    logger: any = None
 ):
     """
     Basic check that the timing json file has the expected structure.
@@ -167,11 +167,20 @@ def validate_timing_dict(
 
     for key in expected_keys:
         if key not in timing_dict:
-            if logger:
-                logger.error(f"Missing expected key '{key}' in timing json.")
-            if verbose:
-                print(f"Missing expected key '{key}' in timing json.")
-            return False
+            if key == "other" and "other_esp" not in timing_dict: 
+                if logger:
+                    logger.error(f"Missing expected key '{key}' or 'other_esp' in timing json.")
+                if verbose:
+                    print(f"Missing expected key '{key}' or 'other_esp' in timing json.")
+                return False
+            elif key == "other" and "other_esp" in timing_dict:
+                key = "other_esp"
+            else: 
+                if logger:
+                    logger.error(f"Missing expected key '{key}' in timing json.")
+                if verbose:
+                    print(f"Missing expected key '{key}' in timing json.")
+                return False
 
         # check that the times aren't tiny
         if timing_dict[key] < 1e-6 and key != "convert":
@@ -559,6 +568,7 @@ def validation_checks(
 
     if verbose:
         print("All validation checks passed.")
+
     return tf_cond
 
 

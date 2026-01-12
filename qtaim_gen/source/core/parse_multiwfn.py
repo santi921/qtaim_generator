@@ -794,6 +794,125 @@ def parse_other_doc(other_txt):
     return dict_other
 
 
+def parse_other_doc_geometry(other_txt):
+    """
+    Method to parse other info from multiwfn, specifically the geometry info from other routine
+    Takes:
+        other_info_txt: str, path to the bond out file
+    Returns:
+        other_info_dict: dict, dictionary with the bond orders
+    """
+    dict_other = {}
+    ind_planarity = 0
+    
+    trigger_mpp = "Molecular planarity parameter (MPP) is"
+    trigger_sdp = "Span of deviation from plane (SDP) is"
+
+    with open(other_txt, "r") as f:
+        for line in f:
+            if trigger_mpp in line:
+                if ind_planarity == 0:
+                    dict_other["mpp_full"] = float(line.split()[-2])
+                else:
+                    dict_other["mpp_heavy"] = float(line.split()[-2])
+            if trigger_sdp in line:
+                if ind_planarity == 0:
+                    dict_other["sdp_full"] = float(line.split()[-2])
+                    ind_planarity += 1
+                else:
+                    dict_other["sdp_heavy"] = float(line.split()[-2])
+    return dict_other
+
+
+def parse_other_doc_esp(other_txt, ind_surface_prefix="ESP"):
+    """
+    Method to parse other info from multiwfn
+    Takes:
+        other_info_txt: str, path to the bond out file
+    Returns:
+        other_info_dict: dict, dictionary with the bond orders
+    """
+    dict_other = {}
+    bool_trigger_surface_summary = False
+    #ind_surface_prefix = "ESP"
+
+    trigger_surface_summary = (
+        "================= Summary of surface analysis ================="
+    )
+    trigger_surface_summary_end = "Surface analysis finished!"
+
+    trigger_dict_surface = {
+        "Volume:": {"name": "Volume", "data_ind": 1},
+        "Estimated density according to mass and volume (M/V):": {
+            "name": "Surface_Density",
+            "data_ind": -2,
+        },
+        "Minimal value:": {
+            "name": ["Minimal_value", "Maximal_value"],
+            "data_ind": [2, -2],
+        },
+        "Overall surface area:": {"name": "Overall_surface_area", "data_ind": 3},
+        "Positive surface area:": {"name": "Positive_surface_area", "data_ind": 3},
+        "Negative surface area:": {"name": "Negative_surface_area", "data_ind": 3},
+        "Overall average value:": {"name": "Overall_average_value", "data_ind": 3},
+        "Positive average value:": {"name": "Positive_average_value", "data_ind": 3},
+        "Negative average value:": {"name": "Negative_average_value", "data_ind": 3},
+        "Overall variance (sigma^2_tot):": {"name": "Overall_variance", "data_ind": 3},
+        "Positive variance:": {"name": "Positive_variance", "data_ind": 2},
+        "Negative variance:": {"name": "Negative_variance", "data_ind": 2},
+        "Balance of charges (nu):": {"name": "Balance_of_charges", "data_ind": 4},
+        "Product of sigma^2_tot and nu:": {"name": "Product_of_sigma", "data_ind": 5},
+        "Internal charge separation (Pi):": {
+            "name": "Internal_charge_separation",
+            "data_ind": 4,
+        },
+        "Molecular polarity index (MPI):": {
+            "name": "Molecular_polarity_index",
+            "data_ind": 4,
+        },
+        "Nonpolar surface area (|ESP| <= 10 kcal/mol):": {
+            "name": "Nonpolar_surface_area",
+            "data_ind": 7,
+        },
+        "Polar surface area (|ESP| > 10 kcal/mol):": {
+            "name": "Polar_surface_area",
+            "data_ind": 7,
+        },
+        "Overall skewness:": {"name": "Overall_skewness", "data_ind": -1},
+        # "Positive skewness:": {"name": "Positive_skewness", "data_ind": -1},
+        # "Negative skewness:": {"name": "Negative_skewness", "data_ind": -1},
+    }
+
+    surface_trigger_keys = trigger_dict_surface.keys()
+
+    with open(other_txt, "r") as f:
+        for line in f:
+
+            if trigger_surface_summary in line:
+                bool_trigger_surface_summary = True
+
+            if bool_trigger_surface_summary:
+                if trigger_surface_summary_end in line:
+                    bool_trigger_surface_summary = False
+                    #ind_surface_prefix = "ALIE"
+
+            if bool_trigger_surface_summary:
+                for key in surface_trigger_keys:
+                    if key in line:
+                        name = trigger_dict_surface[key]["name"]
+                        data_ind = trigger_dict_surface[key]["data_ind"]
+                        if isinstance(name, list):
+                            for i, n in enumerate(name):
+                                dict_other[ind_surface_prefix + "_" + n] = float(
+                                    line.split()[data_ind[i]]
+                                )
+                        else:
+                            dict_other[ind_surface_prefix + "_" + name] = float(
+                                line.split()[data_ind]
+                            )
+    return dict_other
+
+
 def fix_float_overflow(value_str):
     """
     Function to fix float overflow in multiwfn outputs.

@@ -9,7 +9,7 @@ import logging
 
 def main():
     # set environment variables
-    os.environ["OMP_sSTACKSIZE"] = "64000000"
+    os.environ["OMP_STACKSIZE"] = "64000000"
     # set mem
     os.system("ulimit -s unlimited")
     os.system("export LD_LIBRARY_PATH=/home/santiagovargas/dev/orca5/:$LD_LIBRARY_PATH")
@@ -39,10 +39,6 @@ def main():
     threads = int(args.threads)
 
     orca_base = "/home/santiagovargas/dev/qtaim_generator/data/omol_profiling/{}_threads/base_test/".format(
-        threads
-    )
-
-    orca_base = "/home/santiagovargas/dev/qtaim_generator/data/omol_profiling/{}_threads/droplet".format(
         threads
     )
 
