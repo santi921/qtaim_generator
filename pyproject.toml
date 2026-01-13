@@ -17,6 +17,7 @@ dependencies = []
 # optional dependencies for parsl 
 [project.optional-dependencies]
 parsl = ["parsl[monitoring]>=2024.5.27; platform_system!='Windows'"]
+wandb = ["wandb>=0.15.0"]
 dev = ["pytest>=7.4.0", "pytest-cov>=7.0.0", "ruff>=0.0.285", "pytest-asyncio>=0.26.0"]
 
 
