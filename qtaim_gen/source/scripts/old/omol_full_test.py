@@ -72,7 +72,8 @@ def main():
 
     parse_only = False
     separate = True
-    overwrite = True
+    overwrite = False
+    restart=True
     clean = True
     debug = False
     # create logger in target folder
@@ -211,10 +212,10 @@ def main():
                 multiwfn_cmd=multiwfn_cmd,
                 parse_only=parse_only,
                 separate=separate,
-                overwrite=True,
+                overwrite=False,
                 orca_6=True,
                 clean=False,
-                restart=False,
+                restart=True,
                 debug=debug,
                 logger=logging.getLogger("gbw_analysis"),
                 mem=400000000,
