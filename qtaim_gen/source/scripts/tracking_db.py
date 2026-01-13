@@ -376,6 +376,103 @@ def print_summary(
     conn.close()
 
 
+def log_to_wandb(
+    db_path,
+    project_name,
+    entity=None,
+    run_name=None,
+    tags=None,
+    notes=None,
+    config=None,
+    table_name="validation_tracking",
+):
+    """
+    Log SQLite database contents to Weights & Biases as a table.
+    
+    Args:
+        db_path (str): Path to the SQLite database file
+        project_name (str): Name of the W&B project
+        entity (str, optional): W&B entity (username or team name). If None, uses default entity.
+        run_name (str, optional): Name for this W&B run. If None, W&B generates a random name.
+        tags (list, optional): List of tags for the run
+        notes (str, optional): Notes/description for the run
+        config (dict, optional): Configuration dictionary to log
+        table_name (str, optional): Name for the W&B table. Defaults to "validation_tracking"
+    
+    Returns:
+        str: URL to the W&B run
+        
+    Raises:
+        ImportError: If wandb is not installed
+        sqlite3.Error: If there's an error reading the database
+        
+    Example:
+        >>> log_to_wandb(
+        ...     db_path="validation_results.sqlite",
+        ...     project_name="qtaim-tracking",
+        ...     entity="my-team",
+        ...     run_name="experiment-1",
+        ...     tags=["production", "full-dataset"]
+        ... )
+    """
+    try:
+        import wandb
+    except ImportError:
+        raise ImportError(
+            "wandb is not installed. Install it with: pip install wandb\n"
+            "Or install the wandb extra: pip install qtaim_generator[wandb]"
+        )
+    
+    # Connect to SQLite database
+    conn = sqlite3.connect(db_path)
+    
+    # Read the entire validation table into a pandas DataFrame
+    try:
+        df = pd.read_sql_query("SELECT * FROM validation", conn)
+    except (sqlite3.Error, pd.errors.DatabaseError) as e:
+        raise sqlite3.Error(f"Error reading validation table: {e}")
+    finally:
+        conn.close()
+    
+    # Initialize W&B run
+    run = wandb.init(
+        project=project_name,
+        entity=entity,
+        name=run_name,
+        tags=tags,
+        notes=notes,
+        config=config,
+    )
+    
+    # Create a W&B Table from the DataFrame
+    wandb_table = wandb.Table(dataframe=df)
+    
+    # Log the table
+    wandb.log({table_name: wandb_table})
+    
+    # Log summary statistics
+    run.summary["total_jobs"] = len(df)
+    run.summary["unique_subsets"] = df["subset"].nunique() if "subset" in df.columns else 0
+    
+    # If validation columns exist, log summary stats
+    validation_cols = ["val_qtaim", "val_charge", "val_bond", "val_fuzzy", "val_other", "val_time"]
+    for col in validation_cols:
+        if col in df.columns:
+            # Count True values (handle both string 'True', 'true', and boolean True)
+            true_count = df[col].apply(
+                lambda x: str(x).lower() == 'true' if pd.notna(x) else False
+            ).sum()
+            run.summary[f"{col}_count"] = int(true_count)
+    
+    run_url = run.get_url()
+    print(f"Data logged to W&B: {run_url}")
+    
+    # Finish the run
+    wandb.finish()
+    
+    return run_url
+
+
 if __name__ == "__main__":
     root_dir = "/lus/eagle/projects/generator/OMol25_postprocessing/"  # Change to your root directory
     db_path = "validation_results.sqlite"
