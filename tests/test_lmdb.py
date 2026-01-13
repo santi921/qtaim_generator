@@ -8,7 +8,7 @@ import json
 import pickle as pkl
 import numpy as np
 from copy import deepcopy
-from qtaim_gen.source.utils.lmdbs import json_2_lmdbs, inp_files_2_lmdbs
+from qtaim_gen.source.utils.lmdbs import json_2_lmdbs, inp_files_2_lmdbs, filter_bond_feats
 from qtaim_gen.source.core.converter import (
     BaseConverter,
     QTAIMConverter,
@@ -20,8 +20,7 @@ from qtaim_gen.source.utils.lmdbs import (
     parse_qtaim_data,
     parse_bond_data,
     parse_fuzzy_data,
-    gather_structure_info,
-    filter_bond_feats,
+    gather_structure_info
 )
 
 import pytest
@@ -655,66 +654,6 @@ class TestConverters:
         assert len(atom_keys) == 22, f"Expected 22, got {len(atom_keys)} for atom_keys"
         assert len(bond_keys) == 22, f"Expected 22, got {len(bond_keys)} for bond_keys"
     
-    def test_filter_bond_feats(self):
-        """Test the filter_bond_feats function with various inputs."""
-        # Create test data
-        bond_feats = {
-            (0, 1): {'ibsi': 1.2, 'fuzzy': 0.8},
-            (0, 2): {'ibsi': 0.5, 'fuzzy': 0.3},
-            (1, 2): {'ibsi': 0.3, 'fuzzy': 0.2},
-            (2, 3): {'ibsi': 0.9, 'fuzzy': 0.6},
-            (3, 4): {'ibsi': 0.7, 'fuzzy': 0.4},
-        }
-        
-        # Test 1: Filter with a list of bonds
-        bond_list_1 = [(0, 1), (1, 2), (3, 4)]
-        filtered_1 = filter_bond_feats(bond_feats, bond_list_1)
-        
-        assert len(filtered_1) == 3, f"Expected 3 bonds, got {len(filtered_1)}"
-        assert (0, 1) in filtered_1, "Bond (0, 1) should be in filtered result"
-        assert (1, 2) in filtered_1, "Bond (1, 2) should be in filtered result"
-        assert (3, 4) in filtered_1, "Bond (3, 4) should be in filtered result"
-        assert (0, 2) not in filtered_1, "Bond (0, 2) should not be in filtered result"
-        assert (2, 3) not in filtered_1, "Bond (2, 3) should not be in filtered result"
-        
-        # Verify feature values are preserved
-        assert filtered_1[(0, 1)] == bond_feats[(0, 1)], "Features should be unchanged"
-        assert filtered_1[(1, 2)] == bond_feats[(1, 2)], "Features should be unchanged"
-        
-        # Test 2: Filter with a dict of bonds
-        bond_list_2 = {(0, 2): None, (2, 3): None}
-        filtered_2 = filter_bond_feats(bond_feats, bond_list_2)
-        
-        assert len(filtered_2) == 2, f"Expected 2 bonds, got {len(filtered_2)}"
-        assert (0, 2) in filtered_2, "Bond (0, 2) should be in filtered result"
-        assert (2, 3) in filtered_2, "Bond (2, 3) should be in filtered result"
-        
-        # Test 3: Filter with reversed bond tuples (should still match due to normalization)
-        bond_list_3 = [(1, 0), (2, 1)]  # Reversed versions of (0, 1) and (1, 2)
-        filtered_3 = filter_bond_feats(bond_feats, bond_list_3)
-        
-        assert len(filtered_3) == 2, f"Expected 2 bonds, got {len(filtered_3)}"
-        # The original keys should be preserved, not the reversed ones
-        assert (0, 1) in filtered_3, "Bond (0, 1) should be in filtered result"
-        assert (1, 2) in filtered_3, "Bond (1, 2) should be in filtered result"
-        
-        # Test 4: Filter with empty bond list
-        bond_list_4 = []
-        filtered_4 = filter_bond_feats(bond_feats, bond_list_4)
-        
-        assert len(filtered_4) == 0, f"Expected 0 bonds, got {len(filtered_4)}"
-        
-        # Test 5: Filter with all bonds
-        bond_list_5 = list(bond_feats.keys())
-        filtered_5 = filter_bond_feats(bond_feats, bond_list_5)
-        
-        assert len(filtered_5) == len(bond_feats), \
-            f"Expected {len(bond_feats)} bonds, got {len(filtered_5)}"
-        for key in bond_feats.keys():
-            assert key in filtered_5, f"Bond {key} should be in filtered result"
-            assert filtered_5[key] == bond_feats[key], \
-                f"Features for bond {key} should be unchanged"
-    
     def test_parser_merge(self):
         # test parsers by using general converter
         self.converter_general = GeneralConverter(
@@ -737,6 +676,13 @@ class TestConverters:
         fuzzy_dict_raw = self.converter_general.__getitem__(
             "fuzzy_lmdb", "b'orca5'".encode("ascii")
         )
+
+
+
+        # TESTS 
+        # 1) check that the number of atoms does not change as we merge along
+        # 2) check that bonds are consistent 
+        # 3) test bond feat filters as they are being added in - check that the keys are consistent with the input dicts and that the values are not None
 
         
         # structure info
@@ -796,13 +742,16 @@ class TestConverters:
             atom_feats=atom_feats,
             bond_feats=bond_feats,
         )
-
+        print(atom_feats)
+        
         # bond definition options
         # 1 - connected_bond_paths
         # 2 - bond_list_fuzzy
         # 3 - bond_list_ibsi
         # 4 - bond_list / bond cutoffs 
-        
+
+
+  
         # Test filter_bond_feats with different bond list definitions
         # Store original bond_feats for comparison
         original_bond_feats = bond_feats.copy()
@@ -870,9 +819,10 @@ class TestConverters:
 
 
 
+
 # create dummy to just run test_parsers and setups
 if __name__ == "__main__":
     test_lmdb = TestConverters()
     test_lmdb.setup_class()
-    test_lmdb.test_parsers()
+    #test_lmdb.test_parsers()
     test_lmdb.test_parser_merge()

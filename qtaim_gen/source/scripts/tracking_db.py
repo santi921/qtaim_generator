@@ -433,6 +433,27 @@ def log_to_wandb(
         raise sqlite3.Error(f"Error reading validation table: {e}")
     finally:
         conn.close()
+
+    # Compute aggregated 'val_all' column from validation columns (if any present)
+    validation_cols = [
+        "val_qtaim",
+        "val_charge",
+        "val_bond",
+        "val_fuzzy",
+        "val_other",
+        "val_time",
+    ]
+    present_cols = [c for c in validation_cols if c in df.columns]
+    if present_cols:
+        def _is_true(x):
+            return str(x).lower() == "true" if pd.notna(x) else False
+
+        df["val_all"] = df.apply(
+            lambda row: all(_is_true(row[c]) for c in present_cols), axis=1
+        )
+    else:
+        # If no validation columns present, ensure column exists (all False)
+        df["val_all"] = False
     
     # Initialize W&B run
     run = wandb.init(
@@ -458,11 +479,15 @@ def log_to_wandb(
     validation_cols = ["val_qtaim", "val_charge", "val_bond", "val_fuzzy", "val_other", "val_time"]
     for col in validation_cols:
         if col in df.columns:
-            # Count True values (handle both string 'True', 'true', and boolean True)
             true_count = df[col].apply(
                 lambda x: str(x).lower() == 'true' if pd.notna(x) else False
             ).sum()
             run.summary[f"{col}_count"] = int(true_count)
+
+    # Log aggregated val_all count
+    if "val_all" in df.columns:
+        val_all_count = df["val_all"].apply(lambda x: bool(x)).sum()
+        run.summary["val_all_count"] = int(val_all_count)
     
     run_url = run.get_url()
     print(f"Data logged to W&B: {run_url}")
@@ -480,8 +505,11 @@ if __name__ == "__main__":
     # scan_and_store_parallel(root_dir, db_path)
     print_summary(db_path)
 
-    root_data_dir = "/usr/workspace/vargas58/orca_test/wave_2_benchmarks_filtered/"
-    calc_root_dir = "/p/lustre5/vargas58/maria_benchmarks/wave2_omol_sp_tight/"
-
-    root_data_dir = "/usr/workspace/vargas58/orca_test/wave_2_benchmarks_filtered/"
-    calc_root_dir = "/p/lustre5/vargas58/maria_benchmarks/wave2_omol_opt_tight/"
+    log_to_wandb(
+        db_path=db_path,
+        project_name="qtaim-tracking",
+        entity="santi",
+        run_name="validation-tracking-run",
+        tags=["production", "full-dataset"],
+        notes="Logging validation results from SQLite database",
+    )
