@@ -118,6 +118,63 @@ def test_log_to_wandb_with_mock(tmp_path, monkeypatch):
     assert url == "https://wandb.ai/test/test-project/runs/test123"
 
 
+def test_log_to_wandb_boolean_handling(tmp_path, monkeypatch):
+    """Test that log_to_wandb correctly handles various boolean formats."""
+    db_path = os.path.join(tmp_path, "test_bool.sqlite")
+    
+    # Create database with various boolean formats
+    conn = sqlite3.connect(db_path)
+    c = conn.cursor()
+    c.execute("""
+        CREATE TABLE validation (
+            job_id TEXT,
+            subset TEXT,
+            folder TEXT,
+            val_qtaim TEXT,
+            PRIMARY KEY(job_id, subset, folder)
+        )
+    """)
+    # Test various boolean representations
+    test_data = [
+        ('job1', 'subset', '/path/1', 'True'),   # String 'True'
+        ('job2', 'subset', '/path/2', 'true'),   # String 'true' (lowercase)
+        ('job3', 'subset', '/path/3', 'False'),  # String 'False'
+        ('job4', 'subset', '/path/4', None),     # NULL/None
+    ]
+    c.executemany("INSERT INTO validation VALUES (?, ?, ?, ?)", test_data)
+    conn.commit()
+    conn.close()
+    
+    # Mock wandb
+    import types
+    mock_wandb = types.ModuleType('wandb')
+    
+    class MockRun:
+        def __init__(self):
+            self.summary = {}
+        def get_url(self):
+            return "https://wandb.ai/test/test/runs/test"
+    
+    class MockTable:
+        def __init__(self, dataframe):
+            self.dataframe = dataframe
+    
+    mock_run = MockRun()
+    mock_wandb.Table = MockTable
+    mock_wandb.init = lambda **kwargs: mock_run
+    mock_wandb.log = lambda data: None
+    mock_wandb.finish = lambda: None
+    
+    import sys
+    monkeypatch.setitem(sys.modules, 'wandb', mock_wandb)
+    
+    # Call the function
+    log_to_wandb(db_path=db_path, project_name="test")
+    
+    # Verify that it correctly counted True values (should be 2: 'True' and 'true')
+    assert mock_run.summary.get("val_qtaim_count") == 2
+
+
 def test_log_to_wandb_invalid_db():
     """Test that log_to_wandb raises error for invalid database."""
     with tempfile.TemporaryDirectory() as tmpdir:

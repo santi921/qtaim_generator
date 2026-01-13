@@ -429,7 +429,7 @@ def log_to_wandb(
     # Read the entire validation table into a pandas DataFrame
     try:
         df = pd.read_sql_query("SELECT * FROM validation", conn)
-    except Exception as e:
+    except (sqlite3.Error, pd.errors.DatabaseError) as e:
         raise sqlite3.Error(f"Error reading validation table: {e}")
     finally:
         conn.close()
@@ -458,8 +458,10 @@ def log_to_wandb(
     validation_cols = ["val_qtaim", "val_charge", "val_bond", "val_fuzzy", "val_other", "val_time"]
     for col in validation_cols:
         if col in df.columns:
-            # Count True values (handle both string 'True' and boolean True)
-            true_count = df[col].apply(lambda x: str(x) == 'True').sum()
+            # Count True values (handle both string 'True', 'true', and boolean True)
+            true_count = df[col].apply(
+                lambda x: str(x).lower() == 'true' if pd.notna(x) else False
+            ).sum()
             run.summary[f"{col}_count"] = int(true_count)
     
     run_url = run.get_url()
