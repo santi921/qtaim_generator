@@ -430,7 +430,6 @@ def log_to_wandb(
     try:
         df = pd.read_sql_query("SELECT * FROM validation", conn)
     except Exception as e:
-        conn.close()
         raise sqlite3.Error(f"Error reading validation table: {e}")
     finally:
         conn.close()
@@ -452,8 +451,8 @@ def log_to_wandb(
     wandb.log({table_name: wandb_table})
     
     # Log summary statistics
-    wandb.summary["total_jobs"] = len(df)
-    wandb.summary["unique_subsets"] = df["subset"].nunique() if "subset" in df.columns else 0
+    run.summary["total_jobs"] = len(df)
+    run.summary["unique_subsets"] = df["subset"].nunique() if "subset" in df.columns else 0
     
     # If validation columns exist, log summary stats
     validation_cols = ["val_qtaim", "val_charge", "val_bond", "val_fuzzy", "val_other", "val_time"]
@@ -461,7 +460,7 @@ def log_to_wandb(
         if col in df.columns:
             # Count True values (handle both string 'True' and boolean True)
             true_count = df[col].apply(lambda x: str(x) == 'True').sum()
-            wandb.summary[f"{col}_count"] = int(true_count)
+            run.summary[f"{col}_count"] = int(true_count)
     
     run_url = run.get_url()
     print(f"Data logged to W&B: {run_url}")

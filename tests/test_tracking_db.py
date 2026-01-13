@@ -76,30 +76,32 @@ def test_log_to_wandb_with_mock(tmp_path, monkeypatch):
         
         def get_url(self):
             return "https://wandb.ai/test/test-project/runs/test123"
-        
+    
     class MockWandbTable:
         def __init__(self, dataframe):
             self.dataframe = dataframe
     
-    class MockWandb:
-        Table = MockWandbTable
-        summary = {}
-        
-        @staticmethod
-        def init(project, entity=None, name=None, tags=None, notes=None, config=None):
-            return MockWandbRun()
-        
-        @staticmethod
-        def log(data):
-            pass
-        
-        @staticmethod
-        def finish():
-            pass
+    # Create mock wandb module with proper structure
+    import types
+    mock_wandb = types.ModuleType('wandb')
+    mock_wandb.Table = MockWandbTable
+    mock_run = MockWandbRun()
+    
+    def mock_init(project, entity=None, name=None, tags=None, notes=None, config=None):
+        return mock_run
+    
+    def mock_log(data):
+        pass
+    
+    def mock_finish():
+        pass
+    
+    mock_wandb.init = mock_init
+    mock_wandb.log = mock_log
+    mock_wandb.finish = mock_finish
     
     # Monkeypatch wandb import
     import sys
-    mock_wandb = MockWandb()
     monkeypatch.setitem(sys.modules, 'wandb', mock_wandb)
     
     # Call the function
