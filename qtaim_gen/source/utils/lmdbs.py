@@ -649,10 +649,11 @@ def gather_structure_info(value_structure: dict) -> Tuple[MoleculeGraph, Dict[st
 def parse_bond_data(
         dict_bond: dict, 
         bond_filter: Optional[List[str]] = None, 
+        cutoff: Optional[float] = None, 
         bond_list_definition="fuzzy", 
         bond_feats=None, 
         clean=True, 
-        as_lists=True
+        as_lists=True, 
     ) -> Dict[str, Any]:
     """
     Parse bond-related data and update bond features.
@@ -721,6 +722,70 @@ def parse_bond_data(
 
             # store under the original section key (e.g., 'fuzzy' or 'ibsi_bond')
             bond_feats[bond_key_tuple][k] = float(bond_value)
+
+    # If a cutoff is provided, or a bond_filter is provided, do a second pass
+    # to filter bond_feats and bond_list based on the feature used to define
+    # the bond_list (e.g., 'fuzzy' if bond_list_definition == 'fuzzy').
+    # - cutoff (float): keep bonds where feature >= cutoff
+    # - bond_filter (list): if cutoff is None, fall back to presence/non-zero behavior
+    if cutoff is not None or bond_filter is not None:
+        # determine the actual key name used in the payload (could be 'fuzzy' or 'fuzzy_bond')
+        candidate_keys = [bond_list_definition, bond_list_definition + "_bond"]
+        filter_key = None
+        for ck in candidate_keys:
+            if ck in dict_bond:
+                filter_key = ck
+                break
+        # if still not found, try to find something from bond_filter
+        if filter_key is None and bond_filter is not None:
+            for ck in candidate_keys:
+                if ck in bond_filter:
+                    filter_key = ck
+                    break
+        # final fallback: if bond_filter explicitly provided, use its first element
+        if filter_key is None and bond_filter is not None and len(bond_filter) > 0:
+            filter_key = bond_filter[0]
+
+        allowed = set()
+        for b in bond_list:
+            normalized = tuple(sorted(b))
+            feats = bond_feats.get(normalized)
+            if feats is None:
+                continue
+            if filter_key is None or filter_key not in feats:
+                # if no filter key available, skip this bond for safety
+                continue
+
+            val = feats[filter_key]
+            # if cutoff is provided: require numeric comparison >= cutoff
+            if cutoff is not None:
+                try:
+                    if isinstance(val, (int, float)) and not np.isnan(val) and not np.isinf(val):
+                        if val >= cutoff:
+                            allowed.add(normalized)
+                except Exception:
+                    # if comparison fails, skip the bond
+                    continue
+            else:
+                # fallback presence/non-zero behavior when only bond_filter provided
+                try:
+                    if isinstance(val, (int, float)):
+                        if not np.isclose(val, 0.0):
+                            allowed.add(normalized)
+                    elif val is not None:
+                        allowed.add(normalized)
+                except Exception:
+                    allowed.add(normalized)
+
+        # filter bond_feats to only include allowed bonds
+        bond_feats = {k: v for k, v in bond_feats.items() if tuple(sorted(k)) in allowed}
+
+        # update bond_list to reflect the filtering; preserve as_lists semantics
+        if as_lists:
+            bond_list = [list(b) for b in allowed]
+        else:
+            bond_list = [tuple(b) for b in allowed]
+    
 
     return bond_feats, bond_list
 

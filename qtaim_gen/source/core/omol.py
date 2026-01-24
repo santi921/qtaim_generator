@@ -126,6 +126,14 @@ def write_conversion(
             + str(Path.home().joinpath(out_folder, read_file))
             + " -molden\n"
         )
+        # also have it clean up the gbw file, .molden.input file 
+        
+        if os.path.exists(str(Path.home().joinpath(out_folder, read_file + ".molden.input"))):
+            f.write("rm {}.molden.input\n".format(str(Path.home().joinpath(out_folder, read_file))))
+
+        # check if gbw file exists
+        if os.path.exists(str(Path.home().joinpath(out_folder, read_file + ".gbw"))):
+            f.write("rm {}.gbw\n".format(str(Path.home().joinpath(out_folder, read_file))))
 
     st = os.stat(out_file)
     os.chmod(out_file, st.st_mode | stat.S_IEXEC)
