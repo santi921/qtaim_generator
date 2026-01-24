@@ -1202,6 +1202,8 @@ def gbw_analysis(
                         subprocess.run(
                             ["unzstd", "-f", zstd_file], cwd=folder, check=True
                         )
+                        # remove the zstd file after successful extraction
+                        os.remove(os.path.join(folder, zstd_file))
                     except Exception as e:
                         logger.error(f"Error running unzstd on {zstd_file}: {e}")
 
@@ -1209,6 +1211,7 @@ def gbw_analysis(
                     if zstd_file.endswith(".tar.zst"):
                         tar_file_name = zstd_file.replace(".tar.zst", ".tar")
                         tar_cmd = ["tar", "-xf", tar_file_name, "--directory", folder]
+                        
                     else:
                         tar_file_name = zstd_file.replace(".tgz", ".tar")
                         tar_cmd = ["tar", "-xf", tar_file_name, "--directory", folder]
@@ -1217,6 +1220,8 @@ def gbw_analysis(
                     # extract tar in the folder
                     try:
                         subprocess.run(tar_cmd, cwd=folder, check=True)
+                        # remove the tar file after successful extraction
+                        os.remove(os.path.join(folder, tar_file_name))
                     except Exception as e:
                         logger.error(f"Error extracting tar {tar_file_name}: {e}")
 
