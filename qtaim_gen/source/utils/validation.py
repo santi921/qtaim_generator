@@ -169,14 +169,16 @@ def validate_timing_dict(
 
     for key in expected_keys:
         if key not in timing_dict:
-            if key == "other" and "other_esp" not in timing_dict: 
+            if key == "other" and "other_alie" not in timing_dict: 
                 if logger:
-                    logger.error(f"Missing expected key '{key}' or 'other_esp' in timing json.")
+                    logger.error(f"Missing expected key '{key}' or 'other_alie' in timing json.")
                 if verbose:
-                    print(f"Missing expected key '{key}' or 'other_esp' in timing json.")
+                    print(f"Missing expected key '{key}' or 'other_alie' in timing json.")
                 return False
-            elif key == "other" and "other_esp" in timing_dict:
-                key = "other_esp"
+            
+            elif key == "other" and "other_alie" in timing_dict:
+                key = "other_alie"
+
             else: 
                 if logger:
                     logger.error(f"Missing expected key '{key}' in timing json.")
