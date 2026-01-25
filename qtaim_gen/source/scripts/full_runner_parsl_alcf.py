@@ -214,9 +214,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     safety_factor: float = float(getattr(args, "safety_factor", 1.0))
     n_nodes: int = int(getattr(args, "n_nodes", 1))
     # convert timeout_hr to str
-    timeout_str: str = (
-        f"{int(timeout_hr)}:{int((timeout_hr - int(timeout_hr)) * 60):02d}:00"
-    )
+
     assert type_runner in ["local", "hpc", "flux"], "type_runner must be 'local' or 'hpc'"
     if type_runner == "local":
         n_threads_per_job = n_threads_per_job
@@ -231,6 +229,9 @@ def main(argv: Optional[List[str]] = None) -> int:
             n_jobs=n_nodes,
         )
     else:
+        timeout_str: str = (
+            f"{int(timeout_hr)}:{int((timeout_hr - int(timeout_hr)) * 60):02d}:00"
+        )
         parsl_config, n_threads_per_job = alcf_config(
             queue=queue,
             walltime=timeout_str,
