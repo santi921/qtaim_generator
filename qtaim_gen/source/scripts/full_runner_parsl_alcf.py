@@ -226,7 +226,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     if type_runner == "local":
         n_threads_per_job = n_threads_per_job
         parsl_config = base_config(n_workers=int(n_threads / n_threads_per_job))
-    if type_runner == "flux": 
+    
+    elif type_runner == "flux": 
         timeout_str: str = (
             f"{int(timeout_hr)}:{int((timeout_hr - int(timeout_hr)) * 60):02d}:00"
         )
