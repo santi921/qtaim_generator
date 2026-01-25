@@ -224,8 +224,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     assert type_runner in ["local", "hpc", "flux"], "type_runner must be 'local' or 'hpc'"
     if type_runner == "local":
-        n_threads_per_job = n_threads_per_job
-        parsl_config = base_config(n_workers=int(n_threads / n_threads_per_job))
+        parsl_config = base_config(n_workers=max(1, int(n_threads / n_threads_per_job)))
     
     elif type_runner == "flux": 
         timeout_str: str = (
@@ -398,9 +397,9 @@ full-runner-parsl-alcf --num_folders 5000 --orca_2mkl_cmd /usr/workspace/vargas5
 
 full-runner-parsl-alcf --num_folders 2 --orca_2mkl_cmd $HOME/orca_6_0_0/orca_2mkl \
      --multiwfn_cmd $HOME/Multiwfn_3_8/Multiwfn_noGUI --clean --job_file \
-    ./test.txt --full_set 0 --type_runner local \
+    ./test.txt --full_set 0 --type_runner local --n_threads_per_job 1 \
     --n_threads 2 --safety_factor 1.0 --move_results --preprocess_compressed --timeout_hr 3 \
-    --queue workq-route  --restart  --n_nodes 1 --job_file ../jobs_by_topdir/spice.txt  \
+    --queue workq-route  --restart  --n_nodes 1 --job_file ../jobs_by_topdir/orbnet_denali_refined.txt  \
     --preprocess_compressed --root_omol_results /lus/eagle/projects/generator/OMol25_postprocessing/ --root_omol_inputs /lus/eagle/projects/OMol25/        
 
 /usr/workspace/vargas58/orca-6.0.0-f.0_linux_x86-64/bin/orca_2mkl

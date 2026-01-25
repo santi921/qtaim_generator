@@ -389,10 +389,12 @@ def create_jobs(
                         read_file=file_read,
                         multi_wfn_cmd=multiwfn_cmd,
                         multiwfn_input_file=value,
-                        convert_gbw=patch_path,
+                        convert_gbw=False,
                         overwrite=True,
                         name="props_{}.mfwn".format(key),
                         mv_cpprop=mv_cpprop,
+                        gbw_override=patch_path,
+
                     )
 
             elif key == "bond_separate":
@@ -403,10 +405,12 @@ def create_jobs(
                         read_file=file_read,
                         multi_wfn_cmd=multiwfn_cmd,
                         multiwfn_input_file=value,
-                        convert_gbw=patch_path,
+                        convert_gbw=False,
                         overwrite=True,
                         name="props_{}.mfwn".format(key),
                         mv_cpprop=mv_cpprop,
+                        gbw_override=patch_path,
+
                     )
 
             elif key == "other_separate":
@@ -417,10 +421,11 @@ def create_jobs(
                         read_file=file_read,
                         multi_wfn_cmd=multiwfn_cmd,
                         multiwfn_input_file=value,
-                        convert_gbw=patch_path,
+                        convert_gbw=False,
                         overwrite=True,
                         name="props_{}.mfwn".format(key),
                         mv_cpprop=mv_cpprop,
+                        gbw_override=patch_path,
                     )
             
             elif key == "convert":
@@ -444,10 +449,11 @@ def create_jobs(
                     read_file=file_read,
                     multi_wfn_cmd=multiwfn_cmd,
                     multiwfn_input_file=value,
-                    convert_gbw=patch_path,
+                    convert_gbw=False,
                     overwrite=True,
                     name="props_{}.mfwn".format(key),
                     mv_cpprop=mv_cpprop,
+                    gbw_override=patch_path,
                 )
 
             logger.info(f"Created execution script for {key}")
