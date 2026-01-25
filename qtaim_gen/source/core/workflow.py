@@ -230,6 +230,7 @@ def process_folder_alcf(
     clean_first: bool = False,
     full_set: bool = False,
     move_results: bool = True,
+    patch_path: bool = False,
     root_omol_results: Optional[
         str
     ] = None,  # root where to store results, should mimic root_omol_inputs
@@ -363,6 +364,7 @@ def process_folder_alcf(
             full_set=full_set,
             preprocess_compressed=preprocess_compressed,
             move_results=move_results,
+            patch_path=patch_path,
         )
         t1: float = time.time()
 

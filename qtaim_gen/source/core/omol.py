@@ -161,6 +161,7 @@ def write_multiwfn_exe(
         mv_cpprop(bool): whether to move the cpprop file to the output folder
         overwrite(bool): whether to overwrite the file if it already exists
         name(str): name of the bash script
+        gbw_override(bool): whether to override the gbw file location
     """
 
     out_file = str(Path.home().joinpath(out_folder, name))
@@ -177,6 +178,7 @@ def write_multiwfn_exe(
 
             multiwfn_input_file_root = multiwfn_input_file.split("/")[-1].split(".")[0]
             bare_file = read_file.split("/")[-1]
+            
             if gbw_override: 
                 # 
                 gbw_loc = bare_file
@@ -215,6 +217,7 @@ def create_jobs(
     debug: bool = True,
     logger: Optional[logging.Logger] = None,
     full_set: int = 0,
+    patch_path: bool= False,
 ) -> None:
     """
     Create job files for multiwfn analysis
@@ -226,6 +229,8 @@ def create_jobs(
         overwrite(bool): whether to overwrite the output files
         orca_6(bool): whether calc is from orca6
         logger(logging.Logger): logger to log messages
+        full_set(int): whether to use full set of analysis (1) or minimal (0)
+        patch_path(bool): whether to patch the pathing in the multiwfn input files
 
     """
     if logger is None:
@@ -384,7 +389,7 @@ def create_jobs(
                         read_file=file_read,
                         multi_wfn_cmd=multiwfn_cmd,
                         multiwfn_input_file=value,
-                        convert_gbw=False,
+                        convert_gbw=patch_path,
                         overwrite=True,
                         name="props_{}.mfwn".format(key),
                         mv_cpprop=mv_cpprop,
@@ -398,7 +403,7 @@ def create_jobs(
                         read_file=file_read,
                         multi_wfn_cmd=multiwfn_cmd,
                         multiwfn_input_file=value,
-                        convert_gbw=False,
+                        convert_gbw=patch_path,
                         overwrite=True,
                         name="props_{}.mfwn".format(key),
                         mv_cpprop=mv_cpprop,
@@ -412,7 +417,7 @@ def create_jobs(
                         read_file=file_read,
                         multi_wfn_cmd=multiwfn_cmd,
                         multiwfn_input_file=value,
-                        convert_gbw=False,
+                        convert_gbw=patch_path,
                         overwrite=True,
                         name="props_{}.mfwn".format(key),
                         mv_cpprop=mv_cpprop,
@@ -439,7 +444,7 @@ def create_jobs(
                     read_file=file_read,
                     multi_wfn_cmd=multiwfn_cmd,
                     multiwfn_input_file=value,
-                    convert_gbw=False,
+                    convert_gbw=patch_path,
                     overwrite=True,
                     name="props_{}.mfwn".format(key),
                     mv_cpprop=mv_cpprop,
@@ -1127,6 +1132,7 @@ def gbw_analysis(
     preprocess_compressed: bool = False,
     full_set: int = 0,
     move_results: bool = True,
+    patch_path: bool= False,
 ) -> None:
     """
     Run a full analysis on a folder of gbw files
@@ -1361,6 +1367,7 @@ def gbw_analysis(
             debug=debug,
             logger=logger,
             full_set=full_set,
+            patch_path=patch_path,
         )
         # run jobs
         run_jobs(
