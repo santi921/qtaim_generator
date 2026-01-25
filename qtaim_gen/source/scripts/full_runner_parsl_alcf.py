@@ -220,11 +220,14 @@ def main(argv: Optional[List[str]] = None) -> int:
         n_threads_per_job = n_threads_per_job
         parsl_config = base_config(n_workers=int(n_threads / n_threads_per_job))
     if type_runner == "flux": 
+        timeout_str: str = (
+            f"{int(timeout_hr)}:{int((timeout_hr - int(timeout_hr)) * 60):02d}:00"
+        )
         parsl_config, n_threads_per_job = tuo_flux_config(
             threads_per_task=n_threads_per_job,
             threads_per_node=n_threads,
             queue="dnn-sim",
-            walltime="1200m",
+            walltime=timeout_str,
             monitoring=False,
             n_jobs=n_nodes,
         )
