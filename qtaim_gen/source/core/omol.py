@@ -347,7 +347,7 @@ def create_jobs(
                     f.write(data)
 
             elif routine == "other_separate":
-                other_dict = other_data_dict()
+                other_dict = other_data_dict(full_set=full_set)
                 for key, value in other_dict.items():
                     job_dict[key] = os.path.join(folder, "{}.txt".format(key))
                     with open(os.path.join(folder, "{}.txt".format(key)), "w") as f:
@@ -405,7 +405,7 @@ def create_jobs(
                     )
 
             elif key == "other_separate":
-                other_dict = other_data_dict()
+                other_dict = other_data_dict(full_set=full_set)
                 for key, value in other_dict.items():
                     write_multiwfn_exe(
                         out_folder=folder,
@@ -485,7 +485,7 @@ def run_jobs(
         bond_dict = bond_order_dict(full_set=full_set)
         spin_tf = check_spin(folder)
         fuzzy_dict = fuzzy_data(spin=spin_tf, full_set=full_set)
-        other_dict = other_data_dict()
+        other_dict = other_data_dict(full_set=full_set)
         [order_of_operations.append(i) for i in charge_dict.keys()]
         [order_of_operations.append(i) for i in bond_dict.keys()]
         [order_of_operations.append(i) for i in fuzzy_dict.keys()]
@@ -685,7 +685,7 @@ def parse_multiwfn(
         spin_tf = check_spin(folder)
         # print("spin_tf: {}".format(spin_tf))
         fuzzy_dict = fuzzy_data(spin=spin_tf, full_set=full_set)
-        other_dict = other_data_dict()
+        other_dict = other_data_dict(full_set=full_set)
         [routine_list.append(i) for i in charge_dict.keys()]
         [routine_list.append(i) for i in bond_dict.keys()]
         [routine_list.append(i) for i in fuzzy_dict.keys()]
