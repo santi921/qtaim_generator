@@ -67,7 +67,6 @@ def scan_and_store_parallel(
         "t_becke_fuzzy_spin",
         "t_bond",
         "t_other_alie", 
-        "t_other_esp",
         "t_other_geometry"
     ]
     columns = list(set(columns))  # ensure uniqueness

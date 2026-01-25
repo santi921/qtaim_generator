@@ -111,6 +111,7 @@ def get_val_breakdown_from_folder(
         tf_other = validate_other_dict(
             other_file,
             logger=None,
+            full_set=full_set
         )
         info["val_other"] = tf_other
 
@@ -163,6 +164,7 @@ def validate_timing_dict(
             "laplacian_bond",
             "grad_norm_rho_fuzzy",
             "laplacian_rho_fuzzy",
+            "ESP_Volume",
         ]
 
     for key in expected_keys:
@@ -289,7 +291,7 @@ def validate_fuzzy_dict(
     return True
 
 
-def validate_other_dict(other_dict_loc: str, verbose: bool = False, logger: any = None):
+def validate_other_dict(other_dict_loc: str, verbose: bool = False, logger: any = None, full_set: int = 0):
     """
     Basic check that the other json file has the expected structure.
     Check that it has the keys 'atoms', 'bonds', 'charges', and 'fuzzy'.
@@ -302,25 +304,6 @@ def validate_other_dict(other_dict_loc: str, verbose: bool = False, logger: any 
         "sdp_full",
         "mpp_heavy",
         "sdp_heavy",
-        "ESP_Volume",
-        "ESP_Surface_Density",
-        "ESP_Minimal_value",
-        "ESP_Maximal_value",
-        "ESP_Overall_surface_area",
-        "ESP_Positive_surface_area",
-        "ESP_Negative_surface_area",
-        "ESP_Overall_average_value",
-        "ESP_Positive_average_value",
-        "ESP_Negative_average_value",
-        "ESP_Overall_variance",
-        "ESP_Positive_variance",
-        "ESP_Negative_variance",
-        "ESP_Balance_of_charges",
-        "ESP_Product_of_sigma",
-        "ESP_Internal_charge_separation",
-        "ESP_Molecular_polarity_index",
-        "ESP_Nonpolar_surface_area",
-        "ESP_Polar_surface_area",
         "ALIE_Volume",
         "ALIE_Surface_Density",
         "ALIE_Minimal_value",
@@ -328,11 +311,20 @@ def validate_other_dict(other_dict_loc: str, verbose: bool = False, logger: any 
         "ALIE_Overall_surface_area",
         "ALIE_Positive_surface_area",
         "ALIE_Negative_surface_area",
-        "ESP_Overall_skewness",
-        # "ESP_Positive_skewness",
         "ALIE_Overall_skewness",
-        # "ALIE_Positive_skewness",
     ]
+    if full_set > 1:
+        expected_keys += [
+            "ESP_Volume",
+            "ESP_Surface_Density",
+            "ESP_Minimal_value",
+            "ESP_Maximal_value",
+            "ESP_Overall_surface_area",
+            "ESP_Positive_surface_area",
+            "ESP_Negative_surface_area",
+            "ESP_Overall_skewness",
+        ]
+
     for key in expected_keys:
         if key not in other_dict:
             if verbose:
@@ -540,7 +532,7 @@ def validation_checks(
             logger.error(f"Fuzzy json validation failed in folder: {folder}")
         tf_cond = False
 
-    if not validate_other_dict(other_dict_loc, verbose=verbose, logger=logger):
+    if not validate_other_dict(other_dict_loc, verbose=verbose, logger=logger, full_set=full_set):
         if logger:
             logger.error(f"Other json validation failed in folder: {folder}")
         tf_cond = False
