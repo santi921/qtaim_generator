@@ -295,9 +295,9 @@ def tuo_flux_config(
                 label="flux",
                 provider=SlurmProvider(
                     # Partition / queue name on TUO
-                    partition=queue,
+                    #partition=queue,
                     # Account name (change if needed)
-                    account="generator",
+                    account=queue,
                     # Commands run before workers launched
                     worker_init=(
                         "set -x; "
