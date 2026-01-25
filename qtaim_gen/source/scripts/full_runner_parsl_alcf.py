@@ -10,7 +10,7 @@ from typing import Optional, List
 
 
 from qtaim_gen.source.core.workflow import run_folder_task_alcf
-from qtaim_gen.source.utils.parsl_configs import alcf_config, base_config
+from qtaim_gen.source.utils.parsl_configs import alcf_config, base_config, tuo_flux_config
 
 from qtaim_gen.source.utils.io import get_folders_from_file
 
@@ -217,11 +217,19 @@ def main(argv: Optional[List[str]] = None) -> int:
     timeout_str: str = (
         f"{int(timeout_hr)}:{int((timeout_hr - int(timeout_hr)) * 60):02d}:00"
     )
-    assert type_runner in ["local", "hpc"], "type_runner must be 'local' or 'hpc'"
+    assert type_runner in ["local", "hpc", "flux"], "type_runner must be 'local' or 'hpc'"
     if type_runner == "local":
         n_threads_per_job = n_threads_per_job
         parsl_config = base_config(n_workers=int(n_threads / n_threads_per_job))
-
+    if type_runner == "flux": 
+        parsl_config, n_threads_per_job = tuo_flux_config(
+            threads_per_task=n_threads_per_job,
+            threads_per_node=n_threads,
+            queue="dnn-sim",
+            walltime="1200m",
+            monitoring=False,
+            n_jobs=n_nodes,
+        )
     else:
         parsl_config, n_threads_per_job = alcf_config(
             queue=queue,
@@ -333,69 +341,85 @@ if __name__ == "__main__":
 
 
 """
-                    
 
-        
-
-25218 / 51102  - something is up here             
-full-runner-parsl-alcf --num_folders 5000 --orca_2mkl_cmd $HOME/orca_6_0_0/orca_2mkl    \
+50K / 51102  - something is up here             
+full-runner-parsl-alcf --num_folders 100000 --orca_2mkl_cmd $HOME/orca_6_0_0/orca_2mkl    \
       --multiwfn_cmd $HOME/Multiwfn_3_8/Multiwfn_noGUI --clean --full_set 0 \
         --n_threads 220 --n_threads_per_job 1 --safety_factor 1.0 --move_results \
-        --timeout_hr 4             --queue workq-route --restart --n_nodes 1 --type_runner hpc \
+        --timeout_hr 4             --queue workq-route --restart --n_nodes 5 --type_runner hpc \
         --job_file /lus/eagle/projects/generator/jobs_by_topdir/orbnet_denali_refined.txt \
         --preprocess_compressed --root_omol_results /lus/eagle/projects/generator/OMol25_postprocessing/ \
-        --root_omol_inputs /lus/eagle/projects/OMol25/ --clean_first
+        --root_omol_inputs /lus/eagle/projects/OMol25/ 
 
-
-65431 / 199805
-full-runner-parsl-alcf --num_folders 40000 --orca_2mkl_cmd $HOME/orca_6_0_0/orca_2mkl    \
-      --multiwfn_cmd $HOME/Multiwfn_3_8/Multiwfn_noGUI --clean --full_set 0  \
+# geom_orca6
+full-runner-parsl-alcf --num_folders 60000 --orca_2mkl_cmd $HOME/orca_6_0_0/orca_2mkl    \
+      --multiwfn_cmd $HOME/Multiwfn_3_8/Multiwfn_noGUI --clean --full_set 0 \
         --n_threads 220 --n_threads_per_job 1 --safety_factor 1.0 --move_results \
-        --timeout_hr 3             --queue workq-route --restart --n_nodes 5 --type_runner hpc \
+        --timeout_hr 4             --queue workq-route --restart --n_nodes 5 --type_runner hpc \
         --job_file /lus/eagle/projects/generator/jobs_by_topdir/geom_orca6_refined.txt \
         --preprocess_compressed --root_omol_results /lus/eagle/projects/generator/OMol25_postprocessing/ \
         --root_omol_inputs /lus/eagle/projects/OMol25/ 
 
-187093 / 215642
-full-runner-parsl-alcf --num_folders 30000 --orca_2mkl_cmd $HOME/orca_6_0_0/orca_2mkl    \
-      --multiwfn_cmd $HOME/Multiwfn_3_8/Multiwfn_noGUI --clean --full_set 0  \
+
+
+full-runner-parsl-alcf --num_folders 60000 --orca_2mkl_cmd $HOME/orca_6_0_0/orca_2mkl    \
+      --multiwfn_cmd $HOME/Multiwfn_3_8/Multiwfn_noGUI --clean --full_set 0 \
         --n_threads 220 --n_threads_per_job 1 --safety_factor 1.0 --move_results \
-        --timeout_hr 4             --queue workq-route --restart --n_nodes 3 --type_runner hpc \
-        --job_file /lus/eagle/projects/generator/jobs_by_topdir/ani2x_refined.txt \
+        --timeout_hr 4             --queue workq-route --restart --n_nodes 5 --type_runner hpc \
+        --job_file /lus/eagle/projects/generator/jobs_by_topdir/tm_react.txt \
         --preprocess_compressed --root_omol_results /lus/eagle/projects/generator/OMol25_postprocessing/ \
         --root_omol_inputs /lus/eagle/projects/OMol25/ 
 
+        
+
+        138K / 199805 RUNNER ON TUO
+
+full-runner-parsl-alcf --num_folders 5000 --orca_2mkl_cmd /usr/workspace/vargas58/orca-6.0.0-f.0_linux_x86-64/bin/orca_2mkl    \
+      --multiwfn_cmd /usr/workspace/vargas58/Multiwfn/Multiwfn_noGUI --clean --full_set 0  \
+        --n_threads 256 --n_threads_per_job 1 --safety_factor 1.0 --move_results \
+        --timeout_hr 5             --queue workq-route --restart --n_nodes 3 --type_runner local \
+        --job_file /usr/workspace/vargas58/jobs/5A_elytes.txt \
+        --preprocess_compressed --root_omol_results /p/lustre5/vargas58/OMol4M/ \
+        --root_omol_inputs /p/lustre5/bennion1/Omol2025-4M-DiversitySet/
+
+
+
+/p/lustre5/bennion1/ncpbr/Omol2025-4M-DiversitySet
+
+/usr/workspace/vargas58/orca-6.0.0-f.0_linux_x86-64/bin/orca_2mkl
+
+/p/lustre5/bennion1/Omol2025-4M-DiversitySet/5A_elytes/   
 DONE        
-"ani1xbb",
-"trans1x"
-"noble_gas",
-"noble_gas_compounds",
+"ani1xbb", - cleaned
+"trans1x" - cleaned
+"noble_gas", - cleaned
+"noble_gas_compounds", - cleaned
+"ani2x", # cleaned
 
 RUNNING
-"ani2x", # heavy
-"droplet", - 
-"mo_hydrides", - 
-"nakb", 
-"dna", 
+"droplet"
+"mo_hydrides"
+"nakb"
+"dna" 
 
-
-"orbnet_denali", - 
-"geom_orca6", - 
+"geom_orca6"
+"orbnet_denali",  
 "omol", # HEAVIEST
 "tm_react", # HEAVY
 
-next up
+"pdb_pockets_400K"
+"rpmd"
+"scaled_separations_exp" -
 
+
+next up
 "5A_elytes",
-"scaled_separations_exp"
 "rgd_uks"
 "rna"
-"pdb_fragments_400K"
 "ml_mo"
 "ml_elytes"
 "electrolytes_reactivity"
 "pmechdb"
 "protein_interface"
 "protein_core"
-
 """

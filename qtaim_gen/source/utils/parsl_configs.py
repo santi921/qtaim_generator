@@ -2,8 +2,8 @@
 import os
 from parsl.config import Config
 from parsl.providers import PBSProProvider, LocalProvider, SlurmProvider
-from parsl.executors import HighThroughputExecutor
-from parsl.launchers import MpiExecLauncher
+from parsl.executors import HighThroughputExecutor, FluxExecutor
+from parsl.launchers import MpiExecLauncher, SrunLauncher
 
 
 from parsl.executors.threads import ThreadPoolExecutor
@@ -212,19 +212,37 @@ def nersc_config(
 
 
 """
-crux configs 
+template for tuo/flux config 
+from parsl.config import Config
+from parsl.executors import FluxExecutor
+from parsl.providers import SlurmProvider
+from parsl.launchers import SrunLauncher
 
-For CPU 0:
-NUMA 0: cores 0-15,128-143
-NUMA 1: cores 16-31,144-159
-NUMA 2: cores 32-47,160-175
-NUMA 3: cores 48-63,176-191
 
-For CPU 1:
-NUMA 4: cores 64-79,192-207
-NUMA 5: cores 80-95,208-223
-NUMA 6: cores 96-111,224-239
-NUMA 7: cores 112-127,240-255
+config = Config(
+    executors=[
+        FluxExecutor(
+            provider=SlurmProvider(
+                partition="YOUR_PARTITION",  # e.g. "pbatch", "pdebug"
+                account="YOUR_ACCOUNT",
+                launcher=SrunLauncher(overrides="--mpibind=off"),
+                nodes_per_block=1,
+                init_blocks=1,
+                min_blocks=1,
+                max_blocks=1,
+                walltime="00:30:00",
+                # string to prepend to #SBATCH blocks in the submit
+                # script to the scheduler, e.g.: '#SBATCH -t 50'
+                scheduler_options='',
+                # Command to be run before starting a worker, such as:
+                # 'module load Anaconda; source activate parsl_env'.
+                worker_init='',
+                cmd_timeout=120,
+            ),
+        )
+    ]
+)
+
 """
 
 
@@ -238,3 +256,80 @@ def base_config(n_workers: int = 128) -> Config:
         executors=[ThreadPoolExecutor(max_threads=n_workers, label="local_threads")]
     )
     return local_threads
+
+
+def tuo_flux_config(
+    threads_per_task: int = 1,
+    threads_per_node: int = 40,
+    n_jobs: int = 1,
+    queue: str = "dnn-sim",
+    walltime: str = "600m",
+    monitoring: bool = False,
+    memory: str = 192,
+) -> Config:
+    """
+    Returns a Parsl config optimized for running on TUO using Flux (via Slurm).
+
+    Returns:
+        Config: A Parsl configuration object for TUO/Flux.
+    """
+    # Compute workers per node from threads settings
+    #workers_per_node = int(threads_per_node // threads_per_task)
+    #nodes_per_job = 1
+
+    # The config will launch workers from this directory
+    execute_dir = os.getcwd()
+
+    if monitoring:
+        monitoring = MonitoringHub(
+            hub_address=address_by_hostname(),
+            hub_port=55055,
+            monitoring_debug=False,
+        )
+    else:
+        monitoring = None
+
+    flux_cfg = Config(
+        executors=[
+            FluxExecutor(
+                label="flux",
+                provider=SlurmProvider(
+                    # Partition / queue name on TUO
+                    partition=queue,
+                    # Account name (change if needed)
+                    account="generator",
+                    # Commands run before workers launched
+                    worker_init=(
+                        "set -x; "
+                        "echo '--- WORKER_INIT START ---'; "
+                        "hostname; "
+                        "date; "
+                        "source ~/.bashrc; "
+                        "module load gcc; "
+                        "conda activate qtaim_generator; "
+                        "echo 'Loaded conda module'; "
+                        "which python || { echo 'python not found'; exit 1; }; "
+                        "python -c 'import sys, parsl; print(\"PYOK\", sys.version); print(\"PARSL\", parsl.__version__)' || { echo 'Python/parsl import failed'; exit 1; }; "
+                        f"cd {execute_dir} || {{ echo 'cd {execute_dir} failed'; exit 1; }}; "
+                        "pwd; "
+                        f"export OMP_NUM_THREADS={threads_per_task}; "
+                        "export KMP_STACKSIZE=200M; "
+                    ),
+                    # Wall time for batch jobs
+                    walltime=walltime,
+                    # Additional SBATCH options (if needed)
+                    scheduler_options="",
+                    # Launcher configuration for srun
+                    launcher=SrunLauncher(overrides="--mpibind=off"),
+                    nodes_per_block=1,
+                    min_blocks=1,
+                    max_blocks=n_jobs,
+                    cmd_timeout=120,
+                ),
+            ),
+        ],
+        retries=1,
+        # monitoring=monitoring,
+    )
+
+    return flux_cfg, threads_per_node

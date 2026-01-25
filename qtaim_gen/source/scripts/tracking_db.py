@@ -66,6 +66,9 @@ def scan_and_store_parallel(
         "t_becke_fuzzy_density",
         "t_becke_fuzzy_spin",
         "t_bond",
+        "t_other_alie", 
+        "t_other_esp",
+        "t_other_geometry"
     ]
     columns = list(set(columns))  # ensure uniqueness
 
@@ -477,6 +480,7 @@ def log_to_wandb(
     
     # If validation columns exist, log summary stats
     validation_cols = ["val_qtaim", "val_charge", "val_bond", "val_fuzzy", "val_other", "val_time"]
+    
     for col in validation_cols:
         if col in df.columns:
             true_count = df[col].apply(
