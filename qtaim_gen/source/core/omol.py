@@ -3,6 +3,8 @@ import os, stat, json, time, logging
 from typing import Optional, Dict, Any, List
 import subprocess
 
+import zipfile
+
 from qtaim_gen.source.utils.validation import (
     validation_checks,
     get_val_breakdown_from_folder,
@@ -649,6 +651,9 @@ def run_jobs(
                 logger.error(f"Error running {mfwn_file} via subprocess: {e}")
 
             end = time.time()
+            # remove the .mfwn file after running
+            if os.path.exists(mfwn_file):
+                os.remove(mfwn_file)
 
             timings[order] = end - start
             logger.info(f"Completed {order} in {end - start:.2f} seconds")
@@ -1007,6 +1012,7 @@ def clean_jobs(
     txt_files = [i + ".txt" for i in order_of_operations] + ["convert.txt"]
     txt_files += [i + ".out" for i in order_of_operations] + ["convert.out"]
     txt_files += [i for i in ["settings.ini", "convert.out", "convert.txt"]]
+    zip_file_out = os.path.join(folder, "out_files.zip")
     # print all jobs ending in .mfwn
     for file in os.listdir(folder):
         try:
@@ -1016,12 +1022,7 @@ def clean_jobs(
             if file.endswith(".txt"):
                 if file in txt_files:
                     os.remove(os.path.join(folder, file))
-                    logger.info(f"Removed {file}")
-            # keeping out files for now since they are needed for parsing - can be removed after parsing is done
-            if file.endswith(".out"):
-               if file in txt_files:
-                   os.remove(os.path.join(folder, file))
-                   logger.info(f"Removed {file}")
+                    logger.info(f"Removed {file}")                   
             if file.endswith(".molden.input"):
                 os.remove(os.path.join(folder, file))
                 logger.info(f"Removed {file}")
@@ -1042,8 +1043,17 @@ def clean_jobs(
                 if any(f.endswith(".gbw") for f in os.listdir(folder)):
                     os.remove(os.path.join(folder, file))
                     logger.info(f"Removed {file}")
+
         except Exception as e:
             logger.info(f"Couldn't rm file {file}: {e}")
+
+    # zip all out files
+    with zipfile.ZipFile(zip_file_out, "w") as zipf:
+        for file in os.listdir(folder):
+            if file.endswith(".out"):
+                zipf.write(os.path.join(folder, file), arcname=file)
+                os.remove(os.path.join(folder, file))
+                logger.info(f"Zipped and removed {file}")
 
 
 def setup_logger(folder: str, name: str = "gbw_analysis") -> logging.Logger:
