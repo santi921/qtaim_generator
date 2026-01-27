@@ -1004,7 +1004,9 @@ def clean_jobs(
         [order_of_operations.append(i) for i in bond_dict.keys()]
         spin_tf = check_spin(folder)
         fuzzy_dict = fuzzy_data(spin=spin_tf, full_set=full_set)
+        other_dict = other_data_dict(full_set=full_set)
         [order_of_operations.append(i) for i in fuzzy_dict.keys()]
+        [order_of_operations.append(i) for i in other_dict.keys()]
     else:
         order_of_operations = ORDER_OF_OPERATIONS
 
@@ -1055,6 +1057,15 @@ def clean_jobs(
                 zipf.write(os.path.join(folder, file), arcname=file)
                 os.remove(os.path.join(folder, file))
                 logger.info(f"Zipped and removed {file}")
+        if move_results:
+            results_folder = os.path.join(folder, "generator")
+            if not os.path.exists(results_folder):
+                os.mkdir(results_folder)
+            os.rename(
+                zip_file_out,
+                os.path.join(results_folder, "out_files.zip"),
+            )
+            logger.info(f"Moved zipped out files to results folder")
 
 
 def setup_logger(folder: str, name: str = "gbw_analysis") -> logging.Logger:

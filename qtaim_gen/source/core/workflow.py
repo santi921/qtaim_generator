@@ -341,6 +341,7 @@ def process_folder_alcf(
                                     zipf.write(os.path.join(folder, file), arcname=file)
                                     os.remove(os.path.join(folder, file))
                                     logger.info(f"Zipped and removed {file}")
+                    
                     if move_results:
                         # move the zip file to the results folder
                         results_folder = os.path.join(folder, "generator")
@@ -404,6 +405,8 @@ def process_folder_alcf(
             "orca.out",
             "orca.engrad",
             "orca_stderr",
+            "orca.wfn", # this is specific to HPC where we are moving wfns to process 
+            "orca.inp"  # this is specific to HPC where we are moving wfns to process
         ]
         results_folder = os.path.join(folder, "generator")
         for fn in files_to_remove:
