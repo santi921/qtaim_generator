@@ -1018,10 +1018,10 @@ def clean_jobs(
                     os.remove(os.path.join(folder, file))
                     logger.info(f"Removed {file}")
             # keeping out files for now since they are needed for parsing - can be removed after parsing is done
-            # if file.endswith(".out"):
-            #    if file in txt_files:
-            #        os.remove(os.path.join(folder, file))
-            #        logger.info(f"Removed {file}")
+            if file.endswith(".out"):
+               if file in txt_files:
+                   os.remove(os.path.join(folder, file))
+                   logger.info(f"Removed {file}")
             if file.endswith(".molden.input"):
                 os.remove(os.path.join(folder, file))
                 logger.info(f"Removed {file}")
