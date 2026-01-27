@@ -34,16 +34,67 @@ def scan_and_store_parallel(
             logger.info(f"Skipping subset: {job_id}")
 
         if sub_dirs_to_sweep is not None and job_id in sub_dirs_to_sweep:
+            
             logger.info(f"Running subset: {job_id}")
+            if job_id == "omol":
+                # omol is structured jaggedly instead of the others which have a list of folders with jobs directly.
+                omol_path = os.path.join(root_dir, job_id)
+                if not os.path.isdir(omol_path):
+                    continue
 
-            cat_path_path = os.path.join(root_dir, job_id)
-            if not os.path.isdir(cat_path_path):
-                continue
+                # Find all maximally deep folders (leaf directories)
+                def find_leaf_folders(path):
+                    """Recursively find all leaf directories (directories with no subdirectories)."""
+                    leaves = []
+                    subdirs = []
 
-            for subset in os.listdir(cat_path_path):
-                subset_path = os.path.join(cat_path_path, subset)
-                if os.path.isdir(subset_path):
-                    jobs.append((subset_path, full_set, subset, job_id, subset_path))
+                    try:
+                        items = os.listdir(path)
+                    except (PermissionError, OSError) as e:
+                        logger.warning(f"Cannot access {path}: {e}")
+                        return []
+
+                    for item in items:
+                        item_path = os.path.join(path, item)
+                        if os.path.isdir(item_path):
+                            subdirs.append(item_path)
+
+                    if not subdirs:
+                        # This is a leaf directory (no subdirectories)
+                        return [path]
+                    else:
+                        # Recurse into subdirectories
+                        for subdir_path in subdirs:
+                            leaves.extend(find_leaf_folders(subdir_path))
+                        return leaves
+
+                leaf_folders = find_leaf_folders(omol_path)
+
+                # Post-process: if a leaf folder's basename is "generator", use its parent instead
+                processed_folders = set()
+                for folder_path in leaf_folders:
+                    if os.path.basename(folder_path) == "generator":
+                        parent_path = os.path.dirname(folder_path)
+                        processed_folders.add(parent_path)
+                    else:
+                        processed_folders.add(folder_path)
+
+                # Add to jobs list
+                for folder_path in processed_folders:
+                    # Extract a meaningful subset name from the relative path
+                    relative_path = os.path.relpath(folder_path, omol_path)
+                    subset = relative_path.replace(os.sep, "_")
+                    jobs.append((folder_path, full_set, subset, job_id, folder_path))
+
+            else:
+                cat_path_path = os.path.join(root_dir, job_id)
+                if not os.path.isdir(cat_path_path):
+                    continue
+
+                for subset in os.listdir(cat_path_path):
+                    subset_path = os.path.join(cat_path_path, subset)
+                    if os.path.isdir(subset_path):
+                        jobs.append((subset_path, full_set, subset, job_id, subset_path))
     if debug:
         # shuffle jobs to get a representative sample
         random.shuffle(jobs)
@@ -505,7 +556,7 @@ if __name__ == "__main__":
     root_dir = "/lus/eagle/projects/generator/OMol25_postprocessing/"  # Change to your root directory
     db_path = "validation_results.sqlite"
     # scan_test(root_dir, db_path)
-    # scan_and_store_parallel(root_dir, db_path)
+    scan_and_store_parallel(root_dir, db_path)
     print_summary(db_path)
 
     log_to_wandb(

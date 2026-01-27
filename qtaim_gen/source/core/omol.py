@@ -1050,7 +1050,8 @@ def clean_jobs(
     # zip all out files
     with zipfile.ZipFile(zip_file_out, "w") as zipf:
         for file in os.listdir(folder):
-            if file.endswith(".out"):
+            # skip orca.out 
+            if file.endswith(".out") and file != "orca.out":
                 zipf.write(os.path.join(folder, file), arcname=file)
                 os.remove(os.path.join(folder, file))
                 logger.info(f"Zipped and removed {file}")

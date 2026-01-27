@@ -2,6 +2,7 @@ import os
 import logging
 import time
 from parsl import python_app
+import zipfile
 from qtaim_gen.source.core.omol import gbw_analysis
 from typing import Optional, Dict, Any, List
 import shutil
@@ -328,7 +329,31 @@ def process_folder_alcf(
             if not overwrite and tf_validation:
                 logger.info("Skipping %s: already processed and validated", folder)
                 result["status"] = "skipped"
+
+                try: 
+                    # check if there are .out files to zip. If the file out_files.zip already exists, skip
+                    zip_file_out = os.path.join(folder, "out_files.zip")
+                    if not os.path.exists(zip_file_out):
+                        with zipfile.ZipFile(zip_file_out, "w") as zipf:
+                            for file in os.listdir(folder):
+                                # skip orca.out 
+                                if file.endswith(".out") and file != "orca.out":
+                                    zipf.write(os.path.join(folder, file), arcname=file)
+                                    os.remove(os.path.join(folder, file))
+                                    logger.info(f"Zipped and removed {file}")
+                    if move_results:
+                        # move the zip file to the results folder
+                        results_folder = os.path.join(folder, "generator")
+                        if not os.path.exists(results_folder):
+                            os.makedirs(results_folder)
+                        shutil.move(zip_file_out, os.path.join(results_folder, "out_files.zip"))
+                        logger.info(f"Moved out_files.zip to results folder {results_folder}")
+
+                except Exception as e:
+                    logger.info(f"Couldn't zip .out files in {folder}: {e}")
+
                 return result
+            
         except Exception as e:
             logger.warning("Validation check failed for %s: %s", folder, str(e))
             # continue processing
