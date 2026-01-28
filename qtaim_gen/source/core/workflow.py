@@ -252,6 +252,21 @@ def process_folder_alcf(
         "elapsed": None,
         "error": None,
     }
+
+    files_to_remove = [
+        "density_mat.npz",
+        "orca.gbw.zstd0",
+        "orca.gbw",
+        "orca.tar.zst",
+        "orca.inp.orig",
+        "orca.property.txt",
+        "orca.out",
+        "orca.engrad",
+        "orca_stderr",
+        "orca.wfn", # this is specific to HPC where we are moving wfns to process 
+        "orca.inp"  # this is specific to HPC where we are moving wfns to process
+    ]
+
     # normalize to absolute path and set up logger
     # remove root_omol_status from folder name
     folder_inputs = folder
@@ -282,6 +297,7 @@ def process_folder_alcf(
                         )
                 except Exception as e:
                     logger.error(f"Failed to remove {item_path}. Reason: {e}")
+
 
     for item in os.listdir(folder_inputs):
         # skip "density_mat.npz"
@@ -352,6 +368,14 @@ def process_folder_alcf(
 
                 except Exception as e:
                     logger.info(f"Couldn't zip .out files in {folder}: {e}")
+                
+                #results_folder = os.path.join(folder)                
+                for fn in files_to_remove:
+                    fp = os.path.join(folder, fn)
+                    if os.path.exists(fp):
+                        os.remove(fp)
+                        # add log
+                        logger.info("Removed file %s to save space", fp)
 
                 return result
             
@@ -394,21 +418,7 @@ def process_folder_alcf(
         )
         t1: float = time.time()
 
-        # remove density_mat.npz, orca.gbw.zstd0, orca.gbw, orca.tar.zst from results folder
-        files_to_remove = [
-            "density_mat.npz",
-            "orca.gbw.zstd0",
-            "orca.gbw",
-            "orca.tar.zst",
-            "orca.inp.orig",
-            "orca.property.txt",
-            "orca.out",
-            "orca.engrad",
-            "orca_stderr",
-            "orca.wfn", # this is specific to HPC where we are moving wfns to process 
-            "orca.inp"  # this is specific to HPC where we are moving wfns to process
-        ]
-        results_folder = os.path.join(folder, "generator")
+        # remove density_mat.npz, orca.gbw.zstd0, orca.gbw, orca.tar.zst from results folder        
         for fn in files_to_remove:
             fp = os.path.join(folder, fn)
             if os.path.exists(fp):
