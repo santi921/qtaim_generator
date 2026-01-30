@@ -1298,7 +1298,7 @@ def gbw_analysis(
 
             for file in os.listdir(folder):
                 # clean files ending in .tar, .tar.zst, .tgz, .gbw.zstd0, .zstd, .npz
-                check_list = [".tar", ".tar.zst", ".tgz", ".gbw.zstd0", ".zstd", ".npz"]
+                check_list = [".tar", ".tar.zst", ".tgz", ".gbw.zstd0", ".zstd", ".npz", "orca5.gbw"]
                 if any(file.endswith(ext) for ext in check_list):
                     try:
                         os.remove(os.path.join(folder, file))
@@ -1307,7 +1307,6 @@ def gbw_analysis(
                         logger.error(f"Error removing intermediate file {file}: {e}")
 
     if restart:
-
         # check if the timings file exists
         if move_results:
             timings_path = os.path.join(folder, "generator", "timings.json")
