@@ -474,6 +474,7 @@ def run_jobs(
     prof_mem: bool = False,
     full_set: int = 0,
     move_results: bool = False,
+    clean_jobs_tf: bool = False,
 ) -> None:
     """
     Run conversion and multiwfn jobs
@@ -484,6 +485,7 @@ def run_jobs(
         prof_mem(bool): whether to profile memory usage
         full_set(int): whether to use full set of analysis (1) or minimal (0)
         move_results(bool): whether to move results to a separate folder
+        clean_jobs_tf(bool): whether to remove job files after running
 
     """
     if logger is None:
@@ -643,7 +645,6 @@ def run_jobs(
             start = time.time()
 
             # to replace
-            logger.info(f"Process: {mfwn_file}")
             # run the multiwfn wrapper script with explicit cwd to avoid depending on process CWD
             try:
                 subprocess.run(["bash", mfwn_file], cwd=folder, check=True)
@@ -653,7 +654,9 @@ def run_jobs(
             end = time.time()
             # remove the .mfwn file after running
             if os.path.exists(mfwn_file):
-                os.remove(mfwn_file)
+                logger.info(f"Removing file: {mfwn_file}")
+                if clean_jobs_tf:
+                    os.remove(mfwn_file)
 
             timings[order] = end - start
             logger.info(f"Completed {order} in {end - start:.2f} seconds")
@@ -1409,6 +1412,7 @@ def gbw_analysis(
             prof_mem=prof_mem,
             full_set=full_set,
             move_results=move_results,
+            clean_jobs_tf=clean,
         )
 
     print("... Parsing multiwfn output")
