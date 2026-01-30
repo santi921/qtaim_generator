@@ -418,13 +418,14 @@ def process_folder_alcf(
         )
         t1: float = time.time()
 
-        # remove density_mat.npz, orca.gbw.zstd0, orca.gbw, orca.tar.zst from results folder        
-        for fn in files_to_remove:
-            fp = os.path.join(folder, fn)
-            if os.path.exists(fp):
-                os.remove(fp)
-                # add log
-                logger.info("Removed file %s to save space", fp)
+        # remove density_mat.npz, orca.gbw.zstd0, orca.gbw, orca.tar.zst from results folder    
+        if clean:    
+            for fn in files_to_remove:
+                fp = os.path.join(folder, fn)
+                if os.path.exists(fp):
+                    os.remove(fp)
+                    # add log
+                    logger.info("Removed file %s to save space", fp)
 
         result["elapsed"] = t1 - t0
         result["status"] = "ok"
