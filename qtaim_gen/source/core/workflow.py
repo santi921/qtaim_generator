@@ -264,7 +264,7 @@ def process_folder_alcf(
         "orca.engrad",
         "orca_stderr",
         "orca.wfn", # this is specific to HPC where we are moving wfns to process 
-        "orca.inp"  # this is specific to HPC where we are moving wfns to process
+        #"orca.inp"  # this is specific to HPC where we are moving wfns to process
     ]
 
     # normalize to absolute path and set up logger
