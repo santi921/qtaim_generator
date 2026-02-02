@@ -322,8 +322,8 @@ def convert_inp_to_xyz(orca_path: str, output_path: str) -> None:
     xyz_str += spin_charge_line
     # write the atom positions
     for ind, atom in mol_dict["mol"].items():
-
-        atom_line: str = "{} {} {} {}\n".format(
+        # limit floats to 5 decimal places
+        atom_line: str = "{}  {:.5f}  {:.5f}  {:.5f}\n".format(
             atom["element"], sanitize_floats(atom["pos"][0]), sanitize_floats(atom["pos"][1]), sanitize_floats(atom["pos"][2])
         )
         xyz_str += atom_line
