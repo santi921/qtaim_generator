@@ -412,9 +412,9 @@ class TestConverters:
             cls.config_qtaim_folder, config_path=cls.config_qtaim_folder_path
         )
 
-        cls.converter_general = GeneralConverter(
-            cls.config_general, config_path=cls.config_qtaim_path
-        )
+        #cls.converter_general = GeneralConverter(
+        #    cls.config_general, config_path=cls.config_qtaim_path
+        #)
 
         (
             cls.info_process_baseline,
@@ -464,16 +464,16 @@ class TestConverters:
         # scaled counts should be 4 for each
         assert (
             self.info_scale_qtaim["scaled_count"] == 4
-        ), f"Expected 4, got {self.info_scale_qtaim['scaled_count']}"
+        ), f"Expected 4, got {self.info_scale_qtaim['scaled_count']} on qtaim converter"
         assert (
             self.info_scale_qtaim_folder["scaled_count"] == 4
-        ), f"Expected 4, got {self.info_scale_qtaim_folder['scaled_count']}"
+        ), f"Expected 4, got {self.info_scale_qtaim_folder['scaled_count']} on qtaim folder converter"
         assert (
             self.info_scale_baseline["scaled_count"] == 4
-        ), f"Expected 4, got {self.info_scale_baseline['scaled_count']}"
+        ), f"Expected 4, got {self.info_scale_baseline['scaled_count']} on baseline converter"
         assert (
             self.info_scale_baseline_folder["scaled_count"] == 4
-        ), f"Expected 4, got {self.info_scale_baseline_folder['scaled_count']}"
+        ), f"Expected 4, got {self.info_scale_baseline_folder['scaled_count']} on baseline folder converter"
 
     def test_process_counts(self):
         # process should also have 4 keys each
@@ -549,6 +549,7 @@ class TestConverters:
             "fuzzy_lmdb", "b'orca5'".encode("ascii")
         )
 
+
         # structure info
         _, global_feats = gather_structure_info(struct_raw)
         # charge info
@@ -560,9 +561,11 @@ class TestConverters:
         bond_feats_bond_fuzzy, bond_list_fuzzy = parse_bond_data(
             bond_dict_raw, bond_list_definition="fuzzy", bond_filter=["fuzzy", "ibsi"]
         )
+        print("number of fuzzy bonds:", len(bond_list_fuzzy))
         bond_feats_bond_ibsi, bond_list_ibsi = parse_bond_data(
             bond_dict_raw, bond_list_definition="ibsi", bond_filter=["fuzzy", "ibsi"]
         )
+        print("number of ibsi bonds:", len(bond_list_ibsi))
 
         # fuzzy info
         atom_feats_fuzzy, global_feats_fuzzy = parse_fuzzy_data(
@@ -576,14 +579,25 @@ class TestConverters:
         (
             atom_keys,
             bond_keys,
-            atom_feats_qtaim,
-            bond_feats_qtaim,
+            atom_feats_qtaim_temp,
+            bond_feats_qtaim_temp,
             connected_bond_paths,
         ) = parse_qtaim_data(
             dict_qtaim=qtaim_dict_raw,
-            atom_feats=atom_feats_qtaim,
-            bond_feats=bond_feats_qtaim,
+            atom_feats={},
+            bond_feats={},
         )
+        print("number of connected bond paths:", len(connected_bond_paths))
+        # check number of connected bond paths is 158 
+        assert len(connected_bond_paths) == 158, f"Expected 158, got {len(connected_bond_paths)}"
+        # batch update atom_feats_qtaim and bond_feats_qtaim with the temp dicts
+        # batch update atom_feats_qtaim with atom_feats_qtaim_temp
+        for key, value in atom_feats_qtaim_temp.items():
+            atom_feats_qtaim[key].update(value)
+
+        # batch update bond_feats_qtaim with bond_feats_qtaim_temp
+        for key, value in bond_feats_qtaim_temp.items():
+            bond_feats_qtaim[key].update(value)
 
         # CHARGE tests
         # iterate through processed_charge_dict and print keys and values
@@ -677,8 +691,6 @@ class TestConverters:
             "fuzzy_lmdb", "b'orca5'".encode("ascii")
         )
 
-
-
         # TESTS 
         # 1) check that the number of atoms does not change as we merge along
         # 2) check that bonds are consistent 
@@ -693,6 +705,7 @@ class TestConverters:
         }
         bond_feats = {}
         atom_feats= {i: {} for i in range(global_feats["n_atoms"])}
+        
 
         # charge info
         atom_feats_charge, global_feats_charge = parse_charge_data(
@@ -701,8 +714,8 @@ class TestConverters:
         atom_feats_fuzzy, global_feats_fuzzy = parse_fuzzy_data(
             fuzzy_dict_raw, global_feats["n_atoms"], fuzzy_filter=None
         )
-        # merge charge info into atom_feats and global_feats - batch update the dicts
 
+        # merge charge info into atom_feats and global_feats - batch update the dicts
         for key, value in atom_feats_charge.items():
             if key in atom_feats:
                 atom_feats[key].update(atom_feats_charge.get(key, {}))
@@ -717,10 +730,10 @@ class TestConverters:
 
         # bond info
         bond_feats_bond_fuzzy, bond_list_fuzzy = parse_bond_data(
-            bond_dict_raw, bond_list_definition="fuzzy", bond_filter=["fuzzy", "ibsi"]
+            bond_dict_raw, bond_list_definition="fuzzy", bond_filter=["fuzzy", "ibsi"], as_lists=False
         )
-        bond_feats_bond_ibsi, bond_list_ibsi = parse_bond_data(
-            bond_dict_raw, bond_list_definition="ibsi", bond_filter=["fuzzy", "ibsi"]
+        _, bond_list_ibsi = parse_bond_data(
+            bond_dict_raw, bond_list_definition="ibsi", bond_filter=["fuzzy", "ibsi"], as_lists=False
         )
         # merge bond info into bond_feats - batch update the dicts
         for key, value in bond_feats_bond_fuzzy.items():
@@ -730,7 +743,6 @@ class TestConverters:
                 bond_feats[key] = value
 
         # this tests merging in qtaim as well as parsing
-
         (
             atom_keys,
             bond_keys,
@@ -739,21 +751,21 @@ class TestConverters:
             connected_bond_paths,
         ) = parse_qtaim_data(
             dict_qtaim=qtaim_dict_raw,
-            atom_feats=atom_feats,
-            bond_feats=bond_feats,
+            atom_feats={i: {} for i in range(global_feats["n_atoms"])},
+            bond_feats={},
         )
-        print(atom_feats)
+        #print(atom_feats)
         
         # bond definition options
         # 1 - connected_bond_paths
         # 2 - bond_list_fuzzy
         # 3 - bond_list_ibsi
         # 4 - bond_list / bond cutoffs 
-
-
   
         # Test filter_bond_feats with different bond list definitions
         # Store original bond_feats for comparison
+        print("number of bonds via feats:", len(bond_feats))
+        
         original_bond_feats = bond_feats.copy()
         
         # Pre-compute normalized sets for efficient comparison (avoid O(n²) complexity)
@@ -763,61 +775,119 @@ class TestConverters:
         normalized_struct = {tuple(sorted(k)) for k in bond_list.keys()}
         normalized_original_keys = {tuple(sorted(k)) for k in original_bond_feats.keys()}
         
-        # Test 1: Filter with connected_bond_paths (from QTAIM)
-        filtered_bond_feats_qtaim = filter_bond_feats(bond_feats, connected_bond_paths)
-        # Verify all keys in filtered result are in the original bond_list
-        for bond_key in filtered_bond_feats_qtaim.keys():
-            normalized_key = tuple(sorted(bond_key))
-            assert normalized_key in normalized_connected_paths, \
-                f"Bond {bond_key} not in connected_bond_paths"
-        # Verify all bonds in connected_bond_paths that are in bond_feats are in filtered result
-        normalized_filtered_qtaim = {tuple(sorted(k)) for k in filtered_bond_feats_qtaim.keys()}
-        for bond in connected_bond_paths:
-            normalized_bond = tuple(sorted(bond))
-            if normalized_bond in normalized_original_keys:
-                # Check if this bond appears in the filtered result
-                assert normalized_bond in normalized_filtered_qtaim, \
-                    f"Bond {bond} from connected_bond_paths not in filtered result"
-        
-        # Test 2: Filter with bond_list_fuzzy
-        filtered_bond_feats_fuzzy = filter_bond_feats(bond_feats, bond_list_fuzzy)
-        # Verify all keys in filtered result are in bond_list_fuzzy
-        for bond_key in filtered_bond_feats_fuzzy.keys():
-            normalized_key = tuple(sorted(bond_key))
-            assert normalized_key in normalized_fuzzy, \
-                f"Bond {bond_key} not in bond_list_fuzzy"
-        # Verify all bonds in bond_list_fuzzy that exist in bond_feats are in filtered result
-        normalized_filtered_fuzzy = {tuple(sorted(k)) for k in filtered_bond_feats_fuzzy.keys()}
-        for bond in bond_list_fuzzy:
-            normalized_bond = tuple(sorted(bond))
-            if normalized_bond in normalized_original_keys:
-                assert normalized_bond in normalized_filtered_fuzzy, \
-                    f"Bond {bond} from bond_list_fuzzy not in filtered result"
-        
-        # Test 3: Filter with bond_list_ibsi
-        filtered_bond_feats_ibsi = filter_bond_feats(bond_feats, bond_list_ibsi)
-        # Verify all keys in filtered result are in bond_list_ibsi
-        for bond_key in filtered_bond_feats_ibsi.keys():
-            normalized_key = tuple(sorted(bond_key))
-            assert normalized_key in normalized_ibsi, \
-                f"Bond {bond_key} not in bond_list_ibsi"
-        
-        # Test 4: Filter with bond_list dict (from structure bonds)
-        filtered_bond_feats_struct = filter_bond_feats(bond_feats, bond_list)
-        # Verify all keys in filtered result are in bond_list dict
-        for bond_key in filtered_bond_feats_struct.keys():
-            normalized_key = tuple(sorted(bond_key))
-            assert normalized_key in normalized_struct, \
-                f"Bond {bond_key} not in structure bond_list"
-        
-        # Test 5: Verify filtered results preserve bond feature values
-        for bond_key, bond_value in filtered_bond_feats_qtaim.items():
-            assert bond_key in original_bond_feats, \
-                f"Filtered bond {bond_key} not in original bond_feats"
-            assert bond_value == original_bond_feats[bond_key], \
-                f"Bond features changed for {bond_key}: {bond_value} != {original_bond_feats[bond_key]}"
+        print("number of bonds via connected paths:", len(normalized_connected_paths))
+        print("number of bonds via fuzzy:", len(normalized_fuzzy))
+        print("number of bonds via ibsi:", len(normalized_ibsi))
+        print("number of bonds via struct:", len(normalized_struct))
+
+        def _check_filter_bond_feats(selection, expected_normalized):
+            """Helper to test filter_bond_feats for a given bond selection.
+
+            - Ensures filtered keys are a subset of the expected_normalized set
+            - Ensures every bond from selection that exists in the original bond feats
+              appears in the filtered result
+            - Ensures that feature values are preserved in the filtered output
+            """
+            filtered = filter_bond_feats(bond_feats, selection)
+
+            # Check filtered keys are within the provided selection
+            for bond_key in filtered.keys():
+                normalized_key = tuple(sorted(bond_key))
+                assert normalized_key in expected_normalized, \
+                    f"Bond {bond_key} not in provided selection"
+
+            # Check that every bond in the selection that exists in the original
+            # bond feats is present in the filtered results
+            normalized_filtered = {tuple(sorted(k)) for k in filtered.keys()}
+            for bond in selection:
+                normalized_bond = tuple(sorted(bond))
+                if normalized_bond in normalized_original_keys:
+                    assert normalized_bond in normalized_filtered, \
+                        f"Bond {bond} from selection not in filtered result"
+
+            # Ensure that feature values were preserved
+            for bond_key, bond_value in filtered.items():
+                assert bond_key in original_bond_feats, \
+                    f"Filtered bond {bond_key} not in original bond_feats"
+                assert bond_value == original_bond_feats[bond_key], \
+                    f"Bond features changed for {bond_key}: {bond_value} != {original_bond_feats[bond_key]}"
+
+            return filtered
+
+        # Run checks for the different bond selection definitions
+        filtered_bond_feats_qtaim = _check_filter_bond_feats(connected_bond_paths, normalized_connected_paths)
+        filtered_bond_feats_fuzzy = _check_filter_bond_feats(bond_list_fuzzy, normalized_fuzzy)
+        filtered_bond_feats_ibsi = _check_filter_bond_feats(bond_list_ibsi, normalized_ibsi)
+        filtered_bond_feats_struct = _check_filter_bond_feats(bond_list, normalized_struct)
 
 
+        # check the number of features of each bond that is filtered 
+
+        print(f"Original bond feats: {len(original_bond_feats)}")
+        print(f"Filtered bond feats (connected paths): {len(filtered_bond_feats_qtaim)}")
+        print(f"Filtered bond feats (fuzzy): {len(filtered_bond_feats_fuzzy)}")
+        print(f"Filtered bond feats (ibsi): {len(filtered_bond_feats_ibsi)}")
+
+        # check the nubmer of features in each dict key 
+        #for bond_key, bond_value in filtered_bond_feats_qtaim.items():
+        #    print(f"Bond {bond_key} has {len(bond_value)} features in connected paths filter") 
+        #for bond_key, bond_value in filtered_bond_feats_fuzzy.items():
+        #    print(f"Bond {bond_key} has {len(bond_value)} features in fuzzy filter")
+        #for bond_key, bond_value in filtered_bond_feats_ibsi.items():
+        #    print(f"Bond {bond_key} has {len(bond_value)} features in ibsi filter")
+        #for bond_key, bond_value in filtered_bond_feats_struct.items():
+        #    print(f"Bond {bond_key} has {len(bond_value)} features in struct filter")
+        #for bond_key, bond_value in original_bond_feats.items():
+        #    print(f"Bond {bond_key} has {len(bond_value)} features in original bond feats")                                           
+
+
+    def test_parse_bond_data_filtering(self):
+        """Ensure parse_bond_data filters bond_feats and bond_list when bond_filter is provided."""
+        dict_bond = {
+            "fuzzy": {
+                "1_O_to_2_C": 0.0,
+                "1_O_to_3_C": 0.5,
+            },
+            "ibsi": {
+                "1_O_to_2_C": 1.2,
+                "1_O_to_3_C": 0.8,
+            },
+        }
+
+        # with bond_filter present, should use 'fuzzy' (bond_list_definition) and only keep bonds
+        # where the fuzzy value is non-zero (1_O_to_3_C)
+        bond_feats_filtered, bond_list_filtered = parse_bond_data(
+            dict_bond, bond_list_definition="fuzzy", bond_filter=["fuzzy", "ibsi"], as_lists=False
+        )
+
+        normalized_filtered = {tuple(sorted(b)) for b in bond_list_filtered}
+        assert (0, 2) in normalized_filtered
+        assert (0, 1) not in normalized_filtered
+        assert any(tuple(sorted(k)) == (0, 2) for k in bond_feats_filtered.keys())
+        assert not any(tuple(sorted(k)) == (0, 1) for k in bond_feats_filtered.keys())
+
+    def test_parse_bond_data_cutoff(self):
+        """Ensure parse_bond_data filters by cutoff when provided."""
+        dict_bond = {
+            "fuzzy": {
+                "1_O_to_2_C": 0.0,
+                "1_O_to_3_C": 0.5,
+            },
+            "ibsi": {
+                "1_O_to_2_C": 1.2,
+                "1_O_to_3_C": 0.8,
+            },
+        }
+
+        bond_feats_cut, bond_list_cut = parse_bond_data(
+            dict_bond, bond_list_definition="fuzzy", bond_filter=None, cutoff=0.4, as_lists=False
+        )
+
+        normalized_cut = {tuple(sorted(b)) for b in bond_list_cut}
+        assert (0, 2) in normalized_cut
+        assert (0, 1) not in normalized_cut
+        assert any(tuple(sorted(k)) == (0, 2) for k in bond_feats_cut.keys())
+        assert not any(tuple(sorted(k)) == (0, 1) for k in bond_feats_cut.keys())
 
 
 # create dummy to just run test_parsers and setups

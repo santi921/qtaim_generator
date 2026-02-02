@@ -34,6 +34,9 @@ from qtaim_gen.source.utils.lmdbs import (
     get_elements_from_structure_lmdb_folder_list,
     parse_charge_data,
     parse_qtaim_data,
+    parse_fuzzy_data,
+    parse_other_data,
+    parse_bond_data,
     gather_structure_info
 )
 from qtaim_gen.source.core.qtaim_embed import (
@@ -317,7 +320,7 @@ class Converter:
             lock=False,
             readahead=True,
             meminit=False,
-            max_readers=1,
+            max_readers=126,
             map_async=True,
             map_size=map_size,
         )
@@ -417,24 +420,39 @@ class Converter:
                     return
 
             cursor = txn_in.cursor()
+            items = list(cursor)
             scaled_count = 0
-            
-            for key, value in cursor:
+
+            # Diagnostic logging: report key counts and examples
+            try:
+                key_strs = [k.decode("ascii") if isinstance(k, bytes) else str(k) for k, _ in items]
+            except Exception:
+                key_strs = [str(k) for k, _ in items]
+            self.logger.debug(f"scale_graphs_single: total keys in cursor: {len(key_strs)}")
+            self.logger.debug(f"scale_graphs_single: example keys: {key_strs[:20]}")
+
+            skipped_by_skip_keys = 0
+            skipped_by_filter_list = 0
+
+            for key, value in items:
                 # normalize key to string so comparisons and writes are consistent
                 if isinstance(key, bytes):
                     key_str = key.decode("ascii")
                 else:
                     key_str = str(key)
-
                 if key_str in self.skip_keys:
+                    skipped_by_skip_keys += 1
                     self.logger.debug(f"Skipping key {key_str} as it is in the skip list.")
                     continue
 
                 if key_str not in self.config_dict["filter_list"]:
-                    #print("key_str: ", key_str)
-                    # print(key.decode("ascii"))
-                    graph = load_dgl_graph_from_serialized(pickle.loads(value))
-                    #print(graph)
+                    # process graph
+                    try:
+                        graph = load_dgl_graph_from_serialized(pickle.loads(value))
+                    except Exception as e:
+                        self.logger.exception(f"Failed to load graph for key {key_str}: {e}")
+                        continue
+                    # apply scalers
                     graph = feature_scaler([graph])
                     graph = label_scaler(graph)
 
@@ -447,6 +465,11 @@ class Converter:
                     )
                     txn.commit()
                     scaled_count += 1
+                else:
+                    skipped_by_filter_list += 1
+
+            # Report diagnostics
+            self.logger.debug(f"scale_graphs_single: processed {scaled_count} keys; skipped_by_skip_keys={skipped_by_skip_keys}, skipped_by_filter_list={skipped_by_filter_list}")
 
             # set the scaled flag to True in the LMDB file and on the class 
             self.scaled = True
@@ -460,7 +483,7 @@ class Converter:
             if return_info:
                 return {
                     "scaled_count": scaled_count,
-                    "total_count": len(list(cursor)),
+                    "total_count": len(items),
                 }
 
 
@@ -752,8 +775,9 @@ class BaseConverter(Converter):
                     include_locs=self.index_dict["include_locs"],
                     exclude_locs=self.index_dict["exclude_locs"],
                 )
-                
-            except:
+
+            except Exception as e:
+                self.logger.warning(f"Failed to build graph for {key.decode('ascii')}: {e}")
                 self.fail_log_dict["graph"].append(key.decode("ascii"))
                 continue
 
@@ -770,8 +794,8 @@ class BaseConverter(Converter):
                 processed_count += 1
 
             except Exception as e:
+                self.logger.warning(f"Failed to update scaler for {key.decode('ascii')}: {e}")
                 self.fail_log_dict["scaler"].append(key.decode("ascii"))
-                self.logger.debug(f"Exception adding graph to scaler for key {key}: {str(e)}")
                 continue
 
         ret_dict = self.finalize(return_info=return_info, keys_to_iterate=keys_to_iterate, processed_count=processed_count)
@@ -955,7 +979,8 @@ class QTAIMConverter(Converter):
                     exclude_locs=self.index_dict["exclude_locs"],
                 )
                 
-            except:
+            except Exception as e:
+                self.logger.warning(f"Failed to build graph for {key.decode('ascii')}: {e}")
                 self.fail_log_dict["graph"].append(key.decode("ascii"))
                 continue
 
@@ -971,7 +996,8 @@ class QTAIMConverter(Converter):
                 txn.commit()
                 processed_count += 1
 
-            except:
+            except Exception as e:
+                self.logger.warning(f"Failed to update scaler for {key.decode('ascii')}: {e}")
                 self.fail_log_dict["scaler"].append(key.decode("ascii"))
                 continue
 
@@ -996,12 +1022,25 @@ class GeneralConverter(Converter):
             "other": []
         }
 
-        self.bonding_scheme = self.config_dict.get("bonding_scheme", "qtaim")
+        self.bonding_scheme = self.config_dict.get("bonding_scheme", "structural")
         self.data_inputs = self.config_dict.get("data_inputs", ["geom", "qtaim", "charge"]) # add fuzzy_full, bonds, other as possible data inputs
         
         if config_dict.get("charge_filter", None) is not None:
             self.charge_filter = config_dict["charge_filter"]
-        
+
+        # Optional filters for fuzzy and other data
+        self.fuzzy_filter = config_dict.get("fuzzy_filter", None)
+        self.other_filter = config_dict.get("other_filter", None)
+
+        # Bond parsing options (for bonding_scheme="bonding")
+        self.bond_filter = config_dict.get("bond_filter", None)  # e.g., ["fuzzy", "ibsi"]
+        self.bond_cutoff = config_dict.get("bond_cutoff", None)  # e.g., 0.3 for fuzzy threshold
+        self.bond_list_definition = config_dict.get("bond_list_definition", "fuzzy")  # which bond type defines connectivity
+
+        # Missing data strategy: "skip" (default) or "sentinel" (fill with NaN)
+        self.missing_data_strategy = config_dict.get("missing_data_strategy", "skip")
+        self.sentinel_value = config_dict.get("sentinel_value", float("nan"))
+
         # assert that for each data input, the corresponding LMDB is in the config dict in "lmdb_locations"
     
         for data_input in self.data_inputs:
@@ -1024,10 +1063,14 @@ class GeneralConverter(Converter):
         Main loop for processing the LMDB files and generating the graphs.
         """
         self.logger.info("Starting GeneralConverter processing...")
-        
+
         keys_to_iterate = self.lmdb_dict["geom_lmdb"]["keys"]
         self.logger.info(f"Total keys to iterate: {len(keys_to_iterate)}")
-        
+
+        # Batching configuration for LMDB commits
+        batch_size = self.config_dict.get("batch_size", 500)
+        write_buffer = []  # Buffer for batched writes
+
         processed_count = 0
         for key in keys_to_iterate:
             
@@ -1075,24 +1118,29 @@ class GeneralConverter(Converter):
                     atom_feats_charge, global_dipole_feats = parse_charge_data(
                         dict_charge_raw, global_feats["n_atoms"], self.charge_filter
                     )
-                    
+
                     # add atom_feats[0].keys() and global_feats.keys() to the grapher keys if they are not already there
                     if not self.grapher:
-                        for key in atom_feats_charge[0].keys():
-                            if key not in self.keys_data["atom"]:
-                                self.keys_data["atom"].append(key)
-                        for key in global_dipole_feats.keys():
-                            if key not in self.keys_data["global"]:
-                                self.keys_data["global"].append(key)
-                                
+                        for feat_key in atom_feats_charge[0].keys():
+                            if feat_key not in self.keys_data["atom"]:
+                                self.keys_data["atom"].append(feat_key)
+                        for feat_key in global_dipole_feats.keys():
+                            if feat_key not in self.keys_data["global"]:
+                                self.keys_data["global"].append(feat_key)
+
                     global_feats.update(global_dipole_feats)
                     atom_feats.update(atom_feats_charge)
                 else:
                     self.fail_log_dict["charge"].append(key.decode("ascii"))
-                    continue
-            except:
+                    if self.missing_data_strategy == "skip":
+                        continue
+                    # sentinel strategy: proceed without charge data (features will be missing)
+                    self.logger.debug(f"Missing charge data for {key.decode('ascii')}, using sentinel strategy")
+            except Exception as e:
+                self.logger.warning(f"Failed to parse charge data for {key.decode('ascii')}: {e}")
                 self.fail_log_dict["charge"].append(key.decode("ascii"))
-                continue
+                if self.missing_data_strategy == "skip":
+                    continue
             
             try:
                 dict_qtaim_raw = self.__getitem__("qtaim_lmdb", key)
@@ -1124,41 +1172,122 @@ class GeneralConverter(Converter):
             try:
                 dict_fuzzy_raw = self.__getitem__("fuzzy_full_lmdb", key)
                 if dict_fuzzy_raw != None:
-                    #TODO
-                    pass
-                    #n_atoms=len(data_raw["mbis_fuzzy_density"])-2 #. or just use n_atoms from above
+                    # parse fuzzy data
+                    atom_feats_fuzzy, global_fuzzy_feats = parse_fuzzy_data(
+                        dict_fuzzy_raw, global_feats["n_atoms"], self.fuzzy_filter
+                    )
 
+                    # add keys to grapher if not already there
+                    if not self.grapher:
+                        for feat_key in atom_feats_fuzzy.get(0, {}).keys():
+                            if feat_key not in self.keys_data["atom"]:
+                                self.keys_data["atom"].append(feat_key)
+                        for feat_key in global_fuzzy_feats.keys():
+                            if feat_key not in self.keys_data["global"]:
+                                self.keys_data["global"].append(feat_key)
+
+                    global_feats.update(global_fuzzy_feats)
+                    for atom_idx, fuzzy_feats in atom_feats_fuzzy.items():
+                        if atom_idx in atom_feats:
+                            atom_feats[atom_idx].update(fuzzy_feats)
+                        else:
+                            atom_feats[atom_idx] = fuzzy_feats
                 else:
                     self.fail_log_dict["fuzzy"].append(key.decode("ascii"))
                     self.logger.debug(f"Failed to retrieve Fuzzy data for key: {key}")
-                    continue
+                    if self.missing_data_strategy == "skip":
+                        continue
+                    # sentinel strategy: proceed without fuzzy data
 
             except Exception as e:
                 self.fail_log_dict["fuzzy"].append(key.decode("ascii"))
                 self.logger.debug(f"Exception retrieving Fuzzy data for key {key}: {str(e)}")
-                continue
+                if self.missing_data_strategy == "skip":
+                    continue
         
             try:
                 dict_other_raw = self.__getitem__("other_lmdb", key)
-                #print("qtaim raw data: ", dict_qtaim_raw["0"].keys())
                 if dict_other_raw != None:
-                    #TODO
-                    pass
+                    # parse other data (returns global-level features only)
+                    global_other_feats = parse_other_data(
+                        dict_other_raw, self.other_filter
+                    )
+
+                    # add keys to grapher if not already there
+                    if not self.grapher:
+                        for feat_key in global_other_feats.keys():
+                            if feat_key not in self.keys_data["global"]:
+                                self.keys_data["global"].append(feat_key)
+
+                    global_feats.update(global_other_feats)
                 else:
                     self.fail_log_dict["other"].append(key.decode("ascii"))
                     self.logger.debug(f"Failed to retrieve Other data for key: {key}")
-                    continue
+                    if self.missing_data_strategy == "skip":
+                        continue
+                    # sentinel strategy: proceed without other data
 
             except Exception as e:
                 self.fail_log_dict["other"].append(key.decode("ascii"))
                 self.logger.debug(f"Exception retrieving Other data for key {key}: {str(e)}")
-                continue
-        
-            # TODO: deal with bonding definitions here, select 
+                if self.missing_data_strategy == "skip":
+                    continue
+
+            # Parse bonds LMDB if available (for bonding_scheme="bonding")
+            bonds_from_lmdb = None
+            bond_feats_from_lmdb = None
+            try:
+                dict_bonds_raw = self.__getitem__("bonds_lmdb", key)
+                if dict_bonds_raw is not None:
+                    # parse bond data using parse_bond_data
+                    bond_feats_from_lmdb, bonds_from_lmdb = parse_bond_data(
+                        dict_bonds_raw,
+                        bond_filter=self.bond_filter,
+                        cutoff=self.bond_cutoff,
+                        bond_list_definition=self.bond_list_definition,
+                        bond_feats=None,  # start fresh, merge later
+                        clean=True,
+                        as_lists=False,
+                    )
+
+                    # add bond keys to grapher if not already there
+                    if not self.grapher and bond_feats_from_lmdb:
+                        sample_bond = next(iter(bond_feats_from_lmdb.values()), {})
+                        for feat_key in sample_bond.keys():
+                            if feat_key not in self.keys_data["bond"]:
+                                self.keys_data["bond"].append(feat_key)
+
+                    # merge bond features into existing bond_feats
+                    if bond_feats_from_lmdb:
+                        for bond_key, bond_value in bond_feats_from_lmdb.items():
+                            if bond_key in bond_feats:
+                                bond_feats[bond_key].update(bond_value)
+                            else:
+                                bond_feats[bond_key] = bond_value
+                else:
+                    self.fail_log_dict["bonds"].append(key.decode("ascii"))
+                    self.logger.debug(f"Failed to retrieve Bonds data for key: {key}")
+            except Exception as e:
+                self.fail_log_dict["bonds"].append(key.decode("ascii"))
+                self.logger.debug(f"Exception retrieving Bonds data for key {key}: {str(e)}")
+
+            # Select bond definitions based on configured scheme
+            # connected_bond_paths comes from QTAIM, bond_list comes from structure
             if self.bonding_scheme == "qtaim":
                 selected_bond_definitions = connected_bond_paths
             elif self.bonding_scheme == "bonding":
-                selected_bond_definitions = bonding_list_bond_info
+                # Use bonds from bonds_lmdb if available, otherwise fall back
+                if bonds_from_lmdb is not None:
+                    # Convert tuples to dict format expected by MoleculeWrapper
+                    selected_bond_definitions = {
+                        tuple(sorted(b)): None for b in bonds_from_lmdb
+                    }
+                else:
+                    self.logger.warning(
+                        f"bonding_scheme='bonding' but bonds_lmdb not available. "
+                        f"Falling back to structural bonds for key {key.decode('ascii')}"
+                    )
+                    selected_bond_definitions = bond_list
             else:
                 selected_bond_definitions = bond_list
 
@@ -1233,8 +1362,9 @@ class GeneralConverter(Converter):
                     include_locs=self.index_dict["include_locs"],
                     exclude_locs=self.index_dict["exclude_locs"],
                 )
-                
-            except:
+
+            except Exception as e:
+                self.logger.warning(f"Failed to build graph for {key.decode('ascii')}: {e}")
                 self.fail_log_dict["graph"].append(key.decode("ascii"))
                 continue
 
@@ -1242,23 +1372,41 @@ class GeneralConverter(Converter):
                 self.feature_scaler_iterative.update([graph])
                 self.label_scaler_iterative.update([graph])
 
-                txn = self.db.begin(write=True)
-                txn.put(
+                # Add to write buffer instead of committing immediately
+                write_buffer.append((
                     f"{key_str}".encode("ascii"),
                     pickle.dumps(serialize_dgl_graph(graph, ret=True), protocol=-1),
-                )
-                txn.commit()
+                ))
                 processed_count += 1
 
-            except:
+                # Batch commit when buffer reaches batch_size
+                if len(write_buffer) >= batch_size:
+                    txn = self.db.begin(write=True)
+                    for buf_key, buf_value in write_buffer:
+                        txn.put(buf_key, buf_value)
+                    txn.commit()
+                    self.logger.debug(f"Committed batch of {len(write_buffer)} items")
+                    write_buffer.clear()
+
+            except Exception as e:
+                self.logger.warning(f"Failed to update scaler for {key.decode('ascii')}: {e}")
                 self.fail_log_dict["scaler"].append(key.decode("ascii"))
                 continue
-            
+
+        # Flush remaining items in buffer
+        if write_buffer:
+            txn = self.db.begin(write=True)
+            for buf_key, buf_value in write_buffer:
+                txn.put(buf_key, buf_value)
+            txn.commit()
+            self.logger.debug(f"Committed final batch of {len(write_buffer)} items")
+            write_buffer.clear()
+
         ret_info = self.finalize(return_info=return_info, keys_to_iterate=keys_to_iterate, processed_count=processed_count)
         if return_info:
             return ret_info
 
-    
+
 class ASELMDBConverter:
     # TODO: last class to implement
     pass
