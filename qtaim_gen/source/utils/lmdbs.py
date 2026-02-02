@@ -263,7 +263,7 @@ def inp_files_2_lmdbs(
     chunk_size: int,
     clean: Optional[bool] = True,
     merge: Optional[bool] = True,
-    move_files: Optional[bool] = False,
+    #move_files: Optional[bool] = False,
 ):
     """
     Converts orca inp files into lmdbs at scale.
@@ -275,12 +275,7 @@ def inp_files_2_lmdbs(
         clean (Optional[bool], optional): If True, delete the input files. Defaults to False.
         move_files (Optional[bool], optional): If files were moved into separate ./generator/ folders in each job
     """
-    if move_files: 
-        files = glob(
-            root_dir + "*/generator/*.inp"
-        )
-    else:
-        files = glob(root_dir + "*/*.inp")
+    files = glob(root_dir + "*/*.inp")
     chunk_ind = 1
 
     for chunk in split_list(files, chunk_size):

@@ -376,7 +376,6 @@ def convert_structure_with_stats(
         chunk_size=chunk_size,
         clean=clean,
         merge=merge,
-        move_files=move_files,
     )
 
     # Log first entry from the resulting LMDB
@@ -405,7 +404,6 @@ def convert_structure(
         chunk_size=chunk_size,
         clean=clean,
         merge=merge,
-        move_files=move_files,
     )
     print(f"  -> {os.path.join(out_dir, out_lmdb)}")
 
