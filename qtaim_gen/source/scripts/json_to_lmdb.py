@@ -258,6 +258,7 @@ def convert_json_with_stats(
     move_files: bool,
     logger: logging.Logger,
     full_set: int = 0,
+    limit: Optional[int] = None,
 ) -> ConversionStats:
     """Convert JSON files with detailed statistics tracking."""
     stats = ConversionStats(data_type=data_type)
@@ -270,6 +271,12 @@ def convert_json_with_stats(
         pattern = os.path.join(root_dir, "*/", f"{data_type}.json")
 
     files = glob(pattern)
+
+    # Apply debug limit
+    if limit is not None:
+        files = files[:min(limit, len(files))]
+        logger.debug(f"Debug mode: limiting to {len(files)} files")
+
     stats.files_found = len(files)
     logger.info(f"Found {stats.files_found} {data_type}.json files")
 
@@ -318,6 +325,7 @@ def convert_json_with_stats(
         clean=clean,
         merge=merge,
         move_files=move_files,
+        limit=limit,
     )
 
     # Log first entry from the resulting LMDB
@@ -336,6 +344,7 @@ def convert_structure_with_stats(
     clean: bool,
     merge: bool,
     logger: logging.Logger,
+    limit: Optional[int] = None,
 ) -> ConversionStats:
     """Convert ORCA .inp files to structure LMDB with statistics."""
     stats = ConversionStats(data_type="structure")
@@ -343,8 +352,16 @@ def convert_structure_with_stats(
     pattern = os.path.join(root_dir, "*/*.inp")
 
     files = glob(pattern)
+    total_found = len(files)
+
+    # Apply debug limit
+    if limit is not None:
+        files = files[:min(limit, len(files))]
+        logger.debug(f"Debug mode: limiting to {len(files)} of {total_found} files")
+
     stats.files_found = len(files)
-    logger.info(f"Found {stats.files_found} .inp files for structure conversion")
+    logger.info(f"Found {stats.files_found} .inp files for structure conversion" +
+                (f" (limited from {total_found})" if limit else ""))
 
     if stats.files_found == 0:
         logger.warning(f"No .inp files found matching pattern: {pattern}")
@@ -373,6 +390,7 @@ def convert_structure_with_stats(
         chunk_size=chunk_size,
         clean=clean,
         merge=merge,
+        limit=limit,
     )
 
     # Log first entry from the resulting LMDB
@@ -528,6 +546,16 @@ Examples:
     )
 
     parser.add_argument(
+        "--debug",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Debug mode: only process first N folders (default: 100 if flag used without value)",
+        nargs="?",
+        const=100,
+    )
+
+    parser.add_argument(
         "--verbose", "-v",
         action="store_true",
         help="Enable verbose logging output",
@@ -570,6 +598,7 @@ Examples:
     move_files = args.move_files
     prefix = args.prefix
     full_set = args.full_set
+    debug_limit = args.debug
 
     # Setup logging
     logger = setup_logging(verbose=args.verbose, log_file=args.log_file)
@@ -585,6 +614,8 @@ Examples:
     logger.info(f"Clean intermediate:  {clean}")
     logger.info(f"Generator subfolders: {move_files}")
     logger.info(f"Validation level:    {full_set} ({'baseline' if full_set == 0 else 'extended' if full_set == 1 else 'full'})")
+    if debug_limit:
+        logger.info(f"DEBUG MODE:          Limited to {debug_limit} folders")
     logger.info("")
 
     # Convert each type and collect statistics
@@ -606,6 +637,7 @@ Examples:
                     clean=clean,
                     merge=merge,
                     logger=logger,
+                    limit=debug_limit,
                 )
             else:
                 stats = convert_json_with_stats(
@@ -619,6 +651,7 @@ Examples:
                     move_files=move_files,
                     logger=logger,
                     full_set=full_set,
+                    limit=debug_limit,
                 )
 
             all_stats.append(stats)

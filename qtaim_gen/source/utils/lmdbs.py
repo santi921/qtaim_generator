@@ -210,6 +210,7 @@ def json_2_lmdbs(
     clean: Optional[bool] = True,
     merge: Optional[bool] = True,
     move_files: Optional[bool] = False,
+    limit: Optional[int] = None,
 ):
     """Converts folders of output json files to lmdb files.
     Args:
@@ -220,6 +221,7 @@ def json_2_lmdbs(
         chunk_size (int): Size of the chunks to split the data into.
         clean (Optional[bool], optional): If True, delete the json files. Defaults to False.
         move_files (Optional[bool], optional): If files were moved into separate ./generator/ folders in each job
+        limit (Optional[int], optional): Limit number of files to process (for debugging).
     """
     chunk_ind = 1
     if move_files:
@@ -228,7 +230,11 @@ def json_2_lmdbs(
         )
     else:
         files_target = glob(root_dir + "*/{}.json".format(data_type))
-    
+
+    # Apply limit for debug mode
+    if limit is not None:
+        files_target = files_target[:min(limit, len(files_target))]
+
     for chunk in split_list(files_target, chunk_size):
         data_dict = {}
         for file in chunk:
@@ -265,6 +271,7 @@ def inp_files_2_lmdbs(
     chunk_size: int,
     clean: Optional[bool] = True,
     merge: Optional[bool] = True,
+    limit: Optional[int] = None,
 ):
     """
     Converts orca inp files into lmdbs at scale.
@@ -274,8 +281,14 @@ def inp_files_2_lmdbs(
         out_lmdb (str): Output lmdb file.
         chunk_size (int): Size of the chunks to split the data into.
         clean (Optional[bool], optional): If True, delete the input files. Defaults to False.
+        limit (Optional[int], optional): Limit number of files to process (for debugging).
     """
     files = glob(root_dir + "*/*.inp")
+
+    # Apply limit for debug mode
+    if limit is not None:
+        files = files[:min(limit, len(files))]
+
     chunk_ind = 1
 
     for chunk in split_list(files, chunk_size):
