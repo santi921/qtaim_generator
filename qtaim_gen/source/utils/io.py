@@ -295,6 +295,23 @@ def convert_inp_to_xyz(orca_path: str, output_path: str) -> None:
     Returns:
         None
     """
+    def sanitize_floats(value: str) -> float:
+        """
+        [23:07:05] Cannot convert '-1.0209306831e-05' to double on line 2
+        [23:07:05] Cannot convert '7.4912088061e-05' to double on line 4
+        [23:07:05] Cannot convert '-2.6e-14' to double on line 2
+        [23:07:06] Cannot convert '-2.7829e-10' to double on line 2
+        Utility to sanitize float strings from ORCA input files.
+        """
+        try:
+            return float(value)
+        except ValueError:
+            # handle scientific notation with 'e' or 'E'
+            if "e" in value or "E" in value:
+                base, exponent = value.split("e") if "e" in value else value.split("E")
+                return float(base) * (10 ** float(exponent))
+            else:
+                raise ValueError(f"Cannot convert {value} to float.")
 
     mol_dict: Dict[str, Any] = dft_inp_to_dict(orca_path, parse_charge_spin=True)
 
@@ -307,7 +324,7 @@ def convert_inp_to_xyz(orca_path: str, output_path: str) -> None:
     for ind, atom in mol_dict["mol"].items():
 
         atom_line: str = "{} {} {} {}\n".format(
-            atom["element"], atom["pos"][0], atom["pos"][1], atom["pos"][2]
+            atom["element"], sanitize_floats(atom["pos"][0]), sanitize_floats(atom["pos"][1]), sanitize_floats(atom["pos"][2])
         )
         xyz_str += atom_line
 
