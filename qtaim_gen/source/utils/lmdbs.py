@@ -138,20 +138,11 @@ def merge_lmdbs(db_paths: str, out_path: str, output_file: str):
         with env_out.begin(write=True) as txn_out, env_in.begin(write=False) as txn_in:
             cursor = txn_in.cursor()
             for key, value in cursor:
-
-                if key.decode("ascii") != "length":
-                    # print(key.decode("ascii"))
-                    try:
-                        # int(key.decode("ascii"))
-                        txn_out.put(
-                            f"{key}".encode("ascii"),
-                            value,
-                        )
-                        idx += 1
-                        # print(idx)
-                    # write properties
-                    except ValueError:
-                        txn_out.put(key, value)
+                key_str = key.decode("ascii")
+                if key_str != "length":
+                    # key is already bytes, use it directly
+                    txn_out.put(key, value)
+                    idx += 1
         env_in.close()
 
     # update length
