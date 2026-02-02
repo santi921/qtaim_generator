@@ -216,15 +216,17 @@ def inspect_lmdb_first_entry(lmdb_path: str, logger: logging.Logger) -> Optional
             readahead=False,
             meminit=False,
         )
+        result = None
         with env.begin(write=False) as txn:
             cursor = txn.cursor()
             for key, value in cursor:
                 key_str = key.decode("ascii")
                 if key_str != "length":
                     data = pickle.loads(value)
-                    env.close()
-                    return {"key": key_str, "data": data}
+                    result = {"key": key_str, "data": data}
+                    break
         env.close()
+        return result
     except Exception as e:
         logger.warning(f"Could not inspect LMDB {lmdb_path}: {e}")
     return None
@@ -399,6 +401,7 @@ def convert_structure(
         chunk_size=chunk_size,
         clean=clean,
         merge=merge,
+        move_files=move_files,
     )
     print(f"  -> {os.path.join(out_dir, out_lmdb)}")
 
