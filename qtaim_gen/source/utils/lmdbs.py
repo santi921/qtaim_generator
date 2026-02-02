@@ -209,6 +209,7 @@ def json_2_lmdbs(
     chunk_size: int,
     clean: Optional[bool] = True,
     merge: Optional[bool] = True,
+    move_files: Optional[bool] = False,
 ):
     """Converts folders of output json files to lmdb files.
     Args:
@@ -218,11 +219,16 @@ def json_2_lmdbs(
         out_lmdb (str): Output lmdb file.
         chunk_size (int): Size of the chunks to split the data into.
         clean (Optional[bool], optional): If True, delete the json files. Defaults to False.
+        move_files (Optional[bool], optional): If files were moved into separate ./generator/ folders in each job
     """
     chunk_ind = 1
-    files_target = glob(root_dir + "*/{}.json".format(data_type))
-    #print("Found {} files for data type {}".format(len(files_target), data_type))
-
+    if move_files:
+        files_target = glob(
+            root_dir + "*/generator/{}.json".format(data_type)
+        )
+    else:
+        files_target = glob(root_dir + "*/{}.json".format(data_type))
+    
     for chunk in split_list(files_target, chunk_size):
         data_dict = {}
         for file in chunk:
@@ -257,18 +263,24 @@ def inp_files_2_lmdbs(
     chunk_size: int,
     clean: Optional[bool] = True,
     merge: Optional[bool] = True,
+    move_files: Optional[bool] = False,
 ):
     """
-    Converts orca inp files into lmdbs
+    Converts orca inp files into lmdbs at scale.
     Args:
         root_dir (str): Root directory containing the input files.
         out_dir (str): Output directory for the lmdb files.
         out_lmdb (str): Output lmdb file.
         chunk_size (int): Size of the chunks to split the data into.
         clean (Optional[bool], optional): If True, delete the input files. Defaults to False.
+        move_files (Optional[bool], optional): If files were moved into separate ./generator/ folders in each job
     """
-
-    files = glob(root_dir + "*/*.inp")
+    if move_files: 
+        files = glob(
+            root_dir + "*/generator/*.inp"
+        )
+    else:
+        files = glob(root_dir + "*/*.inp")
     chunk_ind = 1
 
     for chunk in split_list(files, chunk_size):

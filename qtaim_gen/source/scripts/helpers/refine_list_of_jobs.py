@@ -168,63 +168,105 @@ if __name__ == "__main__":
     raise SystemExit(main())
 
 """
-
-
-
-    
-python refine_list_of_jobs.py --root_omol_inputs /lus/eagle/projects/OMol25/ \
---job_file /lus/eagle/projects/generator/jobs_by_topdir/dna_refined.txt --move_results \
---refined_job_file /lus/eagle/projects/generator/jobs_by_topdir/dna_refined.txt \
-    --full_set 0 --root_omol_results /lus/eagle/projects/generator/OMol25_postprocessing/ 
-129 left
-
-python refine_list_of_jobs.py --root_omol_inputs /lus/eagle/projects/OMol25/ \
---job_file /lus/eagle/projects/generator/jobs_by_topdir/nakb_refined.txt --move_results \
---refined_job_file /lus/eagle/projects/generator/jobs_by_topdir/nakb_refined.txt \
-    --full_set 0 --root_omol_results /lus/eagle/projects/generator/OMol25_postprocessing/ 
-192 left ex: /lus/eagle/projects/generator/OMol25_postprocessing/nakb/5DWX_A19_E_frame0_-3_1
+stragglers nakb, dna, droplet, mo_hydrides
 
 python refine_list_of_jobs.py --root_omol_inputs /lus/eagle/projects/OMol25/ \
 --job_file /lus/eagle/projects/generator/jobs_by_topdir/mo_hydrides_refined.txt --move_results \
 --refined_job_file /lus/eagle/projects/generator/jobs_by_topdir/mo_hydrides_refined.txt \
     --full_set 0 --root_omol_results /lus/eagle/projects/generator/OMol25_postprocessing/ 
-361 left ex: /lus/eagle/projects/generator/OMol25_postprocessing/mo_hydrides/5098_12_-1_1
-
-
+50 left - 2/02
 python refine_list_of_jobs.py --root_omol_inputs /lus/eagle/projects/OMol25/ \
---job_file /lus/eagle/projects/generator/jobs_by_topdir/ani2x_refined.txt --move_results \
---refined_job_file /lus/eagle/projects/generator/jobs_by_topdir/ani2x_refined.txt \
+--job_file /lus/eagle/projects/generator/jobs_by_topdir/droplet_refined.txt --move_results \
+--refined_job_file /lus/eagle/projects/generator/jobs_by_topdir/droplet_refined.txt \
     --full_set 0 --root_omol_results /lus/eagle/projects/generator/OMol25_postprocessing/ 
-
+2 left - running rn (2/02)
 
 python refine_list_of_jobs.py --root_omol_inputs /lus/eagle/projects/OMol25/ \
---job_file /lus/eagle/projects/generator/jobs_by_topdir/rmechdb_refined.txt --move_results \
---refined_job_file /lus/eagle/projects/generator/jobs_by_topdir/rmechdb_refined.txt \
+--job_file /lus/eagle/projects/generator/jobs_by_topdir/nakb_refined.txt --move_results \
+--refined_job_file /lus/eagle/projects/generator/jobs_by_topdir/nakb_refined.txt \
+    --full_set 0 --root_omol_results /lus/eagle/projects/generator/OMol25_postprocessing/ 
+172 left - running rn (2/02)
+
+python refine_list_of_jobs.py --root_omol_inputs /lus/eagle/projects/OMol25/ \
+--job_file /lus/eagle/projects/generator/jobs_by_topdir/dna_refined.txt --move_results \
+--refined_job_file /lus/eagle/projects/generator/jobs_by_topdir/dna_refined.txt \
+    --full_set 0 --root_omol_results /lus/eagle/projects/generator/OMol25_postprocessing/ 
+13 left  - running rn (1/29)
+python refine_list_of_jobs.py --root_omol_inputs /lus/eagle/projects/OMol25/ \
+--job_file /lus/eagle/projects/generator/jobs_by_topdir/orbnet_denali_refined.txt --move_results \
+--refined_job_file /lus/eagle/projects/generator/jobs_by_topdir/orbnet_denali_refined.txt \
+    --full_set 0 --root_omol_results /lus/eagle/projects/generator/OMol25_postprocessing/ 
+2 left - running rn (2/01)
+python refine_list_of_jobs.py --root_omol_inputs /lus/eagle/projects/OMol25/ \
+--job_file /lus/eagle/projects/generator/jobs_by_topdir/spice_refined.txt --move_results \
+--refined_job_file /lus/eagle/projects/generator/jobs_by_topdir/spice_refined.txt \
+    --full_set 0 --root_omol_results /lus/eagle/projects/generator/OMol25_postprocessing/ 
+~2k left - running rn (2/01)
+
+# PACKAGED TOGETHER
+python refine_list_of_jobs.py --root_omol_inputs /lus/eagle/projects/OMol25/ \
+--job_file /lus/eagle/projects/generator/jobs_by_topdir/packaged_together.txt --move_results \
+--refined_job_file /lus/eagle/projects/generator/jobs_by_topdir/packaged_together.txt \
     --full_set 0 --root_omol_results /lus/eagle/projects/generator/OMol25_postprocessing/ 
 
     
-# lrc 
 
+python refine_list_of_jobs.py --root_omol_inputs /lus/eagle/projects/OMol25/ \
+--job_file /lus/eagle/projects/generator/jobs_by_topdir/geom_orca6_refined.txt --move_results \
+--refined_job_file /lus/eagle/projects/generator/jobs_by_topdir/geom_orca6_refined.txt \
+    --full_set 0 --root_omol_results /lus/eagle/projects/generator/OMol25_postprocessing/ 
+
+python refine_list_of_jobs.py --root_omol_inputs /lus/eagle/projects/OMol25/ \
+--job_file /lus/eagle/projects/generator/jobs_by_topdir/rna_refined.txt --move_results \
+--refined_job_file /lus/eagle/projects/generator/jobs_by_topdir/rna_refined.txt \
+    --full_set 0 --root_omol_results /lus/eagle/projects/generator/OMol25_postprocessing/ 
+
+# lrc 
 python refine_list_of_jobs.py --root_omol_inputs /global/scratch/users/santiagovargas/OMol4M/ \
 --job_file /global/scratch/users/santiagovargas/OMol4M/pdb_pockets_400K_refined.txt --move_results \
 --refined_job_file /global/scratch/users/santiagovargas/OMol4M/pdb_pockets_400K_refined.txt \
     --full_set 0 --root_omol_results /global/scratch/users/santiagovargas/OMol4M/
 
 python refine_list_of_jobs.py --root_omol_inputs /global/scratch/users/santiagovargas/OMol4M/ \
---job_file /global/scratch/users/santiagovargas/OMol4M/pdb_fragments_300K_refined.txt --move_results \
---refined_job_file /global/scratch/users/santiagovargas/OMol4M/pdb_fragments_300K_refined.txt \
+--job_file /global/scratch/users/santiagovargas/OMol4M/packaged_together.txt --move_results \
+--refined_job_file /global/scratch/users/santiagovargas/OMol4M/packaged_together.txt \
     --full_set 0 --root_omol_results /global/scratch/users/santiagovargas/OMol4M/
 
+python refine_list_of_jobs.py --root_omol_inputs /global/scratch/users/santiagovargas/OMol4M/ \
+--job_file /global/scratch/users/santiagovargas/OMol4M/scaled_separations_exp_refined.txt --move_results \
+--refined_job_file /global/scratch/users/santiagovargas/OMol4M/scaled_separations_exp_refined.txt \
+    --full_set 0 --root_omol_results /global/scratch/users/santiagovargas/OMol4M/
 
-/lus/eagle/projects/generator/OMol25_postprocessing/rmechdb/rmechdb_369_step9_-1_1
-/lus/eagle/projects/generator/OMol25_postprocessing/nakb/7REX_A12_E_frame1_-7_1
+python refine_list_of_jobs.py --root_omol_inputs /global/scratch/users/santiagovargas/OMol4M/ \
+--job_file /global/scratch/users/santiagovargas/OMol4M/low_spin_23.txt --move_results \
+--refined_job_file /global/scratch/users/santiagovargas/OMol4M/low_spin_23_refined.txt \
+    --full_set 0 --root_omol_results /global/scratch/users/santiagovargas/OMol4M/
 
-/lus/eagle/projects/generator/OMol25_postprocessing/mo_hydrides/12686_5_1_1
+python refine_list_of_jobs.py --root_omol_inputs /global/scratch/users/santiagovargas/OMol4M/ \
+--job_file /global/scratch/users/santiagovargas/OMol4M/rpmd_refined.txt --move_results \
+--refined_job_file /global/scratch/users/santiagovargas/OMol4M/rpmd_refined.txt \
+    --full_set 0 --root_omol_results /global/scratch/users/santiagovargas/OMol4M/
 
-full-runner-parsl-alcf --num_folders 2 --orca_2mkl_cmd $HOME/orca_6_0_0/orca_2mkl \
-     --multiwfn_cmd $HOME/Multiwfn_3_8/Multiwfn_noGUI --clean --job_file \
-    ./test.txt --full_set 0 --type_runner local --n_threads_per_job 2 --clean_first \
-    --n_threads 4  --safety_factor 1.0 --move_results --preprocess_compressed --timeout_hr 3 \
-    --queue workq-route  --restart  --n_nodes 1 --job_file ../jobs_by_topdir/rmechdb_refined.txt  \
-    --preprocess_compressed --root_omol_results /lus/eagle/projects/generator/OMol25_postprocessing/ --root_omol_inputs /lus/eagle/projects/OMol25/
+cat mo_hydrides_refined.txt >> packaged_together.txt
+cat droplet_refined.txt >> packaged_together.txt
+cat dna_refined.txt >> packaged_together.txt
+cat nakb_refined.txt >> packaged_together.txt
+cat orbnet_denali_refined.txt >> packaged_together.txt
+cat spice_refined.txt >> packaged_together.txt
+
+
+cat rpmd_refined.txt >> packaged_together.txt
+cat scaled_separations_exp_refined.txt >> packaged_together.txt
+cat low_spin_23_refined.txt >> packaged_together.txt
+
+
+# tuo
+python refine_list_of_jobs.py --root_omol_inputs /p/lustre5/bennion1/Omol2025-4M-DiversitySet/ \
+--job_file /p/lustre5/vargas58/generator_working/job_lists/ml_mo_refined.txt --move_results \
+--refined_job_file /p/lustre5/vargas58/generator_working/job_lists/ml_mo_refined.txt \
+    --full_set 0 --root_omol_results /p/lustre5/vargas58/OMol4M/
+
+
+
+
 """

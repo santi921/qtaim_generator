@@ -79,7 +79,7 @@ CONVERTER_MAP = {
 }
 
 
-if __name__ == "__main__":
+def main():
     parser = argparse.ArgumentParser(
         description="Convert qtaim_generator LMDB files to qtaim_embed graph format",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -141,3 +141,7 @@ Converter types:
         print("Skipping scaling step")
 
     print("Done!")
+
+
+if __name__ == "__main__":
+    main()

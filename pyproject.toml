@@ -26,6 +26,10 @@ dev = ["pytest>=7.4.0", "pytest-cov>=7.0.0", "ruff>=0.0.285", "pytest-asyncio>=0
 packages = { find = {} }
 
 [project.scripts]
+# LMDB conversion
+json-to-lmdb = "qtaim_gen.source.scripts.json_to_lmdb:main"
+generator-to-embed = "qtaim_gen.source.scripts.helpers.generator_to_embed:main"
+
 # QTAIM - only
 create-files = "qtaim_gen.source.scripts.create_files:main"
 # QTAIM - only
@@ -34,7 +38,7 @@ parse-data = "qtaim_gen.source.scripts.parse_data:main"
 run-qtaim-gen = "qtaim_gen.source.scripts.run:main"
 # QTAIM - only
 clean-failed-files = "qtaim_gen.source.scripts.helpers.clean_failed_files:main"
-# Full analysis 
+# Full analysis
 full-runner = "qtaim_gen.source.scripts.full_runner:main"
 full-runner-parsl = "qtaim_gen.source.scripts.full_runner_parsl:main"
 full-runner-parsl-alcf = "qtaim_gen.source.scripts.full_runner_parsl_alcf:main"
