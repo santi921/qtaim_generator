@@ -234,7 +234,9 @@ def json_2_lmdbs(
         for file in chunk:
             with open(file, "r") as f:
                 data = json.load(f)
-                name = file.split("/")[-2]
+                # When move_files=True, path is root/job/generator/file.json -> use [-3]
+                # When move_files=False, path is root/job/file.json -> use [-2]
+                name = file.split("/")[-3] if move_files else file.split("/")[-2]
                 data_dict[name] = data
 
         write_lmdb(data_dict, out_dir, f"{data_type}_{chunk_ind}.lmdb")
@@ -263,7 +265,6 @@ def inp_files_2_lmdbs(
     chunk_size: int,
     clean: Optional[bool] = True,
     merge: Optional[bool] = True,
-    #move_files: Optional[bool] = False,
 ):
     """
     Converts orca inp files into lmdbs at scale.
@@ -273,7 +274,6 @@ def inp_files_2_lmdbs(
         out_lmdb (str): Output lmdb file.
         chunk_size (int): Size of the chunks to split the data into.
         clean (Optional[bool], optional): If True, delete the input files. Defaults to False.
-        move_files (Optional[bool], optional): If files were moved into separate ./generator/ folders in each job
     """
     files = glob(root_dir + "*/*.inp")
     chunk_ind = 1
