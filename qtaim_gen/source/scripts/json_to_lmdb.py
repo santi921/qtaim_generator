@@ -17,8 +17,8 @@ Example directory structure expected:
     OR with move_files=True:
     root_dir/
         job_001/
+            *.inp
             generator/
-                *.inp
                 charge.json
                 ...
 
@@ -333,17 +333,12 @@ def convert_structure_with_stats(
     chunk_size: int,
     clean: bool,
     merge: bool,
-    move_files: bool,
     logger: logging.Logger,
 ) -> ConversionStats:
     """Convert ORCA .inp files to structure LMDB with statistics."""
     stats = ConversionStats(data_type="structure")
 
-    # Find files
-    if move_files:
-        pattern = os.path.join(root_dir, "*/generator/*.inp")
-    else:
-        pattern = os.path.join(root_dir, "*/*.inp")
+    pattern = os.path.join(root_dir, "*/*.inp")
 
     files = glob(pattern)
     stats.files_found = len(files)
@@ -607,7 +602,6 @@ Examples:
                     chunk_size=chunk_size,
                     clean=clean,
                     merge=merge,
-                    move_files=move_files,
                     logger=logger,
                 )
             else:
