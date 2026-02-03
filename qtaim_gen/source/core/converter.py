@@ -147,7 +147,7 @@ class Converter:
         self.index_dict = {}
         
         # data
-        self.single_lmdb_in = True
+        self.single_lmdb_in = True # TODO allow multiple lmdb inputs
         self.lmdb_dict = self.pull_lmdbs()
         
         # grapher        
@@ -758,20 +758,21 @@ class BaseConverter(Converter):
                     atom_features=atom_feats, bond_features=bond_feats,
                     global_features=global_feats, original_atom_ind=None, original_bond_mapping=None,
                 )
-
-                self.grapher = get_grapher(
-                    element_set=self.element_set,
-                    atom_keys=self.keys_data["atom"],
-                    bond_keys=self.keys_data["bond"],
-                    global_keys=self.keys_data["global"],
-                    allowed_ring_size=self.config_dict["allowed_ring_size"],
-                    allowed_charges=self.config_dict["allowed_charges"],
-                    allowed_spins=self.config_dict["allowed_spins"],
-                    self_loop=True,
-                    atom_featurizer_tf=True,
-                    bond_featurizer_tf=True,
-                    global_featurizer_tf=True,
-                )
+                # we only need to build the grapher once
+                if self.grapher is None:
+                    self.grapher = get_grapher(
+                        element_set=self.element_set,
+                        atom_keys=self.keys_data["atom"],
+                        bond_keys=self.keys_data["bond"],
+                        global_keys=self.keys_data["global"],
+                        allowed_ring_size=self.config_dict["allowed_ring_size"],
+                        allowed_charges=self.config_dict["allowed_charges"],
+                        allowed_spins=self.config_dict["allowed_spins"],
+                        self_loop=True,
+                        atom_featurizer_tf=True,
+                        bond_featurizer_tf=True,
+                        global_featurizer_tf=True,
+                    )
                 self.logger.info(f"Grapher initialized with element_set: {self.element_set}")
 
                 first_graph = build_and_featurize_graph(self.grapher, mol_wrapper)
@@ -1004,20 +1005,20 @@ class QTAIMConverter(Converter):
                     atom_features=atom_feats, bond_features=bond_feats,
                     global_features=global_feats, original_atom_ind=None, original_bond_mapping=None,
                 )
-
-                self.grapher = get_grapher(
-                    element_set=self.element_set,
-                    atom_keys=self.keys_data["atom"],
-                    bond_keys=self.keys_data["bond"],
-                    global_keys=self.keys_data["global"],
-                    allowed_ring_size=self.config_dict["allowed_ring_size"],
-                    allowed_charges=self.config_dict["allowed_charges"],
-                    allowed_spins=self.config_dict["allowed_spins"],
-                    self_loop=True,
-                    atom_featurizer_tf=True,
-                    bond_featurizer_tf=True,
-                    global_featurizer_tf=True,
-                )
+                if self.grapher is None:
+                    self.grapher = get_grapher(
+                        element_set=self.element_set,
+                        atom_keys=self.keys_data["atom"],
+                        bond_keys=self.keys_data["bond"],
+                        global_keys=self.keys_data["global"],
+                        allowed_ring_size=self.config_dict["allowed_ring_size"],
+                        allowed_charges=self.config_dict["allowed_charges"],
+                        allowed_spins=self.config_dict["allowed_spins"],
+                        self_loop=True,
+                        atom_featurizer_tf=True,
+                        bond_featurizer_tf=True,
+                        global_featurizer_tf=True,
+                    )
                 self.logger.info(f"Grapher initialized with element_set: {self.element_set}")
 
                 first_graph = build_and_featurize_graph(self.grapher, mol_wrapper)
@@ -1478,20 +1479,20 @@ class GeneralConverter(Converter):
                     atom_features=atom_feats, bond_features=bond_feats,
                     global_features=global_feats, original_atom_ind=None, original_bond_mapping=None,
                 )
-
-                self.grapher = get_grapher(
-                    element_set=self.element_set,
-                    atom_keys=self.keys_data["atom"],
-                    bond_keys=self.keys_data["bond"],
-                    global_keys=self.keys_data["global"],
-                    allowed_ring_size=self.config_dict["allowed_ring_size"],
-                    allowed_charges=self.config_dict["allowed_charges"],
-                    allowed_spins=self.config_dict["allowed_spins"],
-                    self_loop=True,
-                    atom_featurizer_tf=True,
-                    bond_featurizer_tf=True,
-                    global_featurizer_tf=True,
-                )
+                if self.grapher is None:
+                    self.grapher = get_grapher(
+                        element_set=self.element_set,
+                        atom_keys=self.keys_data["atom"],
+                        bond_keys=self.keys_data["bond"],
+                        global_keys=self.keys_data["global"],
+                        allowed_ring_size=self.config_dict["allowed_ring_size"],
+                        allowed_charges=self.config_dict["allowed_charges"],
+                        allowed_spins=self.config_dict["allowed_spins"],
+                        self_loop=True,
+                        atom_featurizer_tf=True,
+                        bond_featurizer_tf=True,
+                        global_featurizer_tf=True,
+                    )
                 self.logger.info(f"Grapher initialized with keys_data: {self.keys_data}")
 
                 first_graph = build_and_featurize_graph(self.grapher, mol_wrapper)
