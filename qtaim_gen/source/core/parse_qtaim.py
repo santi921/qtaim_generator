@@ -594,17 +594,17 @@ def gather_imputation(
                     if define_bonds == "distances":
                         bonds_reactants = row["reactant_bonds"]
 
-                    QTAIM_loc_reactant = (
-                        root_dir + "QTAIM/" + str(reaction_id) + "/reactants/"
+                    QTAIM_loc_reactant = os.path.join(
+                        root_dir, "QTAIM", str(reaction_id), "reactants"
                     )
-                    QTAIM_loc_product = (
-                        root_dir + "QTAIM/" + str(reaction_id) + "/products/"
+                    QTAIM_loc_product = os.path.join(
+                        root_dir, "QTAIM", str(reaction_id), "products"
                     )
 
-                    cp_file_reactants = QTAIM_loc_reactant + "CPprop.txt"
-                    dft_inp_file_reactant = QTAIM_loc_reactant + "input.in"
-                    cp_file_products = QTAIM_loc_product + "CPprop.txt"
-                    dft_inp_file_product = QTAIM_loc_product + "input.in"
+                    cp_file_reactants = os.path.join(QTAIM_loc_reactant, "CPprop.txt")
+                    dft_inp_file_reactant = os.path.join(QTAIM_loc_reactant, "input.in")
+                    cp_file_products = os.path.join(QTAIM_loc_product, "CPprop.txt")
+                    dft_inp_file_product = os.path.join(QTAIM_loc_product, "input.in")
 
                     qtaim_descs_reactants = get_qtaim_descs(
                         cp_file_reactants, verbose=False
@@ -664,9 +664,9 @@ def gather_imputation(
                     if define_bonds == "distances":
                         bonds = row["bonds"]
                     # bonds = row["bonds"]
-                    QTAIM_loc = root_dir + "QTAIM/" + str(ids) + "/"
-                    cp_file = QTAIM_loc + "CPprop.txt"
-                    dft_inp_file = QTAIM_loc + "input.in"
+                    QTAIM_loc = os.path.join(root_dir, "QTAIM", str(ids))
+                    cp_file = os.path.join(QTAIM_loc, "CPprop.txt")
+                    dft_inp_file = os.path.join(QTAIM_loc, "input.in")
 
                     qtaim_descs = get_qtaim_descs(cp_file, verbose=False)
                     mapped_descs = merge_qtaim_inds(

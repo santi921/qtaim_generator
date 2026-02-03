@@ -55,7 +55,7 @@ def test_gather_imputation_reaction():
 
 def test_gather_imputation_molecule():
     test_root = str(TEST_FILES / "molecule")
-    df = pd.read_pickle(str(TEST_FILES / "molecule" / "libe_qtaim_test.pkl"))
+    df = pd.read_json(str(TEST_FILES / "molecule" / "libe_qtaim_test.json"))
     features_atom = [
         "Lagrangian_K",
         "eta",

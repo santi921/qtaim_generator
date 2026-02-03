@@ -9,12 +9,14 @@ import numpy as np
 from pymatgen.core import Molecule
 from pymatgen.analysis.graphs import MoleculeGraph
 
-from qtaim_gen.source.utils.io import convert_inp_to_xyz
+from qtaim_gen.source.utils.io import (
+    get_bonds_from_coords,
+    parse_orca_inp_to_molecule_data,
+)
 from qtaim_gen.source.core.parse_qtaim import (
     get_spin_charge_from_orca_inp,
     orca_inp_to_dict,
 )
-from qtaim_gen.source.utils.bonds import get_bonds_from_rdkit
 
 
 def convert_inp_to_xyz(orca_path, output_path):
@@ -113,8 +115,16 @@ def write_lmdb(
 
 
 def merge_lmdbs(db_paths: str, out_path: str, output_file: str):
+    # Remove existing merged LMDB to avoid stale key accumulation
+    merged_path = os.path.join(out_path, output_file)
+    if os.path.exists(merged_path):
+        os.remove(merged_path)
+    merged_lock = merged_path + "-lock"
+    if os.path.exists(merged_lock):
+        os.remove(merged_lock)
+
     env_out = lmdb.open(
-        os.path.join(out_path, output_file),
+        merged_path,
         map_size=1099511627776 * 2,
         subdir=False,
         meminit=False,
@@ -287,30 +297,31 @@ def inp_files_2_lmdbs(
         data_dict = {}
 
         for file in chunk:
-            #print("Processing file: ", file, " chunk: ", chunk_ind)
-            charge, spin = get_spin_charge_from_orca_inp(file)
-            xyz_file = file.replace(".inp", ".xyz")
-            convert_inp_to_xyz(file, xyz_file)
-            molecule = Molecule.from_file(xyz_file)
+            # Parse ORCA input directly to get species, coords, charge, spin
+            species, coords, charge, spin = parse_orca_inp_to_molecule_data(file)
 
-            molecule.set_charge_and_spin(
-                charge=int(charge), spin_multiplicity=int(spin)
+            # Construct pymatgen Molecule directly (no file I/O)
+            molecule = Molecule(
+                species=species,
+                coords=coords,
+                charge=charge,
+                spin_multiplicity=spin,
             )
+
             molecule_graph = MoleculeGraph.with_empty_graph(molecule)
 
             identifier = file.split("/")[-2]
 
-            try:
-                bonds_rdkit = get_bonds_from_rdkit(xyz_file)
-            except:
-                bonds_rdkit = []
-                [molecule_graph.add_edge(bond[0], bond[1]) for bond in bonds_rdkit]
+            # Get bonds directly from coords (no xyz file needed)
+            bonds = get_bonds_from_coords(species, coords)
+            for bond in bonds:
+                molecule_graph.add_edge(bond[0], bond[1])
 
             data_dict[identifier] = {
                 "molecule": molecule,
                 "molecule_graph": molecule_graph,
                 "ids": identifier,
-                "bonds": bonds_rdkit,
+                "bonds": bonds,
                 "spin": int(spin),
                 "charge": int(charge),
             }
@@ -580,11 +591,12 @@ def parse_qtaim_data(
                 continue
             qtaim_bonds_conv[key_conv] = get_several_keys(v, bond_keys)
 
-    # Update atom_feats using integer keys directly (faster than repeated str conversions)
-    for key in list(atom_feats.keys()):
-        vals = qtaim_atoms_int.get(key)
-        if vals:
+    # Update atom_feats with parsed values (create or update keys)
+    for key, vals in qtaim_atoms_int.items():
+        if key in atom_feats:
             atom_feats[key].update(vals)
+        else:
+            atom_feats[key] = vals
 
     # Update bond_feats with converted tuple keys
     for key_conv, vals in qtaim_bonds_conv.items():
