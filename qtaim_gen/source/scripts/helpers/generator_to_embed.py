@@ -9,52 +9,50 @@ Supports three converter types:
 Example config (lmdb_config.json):
 {
     "restart": false,
-    "lmdb_path": "/path/to/output/",
-    "lmdb_name": "graphs.lmdb",
-
+    "lmdb_path": "/eagle/projects/generator/qtaim_embed/test_parse/",
+    "lmdb_name": "base_graphs.lmdb",
     "lmdb_locations": {
-        "geom_lmdb": "/path/to/structure.lmdb",
-        "qtaim_lmdb": "/path/to/qtaim.lmdb",
-        "charge_lmdb": "/path/to/charge.lmdb",
-        "fuzzy_full_lmdb": "/path/to/fuzzy.lmdb",
-        "bonds_lmdb": "/path/to/bonds.lmdb",
-        "other_lmdb": "/path/to/other.lmdb"
+        "geom_lmdb": "/eagle/projects/generator/lmdbs/rmechdb/structure.lmdb",
+        "qtaim_lmdb": "/eagle/projects/generator/lmdbs/rmechdb/qtaim.lmdb",
+        "charge_lmdb": "/eagle/projects/generator/lmdbs/rmechdb/charge.lmdb",
+        "fuzzy_full_lmdb": "/eagle/projects/generator/lmdbs/rmechdb/fuzzy.lmdb",
+        "bonds_lmdb": "/eagle/projects/generator/lmdbs/rmechdb/bond.lmdb",
+        "other_lmdb": "/eagle/projects/generator/lmdbs/rmechdb/other.lmdb"
     },
-
     "keys_data": {
-        "atom": [],
-        "bond": [],
-        "global": []
+        "atom": ["eta", "lol"],
+        "bond": ["eta", "lol"],
+        "global": ["n_atoms", "spin", "charge", "n_bonds"]
     },
     "keys_target": {
         "atom": [],
         "bond": [],
-        "global": ["extra_energy"]
+        "global": ["n_bonds"]
     },
-
     "allowed_ring_size": [3, 4, 5, 6, 7, 8],
     "allowed_charges": [-2, -1, 0, 1, 2],
     "allowed_spins": [1, 2, 3],
-
-    "filter_list": [],
-
     "n_workers": 8,
     "batch_size": 500,
-
+    "charge_filter": ["adch", "hirshfeld", "cm5", "becke"],
     "bonding_scheme": "structural",
-    "bond_filter": ["fuzzy", "ibsi"],
+    "bond_filter": ["fuzzy"],
+    "fuzzy_filter": ["becke_fuzzy_density", "hirsh_fuzzy_density"],
     "bond_cutoff": 0.3,
     "bond_list_definition": "fuzzy",
-
     "missing_data_strategy": "skip",
     "sentinel_value": null,
-
     "charge_filter": null,
     "fuzzy_filter": null,
     "other_filter": null,
-
-    "save_scaler": true
+    "save_scaler": true, 
+    "filter_list": ["length", "scaled"]
 }
+
+charge: 'hirshfeld', 'adch', 'cm5', 'becke'
+fuzzy_full: 'becke_fuzzy_density', 'hirsh_fuzzy_density', 'hirsh_fuzzy_spin', 'becke_fuzzy_spin'
+qtaim: "eta", "lol",
+other: 'mpp_full', 'sdp_full', 'mpp_heavy', 'sdp_heavy', 'ESP_Volume', 'ESP_Surface_Density', 'ESP_Minimal_value', 'ESP_Maximal_value', 'ESP_Overall_surface_area', 'ESP_Positive_surface_area
 
 Usage:
     python generator_to_embed.py --config_path ./lmdb_config.json --converter general

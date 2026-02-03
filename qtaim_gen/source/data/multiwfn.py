@@ -116,7 +116,7 @@ def other_data_dict(full_set: int) -> dict:
     string_dict["other_geometry"] = "26\n3\na\nn\n3\nh\nn\n8\n0\n0\nq\n"
     string_dict["other_alie"] = "12\n2\n2\n0\n-1\n-1\nq\n"
 
-    if full_set > 1:
+    if full_set > 2:
         string_dict["other_esp"] = "12\n0\n-1\n-1\nq\n"    
     return string_dict
  
