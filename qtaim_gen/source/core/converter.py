@@ -773,7 +773,7 @@ class BaseConverter(Converter):
                         bond_featurizer_tf=True,
                         global_featurizer_tf=True,
                     )
-                self.logger.info(f"Grapher initialized with element_set: {self.element_set}")
+                    self.logger.info(f"Grapher initialized with element_set: {self.element_set}")
 
                 first_graph = build_and_featurize_graph(self.grapher, mol_wrapper)
 
@@ -1019,7 +1019,7 @@ class QTAIMConverter(Converter):
                         bond_featurizer_tf=True,
                         global_featurizer_tf=True,
                     )
-                self.logger.info(f"Grapher initialized with element_set: {self.element_set}")
+                    self.logger.info(f"Grapher initialized with element_set: {self.element_set}")
 
                 first_graph = build_and_featurize_graph(self.grapher, mol_wrapper)
 
@@ -1492,7 +1492,7 @@ class GeneralConverter(Converter):
                         atom_featurizer_tf=True,
                         bond_featurizer_tf=True,
                         global_featurizer_tf=True,
-                    )
+                        )
                 self.logger.info(f"Grapher initialized with keys_data: {self.keys_data}")
 
                 first_graph = build_and_featurize_graph(self.grapher, mol_wrapper)
