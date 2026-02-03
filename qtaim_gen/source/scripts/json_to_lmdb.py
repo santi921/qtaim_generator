@@ -47,6 +47,7 @@ import json
 import logging
 import os
 import sys
+import time
 from dataclasses import dataclass, field
 from glob import glob
 from typing import Dict, List, Optional, Set
@@ -66,10 +67,35 @@ class ConversionStats:
     missing_keys: Dict[str, int] = field(default_factory=dict)
     failed_files: List[str] = field(default_factory=list)
     skipped_files: List[str] = field(default_factory=list)
+    # Timing stats
+    scan_time_sec: float = 0.0
+    lmdb_write_time_sec: float = 0.0
+    total_bytes_read: int = 0
 
     def add_missing_key(self, key: str):
         """Track a missing key."""
         self.missing_keys[key] = self.missing_keys.get(key, 0) + 1
+
+    @property
+    def read_rate_files_per_sec(self) -> float:
+        """Calculate file read rate."""
+        if self.scan_time_sec > 0:
+            return self.files_converted / self.scan_time_sec
+        return 0.0
+
+    @property
+    def write_rate_files_per_sec(self) -> float:
+        """Calculate LMDB write rate (files written per second)."""
+        if self.lmdb_write_time_sec > 0:
+            return self.files_converted / self.lmdb_write_time_sec
+        return 0.0
+
+    @property
+    def read_rate_mb_per_sec(self) -> float:
+        """Calculate read throughput in MB/sec."""
+        if self.scan_time_sec > 0 and self.total_bytes_read > 0:
+            return (self.total_bytes_read / (1024 * 1024)) / self.scan_time_sec
+        return 0.0
 
     def log_summary(self, logger: logging.Logger):
         """Log a summary of the conversion statistics."""
@@ -79,6 +105,15 @@ class ConversionStats:
         logger.info(f"  Files skipped:   {self.files_skipped}")
         logger.info(f"  Files failed:    {self.files_failed}")
         logger.info(f"  Empty files:     {self.empty_files}")
+
+        # Timing stats
+        if self.scan_time_sec > 0:
+            logger.info(f"  Scan/read time:  {self.scan_time_sec:.2f}s ({self.read_rate_files_per_sec:.1f} files/sec)")
+        if self.total_bytes_read > 0:
+            mb_read = self.total_bytes_read / (1024 * 1024)
+            logger.info(f"  Data read:       {mb_read:.2f} MB ({self.read_rate_mb_per_sec:.2f} MB/sec)")
+        if self.lmdb_write_time_sec > 0:
+            logger.info(f"  LMDB write time: {self.lmdb_write_time_sec:.2f}s ({self.write_rate_files_per_sec:.1f} files/sec)")
 
         if self.missing_keys:
             logger.warning(f"  Missing keys (top 10):")
@@ -284,9 +319,16 @@ def convert_json_with_stats(
         logger.warning(f"No {data_type}.json files found matching pattern: {pattern}")
         return stats
 
-    # Process files and track statistics
-    for file_path in files:
+    # Process files and track statistics with timing
+    scan_start = time.time()
+    progress_interval = max(1, stats.files_found // 20)  # Update ~20 times during scan
+
+    for i, file_path in enumerate(files):
         try:
+            # Track file size for throughput calculation
+            file_size = os.path.getsize(file_path)
+            stats.total_bytes_read += file_size
+
             with open(file_path, "r") as f:
                 data = json.load(f)
 
@@ -305,6 +347,12 @@ def convert_json_with_stats(
 
             stats.files_converted += 1
 
+            # Dynamic progress update
+            if (i + 1) % progress_interval == 0 or (i + 1) == stats.files_found:
+                elapsed = time.time() - scan_start
+                rate = (i + 1) / elapsed if elapsed > 0 else 0
+                print(f"\r  Scanning {data_type}: {i + 1}/{stats.files_found} files ({rate:.1f} files/sec)", end="", flush=True)
+
         except json.JSONDecodeError as e:
             stats.files_failed += 1
             stats.failed_files.append(file_path)
@@ -314,8 +362,12 @@ def convert_json_with_stats(
             stats.failed_files.append(file_path)
             logger.warning(f"Error processing {file_path}: {e}")
 
+    stats.scan_time_sec = time.time() - scan_start
+    print()  # Newline after progress
+
     # Actually perform the conversion using the existing function
     logger.info(f"Writing LMDB for {data_type}...")
+    write_start = time.time()
     json_2_lmdbs(
         root_dir=root_dir,
         out_dir=out_dir,
@@ -327,6 +379,7 @@ def convert_json_with_stats(
         move_files=move_files,
         limit=limit,
     )
+    stats.lmdb_write_time_sec = time.time() - write_start
 
     # Log first entry from the resulting LMDB
     lmdb_path = os.path.join(out_dir, out_lmdb)
@@ -367,22 +420,39 @@ def convert_structure_with_stats(
         logger.warning(f"No .inp files found matching pattern: {pattern}")
         return stats
 
-    # Track processing (simplified - the actual conversion happens in inp_files_2_lmdbs)
-    for file_path in files:
+    # Track processing with timing
+    scan_start = time.time()
+    progress_interval = max(1, stats.files_found // 20)  # Update ~20 times during scan
+
+    for i, file_path in enumerate(files):
         try:
-            if os.path.getsize(file_path) == 0:
+            file_size = os.path.getsize(file_path)
+            stats.total_bytes_read += file_size
+
+            if file_size == 0:
                 stats.empty_files += 1
                 stats.skipped_files.append(file_path)
                 logger.debug(f"Empty file: {file_path}")
             else:
                 stats.files_converted += 1
+
+            # Dynamic progress update
+            if (i + 1) % progress_interval == 0 or (i + 1) == stats.files_found:
+                elapsed = time.time() - scan_start
+                rate = (i + 1) / elapsed if elapsed > 0 else 0
+                print(f"\r  Scanning structure: {i + 1}/{stats.files_found} files ({rate:.1f} files/sec)", end="", flush=True)
+
         except Exception as e:
             stats.files_failed += 1
             stats.failed_files.append(file_path)
             logger.warning(f"Error checking {file_path}: {e}")
 
+    stats.scan_time_sec = time.time() - scan_start
+    print()  # Newline after progress
+
     # Perform the actual conversion
     logger.info("Writing structure LMDB...")
+    write_start = time.time()
     inp_files_2_lmdbs(
         root_dir=root_dir,
         out_dir=out_dir,
@@ -392,6 +462,7 @@ def convert_structure_with_stats(
         merge=merge,
         limit=limit,
     )
+    stats.lmdb_write_time_sec = time.time() - write_start
 
     # Log first entry from the resulting LMDB
     lmdb_path = os.path.join(out_dir, out_lmdb)
@@ -694,11 +765,30 @@ Examples:
     total_converted = sum(s.files_converted for s in all_stats)
     total_failed = sum(s.files_failed for s in all_stats)
     total_empty = sum(s.empty_files for s in all_stats)
+    total_scan_time = sum(s.scan_time_sec for s in all_stats)
+    total_write_time = sum(s.lmdb_write_time_sec for s in all_stats)
+    total_bytes = sum(s.total_bytes_read for s in all_stats)
 
     logger.info(f"Total files found:     {total_found}")
     logger.info(f"Total files converted: {total_converted}")
     logger.info(f"Total files failed:    {total_failed}")
     logger.info(f"Total empty files:     {total_empty}")
+    logger.info("")
+
+    # Aggregate timing stats
+    logger.info("--- Aggregate I/O Statistics ---")
+    if total_scan_time > 0:
+        avg_read_rate = total_converted / total_scan_time
+        logger.info(f"Total scan/read time:  {total_scan_time:.2f}s")
+        logger.info(f"Avg read rate:         {avg_read_rate:.1f} files/sec")
+    if total_bytes > 0:
+        total_mb = total_bytes / (1024 * 1024)
+        mb_per_sec = total_mb / total_scan_time if total_scan_time > 0 else 0
+        logger.info(f"Total data read:       {total_mb:.2f} MB ({mb_per_sec:.2f} MB/sec)")
+    if total_write_time > 0:
+        avg_write_rate = total_converted / total_write_time
+        logger.info(f"Total LMDB write time: {total_write_time:.2f}s")
+        logger.info(f"Avg write rate:        {avg_write_rate:.1f} files/sec")
     logger.info("")
 
     # Per-type summaries

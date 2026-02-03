@@ -38,6 +38,8 @@ def should_delete(filename: str) -> bool:
         return True
     if ".tmp" in filename:  # matches .tmp, .tmp.0, .tmp.123, etc.
         return True
+    if "core." in filename:
+        return True
     return False
 
 
