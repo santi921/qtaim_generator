@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pandas as pd
 from qtaim_gen.source.core.parse_qtaim import (
     gather_imputation,
@@ -8,6 +10,8 @@ import pytest
 bondnet = pytest.importorskip(
     "bondnet", reason="bondnet not installed; skipping bondnet test"
 )
+
+TEST_FILES = Path(__file__).parent / "test_files"
 
 
 class TestML:
@@ -31,9 +35,9 @@ class TestML:
 
     reaction = True
     define_bonds = "qtaim"
-    impute_file = "./test_files/reaction/impute.json"
-    test_root = "./test_files/reaction/"
-    df = pd.read_json("./test_files/reaction/b97d3.json")
+    impute_file = str(TEST_FILES / "reaction" / "impute.json")
+    test_root = str(TEST_FILES / "reaction") + "/"
+    df = pd.read_json(str(TEST_FILES / "reaction" / "b97d3.json"))
 
     impute_dict = gather_imputation(
         df,
@@ -61,17 +65,18 @@ class TestML:
 
     rxn_df = pandas_file
     # save
-    rxn_df.to_pickle("./test_files/reaction/libe_qtaim_test.pkl")
-    # rxn_df.to_hdf("./test_files/reaction/libe_qtaim_test.h5", key="df", mode="w")
+    rxn_df.to_pickle(str(TEST_FILES / "reaction" / "libe_qtaim_test.pkl"))
+    # rxn_df.to_hdf(str(TEST_FILES / "reaction" / "libe_qtaim_test.h5"), key="df", mode="w")
 
-    test_root = "./test_files/molecule/"
+    test_root = str(TEST_FILES / "molecule") + "/"
+    mol_pkl_path = str(TEST_FILES / "molecule" / "libe_qtaim_test.pkl")
     try:
-        df = pd.read_pickle("./test_files/molecule/libe_qtaim_test.pkl")
+        df = pd.read_pickle(mol_pkl_path)
     except:
-        df = pd.read_hdf("./test_files/molecule/libe_qtaim_test.h5", key="df")
+        df = pd.read_hdf(str(TEST_FILES / "molecule" / "libe_qtaim_test.h5"), key="df")
     reaction = False
     define_bonds = "qtaim"
-    impute_file = "./test_files/molecule/impute.json"
+    impute_file = str(TEST_FILES / "molecule" / "impute.json")
 
     impute_dict = gather_imputation(
         df=df,
@@ -100,7 +105,7 @@ class TestML:
 
     mol_df = pandas_file
     # save
-    mol_df.to_pickle("./test_files/molecule/libe_qtaim_test.pkl")
+    mol_df.to_pickle(str(TEST_FILES / "molecule" / "libe_qtaim_test.pkl"))
 
     def test_bondnet(self):
 
@@ -115,7 +120,7 @@ class TestML:
 
         dataset_bondnet = ReactionDatasetGraphs(
             grapher=get_grapher(extra_features),
-            file="./test_files/reaction/libe_qtaim_test.pkl",
+            file=str(TEST_FILES / "reaction" / "libe_qtaim_test.pkl"),
             feature_filter=False,
             target="ea",
             filter_species=[4, 5],
@@ -133,7 +138,7 @@ class TestML:
         from qtaim_embed.core.dataset import HeteroGraphGraphLabelDataset
 
         qtaim_embed_dataset = HeteroGraphGraphLabelDataset(
-            file="./test_files/molecule/libe_qtaim_test.pkl",
+            file=str(TEST_FILES / "molecule" / "libe_qtaim_test.pkl"),
             allowed_ring_size=[5, 6, 7],
             allowed_charges=None,
             allowed_spins=None,

@@ -42,7 +42,8 @@ qtaim_gen/source/
 └── utils/          # Utilities
     ├── validation.py    # Job completeness validation
     ├── lmdbs.py         # LMDB read/write utilities
-    └── io.py            # Input file generation, format conversion
+    ├── bonds.py         # Bond detection (RDKit-based and coordinate-based)
+    └── io.py            # Input file generation, format conversion, bond detection
 ```
 
 ## Key Workflows
@@ -83,3 +84,20 @@ All commands defined in `pyproject.toml [project.scripts]`. Main ones:
 - When modifying parsing logic, add tests and fixtures under `tests/test_files/`
 - Preserve `pyproject.toml` entrypoints when renaming scripts
 - Many scripts use `--file` for input path and `--root` for output directory
+
+## Test Suite
+
+Run tests with `pytest -q` or specific files with `pytest tests/<file>.py -v`.
+
+| Test File | Coverage |
+|-----------|----------|
+| `test_parse.py` | QTAIM/DFT input parsing, critical point extraction |
+| `test_parse_multiwfn.py` | Multiwfn output parsing (charges, bonds, fuzzy) |
+| `test_bond_detection.py` | Bond detection from coordinates (`get_bonds_from_coords`), ORCA parsing |
+| `test_lmdb.py` | LMDB read/write operations |
+| `test_parse_json.py` | JSON output parsing and validation |
+| `test_tracking_db.py` | SQLite tracking database operations |
+| `test_ml.py` | ML-related data transformations |
+| `test_*_lmdb*.py` | Various LMDB indexing, serialization, and key normalization tests |
+
+Test fixtures are in `tests/test_files/` with subdirectories for ORCA inputs, Multiwfn outputs, etc.

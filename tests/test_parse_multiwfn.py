@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import numpy as np
 
 from qtaim_gen.source.core.parse_multiwfn import (
@@ -16,10 +18,12 @@ from qtaim_gen.source.core.parse_multiwfn import (
 
 from qtaim_gen.source.core.omol import gbw_analysis
 
+TEST_FILES = Path(__file__).parent / "test_files"
+
 
 class TestMultiwfnParser:
 
-    orca_6 = "./test_files/multiwfn/"
+    orca_6 = str(TEST_FILES / "multiwfn")
     gbw_analysis(
         folder=orca_6,
         orca_2mkl_cmd="orca2_mkl",
@@ -30,7 +34,7 @@ class TestMultiwfnParser:
     )  # works!
 
     def test_bond_info(self):
-        file_bond_info = "./test_files/multiwfn/bond.out"
+        file_bond_info = str(TEST_FILES / "multiwfn" / "bond.out")
         bond_dict = parse_bond_order_doc(file_bond_info)
         # print(bond_dict["fuzzy"]['81_H_to_82_N'], bond_dict["laplace"]['81_H_to_82_N'], bond_dict["ibsi"]['81_H_to_82_N'])
         # assert len(bond_dict.keys()) == 3, "incorrect number of keys in the dictionary"
@@ -48,7 +52,7 @@ class TestMultiwfnParser:
         ), "ibsi bond order is not right"
 
     def test_other_info(self):
-        file_other_info = "./test_files/multiwfn/other.out"
+        file_other_info = str(TEST_FILES / "multiwfn" / "other.out")
         other_info_dict = parse_other_doc(file_other_info)
         assert (
             len(other_info_dict.keys()) == 32
@@ -68,7 +72,7 @@ class TestMultiwfnParser:
 
     def test_parse_charge(self):
 
-        file_charge_info = "./test_files/multiwfn/charge.out"
+        file_charge_info = str(TEST_FILES / "multiwfn" / "charge.out")
 
         (
             charge_dict_overall,
@@ -172,7 +176,7 @@ class TestMultiwfnParser:
         ), "becke dipole is not right"
 
     def test_fuzzy_parse(self):
-        file_fuzzy_info = "./test_files/multiwfn/fuzzy_full.out"
+        file_fuzzy_info = str(TEST_FILES / "multiwfn" / "fuzzy_full.out")
         dict_fuzzy = parse_fuzzy_doc(file_fuzzy_info)
         probe_atom = "5_C"
         probe_values = []
@@ -202,7 +206,7 @@ class TestMultiwfnParser:
 
     def test_charge_info_separate(self):
 
-        file_mbis_info = "./test_files/multiwfn/mbis.out"
+        file_mbis_info = str(TEST_FILES / "multiwfn" / "mbis.out")
         charge_dict_overall = parse_charge_base(
             file_mbis_info, corrected=False, dipole=False
         )
@@ -212,7 +216,7 @@ class TestMultiwfnParser:
             charge_dict_overall["9_C"], -0.07241207, atol=1e-3
         ), "mbis charge is not right"
 
-        file_hirshfeld_info = "./test_files/multiwfn/hirshfeld.out"
+        file_hirshfeld_info = str(TEST_FILES / "multiwfn" / "hirshfeld.out")
         charge_dict_overall, dipole_info = parse_charge_base(
             file_hirshfeld_info, corrected=False
         )
@@ -226,7 +230,7 @@ class TestMultiwfnParser:
             dipole_info["mag"], 0.064279, atol=1e-3
         ), "hirshfeld dipole is not right"
 
-        file_vdd_info = "./test_files/multiwfn/vdd.out"
+        file_vdd_info = str(TEST_FILES / "multiwfn" / "vdd.out")
         charge_dict_overall, dipole_info = parse_charge_base(
             file_vdd_info, corrected=False, dipole=True
         )
@@ -239,7 +243,7 @@ class TestMultiwfnParser:
             dipole_info["mag"], 0.123379, atol=1e-3
         ), "vdd dipole is not right"
 
-        file_cm5_info = "./test_files/multiwfn/cm5.out"
+        file_cm5_info = str(TEST_FILES / "multiwfn" / "cm5.out")
         charge_dict_overall, dipole_info = parse_charge_base(
             file_cm5_info, corrected=False
         )
@@ -252,7 +256,7 @@ class TestMultiwfnParser:
             dipole_info["mag"], 0.064279, atol=1e-3
         ), "cm5 dipole is not right"
 
-        file_adch_info = "./test_files/multiwfn/adch.out"
+        file_adch_info = str(TEST_FILES / "multiwfn" / "adch.out")
         (
             charge_dict_overall,
             atomic_dipole_dict_overall,
@@ -273,7 +277,7 @@ class TestMultiwfnParser:
             atomic_dipole_dict_overall["9_C"][-1], 0.001915, atol=1e-3
         ), "adch dipole is not right"
 
-        file_becke_info = "./test_files/multiwfn/becke.out"
+        file_becke_info = str(TEST_FILES / "multiwfn" / "becke.out")
         (
             charge_dict_overall,
             atomic_dipole_dict_overall,
@@ -295,11 +299,11 @@ class TestMultiwfnParser:
         ), "becke dipole is not right"
 
     def test_bond_info_separate(self):
-        file_bond_info = "./test_files/multiwfn/ibsi.out"
+        file_bond_info = str(TEST_FILES / "multiwfn" / "ibsi.out")
         ibsi_dict = parse_bond_order_ibsi(file_bond_info)
-        file_bond_info = "./test_files/multiwfn/laplacian.out"
+        file_bond_info = str(TEST_FILES / "multiwfn" / "laplacian.out")
         laplace_dict = parse_bond_order_laplace(file_bond_info)
-        file_bond_info = "./test_files/multiwfn/fuzzy.out"
+        file_bond_info = str(TEST_FILES / "multiwfn" / "fuzzy.out")
         fuzzy_dict = parse_bond_order_fuzzy(file_bond_info)
         print(ibsi_dict["6_C_to_9_C"])
         assert len(laplace_dict) == 88, "wrong number of laplace bonds"
@@ -317,10 +321,10 @@ class TestMultiwfnParser:
 
     def test_fuzzy_info_separate(self):
         spin_dict = parse_fuzzy_real_space(
-            "./test_files/multiwfn/becke_fuzzy_spin.out"
+            str(TEST_FILES / "multiwfn" / "becke_fuzzy_spin.out")
         )["becke_fuzzy_spin"]
         density_dict = parse_fuzzy_real_space(
-            "./test_files/multiwfn/becke_fuzzy_density.out"
+            str(TEST_FILES / "multiwfn" / "becke_fuzzy_density.out")
         )["becke_fuzzy_density"]
 
         assert len(spin_dict) == 60, "wrong number of atoms in becke fuzzy spin"

@@ -1,12 +1,98 @@
 import os
-from typing import Dict, Sequence, Any, Union, List
+from typing import Dict, Sequence, Any, Union, List, Tuple, Optional
 import time
 import random
 import concurrent.futures
 from tqdm import tqdm
+import numpy as np
+from rdkit import Chem
 
 from qtaim_gen.source.core.parse_qtaim import dft_inp_to_dict
 from qtaim_gen.source.utils.validation import validation_checks
+
+# RDKit periodic table for element lookups
+_PERIODIC_TABLE = Chem.GetPeriodicTable()
+
+
+def get_bonds_from_coords(
+    species: List[str],
+    coords: np.ndarray,
+    covalent_factor: float = 1.3,
+) -> List[List[int]]:
+    """Determine bonds from atomic coordinates using covalent radii.
+
+    Based on xyz2mol approach: two atoms are bonded if their distance
+    is less than the sum of their covalent radii scaled by covalent_factor.
+
+    Args:
+        species: List of element symbols (e.g., ['C', 'H', 'H', 'H', 'H'])
+        coords: Numpy array of shape (n_atoms, 3) with Cartesian coordinates in Angstroms
+        covalent_factor: Scaling factor for covalent radii (default 1.3)
+
+    Returns:
+        List of bonds as [atom_i, atom_j] pairs (0-indexed)
+    """
+    n_atoms = len(species)
+    coords = np.asarray(coords)
+
+    # Get covalent radii from RDKit's periodic table
+    radii = np.array([
+        _PERIODIC_TABLE.GetRcovalent(_PERIODIC_TABLE.GetAtomicNumber(s))
+        for s in species
+    ])
+
+    # Compute pairwise distances efficiently
+    diff = coords[:, np.newaxis, :] - coords[np.newaxis, :, :]
+    dist_matrix = np.sqrt(np.sum(diff ** 2, axis=-1))
+
+    # Compute threshold matrix: (r_i + r_j) * covalent_factor
+    radii_sum = radii[:, np.newaxis] + radii[np.newaxis, :]
+    threshold_matrix = radii_sum * covalent_factor
+
+    # Find bonds (distance <= threshold, excluding self-bonds)
+    bond_matrix = (dist_matrix <= threshold_matrix) & (dist_matrix > 0)
+
+    # Extract upper triangle to avoid duplicates
+    bonds = []
+    for i in range(n_atoms):
+        for j in range(i + 1, n_atoms):
+            if bond_matrix[i, j]:
+                bonds.append([i, j])
+
+    return bonds
+
+
+def parse_orca_inp_to_molecule_data(
+    orca_path: str,
+) -> Tuple[List[str], np.ndarray, int, int]:
+    """Parse ORCA input file and return species, coords, charge, and spin.
+
+    Args:
+        orca_path: Path to ORCA input file
+
+    Returns:
+        Tuple of (species, coords, charge, spin_multiplicity)
+        - species: List of element symbols
+        - coords: numpy array of shape (n_atoms, 3)
+        - charge: molecular charge (int)
+        - spin_multiplicity: spin multiplicity (int)
+    """
+    mol_dict = dft_inp_to_dict(orca_path, parse_charge_spin=True)
+
+    n_atoms = len(mol_dict["mol"])
+    species = []
+    coords = np.zeros((n_atoms, 3))
+
+    for idx, (ind, atom) in enumerate(mol_dict["mol"].items()):
+        species.append(atom["element"])
+        coords[idx, 0] = float(atom["pos"][0])
+        coords[idx, 1] = float(atom["pos"][1])
+        coords[idx, 2] = float(atom["pos"][2])
+
+    charge = int(mol_dict.get("charge", 0))
+    spin = int(mol_dict.get("spin", 1))
+
+    return species, coords, charge, spin
 
 
 def sanitize_folders(folders: List[str]) -> List[str]:
@@ -297,11 +383,7 @@ def convert_inp_to_xyz(orca_path: str, output_path: str) -> None:
     """
     def sanitize_floats(value: str) -> float:
         """
-        [23:07:05] Cannot convert '-1.0209306831e-05' to double on line 2
-        [23:07:05] Cannot convert '7.4912088061e-05' to double on line 4
-        [23:07:05] Cannot convert '-2.6e-14' to double on line 2
-        [23:07:06] Cannot convert '-2.7829e-10' to double on line 2
-        Utility to sanitize float strings from ORCA input files.
+        convert '-1.0209306831e-05' to float
         """
         try:
             return float(value)

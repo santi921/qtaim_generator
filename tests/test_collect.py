@@ -1,8 +1,12 @@
+from pathlib import Path
+
 import pandas as pd
 from qtaim_gen.source.core.parse_qtaim import (
     gather_imputation,
     gather_qtaim_features,
 )
+
+TEST_FILES = Path(__file__).parent / "test_files"
 
 
 class TestParser:
@@ -33,9 +37,9 @@ class TestParser:
     def test_reaction_parsing(self):
         reaction = True
         define_bonds = "qtaim"
-        impute_file = "./test_files/reaction/impute.json"
-        test_root = "./test_files/reaction/"
-        df = pd.read_json("./test_files/reaction/b97d3.json")
+        impute_file = str(TEST_FILES / "reaction" / "impute.json")
+        test_root = str(TEST_FILES / "reaction") + "/"
+        df = pd.read_json(str(TEST_FILES / "reaction" / "b97d3.json"))
 
         impute_dict = gather_imputation(
             df,
@@ -78,20 +82,19 @@ class TestParser:
         assert len(drop_list) == 0, "drop list not empty"
 
     def test_molecule_parsing(self):
-        test_root = "./test_files/molecule/"
+        test_root = str(TEST_FILES / "molecule") + "/"
+        pkl_path = str(TEST_FILES / "molecule" / "libe_qtaim_test.pkl")
         try:
-            df = pd.read_pickle("./test_files/molecule/libe_qtaim_test.pkl")
+            df = pd.read_pickle(pkl_path)
         except:
             try:
-                df = pd.read_pickle(
-                    "./test_files/molecule/libe_qtaim_test.pkl", encoding="latin1"
-                )
+                df = pd.read_pickle(pkl_path, encoding="latin1")
             except:
                 raise Exception("Could not read test pickle file.")
 
         reaction = False
         define_bonds = "qtaim"
-        impute_file = "./test_files/molecule/impute.json"
+        impute_file = str(TEST_FILES / "molecule" / "impute.json")
 
         impute_dict = gather_imputation(
             df=df,

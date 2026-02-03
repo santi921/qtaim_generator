@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pandas as pd
 import os
 import numpy as np
@@ -5,10 +7,12 @@ from qtaim_gen.source.core.parse_qtaim import (
     gather_imputation,
 )
 
+TEST_FILES = Path(__file__).parent / "test_files"
+
 
 def test_gather_imputation_reaction():
-    test_root = "./test_files/reaction/"
-    df = pd.read_json("./test_files/reaction/b97d3.json")
+    test_root = str(TEST_FILES / "reaction")
+    df = pd.read_json(str(TEST_FILES / "reaction" / "b97d3.json"))
     features_atom = [
         "Lagrangian_K",
         "eta",
@@ -17,7 +21,7 @@ def test_gather_imputation_reaction():
 
     reaction = True
     define_bonds = "qtaim"
-    impute_file = "./test_files/reaction/impute.json"
+    impute_file = str(TEST_FILES / "reaction" / "impute.json")
     if os.path.exists(impute_file):
         os.remove(impute_file)
     impute_dict = gather_imputation(
@@ -41,7 +45,7 @@ def test_gather_imputation_reaction():
         define_bonds=define_bonds,
         inp_type="xyz",
     )
-    assert impute_dict == impute_dict_reup, "not properly reloaded on impute"
+    assert impute_dict == impute_dict_reup, f"not properly reloaded on impute reup: {impute_dict} vs {impute_dict_reup}"
 
     for k, v in impute_dict.items():
         for k_sub, v_sub in v.items():
@@ -50,8 +54,8 @@ def test_gather_imputation_reaction():
 
 
 def test_gather_imputation_molecule():
-    test_root = "./test_files/molecule/"
-    df = pd.read_pickle("./test_files/molecule/libe_qtaim_test.pkl")
+    test_root = str(TEST_FILES / "molecule")
+    df = pd.read_pickle(str(TEST_FILES / "molecule" / "libe_qtaim_test.pkl"))
     features_atom = [
         "Lagrangian_K",
         "eta",
@@ -60,7 +64,7 @@ def test_gather_imputation_molecule():
 
     reaction = False
     define_bonds = "qtaim"
-    impute_file = "./test_files/molecule/impute.json"
+    impute_file = str(TEST_FILES / "molecule" / "impute.json")
     if os.path.exists(impute_file):
         os.remove(impute_file)
     impute_dict = gather_imputation(

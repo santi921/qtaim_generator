@@ -52,6 +52,8 @@ class TestLMDB:
 
         # construct merged inputs
         merge = True
+
+
         json_2_lmdbs(
             cls.dir_data,
             cls.dir_active_merged,
@@ -178,8 +180,11 @@ class TestLMDB:
         )
 
         for key, value in env.begin().cursor():
-            if str(key.decode("ascii"))[2:-1] == lookup:
+            key_str = key.decode("ascii")
+            if key_str == lookup:
                 return pkl.loads(value)
+        env.close()
+        return None
 
     def test_write_read(self):
         base = self.base_tests / "test_files"
@@ -534,19 +539,19 @@ class TestConverters:
         # self.converter_general.process()
         # get first key
         struct_raw = self.converter_general.__getitem__(
-            "geom_lmdb", "b'orca5'".encode("ascii")
+            "geom_lmdb", b"orca5"
         )
         charge_dict_raw = self.converter_general.__getitem__(
-            "charge_lmdb", "b'orca5'".encode("ascii")
+            "charge_lmdb", b"orca5"
         )
         qtaim_dict_raw = self.converter_general.__getitem__(
-            "qtaim_lmdb", "b'orca5'".encode("ascii")
+            "qtaim_lmdb", b"orca5"
         )
         bond_dict_raw = self.converter_general.__getitem__(
-            "bond_lmdb", "b'orca5'".encode("ascii")
+            "bond_lmdb", b"orca5"
         )
         fuzzy_dict_raw = self.converter_general.__getitem__(
-            "fuzzy_lmdb", "b'orca5'".encode("ascii")
+            "fuzzy_lmdb", b"orca5"
         )
 
 
@@ -575,7 +580,7 @@ class TestConverters:
         bond_feats_qtaim = {}
         atom_feats_qtaim = {i: {} for i in range(global_feats["n_atoms"])}
         # this tests merging in qtaim as well as parsing
-
+        print("qtaim raw",  qtaim_dict_raw)
         (
             atom_keys,
             bond_keys,
@@ -595,9 +600,9 @@ class TestConverters:
         for key, value in atom_feats_qtaim_temp.items():
             atom_feats_qtaim[key].update(value)
 
-        # batch update bond_feats_qtaim with bond_feats_qtaim_temp
+        # assign bond_feats_qtaim from bond_feats_qtaim_temp
         for key, value in bond_feats_qtaim_temp.items():
-            bond_feats_qtaim[key].update(value)
+            bond_feats_qtaim[key] = value
 
         # CHARGE tests
         # iterate through processed_charge_dict and print keys and values
@@ -676,19 +681,19 @@ class TestConverters:
         # self.converter_general.process()
         # get first key
         struct_raw = self.converter_general.__getitem__(
-            "geom_lmdb", "b'orca5'".encode("ascii")
+            "geom_lmdb", b"orca5"
         )
         charge_dict_raw = self.converter_general.__getitem__(
-            "charge_lmdb", "b'orca5'".encode("ascii")
+            "charge_lmdb", b"orca5"
         )
         qtaim_dict_raw = self.converter_general.__getitem__(
-            "qtaim_lmdb", "b'orca5'".encode("ascii")
+            "qtaim_lmdb", b"orca5"
         )
         bond_dict_raw = self.converter_general.__getitem__(
-            "bond_lmdb", "b'orca5'".encode("ascii")
+            "bond_lmdb", b"orca5"
         )
         fuzzy_dict_raw = self.converter_general.__getitem__(
-            "fuzzy_lmdb", "b'orca5'".encode("ascii")
+            "fuzzy_lmdb", b"orca5"
         )
 
         # TESTS 
@@ -891,8 +896,9 @@ class TestConverters:
 
 
 # create dummy to just run test_parsers and setups
+
 if __name__ == "__main__":
     test_lmdb = TestConverters()
     test_lmdb.setup_class()
-    #test_lmdb.test_parsers()
-    test_lmdb.test_parser_merge()
+    test_lmdb.test_parsers()
+    #test_lmdb.test_parser_merge()

@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 import pandas as pd
 import numpy as np
 import json
@@ -17,13 +18,13 @@ from pymatgen.analysis.graphs import MoleculeGraph
 from qtaim_gen.source.utils.bonds import get_bonds_from_rdkit
 from qtaim_gen.source.utils.io import convert_inp_to_xyz
 
-
-root_folder = "./test_files/QTAIM/"
+TEST_FILES = Path(__file__).parent / "test_files"
+root_folder = str(TEST_FILES / "QTAIM") + "/"
 
 
 def test_get_qtaim_data():
 
-    file = "./test_files/QTAIM/1/qtaim.json"
+    file = str(TEST_FILES / "QTAIM" / "1" / "qtaim.json")
     with open(file, "r") as f:
         qtaim_dict = json.load(f)
     qtaim_dict = get_qtaim_data(qtaim_dict)
@@ -125,7 +126,7 @@ def test_gather_impute():
 
 
 def test_get_keys_qtaim():
-    file = "./test_files/QTAIM/1/qtaim.json"
+    file = str(TEST_FILES / "QTAIM" / "1" / "qtaim.json")
     with open(file, "r") as f:
         qtaim_dict = json.load(f)
     # check that all the keys with atom are the same len
@@ -143,7 +144,7 @@ def test_get_keys_qtaim():
 
 
 def test_parse_bond():
-    file = "./test_files/QTAIM/1/bond.json"
+    file = str(TEST_FILES / "QTAIM" / "1" / "bond.json")
     with open(file, "r") as f:
         bond_dict = json.load(f)
 
@@ -162,7 +163,7 @@ def test_parse_bond():
 
 
 def test_get_qtaim_data_impute():
-    file = "./test_files/QTAIM/1/qtaim.json"
+    file = str(TEST_FILES / "QTAIM" / "1" / "qtaim.json")
     with open(file, "r") as f:
         qtaim_dict = json.load(f)
     # check that all the keys with atom are the same len

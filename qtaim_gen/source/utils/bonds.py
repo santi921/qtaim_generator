@@ -2,6 +2,9 @@ import numpy as np
 from rdkit import Chem
 from rdkit.Chem import rdDetermineBonds
 
+# Re-export the new function from io.py for convenience
+from qtaim_gen.source.utils.io import get_bonds_from_coords
+
 
 def get_bonds_from_rdkit(xyz):
     # Create an RDKit molecule from the XYZ string

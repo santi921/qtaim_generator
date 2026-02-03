@@ -556,6 +556,12 @@ Examples:
     )
 
     parser.add_argument(
+        "--clean_output",
+        action="store_true",
+        help="Delete existing LMDB files in output directory before conversion",
+    )
+
+    parser.add_argument(
         "--verbose", "-v",
         action="store_true",
         help="Enable verbose logging output",
@@ -584,6 +590,18 @@ Examples:
     if not out_dir.endswith(os.sep):
         out_dir += os.sep
     os.makedirs(out_dir, exist_ok=True)
+
+    # Clean existing LMDB files if requested
+    if args.clean_output:
+        existing_lmdbs = glob(os.path.join(out_dir, "*.lmdb"))
+        existing_locks = glob(os.path.join(out_dir, "*.lmdb-lock"))
+        if existing_lmdbs or existing_locks:
+            print(f"Cleaning {len(existing_lmdbs)} LMDB files and {len(existing_locks)} lock files from {out_dir}")
+            for f in existing_lmdbs + existing_locks:
+                try:
+                    os.remove(f)
+                except OSError as e:
+                    print(f"Warning: Could not remove {f}: {e}")
 
     # Determine which types to convert
     if args.all:
@@ -614,6 +632,8 @@ Examples:
     logger.info(f"Clean intermediate:  {clean}")
     logger.info(f"Generator subfolders: {move_files}")
     logger.info(f"Validation level:    {full_set} ({'baseline' if full_set == 0 else 'extended' if full_set == 1 else 'full'})")
+    if args.clean_output:
+        logger.info(f"Clean output:        Yes (removed existing LMDBs)")
     if debug_limit:
         logger.info(f"DEBUG MODE:          Limited to {debug_limit} folders")
     logger.info("")

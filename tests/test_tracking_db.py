@@ -2,7 +2,7 @@ import os
 import sqlite3
 import tempfile
 import pytest
-from qtaim_gen.source.scripts.tracking_db import log_to_wandb
+from qtaim_gen.source.scripts.helpers.tracking_db import log_to_wandb
 
 
 def create_test_db(db_path):
