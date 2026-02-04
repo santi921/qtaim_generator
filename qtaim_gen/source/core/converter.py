@@ -899,8 +899,8 @@ class Converter:
                 for key, value in cursor:
                     try:
                         graph = pickle.loads(value)
-                        graph = merged_feature_scaler.transform(graph)
-                        graph = merged_label_scaler.transform(graph)
+                        graph = merged_feature_scaler(graph)
+                        graph = merged_label_scaler(graph)
                         txn.put(key, pickle.dumps(graph))
                         count += 1
                     except Exception as e:
