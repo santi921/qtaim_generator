@@ -1,7 +1,5 @@
 import pytest
 
-# pytest.skip("test_lmdb.py removed/archived; use tests/test_combined_lmdb_suite.py", allow_module_level=True)
-
 import os
 import lmdb
 import json
