@@ -165,6 +165,18 @@ class Converter:
         self.n_workers = config_dict.get("n_workers", 8)
         self.batch_size = config_dict.get("batch_size", 500)
 
+        # Sharding settings for parallel processing of large datasets
+        self.shard_index = config_dict.get("shard_index", 0)
+        self.total_shards = config_dict.get("total_shards", 1)
+        self.skip_scaling = config_dict.get("skip_scaling", False)
+        self.save_unfinalized_scaler = config_dict.get("save_unfinalized_scaler", False)
+        self.auto_merge = config_dict.get("auto_merge", False)
+
+        if self.total_shards > 1:
+            self.logger.info(f"Sharding enabled: shard {self.shard_index + 1} of {self.total_shards}")
+            if self.auto_merge and self.shard_index == self.total_shards - 1:
+                self.logger.info(f"Auto-merge enabled: will merge all shards after processing")
+
         ####################### Element Set ########################
         if "element_set" in self.config_dict.keys():
             element_set = self.config_dict["element_set"]
@@ -196,10 +208,16 @@ class Converter:
         if "chunk" not in self.config_dict.keys():
             self.config_dict["chunk"] = -1
         
-        # output lmdb file handling - TODO: chunked outputs
+        # output lmdb file handling - supports sharding for parallel processing
+        lmdb_name = self.config_dict["lmdb_name"]
+        if self.total_shards > 1:
+            base_name = lmdb_name.replace(".lmdb", "")
+            lmdb_name = f"{base_name}_shard_{self.shard_index}.lmdb"
+            self.logger.info(f"Shard output file: {lmdb_name}")
+
         self.file = os.path.join(
-            self.config_dict["lmdb_path"], 
-            self.config_dict["lmdb_name"] if self.config_dict["lmdb_name"].endswith(".lmdb") else f"{self.config_dict['lmdb_name']}.lmdb"
+            self.config_dict["lmdb_path"],
+            lmdb_name if lmdb_name.endswith(".lmdb") else f"{lmdb_name}.lmdb"
         )
 
         if os.path.exists(self.file) and not(self.restart):
@@ -543,20 +561,108 @@ class Converter:
                 )"""
 
 
+    def _partition_keys(self, keys: list) -> list:
+        """
+        Partition keys for this shard using deterministic modulo assignment.
+
+        Args:
+            keys: List of all keys to partition
+
+        Returns:
+            List of keys assigned to this shard
+        """
+        if self.total_shards <= 1:
+            return keys
+
+        partitioned = [k for i, k in enumerate(keys) if i % self.total_shards == self.shard_index]
+        self.logger.info(f"Shard {self.shard_index}: {len(partitioned)} keys (of {len(keys)} total)")
+        return partitioned
+
+
+    def _auto_merge_shards(self):
+        """
+        Automatically merge all shards after this shard completes processing.
+
+        This method is called by the last shard (shard_index == total_shards - 1)
+        when auto_merge is enabled. It constructs the list of shard directories
+        and calls merge_shards() to combine them.
+        """
+        self.logger.info("=" * 60)
+        self.logger.info("AUTO-MERGE: Starting automatic shard merging...")
+        self.logger.info("=" * 60)
+
+        # Construct shard directory list
+        base_lmdb_path = self.config_dict["lmdb_path"]
+
+        # Get parent directory (remove current shard suffix)
+        if base_lmdb_path.endswith(f"shard_{self.shard_index}"):
+            parent_dir = os.path.dirname(base_lmdb_path)
+        else:
+            # Try to infer parent from path
+            parent_dir = os.path.dirname(base_lmdb_path)
+
+        # Build list of all shard directories
+        shard_dirs = []
+        for i in range(self.total_shards):
+            shard_dir = os.path.join(parent_dir, f"shard_{i}")
+            if os.path.exists(shard_dir):
+                shard_dirs.append(shard_dir)
+            else:
+                self.logger.warning(f"Shard directory not found: {shard_dir}")
+
+        if len(shard_dirs) != self.total_shards:
+            self.logger.error(
+                f"Expected {self.total_shards} shards but found {len(shard_dirs)}. "
+                "Skipping auto-merge. Run merge manually."
+            )
+            return
+
+        # Create merged output directory
+        merged_dir = os.path.join(parent_dir, "merged")
+
+        self.logger.info(f"Merging {len(shard_dirs)} shards into: {merged_dir}")
+
+        try:
+            merged_path = self.__class__.merge_shards(
+                shard_dirs=shard_dirs,
+                output_dir=merged_dir,
+                output_name="merged.lmdb",
+                skip_scaling=False,  # Apply merged scalers
+                logger=self.logger
+            )
+            self.logger.info("=" * 60)
+            self.logger.info(f"AUTO-MERGE COMPLETE: {merged_path}")
+            self.logger.info("=" * 60)
+        except Exception as e:
+            self.logger.error(f"Auto-merge failed: {e}", exc_info=True)
+            self.logger.error("You can manually merge with: Converter.merge_shards()")
+
 
     def finalize(self, return_info=False, keys_to_iterate=None, processed_count=0):
-        # indicates that the scalers should not be updated anymore 
+        lmdb_path = self.config_dict["lmdb_path"]
+
+        # For sharded runs, save unfinalized scalers for later merging
+        if self.save_unfinalized_scaler:
+            shard_suffix = f"_shard_{self.shard_index}" if self.total_shards > 1 else ""
+            self.feature_scaler_iterative.save_scaler(
+                f"{lmdb_path}/feature_scaler_unfinalized{shard_suffix}.pt"
+            )
+            self.label_scaler_iterative.save_scaler(
+                f"{lmdb_path}/label_scaler_unfinalized{shard_suffix}.pt"
+            )
+            self.logger.info(f"Saved unfinalized scalers for merging (shard {self.shard_index})")
+
+        # Finalize scalers (compute final mean/std)
         self.feature_scaler_iterative.finalize()
         self.label_scaler_iterative.finalize()
 
         if self.save_scaler:
-            lmdb_path_qtaim = self.config_dict["lmdb_path"]
-
+            shard_suffix = f"_shard_{self.shard_index}" if self.total_shards > 1 else ""
             self.feature_scaler_iterative.save_scaler(
-                lmdb_path_qtaim + "/feature_scaler_iterative.pt"
+                f"{lmdb_path}/feature_scaler_iterative{shard_suffix}.pt"
             )
             self.label_scaler_iterative.save_scaler(
-                lmdb_path_qtaim + "/label_scaler_iterative.pt"
+                f"{lmdb_path}/label_scaler_iterative{shard_suffix}.pt"
             )
         
         # last info on whether the graphs were scaled or not
@@ -636,6 +742,197 @@ class Converter:
             data_object = pickle.loads(datapoint_pickled)
         #print("data object retrieved: ", data_object)
         return data_object
+
+
+    @classmethod
+    def merge_shards(
+        cls,
+        shard_dirs: List[str],
+        output_dir: str,
+        output_name: str = "merged.lmdb",
+        skip_scaling: bool = False,
+        logger: Optional[logging.Logger] = None
+    ) -> str:
+        """
+        Merge multiple sharded converter outputs into a single LMDB.
+
+        Args:
+            shard_dirs: List of shard directory paths to merge
+            output_dir: Output directory for merged LMDB
+            output_name: Name of output LMDB file (default: "merged.lmdb")
+            skip_scaling: Skip applying merged scalers to LMDB (default: False)
+            logger: Logger instance (creates new one if None)
+
+        Returns:
+            Path to merged LMDB file
+
+        Example:
+            >>> shard_dirs = ["output/shard_0", "output/shard_1", "output/shard_2"]
+            >>> merged_path = QTAIMConverter.merge_shards(
+            ...     shard_dirs=shard_dirs,
+            ...     output_dir="output/merged"
+            ... )
+        """
+        from qtaim_embed.data.processing import merge_scalers
+
+        if logger is None:
+            logger = logging.getLogger("MergeShards")
+            logger.setLevel(logging.INFO)
+            if not logger.handlers:
+                handler = logging.StreamHandler()
+                handler.setFormatter(logging.Formatter(
+                    "%(asctime)s - %(levelname)s - %(message)s"
+                ))
+                logger.addHandler(handler)
+
+        os.makedirs(output_dir, exist_ok=True)
+
+        # Find LMDB files in shard directories
+        logger.info(f"Merging {len(shard_dirs)} shards...")
+        shard_lmdbs = []
+        for shard_dir in shard_dirs:
+            lmdb_files = list(glob(os.path.join(shard_dir, "*.lmdb")))
+            if not lmdb_files:
+                logger.warning(f"No LMDB files found in {shard_dir}, skipping")
+                continue
+            shard_lmdbs.append(lmdb_files[0])
+
+        if not shard_lmdbs:
+            raise ValueError("No LMDB files found in any shard directory")
+
+        # Create merged LMDB
+        output_path = os.path.join(output_dir, output_name)
+        if output_path.endswith(".lmdb"):
+            output_path = output_path[:-5]
+
+        logger.info(f"Creating merged LMDB: {output_path}")
+
+        # Calculate total entries
+        total_entries = 0
+        for lmdb_path in shard_lmdbs:
+            env = lmdb.open(lmdb_path, subdir=False, readonly=True, lock=False)
+            with env.begin() as txn:
+                total_entries += txn.stat()["entries"]
+            env.close()
+
+        logger.info(f"Total entries to merge: {total_entries}")
+
+        # Create output LMDB
+        map_size = max(1099511627776, total_entries * 100000)
+        merged_env = lmdb.open(
+            output_path,
+            subdir=False,
+            map_size=map_size,
+            writemap=True,
+            map_async=True
+        )
+
+        # Copy all entries from shards
+        total_copied = 0
+        with merged_env.begin(write=True) as dst_txn:
+            for i, lmdb_path in enumerate(shard_lmdbs):
+                logger.info(f"Copying shard {i+1}/{len(shard_lmdbs)}")
+                src_env = lmdb.open(lmdb_path, subdir=False, readonly=True, lock=False)
+                with src_env.begin() as src_txn:
+                    cursor = src_txn.cursor()
+                    for key, value in cursor:
+                        dst_txn.put(key, value)
+                        total_copied += 1
+                src_env.close()
+
+        merged_env.close()
+        logger.info(f"Merged {total_copied} entries")
+
+        # Merge scalers
+        logger.info("Merging feature scalers...")
+        feature_scaler_paths = []
+        for shard_dir in shard_dirs:
+            scaler_path = os.path.join(shard_dir, "feature_scaler_unfinalized.pt")
+            if not os.path.exists(scaler_path):
+                pattern = os.path.join(shard_dir, "feature_scaler_unfinalized_shard_*.pt")
+                matches = glob(pattern)
+                if matches:
+                    scaler_path = matches[0]
+            if os.path.exists(scaler_path):
+                feature_scaler_paths.append(scaler_path)
+
+        if feature_scaler_paths:
+            scalers = [load_scaler(p, features_tf=True) for p in feature_scaler_paths]
+            merged_feature_scaler = merge_scalers(scalers, features_tf=True, finalize_merged=True)
+            feature_out = os.path.join(output_dir, "feature_scaler_iterative.pt")
+            merged_feature_scaler.save_scaler(feature_out)
+            logger.info(f"Saved merged feature scaler")
+        else:
+            logger.warning("No feature scalers found")
+            merged_feature_scaler = None
+
+        # Merge label scalers
+        logger.info("Merging label scalers...")
+        label_scaler_paths = []
+        for shard_dir in shard_dirs:
+            scaler_path = os.path.join(shard_dir, "label_scaler_unfinalized.pt")
+            if not os.path.exists(scaler_path):
+                pattern = os.path.join(shard_dir, "label_scaler_unfinalized_shard_*.pt")
+                matches = glob(pattern)
+                if matches:
+                    scaler_path = matches[0]
+            if os.path.exists(scaler_path):
+                label_scaler_paths.append(scaler_path)
+
+        if label_scaler_paths:
+            scalers = [load_scaler(p, features_tf=False) for p in label_scaler_paths]
+            merged_label_scaler = merge_scalers(scalers, features_tf=False, finalize_merged=True)
+            label_out = os.path.join(output_dir, "label_scaler_iterative.pt")
+            merged_label_scaler.save_scaler(label_out)
+            logger.info(f"Saved merged label scaler")
+        else:
+            logger.warning("No label scalers found")
+            merged_label_scaler = None
+
+        # Apply scalers to merged LMDB
+        if not skip_scaling and merged_feature_scaler and merged_label_scaler:
+            logger.info("Applying merged scalers to LMDB...")
+            env = lmdb.open(output_path, subdir=False, map_size=map_size)
+            count = 0
+            with env.begin(write=True) as txn:
+                cursor = txn.cursor()
+                for key, value in cursor:
+                    try:
+                        graph = pickle.loads(value)
+                        graph = merged_feature_scaler.transform(graph)
+                        graph = merged_label_scaler.transform(graph)
+                        txn.put(key, pickle.dumps(graph))
+                        count += 1
+                    except Exception as e:
+                        logger.warning(f"Failed to scale graph {key}: {e}")
+            env.close()
+            logger.info(f"Applied scalers to {count} graphs")
+
+        # Merge configs
+        first_config = os.path.join(shard_dirs[0], "config.json")
+        if os.path.exists(first_config):
+            with open(first_config, "r") as f:
+                config = json.load(f)
+            config.pop("shard_index", None)
+            config.pop("total_shards", None)
+            config.pop("skip_scaling", None)
+            config.pop("save_unfinalized_scaler", None)
+            config["lmdb_path"] = output_dir
+            with open(os.path.join(output_dir, "config.json"), "w") as f:
+                json.dump(config, f, indent=2)
+
+        logger.info(f"Merge complete: {output_path}")
+        return output_path
+
+
+def load_scaler(scaler_path: str, features_tf: bool):
+    """Helper to load a scaler from file."""
+    from qtaim_embed.data.processing import HeteroGraphStandardScalerIterative
+    return HeteroGraphStandardScalerIterative(
+        features_tf=features_tf,
+        load=True,
+        load_path=scaler_path
+    )
 
 
 class BaseConverter(Converter):
@@ -719,7 +1016,11 @@ class BaseConverter(Converter):
         """
         self.logger.info("Starting BaseConverter processing...")
         keys_to_iterate = self.lmdb_dict["geom_lmdb"]["keys"]
-        self.logger.info(f"Total keys to iterate: {len(keys_to_iterate)}")
+        self.logger.info(f"Total keys before partitioning: {len(keys_to_iterate)}")
+
+        # Partition keys for sharding
+        keys_to_iterate = self._partition_keys(keys_to_iterate)
+        self.logger.info(f"Keys to process in this shard: {len(keys_to_iterate)}")
         self.logger.info(f"Using {self.n_workers} workers for parallel processing")
 
         write_buffer = []
@@ -812,6 +1113,7 @@ class BaseConverter(Converter):
 
         # Phase 2: Process remaining keys in parallel
         remaining_keys = keys_to_iterate[first_key_idx:]
+        self.logger.info(f"Phase 1: Initialized grapher after {first_key_idx} attempts, 1 key processed")
         self.logger.info(f"Phase 2: Processing {len(remaining_keys)} remaining keys with {self.n_workers} workers...")
 
         def process_key(key):
@@ -857,6 +1159,11 @@ class BaseConverter(Converter):
             self.logger.debug(f"Committed final batch of {len(write_buffer)} items")
 
         ret_dict = self.finalize(return_info=return_info, keys_to_iterate=keys_to_iterate, processed_count=processed_count)
+
+        # Auto-merge shards if this is the last shard
+        if self.auto_merge and self.shard_index == self.total_shards - 1:
+            self._auto_merge_shards()
+
         if return_info:
             return ret_dict
 
@@ -957,7 +1264,11 @@ class QTAIMConverter(Converter):
         """
         self.logger.info("Starting QTAIMConverter processing...")
         keys_to_iterate = self.lmdb_dict["geom_lmdb"]["keys"]
-        self.logger.info(f"Total keys to iterate: {len(keys_to_iterate)}")
+        self.logger.info(f"Total keys before partitioning: {len(keys_to_iterate)}")
+
+        # Partition keys for sharding
+        keys_to_iterate = self._partition_keys(keys_to_iterate)
+        self.logger.info(f"Keys to process in this shard: {len(keys_to_iterate)}")
         self.logger.info(f"Using {self.n_workers} workers for parallel processing")
 
         write_buffer = []
@@ -1058,6 +1369,7 @@ class QTAIMConverter(Converter):
 
         # Phase 2: Process remaining keys in parallel
         remaining_keys = keys_to_iterate[first_key_idx:]
+        self.logger.info(f"Phase 1: Initialized grapher after {first_key_idx} attempts, 1 key processed")
         self.logger.info(f"Phase 2: Processing {len(remaining_keys)} remaining keys with {self.n_workers} workers...")
 
         def process_key(key):
@@ -1103,6 +1415,11 @@ class QTAIMConverter(Converter):
             self.logger.debug(f"Committed final batch of {len(write_buffer)} items")
 
         ret_info = self.finalize(return_info=return_info, keys_to_iterate=keys_to_iterate, processed_count=processed_count)
+
+        # Auto-merge shards if this is the last shard
+        if self.auto_merge and self.shard_index == self.total_shards - 1:
+            self._auto_merge_shards()
+
         if return_info:
             return ret_info
 
@@ -1349,7 +1666,11 @@ class GeneralConverter(Converter):
         self.logger.info("Starting GeneralConverter processing...")
 
         keys_to_iterate = self.lmdb_dict["geom_lmdb"]["keys"]
-        self.logger.info(f"Total keys to iterate: {len(keys_to_iterate)}")
+        self.logger.info(f"Total keys before partitioning: {len(keys_to_iterate)}")
+
+        # Partition keys for sharding
+        keys_to_iterate = self._partition_keys(keys_to_iterate)
+        self.logger.info(f"Keys to process in this shard: {len(keys_to_iterate)}")
         self.logger.info(f"Using {self.n_workers} workers for parallel processing")
 
         write_buffer = []
@@ -1533,6 +1854,7 @@ class GeneralConverter(Converter):
 
         # Phase 2: Process remaining keys in parallel
         remaining_keys = keys_to_iterate[first_key_idx:]
+        self.logger.info(f"Phase 1: Initialized grapher after {first_key_idx} attempts, 1 key processed")
         self.logger.info(f"Phase 2: Processing {len(remaining_keys)} remaining keys with {self.n_workers} workers...")
 
         def process_key(key):
@@ -1582,6 +1904,11 @@ class GeneralConverter(Converter):
             write_buffer.clear()
 
         ret_info = self.finalize(return_info=return_info, keys_to_iterate=keys_to_iterate, processed_count=processed_count)
+
+        # Auto-merge shards if this is the last shard
+        if self.auto_merge and self.shard_index == self.total_shards - 1:
+            self._auto_merge_shards()
+
         if return_info:
             return ret_info
 
