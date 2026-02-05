@@ -1739,112 +1739,121 @@ class GeneralConverter(Converter):
                     continue
 
                 # Step 3: Charge data
-                try:
-                    dict_charge_raw = self.__getitem__("charge_lmdb", key)
-                    if dict_charge_raw is not None:
-                        atom_feats_charge, global_dipole_feats = parse_charge_data(
-                            dict_charge_raw, global_feats["n_atoms"], self.charge_filter
-                        )
-                        for feat_key in atom_feats_charge[0].keys():
-                            if feat_key not in self.keys_data["atom"]:
-                                self.keys_data["atom"].append(feat_key)
-                        for feat_key in global_dipole_feats.keys():
-                            if feat_key not in self.keys_data["global"]:
-                                self.keys_data["global"].append(feat_key)
-                        global_feats.update(global_dipole_feats)
-                        atom_feats.update(atom_feats_charge)
-                    elif self.missing_data_strategy == "skip":
-                        self.logger.debug(f"Key {key_str}: charge data missing, skipping")
+                if "charge_lmdb" in self.lmdb_dict:
+                    try:
+                        dict_charge_raw = self.__getitem__("charge_lmdb", key)
+                        if dict_charge_raw is not None:
+                            atom_feats_charge, global_dipole_feats = parse_charge_data(
+                                dict_charge_raw, global_feats["n_atoms"], self.charge_filter
+                            )
+                            for feat_key in atom_feats_charge[0].keys():
+                                if feat_key not in self.keys_data["atom"]:
+                                    self.keys_data["atom"].append(feat_key)
+                            for feat_key in global_dipole_feats.keys():
+                                if feat_key not in self.keys_data["global"]:
+                                    self.keys_data["global"].append(feat_key)
+                            global_feats.update(global_dipole_feats)
+                            atom_feats.update(atom_feats_charge)
+                        elif self.missing_data_strategy == "skip":
+                            self.logger.debug(f"Key {key_str}: charge data missing, skipping")
+                            first_key_idx = idx + 1
+                            continue
+                    except Exception as e:
+                        self.logger.warning(f"Key {key_str}: Failed to parse charge data: {e}", exc_info=True)
                         first_key_idx = idx + 1
                         continue
-                except Exception as e:
-                    self.logger.warning(f"Key {key_str}: Failed to parse charge data: {e}", exc_info=True)
-                    first_key_idx = idx + 1
-                    continue
+
 
                 # Step 4: QTAIM data
-                try:
-                    dict_qtaim_raw = self.__getitem__("qtaim_lmdb", key)
-                    connected_bond_paths = None
-                    if dict_qtaim_raw is not None:
-                        (_, _, atom_feats, bond_feats, connected_bond_paths) = parse_qtaim_data(
-                            dict_qtaim_raw, atom_feats, bond_feats,
-                            atom_keys=self.keys_data["atom"],
-                            bond_keys=self.keys_data["bond"],
-                        )
-                    else:
-                        self.logger.debug(f"Key {key_str}: QTAIM data missing, skipping")
+                connected_bond_paths = None
+                if "qtaim_lmdb" in self.lmdb_dict:
+                    try:
+                        dict_qtaim_raw = self.__getitem__("qtaim_lmdb", key)
+                        if dict_qtaim_raw is not None:
+                            (_, _, atom_feats, bond_feats, connected_bond_paths) = parse_qtaim_data(
+                                dict_qtaim_raw, atom_feats, bond_feats,
+                                atom_keys=self.keys_data["atom"],
+                                bond_keys=self.keys_data["bond"],
+                            )
+                        else:
+                            self.logger.debug(f"Key {key_str}: QTAIM data missing in LMDB, skipping")
+                            first_key_idx = idx + 1
+                            continue
+                    except Exception as e:
+                        self.logger.warning(f"Key {key_str}: Failed to parse QTAIM data: {e}", exc_info=True)
                         first_key_idx = idx + 1
                         continue
-                except Exception as e:
-                    self.logger.warning(f"Key {key_str}: Failed to parse QTAIM data: {e}", exc_info=True)
-                    first_key_idx = idx + 1
-                    continue
+
 
                 # Step 5: Fuzzy data
-                try:
-                    dict_fuzzy_raw = self.__getitem__("fuzzy_full_lmdb", key)
-                    if dict_fuzzy_raw is not None:
-                        atom_feats_fuzzy, global_fuzzy_feats = parse_fuzzy_data(
-                            dict_fuzzy_raw, global_feats["n_atoms"], self.fuzzy_filter
-                        )
-                        for feat_key in atom_feats_fuzzy.get(0, {}).keys():
-                            if feat_key not in self.keys_data["atom"]:
-                                self.keys_data["atom"].append(feat_key)
-                        for feat_key in global_fuzzy_feats.keys():
-                            if feat_key not in self.keys_data["global"]:
-                                self.keys_data["global"].append(feat_key)
-                        global_feats.update(global_fuzzy_feats)
-                        for atom_idx, fuzzy_feats in atom_feats_fuzzy.items():
-                            atom_feats.setdefault(atom_idx, {}).update(fuzzy_feats)
-                    elif self.missing_data_strategy == "skip":
-                        self.logger.debug(f"Key {key_str}: fuzzy data missing, skipping")
+                if "fuzzy_full_lmdb" in self.lmdb_dict:
+                    try:
+                        dict_fuzzy_raw = self.__getitem__("fuzzy_full_lmdb", key)
+                        if dict_fuzzy_raw is not None:
+                            atom_feats_fuzzy, global_fuzzy_feats = parse_fuzzy_data(
+                                dict_fuzzy_raw, global_feats["n_atoms"], self.fuzzy_filter
+                            )
+                            for feat_key in atom_feats_fuzzy.get(0, {}).keys():
+                                if feat_key not in self.keys_data["atom"]:
+                                    self.keys_data["atom"].append(feat_key)
+                            for feat_key in global_fuzzy_feats.keys():
+                                if feat_key not in self.keys_data["global"]:
+                                    self.keys_data["global"].append(feat_key)
+                            global_feats.update(global_fuzzy_feats)
+                            for atom_idx, fuzzy_feats in atom_feats_fuzzy.items():
+                                atom_feats.setdefault(atom_idx, {}).update(fuzzy_feats)
+                        elif self.missing_data_strategy == "skip":
+                            self.logger.debug(f"Key {key_str}: fuzzy data missing in LMDB, skipping")
+                            first_key_idx = idx + 1
+                            continue
+                    except Exception as e:
+                        self.logger.warning(f"Key {key_str}: Failed to parse fuzzy data: {e}", exc_info=True)
                         first_key_idx = idx + 1
                         continue
-                except Exception as e:
-                    self.logger.warning(f"Key {key_str}: Failed to parse fuzzy data: {e}", exc_info=True)
-                    first_key_idx = idx + 1
-                    continue
+
 
                 # Step 6: Other data
-                try:
-                    dict_other_raw = self.__getitem__("other_lmdb", key)
-                    if dict_other_raw is not None:
-                        global_other_feats = parse_other_data(dict_other_raw, self.other_filter)
-                        for feat_key in global_other_feats.keys():
-                            if feat_key not in self.keys_data["global"]:
-                                self.keys_data["global"].append(feat_key)
-                        global_feats.update(global_other_feats)
-                    elif self.missing_data_strategy == "skip":
-                        self.logger.debug(f"Key {key_str}: other data missing, skipping")
+                if "other_lmdb" in self.lmdb_dict:
+                    try:
+                        dict_other_raw = self.__getitem__("other_lmdb", key)
+                        if dict_other_raw is not None:
+                            global_other_feats = parse_other_data(dict_other_raw, self.other_filter)
+                            for feat_key in global_other_feats.keys():
+                                if feat_key not in self.keys_data["global"]:
+                                    self.keys_data["global"].append(feat_key)
+                            global_feats.update(global_other_feats)
+                        elif self.missing_data_strategy == "skip":
+                            self.logger.debug(f"Key {key_str}: other data missing in LMDB, skipping")
+                            first_key_idx = idx + 1
+                            continue
+                    except Exception as e:
+                        self.logger.warning(f"Key {key_str}: Failed to parse other data: {e}", exc_info=True)
                         first_key_idx = idx + 1
                         continue
-                except Exception as e:
-                    self.logger.warning(f"Key {key_str}: Failed to parse other data: {e}", exc_info=True)
-                    first_key_idx = idx + 1
-                    continue
+
 
                 # Step 7: Bonds LMDB
-                try:
-                    bonds_from_lmdb = None
-                    dict_bonds_raw = self.__getitem__("bonds_lmdb", key)
-                    if dict_bonds_raw is not None:
-                        bond_feats_from_lmdb, bonds_from_lmdb = parse_bond_data(
-                            dict_bonds_raw, bond_filter=self.bond_filter,
-                            cutoff=self.bond_cutoff, bond_list_definition=self.bond_list_definition,
-                            bond_feats=None, clean=True, as_lists=False,
-                        )
-                        if bond_feats_from_lmdb:
-                            sample_bond = next(iter(bond_feats_from_lmdb.values()), {})
-                            for feat_key in sample_bond.keys():
-                                if feat_key not in self.keys_data["bond"]:
-                                    self.keys_data["bond"].append(feat_key)
-                            for bond_key, bond_value in bond_feats_from_lmdb.items():
-                                bond_feats.setdefault(bond_key, {}).update(bond_value)
-                except Exception as e:
-                    self.logger.warning(f"Key {key_str}: Failed to parse bond data: {e}", exc_info=True)
-                    first_key_idx = idx + 1
-                    continue
+                bonds_from_lmdb = None
+                if "bonds_lmdb" in self.lmdb_dict:
+                    try:
+                        dict_bonds_raw = self.__getitem__("bonds_lmdb", key)
+                        if dict_bonds_raw is not None:
+                            bond_feats_from_lmdb, bonds_from_lmdb = parse_bond_data(
+                                dict_bonds_raw, bond_filter=self.bond_filter,
+                                cutoff=self.bond_cutoff, bond_list_definition=self.bond_list_definition,
+                                bond_feats=None, clean=True, as_lists=False,
+                            )
+                            if bond_feats_from_lmdb:
+                                sample_bond = next(iter(bond_feats_from_lmdb.values()), {})
+                                for feat_key in sample_bond.keys():
+                                    if feat_key not in self.keys_data["bond"]:
+                                        self.keys_data["bond"].append(feat_key)
+                                for bond_key, bond_value in bond_feats_from_lmdb.items():
+                                    bond_feats.setdefault(bond_key, {}).update(bond_value)
+                    except Exception as e:
+                        self.logger.warning(f"Key {key_str}: Failed to parse bond data: {e}", exc_info=True)
+                        first_key_idx = idx + 1
+                        continue
 
                 # Step 8: Select bond definitions
                 try:
