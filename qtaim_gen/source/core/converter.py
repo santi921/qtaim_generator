@@ -1826,7 +1826,7 @@ class GeneralConverter(Converter):
                         bond_featurizer_tf=True,
                         global_featurizer_tf=True,
                         )
-                self.logger.info(f"Grapher initialized with keys_data: {self.keys_data}")
+                    self.logger.info(f"Grapher initialized with keys_data: {self.keys_data}")
 
                 first_graph = build_and_featurize_graph(self.grapher, mol_wrapper)
 
