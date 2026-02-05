@@ -1523,6 +1523,7 @@ class GeneralConverter(Converter):
             else:
                 id = key_str
         except Exception as e:
+            logging.error(f"Error parsing structure for key {key_str}: {e}")
             failures["structure"].append(key_str)
             return (key_str, None, failures)
 
@@ -1540,6 +1541,7 @@ class GeneralConverter(Converter):
                 if self.missing_data_strategy == "skip":
                     return (key_str, None, failures)
         except Exception as e:
+            logging.error(f"Error parsing charge data for key {key_str}: {e}")
             failures["charge"].append(key_str)
             if self.missing_data_strategy == "skip":
                 return (key_str, None, failures)
@@ -1558,6 +1560,7 @@ class GeneralConverter(Converter):
                 failures["qtaim"].append(key_str)
                 return (key_str, None, failures)
         except Exception as e:
+            logging.error(f"Error parsing QTAIM data for key {key_str}: {e}")
             failures["qtaim"].append(key_str)
             return (key_str, None, failures)
 
@@ -1579,6 +1582,7 @@ class GeneralConverter(Converter):
                 if self.missing_data_strategy == "skip":
                     return (key_str, None, failures)
         except Exception as e:
+            logging.error(f"Error parsing fuzzy data for key {key_str}: {e}")
             failures["fuzzy"].append(key_str)
             if self.missing_data_strategy == "skip":
                 return (key_str, None, failures)
@@ -1594,6 +1598,7 @@ class GeneralConverter(Converter):
                 if self.missing_data_strategy == "skip":
                     return (key_str, None, failures)
         except Exception as e:
+            logging.error(f"Error parsing other data for key {key_str}: {e}")
             failures["other"].append(key_str)
             if self.missing_data_strategy == "skip":
                 return (key_str, None, failures)
@@ -1621,6 +1626,7 @@ class GeneralConverter(Converter):
             else:
                 failures["bonds"].append(key_str)
         except Exception as e:
+            logging.error(f"Error parsing bonds for key {key_str}: {e}")
             failures["bonds"].append(key_str)
 
         # Select bond definitions
@@ -1661,6 +1667,7 @@ class GeneralConverter(Converter):
 
             return (key_str, graph, failures)
         except Exception as e:
+            self.logger.error(f"Error building graph for key {key_str}: {e}")
             failures["graph"].append(key_str)
             return (key_str, None, failures)
 
