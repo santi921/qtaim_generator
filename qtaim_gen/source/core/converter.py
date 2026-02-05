@@ -894,14 +894,26 @@ class Converter:
             logger.info("Applying merged scalers to LMDB...")
             env = lmdb.open(output_path, subdir=False, map_size=map_size)
             count = 0
+            metadata_keys = {b'scaled', b'scaler_finalized'}
             with env.begin(write=True) as txn:
                 cursor = txn.cursor()
                 for key, value in cursor:
+                    # Skip metadata keys
+                    if key in metadata_keys:
+                        continue
+
                     try:
-                        graph = pickle.loads(value)
+                        # Deserialize: pickle.loads returns bytes, then deserialize to DGLGraph
+                        serialized_bytes = pickle.loads(value)
+                        graph = load_dgl_graph_from_serialized(serialized_bytes)
+
+                        # Apply scalers
                         graph = merged_feature_scaler(graph)
                         graph = merged_label_scaler(graph)
-                        txn.put(key, pickle.dumps(graph))
+
+                        # Serialize and write back
+                        serialized_bytes = serialize_dgl_graph(graph, ret=True)
+                        txn.put(key, pickle.dumps(serialized_bytes, protocol=-1))
                         count += 1
                     except Exception as e:
                         logger.warning(f"Failed to scale graph {key}: {e}")
