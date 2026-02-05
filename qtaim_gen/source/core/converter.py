@@ -1548,86 +1548,90 @@ class GeneralConverter(Converter):
 
         # QTAIM data
         connected_bond_paths = None
-        try:
-            dict_qtaim_raw = self.__getitem__("qtaim_lmdb", key)
-            if dict_qtaim_raw is not None:
-                (_, _, atom_feats, bond_feats, connected_bond_paths) = parse_qtaim_data(
-                    dict_qtaim_raw, atom_feats, bond_feats,
-                    atom_keys=self.keys_data["atom"],
-                    bond_keys=self.keys_data["bond"],
-                )
-            else:
+        if "qtaim_lmdb" in self.lmdb_dict:
+            try:
+                dict_qtaim_raw = self.__getitem__("qtaim_lmdb", key)
+                if dict_qtaim_raw is not None:
+                    (_, _, atom_feats, bond_feats, connected_bond_paths) = parse_qtaim_data(
+                        dict_qtaim_raw, atom_feats, bond_feats,
+                        atom_keys=self.keys_data["atom"],
+                        bond_keys=self.keys_data["bond"],
+                    )
+                else:
+                    failures["qtaim"].append(key_str)
+                    return (key_str, None, failures)
+            except Exception as e:
+                logging.error(f"Error parsing QTAIM data for key {key_str}: {e}")
                 failures["qtaim"].append(key_str)
                 return (key_str, None, failures)
-        except Exception as e:
-            logging.error(f"Error parsing QTAIM data for key {key_str}: {e}")
-            failures["qtaim"].append(key_str)
-            return (key_str, None, failures)
 
         # Fuzzy data
-        try:
-            dict_fuzzy_raw = self.__getitem__("fuzzy_full_lmdb", key)
-            if dict_fuzzy_raw is not None:
-                atom_feats_fuzzy, global_fuzzy_feats = parse_fuzzy_data(
-                    dict_fuzzy_raw, global_feats["n_atoms"], self.fuzzy_filter
-                )
-                global_feats.update(global_fuzzy_feats)
-                for atom_idx, fuzzy_feats in atom_feats_fuzzy.items():
-                    if atom_idx in atom_feats:
-                        atom_feats[atom_idx].update(fuzzy_feats)
-                    else:
-                        atom_feats[atom_idx] = fuzzy_feats
-            else:
+        if "fuzzy_lmdb" in self.lmdb_dict:
+            try:
+                dict_fuzzy_raw = self.__getitem__("fuzzy_full_lmdb", key)
+                if dict_fuzzy_raw is not None:
+                    atom_feats_fuzzy, global_fuzzy_feats = parse_fuzzy_data(
+                        dict_fuzzy_raw, global_feats["n_atoms"], self.fuzzy_filter
+                    )
+                    global_feats.update(global_fuzzy_feats)
+                    for atom_idx, fuzzy_feats in atom_feats_fuzzy.items():
+                        if atom_idx in atom_feats:
+                            atom_feats[atom_idx].update(fuzzy_feats)
+                        else:
+                            atom_feats[atom_idx] = fuzzy_feats
+                else:
+                    failures["fuzzy"].append(key_str)
+                    if self.missing_data_strategy == "skip":
+                        return (key_str, None, failures)
+            except Exception as e:
+                logging.error(f"Error parsing fuzzy data for key {key_str}: {e}")
                 failures["fuzzy"].append(key_str)
                 if self.missing_data_strategy == "skip":
                     return (key_str, None, failures)
-        except Exception as e:
-            logging.error(f"Error parsing fuzzy data for key {key_str}: {e}")
-            failures["fuzzy"].append(key_str)
-            if self.missing_data_strategy == "skip":
-                return (key_str, None, failures)
 
         # Other data
-        try:
-            dict_other_raw = self.__getitem__("other_lmdb", key)
-            if dict_other_raw is not None:
-                global_other_feats = parse_other_data(dict_other_raw, self.other_filter)
-                global_feats.update(global_other_feats)
-            else:
+        if "other_lmdb" in self.lmdb_dict:
+            try:
+                dict_other_raw = self.__getitem__("other_lmdb", key)
+                if dict_other_raw is not None:
+                    global_other_feats = parse_other_data(dict_other_raw, self.other_filter)
+                    global_feats.update(global_other_feats)
+                else:
+                    failures["other"].append(key_str)
+                    if self.missing_data_strategy == "skip":
+                        return (key_str, None, failures)
+            except Exception as e:
+                logging.error(f"Error parsing other data for key {key_str}: {e}")
                 failures["other"].append(key_str)
                 if self.missing_data_strategy == "skip":
                     return (key_str, None, failures)
-        except Exception as e:
-            logging.error(f"Error parsing other data for key {key_str}: {e}")
-            failures["other"].append(key_str)
-            if self.missing_data_strategy == "skip":
-                return (key_str, None, failures)
 
         # Bonds LMDB
         bonds_from_lmdb = None
-        try:
-            dict_bonds_raw = self.__getitem__("bonds_lmdb", key)
-            if dict_bonds_raw is not None:
-                bond_feats_from_lmdb, bonds_from_lmdb = parse_bond_data(
-                    dict_bonds_raw,
-                    bond_filter=self.bond_filter,
-                    cutoff=self.bond_cutoff,
-                    bond_list_definition=self.bond_list_definition,
-                    bond_feats=None,
-                    clean=True,
-                    as_lists=False,
-                )
-                if bond_feats_from_lmdb:
-                    for bond_key, bond_value in bond_feats_from_lmdb.items():
-                        if bond_key in bond_feats:
-                            bond_feats[bond_key].update(bond_value)
-                        else:
-                            bond_feats[bond_key] = bond_value
-            else:
+        if "bonds_lmdb" in self.lmdb_dict:
+            try:
+                dict_bonds_raw = self.__getitem__("bonds_lmdb", key)
+                if dict_bonds_raw is not None:
+                    bond_feats_from_lmdb, bonds_from_lmdb = parse_bond_data(
+                        dict_bonds_raw,
+                        bond_filter=self.bond_filter,
+                        cutoff=self.bond_cutoff,
+                        bond_list_definition=self.bond_list_definition,
+                        bond_feats=None,
+                        clean=True,
+                        as_lists=False,
+                    )
+                    if bond_feats_from_lmdb:
+                        for bond_key, bond_value in bond_feats_from_lmdb.items():
+                            if bond_key in bond_feats:
+                                bond_feats[bond_key].update(bond_value)
+                            else:
+                                bond_feats[bond_key] = bond_value
+                else:
+                    failures["bonds"].append(key_str)
+            except Exception as e:
+                logging.error(f"Error parsing bonds for key {key_str}: {e}")
                 failures["bonds"].append(key_str)
-        except Exception as e:
-            logging.error(f"Error parsing bonds for key {key_str}: {e}")
-            failures["bonds"].append(key_str)
 
         # Select bond definitions
         if self.bonding_scheme == "qtaim":
