@@ -1713,157 +1713,241 @@ class GeneralConverter(Converter):
 
             # Try to build first graph to initialize grapher
             try:
-                value_structure = self.__getitem__("geom_lmdb", key)
-                if value_structure is None:
+                # Step 1: Get geometry data
+                try:
+                    value_structure = self.__getitem__("geom_lmdb", key)
+                    if value_structure is None:
+                        self.logger.debug(f"Key {key_str}: geometry data is None")
+                        first_key_idx = idx + 1
+                        continue
+                except Exception as e:
+                    self.logger.warning(f"Key {key_str}: Failed to get geometry data: {e}", exc_info=True)
                     first_key_idx = idx + 1
                     continue
 
-                mol_graph, global_feats = gather_structure_info(value_structure)
-                bond_feats = {}
-                atom_feats = {i: {} for i in range(global_feats["n_atoms"])}
-                bonds = value_structure["bonds"]
-                bond_list = {tuple(sorted(b)): None for b in bonds if b[0] != b[1]}
-                id = clean_id(key) if self.single_lmdb_in else key_str
-
-                # Charge data
-                dict_charge_raw = self.__getitem__("charge_lmdb", key)
-                if dict_charge_raw is not None:
-                    atom_feats_charge, global_dipole_feats = parse_charge_data(
-                        dict_charge_raw, global_feats["n_atoms"], self.charge_filter
-                    )
-                    for feat_key in atom_feats_charge[0].keys():
-                        if feat_key not in self.keys_data["atom"]:
-                            self.keys_data["atom"].append(feat_key)
-                    for feat_key in global_dipole_feats.keys():
-                        if feat_key not in self.keys_data["global"]:
-                            self.keys_data["global"].append(feat_key)
-                    global_feats.update(global_dipole_feats)
-                    atom_feats.update(atom_feats_charge)
-                elif self.missing_data_strategy == "skip":
+                # Step 2: Parse structure info
+                try:
+                    mol_graph, global_feats = gather_structure_info(value_structure)
+                    bond_feats = {}
+                    atom_feats = {i: {} for i in range(global_feats["n_atoms"])}
+                    bonds = value_structure["bonds"]
+                    bond_list = {tuple(sorted(b)): None for b in bonds if b[0] != b[1]}
+                    id = clean_id(key) if self.single_lmdb_in else key_str
+                except Exception as e:
+                    self.logger.warning(f"Key {key_str}: Failed to parse structure info: {e}", exc_info=True)
                     first_key_idx = idx + 1
                     continue
 
-                # QTAIM data
-                dict_qtaim_raw = self.__getitem__("qtaim_lmdb", key)
-                connected_bond_paths = None
-                if dict_qtaim_raw is not None:
-                    (_, _, atom_feats, bond_feats, connected_bond_paths) = parse_qtaim_data(
-                        dict_qtaim_raw, atom_feats, bond_feats,
-                        atom_keys=self.keys_data["atom"],
-                        bond_keys=self.keys_data["bond"],
-                    )
-                else:
-                    first_key_idx = idx + 1
-                    continue
-
-                # Fuzzy data
-                dict_fuzzy_raw = self.__getitem__("fuzzy_full_lmdb", key)
-                if dict_fuzzy_raw is not None:
-                    atom_feats_fuzzy, global_fuzzy_feats = parse_fuzzy_data(
-                        dict_fuzzy_raw, global_feats["n_atoms"], self.fuzzy_filter
-                    )
-                    for feat_key in atom_feats_fuzzy.get(0, {}).keys():
-                        if feat_key not in self.keys_data["atom"]:
-                            self.keys_data["atom"].append(feat_key)
-                    for feat_key in global_fuzzy_feats.keys():
-                        if feat_key not in self.keys_data["global"]:
-                            self.keys_data["global"].append(feat_key)
-                    global_feats.update(global_fuzzy_feats)
-                    for atom_idx, fuzzy_feats in atom_feats_fuzzy.items():
-                        atom_feats.setdefault(atom_idx, {}).update(fuzzy_feats)
-                elif self.missing_data_strategy == "skip":
-                    first_key_idx = idx + 1
-                    continue
-
-                # Other data
-                dict_other_raw = self.__getitem__("other_lmdb", key)
-                if dict_other_raw is not None:
-                    global_other_feats = parse_other_data(dict_other_raw, self.other_filter)
-                    for feat_key in global_other_feats.keys():
-                        if feat_key not in self.keys_data["global"]:
-                            self.keys_data["global"].append(feat_key)
-                    global_feats.update(global_other_feats)
-                elif self.missing_data_strategy == "skip":
-                    first_key_idx = idx + 1
-                    continue
-
-                # Bonds LMDB
-                bonds_from_lmdb = None
-                dict_bonds_raw = self.__getitem__("bonds_lmdb", key)
-                if dict_bonds_raw is not None:
-                    bond_feats_from_lmdb, bonds_from_lmdb = parse_bond_data(
-                        dict_bonds_raw, bond_filter=self.bond_filter,
-                        cutoff=self.bond_cutoff, bond_list_definition=self.bond_list_definition,
-                        bond_feats=None, clean=True, as_lists=False,
-                    )
-                    if bond_feats_from_lmdb:
-                        sample_bond = next(iter(bond_feats_from_lmdb.values()), {})
-                        for feat_key in sample_bond.keys():
-                            if feat_key not in self.keys_data["bond"]:
-                                self.keys_data["bond"].append(feat_key)
-                        for bond_key, bond_value in bond_feats_from_lmdb.items():
-                            bond_feats.setdefault(bond_key, {}).update(bond_value)
-
-                # Select bond definitions
-                if self.bonding_scheme == "qtaim":
-                    selected_bond_definitions = connected_bond_paths
-                elif self.bonding_scheme == "bonding" and bonds_from_lmdb is not None:
-                    selected_bond_definitions = {tuple(sorted(b)): None for b in bonds_from_lmdb}
-                else:
-                    selected_bond_definitions = bond_list
-
-                # Build MoleculeWrapper and initialize grapher
-                mol_wrapper = MoleculeWrapper(
-                    mol_graph, functional_group=None, free_energy=None, id=id,
-                    bonds=selected_bond_definitions, non_metal_bonds=selected_bond_definitions,
-                    atom_features=atom_feats, bond_features=bond_feats,
-                    global_features=global_feats, original_atom_ind=None, original_bond_mapping=None,
-                )
-                if self.grapher is None:
-                    self.grapher = get_grapher(
-                        element_set=self.element_set,
-                        atom_keys=self.keys_data["atom"],
-                        bond_keys=self.keys_data["bond"],
-                        global_keys=self.keys_data["global"],
-                        allowed_ring_size=self.config_dict["allowed_ring_size"],
-                        allowed_charges=self.config_dict["allowed_charges"],
-                        allowed_spins=self.config_dict["allowed_spins"],
-                        self_loop=True,
-                        atom_featurizer_tf=True,
-                        bond_featurizer_tf=True,
-                        global_featurizer_tf=True,
+                # Step 3: Charge data
+                try:
+                    dict_charge_raw = self.__getitem__("charge_lmdb", key)
+                    if dict_charge_raw is not None:
+                        atom_feats_charge, global_dipole_feats = parse_charge_data(
+                            dict_charge_raw, global_feats["n_atoms"], self.charge_filter
                         )
-                    self.logger.info(f"Grapher initialized with keys_data: {self.keys_data}")
+                        for feat_key in atom_feats_charge[0].keys():
+                            if feat_key not in self.keys_data["atom"]:
+                                self.keys_data["atom"].append(feat_key)
+                        for feat_key in global_dipole_feats.keys():
+                            if feat_key not in self.keys_data["global"]:
+                                self.keys_data["global"].append(feat_key)
+                        global_feats.update(global_dipole_feats)
+                        atom_feats.update(atom_feats_charge)
+                    elif self.missing_data_strategy == "skip":
+                        self.logger.debug(f"Key {key_str}: charge data missing, skipping")
+                        first_key_idx = idx + 1
+                        continue
+                except Exception as e:
+                    self.logger.warning(f"Key {key_str}: Failed to parse charge data: {e}", exc_info=True)
+                    first_key_idx = idx + 1
+                    continue
 
-                first_graph = build_and_featurize_graph(self.grapher, mol_wrapper)
+                # Step 4: QTAIM data
+                try:
+                    dict_qtaim_raw = self.__getitem__("qtaim_lmdb", key)
+                    connected_bond_paths = None
+                    if dict_qtaim_raw is not None:
+                        (_, _, atom_feats, bond_feats, connected_bond_paths) = parse_qtaim_data(
+                            dict_qtaim_raw, atom_feats, bond_feats,
+                            atom_keys=self.keys_data["atom"],
+                            bond_keys=self.keys_data["bond"],
+                        )
+                    else:
+                        self.logger.debug(f"Key {key_str}: QTAIM data missing, skipping")
+                        first_key_idx = idx + 1
+                        continue
+                except Exception as e:
+                    self.logger.warning(f"Key {key_str}: Failed to parse QTAIM data: {e}", exc_info=True)
+                    first_key_idx = idx + 1
+                    continue
 
-                self.index_dict = get_include_exclude_indices(
-                    feat_names=self.grapher.feat_names,
-                    target_dict=self.keys_target,
-                )
-                self.config_dict["index_dict"] = self.index_dict
-                self.overwrite_config()
+                # Step 5: Fuzzy data
+                try:
+                    dict_fuzzy_raw = self.__getitem__("fuzzy_full_lmdb", key)
+                    if dict_fuzzy_raw is not None:
+                        atom_feats_fuzzy, global_fuzzy_feats = parse_fuzzy_data(
+                            dict_fuzzy_raw, global_feats["n_atoms"], self.fuzzy_filter
+                        )
+                        for feat_key in atom_feats_fuzzy.get(0, {}).keys():
+                            if feat_key not in self.keys_data["atom"]:
+                                self.keys_data["atom"].append(feat_key)
+                        for feat_key in global_fuzzy_feats.keys():
+                            if feat_key not in self.keys_data["global"]:
+                                self.keys_data["global"].append(feat_key)
+                        global_feats.update(global_fuzzy_feats)
+                        for atom_idx, fuzzy_feats in atom_feats_fuzzy.items():
+                            atom_feats.setdefault(atom_idx, {}).update(fuzzy_feats)
+                    elif self.missing_data_strategy == "skip":
+                        self.logger.debug(f"Key {key_str}: fuzzy data missing, skipping")
+                        first_key_idx = idx + 1
+                        continue
+                except Exception as e:
+                    self.logger.warning(f"Key {key_str}: Failed to parse fuzzy data: {e}", exc_info=True)
+                    first_key_idx = idx + 1
+                    continue
 
-                split_graph_labels(
-                    first_graph,
-                    include_names=self.index_dict["include_names"],
-                    include_locs=self.index_dict["include_locs"],
-                    exclude_locs=self.index_dict["exclude_locs"],
-                )
+                # Step 6: Other data
+                try:
+                    dict_other_raw = self.__getitem__("other_lmdb", key)
+                    if dict_other_raw is not None:
+                        global_other_feats = parse_other_data(dict_other_raw, self.other_filter)
+                        for feat_key in global_other_feats.keys():
+                            if feat_key not in self.keys_data["global"]:
+                                self.keys_data["global"].append(feat_key)
+                        global_feats.update(global_other_feats)
+                    elif self.missing_data_strategy == "skip":
+                        self.logger.debug(f"Key {key_str}: other data missing, skipping")
+                        first_key_idx = idx + 1
+                        continue
+                except Exception as e:
+                    self.logger.warning(f"Key {key_str}: Failed to parse other data: {e}", exc_info=True)
+                    first_key_idx = idx + 1
+                    continue
 
-                # Update scalers and buffer for first graph
-                self.feature_scaler_iterative.update([first_graph])
-                self.label_scaler_iterative.update([first_graph])
-                write_buffer.append((
-                    f"{key_str}".encode("ascii"),
-                    pickle.dumps(serialize_dgl_graph(first_graph, ret=True), protocol=-1),
-                ))
-                processed_count += 1
-                first_key_idx = idx + 1
-                break
+                # Step 7: Bonds LMDB
+                try:
+                    bonds_from_lmdb = None
+                    dict_bonds_raw = self.__getitem__("bonds_lmdb", key)
+                    if dict_bonds_raw is not None:
+                        bond_feats_from_lmdb, bonds_from_lmdb = parse_bond_data(
+                            dict_bonds_raw, bond_filter=self.bond_filter,
+                            cutoff=self.bond_cutoff, bond_list_definition=self.bond_list_definition,
+                            bond_feats=None, clean=True, as_lists=False,
+                        )
+                        if bond_feats_from_lmdb:
+                            sample_bond = next(iter(bond_feats_from_lmdb.values()), {})
+                            for feat_key in sample_bond.keys():
+                                if feat_key not in self.keys_data["bond"]:
+                                    self.keys_data["bond"].append(feat_key)
+                            for bond_key, bond_value in bond_feats_from_lmdb.items():
+                                bond_feats.setdefault(bond_key, {}).update(bond_value)
+                except Exception as e:
+                    self.logger.warning(f"Key {key_str}: Failed to parse bond data: {e}", exc_info=True)
+                    first_key_idx = idx + 1
+                    continue
+
+                # Step 8: Select bond definitions
+                try:
+                    if self.bonding_scheme == "qtaim":
+                        selected_bond_definitions = connected_bond_paths
+                    elif self.bonding_scheme == "bonding" and bonds_from_lmdb is not None:
+                        selected_bond_definitions = {tuple(sorted(b)): None for b in bonds_from_lmdb}
+                    else:
+                        selected_bond_definitions = bond_list
+                except Exception as e:
+                    self.logger.warning(f"Key {key_str}: Failed to select bond definitions: {e}", exc_info=True)
+                    first_key_idx = idx + 1
+                    continue
+
+                # Step 9: Build MoleculeWrapper
+                try:
+                    mol_wrapper = MoleculeWrapper(
+                        mol_graph, functional_group=None, free_energy=None, id=id,
+                        bonds=selected_bond_definitions, non_metal_bonds=selected_bond_definitions,
+                        atom_features=atom_feats, bond_features=bond_feats,
+                        global_features=global_feats, original_atom_ind=None, original_bond_mapping=None,
+                    )
+                except Exception as e:
+                    self.logger.warning(f"Key {key_str}: Failed to build MoleculeWrapper: {e}", exc_info=True)
+                    first_key_idx = idx + 1
+                    continue
+
+                # Step 10: Initialize grapher
+                try:
+                    if self.grapher is None:
+                        self.grapher = get_grapher(
+                            element_set=self.element_set,
+                            atom_keys=self.keys_data["atom"],
+                            bond_keys=self.keys_data["bond"],
+                            global_keys=self.keys_data["global"],
+                            allowed_ring_size=self.config_dict["allowed_ring_size"],
+                            allowed_charges=self.config_dict["allowed_charges"],
+                            allowed_spins=self.config_dict["allowed_spins"],
+                            self_loop=True,
+                            atom_featurizer_tf=True,
+                            bond_featurizer_tf=True,
+                            global_featurizer_tf=True,
+                            )
+                        self.logger.info(f"Grapher initialized with keys_data: {self.keys_data}")
+                except Exception as e:
+                    self.logger.error(f"Key {key_str}: Failed to initialize grapher: {e}", exc_info=True)
+                    first_key_idx = idx + 1
+                    continue
+
+                # Step 11: Build and featurize graph
+                try:
+                    first_graph = build_and_featurize_graph(self.grapher, mol_wrapper)
+                except Exception as e:
+                    self.logger.warning(f"Key {key_str}: Failed to build and featurize graph: {e}", exc_info=True)
+                    first_key_idx = idx + 1
+                    continue
+
+                # Step 12: Get include/exclude indices
+                try:
+                    self.index_dict = get_include_exclude_indices(
+                        feat_names=self.grapher.feat_names,
+                        target_dict=self.keys_target,
+                    )
+                    self.config_dict["index_dict"] = self.index_dict
+                    self.overwrite_config()
+                except Exception as e:
+                    self.logger.warning(f"Key {key_str}: Failed to get include/exclude indices: {e}", exc_info=True)
+                    first_key_idx = idx + 1
+                    continue
+
+                # Step 13: Split graph labels
+                try:
+                    split_graph_labels(
+                        first_graph,
+                        include_names=self.index_dict["include_names"],
+                        include_locs=self.index_dict["include_locs"],
+                        exclude_locs=self.index_dict["exclude_locs"],
+                    )
+                except Exception as e:
+                    self.logger.warning(f"Key {key_str}: Failed to split graph labels: {e}", exc_info=True)
+                    first_key_idx = idx + 1
+                    continue
+
+                # Step 14: Update scalers and buffer
+                try:
+                    self.feature_scaler_iterative.update([first_graph])
+                    self.label_scaler_iterative.update([first_graph])
+                    write_buffer.append((
+                        f"{key_str}".encode("ascii"),
+                        pickle.dumps(serialize_dgl_graph(first_graph, ret=True), protocol=-1),
+                    ))
+                    processed_count += 1
+                    first_key_idx = idx + 1
+                    self.logger.info(f"Successfully initialized grapher with key {key_str}")
+                    break
+                except Exception as e:
+                    self.logger.warning(f"Key {key_str}: Failed to update scalers or serialize: {e}", exc_info=True)
+                    first_key_idx = idx + 1
+                    continue
 
             except Exception as e:
-                self.logger.debug(f"Failed to initialize with key {key_str}: {e}")
+                # Outer catch-all for truly unexpected errors
+                self.logger.error(f"Key {key_str}: Unexpected error in grapher initialization: {e}", exc_info=True)
                 first_key_idx = idx + 1
                 continue
 

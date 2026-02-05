@@ -283,6 +283,7 @@ def inp_files_2_lmdbs(
         chunk_size (int): Size of the chunks to split the data into.
         clean (Optional[bool], optional): If True, delete the input files. Defaults to False.
         limit (Optional[int], optional): Limit number of files to process (for debugging).
+        merge (Optional[bool], optional): If True, merge the lmdb files after creation. Defaults to True.
     """
     files = glob(root_dir + "*/*.inp")
 
@@ -448,6 +449,7 @@ def parse_charge_data(
     Takes:
         dict_charge (dict): Dictionary containing charge-related data.
         n_atoms (int): Number of atoms in the structure.
+        charge_filter (Optional[List[str]]): List of charge types to filter. Defaults to None. An inclusion filter.
     Returns:
         atom_feats_charge (Dict[int, Dict[str, Any]]): Dictionary containing atom features related
         to charge and spin information.
@@ -683,9 +685,13 @@ def parse_bond_data(
     struct of inputs is {'ibsi_bond': {'1_O_to_2_C': 1.28196, '1_O_to_3_C': 0.05902, ...}, "fuzzy_bond": {'1_O_to_2_C': 0.5, '1_O_to_3_C': 0.1, ...}, ...}
     structure of bond_feats is {(0, 1): {'ibsi_bond': 1.28196, 'fuzzy_bond': 0.5}, (0, 2): {'ibsi_bond': 0.05902, 'fuzzy_bond': 0.1}, ...}
     Takes:
-        dict_other: dict, dictionary containing other data
-        other_filter: list of str, list of keys to filter in the other data
-        clean: bool, whether to clean nan None, inf values from the data. Set them to 0 
+        dict_bond (dict): Dictionary containing bond-related data.
+        bond_filter (Optional[List[str]]): List of bond types to filter. Defaults to None
+        cutoff (Optional[float]): Cutoff value for bond features. Defaults to None.
+        bond_list_definition (str): Definition of bond list to use. Defaults to "fuzzy".
+        bond_feats (Optional[Dict[Tuple[int, int], Dict[str, Any]]]): Existing bond features to update. Defaults to None.
+        clean (bool): Whether to clean nan, None, inf values from the data. Set them to 0. Defaults to True.
+        as_lists (bool): Whether to return bond_list as lists instead of tuples. Defaults to True.
     """
     
     # assert that bond_list_definition is in dict_bond keys
