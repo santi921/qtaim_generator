@@ -475,7 +475,7 @@ def parse_charge_data(
         # dipole (global)
         dip = data.get("dipole")
         if isinstance(dip, dict) and "mag" in dip:
-            global_dipole_feats[charge_type + "_dipole_mag"] = float(dip["mag"])
+            global_dipole_feats["charge_"+ charge_type + "_dipole_mag"] = float(dip["mag"])
 
         # spin
         spin_dict = data.get("spin", {})
