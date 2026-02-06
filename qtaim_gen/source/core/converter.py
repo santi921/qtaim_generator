@@ -115,6 +115,15 @@ def setup_logger(lmdb_path: str, logger_name: str = "Converter") -> logging.Logg
     
     return logger
 
+def load_scaler(scaler_path: str, features_tf: bool):
+    """Helper to load a scaler from file."""
+    from qtaim_embed.data.processing import HeteroGraphStandardScalerIterative
+    return HeteroGraphStandardScalerIterative(
+        features_tf=features_tf,
+        load=True,
+        load_path=scaler_path
+    )
+
 
 class Converter:
     def __init__(self, config_dict: Dict[str, Any], config_path: str = None):
@@ -802,9 +811,7 @@ class Converter:
 
         # Create merged LMDB
         output_path = os.path.join(output_dir, output_name)
-        if output_path.endswith(".lmdb"):
-            output_path = output_path[:-5]
-
+        # Keep .lmdb extension for consistency
         logger.info(f"Creating merged LMDB: {output_path}")
 
         # Calculate total entries
@@ -929,22 +936,13 @@ class Converter:
             config.pop("total_shards", None)
             config.pop("skip_scaling", None)
             config.pop("save_unfinalized_scaler", None)
-            config["lmdb_path"] = output_dir
+            config["lmdb_path"] = os.path.abspath(output_dir)
+            config["lmdb_name"] = output_name
             with open(os.path.join(output_dir, "config.json"), "w") as f:
                 json.dump(config, f, indent=2)
 
         logger.info(f"Merge complete: {output_path}")
         return output_path
-
-
-def load_scaler(scaler_path: str, features_tf: bool):
-    """Helper to load a scaler from file."""
-    from qtaim_embed.data.processing import HeteroGraphStandardScalerIterative
-    return HeteroGraphStandardScalerIterative(
-        features_tf=features_tf,
-        load=True,
-        load_path=scaler_path
-    )
 
 
 class BaseConverter(Converter):

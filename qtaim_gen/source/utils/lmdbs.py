@@ -496,13 +496,14 @@ def parse_fuzzy_data(dict_fuzzy: dict, n_atoms: int, fuzzy_filter: Optional[List
     Takes:
         dict_fuzzy: dict, dictionary containing fuzzy data
         n_atoms: int, number of atoms in the molecule
+        fuzzy_filter: list of str, list of keys to filter in the fuzzy data, inclusion filter
     Returns:
         atom_feats_fuzzy: dict, dictionary containing atom features related to fuzzy data
         global_fuzzy_feats: dict, dictionary containing global features related to fuzzy data
     """
     atom_feats_fuzzy = {i: {} for i in range(n_atoms)}
     global_fuzzy_feats: Dict[str, float] = {}
-
+    
     for fuzzy_type, payload in dict_fuzzy.items():
         if fuzzy_filter is not None and fuzzy_type not in fuzzy_filter:
             continue
