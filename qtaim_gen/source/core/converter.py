@@ -1526,27 +1526,28 @@ class GeneralConverter(Converter):
             return (key_str, None, failures)
 
         # Charge data
-        try:
-            dict_charge_raw = self.__getitem__("charge_lmdb", key)
-            if dict_charge_raw is not None:
-                atom_feats_charge, global_dipole_feats = parse_charge_data(
-                    dict_charge_raw, global_feats["n_atoms"], self.charge_filter
-                )
-                global_feats.update(global_dipole_feats)
-                atom_feats.update(atom_feats_charge)
-            else:
+        if "charge" in self.data_inputs:
+            try:
+                dict_charge_raw = self.__getitem__("charge_lmdb", key)
+                if dict_charge_raw is not None:
+                    atom_feats_charge, global_dipole_feats = parse_charge_data(
+                        dict_charge_raw, global_feats["n_atoms"], self.charge_filter
+                    )
+                    global_feats.update(global_dipole_feats)
+                    atom_feats.update(atom_feats_charge)
+                else:
+                    failures["charge"].append(key_str)
+                    if self.missing_data_strategy == "skip":
+                        return (key_str, None, failures)
+            except Exception as e:
+                logging.error(f"Error parsing charge data for key {key_str}: {e}")
                 failures["charge"].append(key_str)
                 if self.missing_data_strategy == "skip":
                     return (key_str, None, failures)
-        except Exception as e:
-            logging.error(f"Error parsing charge data for key {key_str}: {e}")
-            failures["charge"].append(key_str)
-            if self.missing_data_strategy == "skip":
-                return (key_str, None, failures)
 
         # QTAIM data
         connected_bond_paths = None
-        if "qtaim_lmdb" in self.lmdb_dict:
+        if "qtaim" in self.data_inputs:
             try:
                 dict_qtaim_raw = self.__getitem__("qtaim_lmdb", key)
                 if dict_qtaim_raw is not None:
@@ -1557,14 +1558,16 @@ class GeneralConverter(Converter):
                     )
                 else:
                     failures["qtaim"].append(key_str)
-                    return (key_str, None, failures)
+                    if self.missing_data_strategy == "skip":
+                        return (key_str, None, failures)
             except Exception as e:
                 logging.error(f"Error parsing QTAIM data for key {key_str}: {e}")
                 failures["qtaim"].append(key_str)
-                return (key_str, None, failures)
+                if self.missing_data_strategy == "skip":
+                    return (key_str, None, failures)
 
         # Fuzzy data
-        if "fuzzy_lmdb" in self.lmdb_dict:
+        if "fuzzy" in self.data_inputs:
             try:
                 dict_fuzzy_raw = self.__getitem__("fuzzy_lmdb", key)
                 if dict_fuzzy_raw is not None:
@@ -1588,7 +1591,7 @@ class GeneralConverter(Converter):
                     return (key_str, None, failures)
 
         # Other data
-        if "other_lmdb" in self.lmdb_dict:
+        if "other" in self.data_inputs:
             try:
                 dict_other_raw = self.__getitem__("other_lmdb", key)
                 if dict_other_raw is not None:
@@ -1606,9 +1609,9 @@ class GeneralConverter(Converter):
 
         # Bonds LMDB
         bonds_from_lmdb = None
-        if "bonds_lmdb" in self.lmdb_dict:
+        if "bond" in self.data_inputs:
             try:
-                dict_bonds_raw = self.__getitem__("bonds_lmdb", key)
+                dict_bonds_raw = self.__getitem__("bond_lmdb", key)
                 if dict_bonds_raw is not None:
                     bond_feats_from_lmdb, bonds_from_lmdb = parse_bond_data(
                         dict_bonds_raw,
@@ -1627,9 +1630,13 @@ class GeneralConverter(Converter):
                                 bond_feats[bond_key] = bond_value
                 else:
                     failures["bonds"].append(key_str)
+                    if self.missing_data_strategy == "skip":
+                        return (key_str, None, failures)
             except Exception as e:
                 logging.error(f"Error parsing bonds for key {key_str}: {e}")
                 failures["bonds"].append(key_str)
+                if self.missing_data_strategy == "skip":
+                    return (key_str, None, failures)
 
         # Select bond definitions
         if self.bonding_scheme == "qtaim":

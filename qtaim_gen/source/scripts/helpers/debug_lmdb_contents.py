@@ -72,8 +72,24 @@ def inspect_lmdb(lmdb_path, deserialize_graphs=True):
                         try:
                             graph = load_dgl_graph_from_serialized(obj)
                             # Successfully deserialized to DGL graph
-                            graph_keys.append((key_str, 'DGLGraph(deserialized)',
-                                             f"{graph.num_nodes()} nodes, {graph.num_edges()} edges"))
+
+                            # Analyze feature/label sizes by node type
+                            feature_info = []
+                            for ntype in graph.ntypes:
+                                ndata = graph.nodes[ntype].data
+                                if ndata:
+                                    for feat_name, feat_tensor in ndata.items():
+                                        feature_info.append(f"{ntype}.{feat_name}: {tuple(feat_tensor.shape)}")
+
+                            # Create summary
+                            basic_info = f"{graph.num_nodes()} nodes, {graph.num_edges()} edges"
+                            if feature_info:
+                                feat_summary = "; Features: " + ", ".join(feature_info[:3])
+                                if len(feature_info) > 3:
+                                    feat_summary += f" + {len(feature_info)-3} more"
+                                basic_info += feat_summary
+
+                            graph_keys.append((key_str, 'DGLGraph(deserialized)', basic_info, graph))
                             successful_deser += 1
                             type_counter['DGLGraph(deserialized)'] += 1
                         except Exception as deser_e:
@@ -123,7 +139,10 @@ def inspect_lmdb(lmdb_path, deserialize_graphs=True):
     if graph_keys:
         print(f"\nGraph keys ({len(graph_keys)}):")
         for item in graph_keys[:5]:
-            if len(item) == 3:
+            if len(item) == 4:
+                key, obj_type, info, graph = item
+                print(f"  {key}: {obj_type} ({info})")
+            elif len(item) == 3:
                 key, obj_type, info = item
                 print(f"  {key}: {obj_type} ({info})")
             else:
@@ -131,6 +150,29 @@ def inspect_lmdb(lmdb_path, deserialize_graphs=True):
                 print(f"  {key}: {obj_type}")
         if len(graph_keys) > 5:
             print(f"  ... and {len(graph_keys) - 5} more")
+
+        # Print detailed feature breakdown for first graph
+        if graph_keys and len(graph_keys[0]) == 4:
+            first_graph_item = graph_keys[0]
+            key, obj_type, info, graph = first_graph_item
+            print(f"\n  Detailed Feature/Label Breakdown for '{key}':")
+            for ntype in graph.ntypes:
+                ndata = graph.nodes[ntype].data
+                if ndata:
+                    print(f"    {ntype} node features:")
+                    for feat_name, feat_tensor in ndata.items():
+                        print(f"      {feat_name}: shape={tuple(feat_tensor.shape)}, dtype={feat_tensor.dtype}")
+                else:
+                    print(f"    {ntype} node features: (none)")
+
+            # Check edge features
+            if graph.etypes:
+                for etype in graph.canonical_etypes[:3]:  # Show first 3 edge types
+                    edata = graph.edges[etype].data
+                    if edata:
+                        print(f"    {etype} edge features:")
+                        for feat_name, feat_tensor in edata.items():
+                            print(f"      {feat_name}: shape={tuple(feat_tensor.shape)}, dtype={feat_tensor.dtype}")
 
     # Print errors
     if error_keys:
