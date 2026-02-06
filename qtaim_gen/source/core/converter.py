@@ -627,7 +627,7 @@ class Converter:
                 shard_dirs=shard_dirs,
                 output_dir=merged_dir,
                 output_name="merged.lmdb",
-                skip_scaling=False,  # Apply merged scalers
+                skip_scaling=self.skip_scaling,  # Respect config setting
                 logger=self.logger
             )
             self.logger.info("=" * 60)
@@ -907,12 +907,12 @@ class Converter:
                         serialized_bytes = pickle.loads(value)
                         graph = load_dgl_graph_from_serialized(serialized_bytes)
 
-                        # Apply scalers
-                        graph = merged_feature_scaler(graph)
+                        # Apply scalers - feature scaler expects a list
+                        graph = merged_feature_scaler([graph])
                         graph = merged_label_scaler(graph)
 
                         # Serialize and write back
-                        serialized_bytes = serialize_dgl_graph(graph, ret=True)
+                        serialized_bytes = serialize_dgl_graph(graph[0], ret=True)
                         txn.put(key, pickle.dumps(serialized_bytes, protocol=-1))
                         count += 1
                     except Exception as e:
@@ -1568,7 +1568,7 @@ class GeneralConverter(Converter):
         # Fuzzy data
         if "fuzzy_lmdb" in self.lmdb_dict:
             try:
-                dict_fuzzy_raw = self.__getitem__("fuzzy_full_lmdb", key)
+                dict_fuzzy_raw = self.__getitem__("fuzzy_lmdb", key)
                 if dict_fuzzy_raw is not None:
                     atom_feats_fuzzy, global_fuzzy_feats = parse_fuzzy_data(
                         dict_fuzzy_raw, global_feats["n_atoms"], self.fuzzy_filter
@@ -1790,9 +1790,9 @@ class GeneralConverter(Converter):
 
 
                 # Step 5: Fuzzy data
-                if "fuzzy_full_lmdb" in self.lmdb_dict:
+                if "fuzzy_lmdb" in self.lmdb_dict:
                     try:
-                        dict_fuzzy_raw = self.__getitem__("fuzzy_full_lmdb", key)
+                        dict_fuzzy_raw = self.__getitem__("fuzzy_lmdb", key)
                         if dict_fuzzy_raw is not None:
                             atom_feats_fuzzy, global_fuzzy_feats = parse_fuzzy_data(
                                 dict_fuzzy_raw, global_feats["n_atoms"], self.fuzzy_filter
