@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import os
+import re
 import argparse
 from multiprocessing import Pool, cpu_count
 from functools import partial
@@ -39,6 +40,8 @@ def should_delete(filename: str) -> bool:
     if ".tmp" in filename:  # matches .tmp, .tmp.0, .tmp.123, etc.
         return True
     if "core." in filename:
+        return True
+    if re.fullmatch(r"orca\.\d+", filename):
         return True
     return False
 

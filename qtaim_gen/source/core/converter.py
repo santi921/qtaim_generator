@@ -28,7 +28,13 @@ from qtaim_embed.data.processing import (
 )
 from qtaim_embed.core.molwrapper import MoleculeWrapper
 from qtaim_embed.utils.grapher import get_grapher
+#try: 
+
 from qtaim_embed.data.lmdb import serialize_dgl_graph, load_dgl_graph_from_serialized
+serial_func = serialize_dgl_graph
+#except: 
+#    from qtaim_embed.data.lmdb import serialize_graph
+#    serial_func = serialize_graph
 
 from qtaim_gen.source.utils.lmdbs import (
     get_elements_from_structure_lmdb,
@@ -1747,7 +1753,30 @@ class GeneralConverter(Converter):
                     first_key_idx = idx + 1
                     continue
 
-                # Step 3: Charge data
+                # Step 3: QTAIM data
+                connected_bond_paths = None
+                if "qtaim_lmdb" in self.lmdb_dict:
+                    try:
+                        # hypothesis 1 - the raw dict is broken - unlikely bc this is working on qtaim normal
+                        dict_qtaim_raw = self.__getitem__("qtaim_lmdb", key)
+                        if dict_qtaim_raw is not None:
+                            (_, _, atom_feats, bond_feats, connected_bond_paths) = parse_qtaim_data(
+                                dict_qtaim_raw, atom_feats, bond_feats,
+                                atom_keys=self.keys_data["atom"],
+                                bond_keys=self.keys_data["bond"],
+                            )
+                        else:
+                            self.logger.debug(f"Key {key_str}: QTAIM data missing in LMDB, skipping")
+                            first_key_idx = idx + 1
+                            continue
+                    
+                    except Exception as e:
+                        self.logger.warning(f"Key {key_str}: Failed to parse QTAIM data: {e}", exc_info=True)
+                        first_key_idx = idx + 1
+                        continue
+
+
+                # Step 4: Charge data
                 if "charge_lmdb" in self.lmdb_dict:
                     try:
                         dict_charge_raw = self.__getitem__("charge_lmdb", key)
@@ -1763,35 +1792,17 @@ class GeneralConverter(Converter):
                                     self.keys_data["global"].append(feat_key)
                             global_feats.update(global_dipole_feats)
                             atom_feats.update(atom_feats_charge)
+
                         elif self.missing_data_strategy == "skip":
                             self.logger.debug(f"Key {key_str}: charge data missing, skipping")
                             first_key_idx = idx + 1
                             continue
+                    
                     except Exception as e:
                         self.logger.warning(f"Key {key_str}: Failed to parse charge data: {e}", exc_info=True)
                         first_key_idx = idx + 1
                         continue
 
-
-                # Step 4: QTAIM data
-                connected_bond_paths = None
-                if "qtaim_lmdb" in self.lmdb_dict:
-                    try:
-                        dict_qtaim_raw = self.__getitem__("qtaim_lmdb", key)
-                        if dict_qtaim_raw is not None:
-                            (_, _, atom_feats, bond_feats, connected_bond_paths) = parse_qtaim_data(
-                                dict_qtaim_raw, atom_feats, bond_feats,
-                                atom_keys=self.keys_data["atom"],
-                                bond_keys=self.keys_data["bond"],
-                            )
-                        else:
-                            self.logger.debug(f"Key {key_str}: QTAIM data missing in LMDB, skipping")
-                            first_key_idx = idx + 1
-                            continue
-                    except Exception as e:
-                        self.logger.warning(f"Key {key_str}: Failed to parse QTAIM data: {e}", exc_info=True)
-                        first_key_idx = idx + 1
-                        continue
 
 
                 # Step 5: Fuzzy data
