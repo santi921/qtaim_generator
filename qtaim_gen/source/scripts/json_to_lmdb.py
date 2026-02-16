@@ -173,6 +173,41 @@ DEFAULT_LMDB_NAMES = {
 }
 
 
+def partition_folders_by_shard(root_dir: str, shard_index: int, total_shards: int, logger: logging.Logger) -> List[str]:
+    """
+    Partition job folders across shards based on folder name.
+
+    This ensures all JSON files for a given job go to the same shard,
+    maintaining consistency across different data types.
+
+    Args:
+        root_dir: Root directory containing job folders
+        shard_index: Current shard index (0-based)
+        total_shards: Total number of shards
+        logger: Logger instance
+
+    Returns:
+        List of folder names assigned to this shard
+    """
+    if total_shards <= 1:
+        return []  # No sharding, process all folders
+
+    # Get all job folders (one level deep)
+    pattern = os.path.join(root_dir, "*/")
+    all_folders = sorted(glob(pattern))
+
+    # Extract folder names (without trailing slash)
+    folder_names = [os.path.basename(os.path.normpath(f)) for f in all_folders]
+
+    # Partition based on index modulo
+    partitioned = [name for i, name in enumerate(folder_names) if i % total_shards == shard_index]
+
+    logger.info(f"Shard {shard_index}: assigned {len(partitioned)} folders (of {len(folder_names)} total)")
+    logger.debug(f"First 10 folders in shard {shard_index}: {partitioned[:10]}")
+
+    return partitioned
+
+
 def get_expected_json_keys(data_type: str, full_set: int = 0) -> Set[str]:
     """
     Return expected keys for each JSON data type based on validation.py.
@@ -267,6 +302,94 @@ def inspect_lmdb_first_entry(lmdb_path: str, logger: logging.Logger) -> Optional
     return None
 
 
+def merge_shards(
+    shard_lmdbs: List[str],
+    output_path: str,
+    logger: logging.Logger,
+) -> str:
+    """
+    Merge multiple shard LMDB files into a single LMDB.
+
+    Args:
+        shard_lmdbs: List of paths to shard LMDB files
+        output_path: Path for the merged output LMDB
+        logger: Logger instance
+
+    Returns:
+        Path to the merged LMDB file
+    """
+    import lmdb
+    import pickle
+
+    if not shard_lmdbs:
+        raise ValueError("No shard LMDBs provided for merging")
+
+    logger.info(f"Merging {len(shard_lmdbs)} shards into: {output_path}")
+
+    # Calculate total entries across all shards
+    total_entries = 0
+    for shard_path in shard_lmdbs:
+        if not os.path.exists(shard_path):
+            logger.warning(f"Shard LMDB not found: {shard_path}, skipping")
+            continue
+        try:
+            env = lmdb.open(shard_path, subdir=False, readonly=True, lock=False)
+            with env.begin() as txn:
+                length_bytes = txn.get("length".encode())
+                if length_bytes:
+                    shard_length = pickle.loads(length_bytes)
+                    total_entries += shard_length
+                    logger.debug(f"Shard {shard_path}: {shard_length} entries")
+            env.close()
+        except Exception as e:
+            logger.warning(f"Error reading shard {shard_path}: {e}")
+
+    logger.info(f"Total entries to merge: {total_entries}")
+
+    # Create output LMDB with appropriate map_size
+    map_size = max(10 * 1024**3, total_entries * 1024 * 100)  # 10GB minimum or ~100KB per entry
+    out_env = lmdb.open(
+        output_path,
+        subdir=False,
+        map_size=map_size,
+        lock=False,
+    )
+
+    # Merge all shards
+    merged_count = 0
+    with out_env.begin(write=True) as out_txn:
+        for shard_path in shard_lmdbs:
+            if not os.path.exists(shard_path):
+                continue
+
+            logger.info(f"Merging shard: {shard_path}")
+            try:
+                in_env = lmdb.open(shard_path, subdir=False, readonly=True, lock=False)
+                with in_env.begin() as in_txn:
+                    cursor = in_txn.cursor()
+                    for key, value in cursor:
+                        key_str = key.decode("ascii")
+                        if key_str == "length":
+                            continue  # Skip length key, we'll set it at the end
+                        out_txn.put(key, value)
+                        merged_count += 1
+
+                        if merged_count % 10000 == 0:
+                            logger.debug(f"Merged {merged_count} entries...")
+                in_env.close()
+            except Exception as e:
+                logger.error(f"Error merging shard {shard_path}: {e}")
+                raise
+
+        # Set final length
+        out_txn.put("length".encode(), pickle.dumps(merged_count))
+
+    out_env.close()
+    logger.info(f"Merge complete: {merged_count} entries written to {output_path}")
+
+    return output_path
+
+
 def log_first_entry(lmdb_path: str, data_type: str, logger: logging.Logger):
     """Log information about the first entry in an LMDB."""
     entry = inspect_lmdb_first_entry(lmdb_path, logger)
@@ -294,18 +417,39 @@ def convert_json_with_stats(
     logger: logging.Logger,
     full_set: int = 0,
     limit: Optional[int] = None,
+    shard_index: int = 0,
+    total_shards: int = 1,
+    shard_folders: Optional[List[str]] = None,
 ) -> ConversionStats:
     """Convert JSON files with detailed statistics tracking."""
     stats = ConversionStats(data_type=data_type)
     expected_keys = get_expected_json_keys(data_type, full_set=full_set)
 
-    # Find files
-    if move_files:
-        pattern = os.path.join(root_dir, "*/generator/", f"{data_type}.json")
-    else:
-        pattern = os.path.join(root_dir, "*/", f"{data_type}.json")
+    # Update output LMDB name for sharding
+    if total_shards > 1:
+        base_name = out_lmdb.replace(".lmdb", "")
+        out_lmdb = f"{base_name}_shard_{shard_index}.lmdb"
+        logger.info(f"Sharding enabled: output will be {out_lmdb}")
 
-    files = glob(pattern)
+    # Find files - filter by shard assignment if sharding is enabled
+    if total_shards > 1 and shard_folders:
+        # Build patterns for assigned folders only
+        files = []
+        for folder in shard_folders:
+            if move_files:
+                pattern = os.path.join(root_dir, folder, "generator", f"{data_type}.json")
+            else:
+                pattern = os.path.join(root_dir, folder, f"{data_type}.json")
+            folder_files = glob(pattern)
+            files.extend(folder_files)
+        logger.debug(f"Shard {shard_index}: found {len(files)} {data_type}.json files in {len(shard_folders)} assigned folders")
+    else:
+        # No sharding - process all files
+        if move_files:
+            pattern = os.path.join(root_dir, "*/generator/", f"{data_type}.json")
+        else:
+            pattern = os.path.join(root_dir, "*/", f"{data_type}.json")
+        files = glob(pattern)
 
     # Apply debug limit
     if limit is not None:
@@ -398,14 +542,34 @@ def convert_structure_with_stats(
     merge: bool,
     logger: logging.Logger,
     limit: Optional[int] = None,
+    shard_index: int = 0,
+    total_shards: int = 1,
+    shard_folders: Optional[List[str]] = None,
 ) -> ConversionStats:
     """Convert ORCA .inp files to structure LMDB with statistics."""
     stats = ConversionStats(data_type="structure")
 
-    pattern = os.path.join(root_dir, "*/*.inp")
+    # Update output LMDB name for sharding
+    if total_shards > 1:
+        base_name = out_lmdb.replace(".lmdb", "")
+        out_lmdb = f"{base_name}_shard_{shard_index}.lmdb"
+        logger.info(f"Sharding enabled: output will be {out_lmdb}")
 
-    files = glob(pattern)
-    total_found = len(files)
+    # Find files - filter by shard assignment if sharding is enabled
+    if total_shards > 1 and shard_folders:
+        # Build patterns for assigned folders only
+        files = []
+        for folder in shard_folders:
+            pattern = os.path.join(root_dir, folder, "*.inp")
+            folder_files = glob(pattern)
+            files.extend(folder_files)
+        total_found = len(files)
+        logger.debug(f"Shard {shard_index}: found {total_found} .inp files in {len(shard_folders)} assigned folders")
+    else:
+        # No sharding - process all files
+        pattern = os.path.join(root_dir, "*/*.inp")
+        files = glob(pattern)
+        total_found = len(files)
 
     # Apply debug limit
     if limit is not None:
@@ -525,26 +689,34 @@ def main():
         description="Convert generator JSON/inp files to LMDB databases",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-Data types available:
-  structure   Convert ORCA .inp files to geometry LMDB
-  charge      Convert charge.json files
-  qtaim       Convert qtaim.json files
-  bond        Convert bond.json files
-  fuzzy_full  Convert fuzzy_full.json files
-  other       Convert other.json files
+            Data types available:
+            structure   Convert ORCA .inp files to geometry LMDB
+            charge      Convert charge.json files
+            qtaim       Convert qtaim.json files
+            bond        Convert bond.json files
+            fuzzy_full  Convert fuzzy_full.json files
+            other       Convert other.json files
 
-Examples:
-  # Convert all data types with defaults
-  json-to-lmdb --root_dir ./jobs/ --out_dir ./lmdbs/ --all
+            Examples:
+            # Convert all data types with defaults
+            json-to-lmdb --root_dir ./jobs/ --out_dir ./lmdbs/ --all
 
-  # Convert only structure and charge
-  json-to-lmdb --root_dir ./jobs/ --out_dir ./lmdbs/ --types structure charge
+            # Convert only structure and charge
+            json-to-lmdb --root_dir ./jobs/ --out_dir ./lmdbs/ --types structure charge
 
-  # Use generator subfolder structure
-  json-to-lmdb --root_dir ./jobs/ --out_dir ./lmdbs/ --all --move_files
+            # Use generator subfolder structure
+            json-to-lmdb --root_dir ./jobs/ --out_dir ./lmdbs/ --all --move_files
 
-  # Large dataset with custom chunk size
-  json-to-lmdb --root_dir ./jobs/ --out_dir ./lmdbs/ --all --chunk_size 5000
+            # Large dataset with custom chunk size
+            json-to-lmdb --root_dir ./jobs/ --out_dir ./lmdbs/ --all --chunk_size 5000
+
+            # Parallel processing with sharding (run these in separate jobs)
+            # Note: Each shard auto-creates its own subdirectory (shard_0/, shard_1/, etc.)
+            json-to-lmdb --root_dir ./jobs/ --out_dir ./lmdbs/ --all --shard_index 0 --total_shards 4
+            json-to-lmdb --root_dir ./jobs/ --out_dir ./lmdbs/ --all --shard_index 1 --total_shards 4
+            json-to-lmdb --root_dir ./jobs/ --out_dir ./lmdbs/ --all --shard_index 2 --total_shards 4
+            json-to-lmdb --root_dir ./jobs/ --out_dir ./lmdbs/ --all --shard_index 3 --total_shards 4 --auto_merge
+            # Results: lmdbs/shard_0/, lmdbs/shard_1/, ..., lmdbs/merged/
         """,
     )
 
@@ -645,11 +817,40 @@ Examples:
         help="Path to log file (logs are always verbose in file)",
     )
 
+    parser.add_argument(
+        "--shard_index",
+        type=int,
+        default=0,
+        help="Shard index for parallel processing (0-based, default: 0)",
+    )
+
+    parser.add_argument(
+        "--total_shards",
+        type=int,
+        default=1,
+        help="Total number of shards for parallel processing (default: 1 = no sharding)",
+    )
+
+    parser.add_argument(
+        "--auto_merge",
+        action="store_true",
+        default=False,
+        help="Automatically merge shards after last shard completes (only applies to last shard)",
+    )
+
     args = parser.parse_args()
 
     # Validate arguments
     if not args.all and not args.types:
         parser.error("Must specify either --all or --types")
+
+    # Validate sharding arguments
+    if args.shard_index < 0:
+        parser.error("--shard_index must be >= 0")
+    if args.total_shards < 1:
+        parser.error("--total_shards must be >= 1")
+    if args.shard_index >= args.total_shards:
+        parser.error(f"--shard_index ({args.shard_index}) must be less than --total_shards ({args.total_shards})")
 
     # Ensure root_dir ends with separator
     root_dir = args.root_dir
@@ -688,9 +889,24 @@ Examples:
     prefix = args.prefix
     full_set = args.full_set
     debug_limit = args.debug
+    shard_index = args.shard_index
+    total_shards = args.total_shards
+    auto_merge = args.auto_merge
 
     # Setup logging
     logger = setup_logging(verbose=args.verbose, log_file=args.log_file)
+
+    # Auto-create shard subdirectories to avoid chunk naming conflicts
+    base_out_dir = out_dir  # Save original output directory for auto-merge
+    if total_shards > 1:
+        out_dir = os.path.join(out_dir, f"shard_{shard_index}")
+        os.makedirs(out_dir, exist_ok=True)
+        logger.info(f"Sharding: Creating output subdirectory {out_dir}")
+
+    # Compute shard folder assignments
+    shard_folders = None
+    if total_shards > 1:
+        shard_folders = partition_folders_by_shard(root_dir, shard_index, total_shards, logger)
 
     logger.info("=" * 60)
     logger.info("JSON to LMDB Conversion")
@@ -703,6 +919,11 @@ Examples:
     logger.info(f"Clean intermediate:  {clean}")
     logger.info(f"Generator subfolders: {move_files}")
     logger.info(f"Validation level:    {full_set} ({'baseline' if full_set == 0 else 'extended' if full_set == 1 else 'full'})")
+    if total_shards > 1:
+        logger.info(f"Sharding:            Shard {shard_index} of {total_shards}")
+        if auto_merge and shard_index == total_shards - 1:
+            logger.info(f"Auto-merge:          Enabled (last shard will merge)")
+        logger.info(f"Assigned folders:    {len(shard_folders) if shard_folders else 0}")
     if args.clean_output:
         logger.info(f"Clean output:        Yes (removed existing LMDBs)")
     if debug_limit:
@@ -729,6 +950,9 @@ Examples:
                     merge=merge,
                     logger=logger,
                     limit=debug_limit,
+                    shard_index=shard_index,
+                    total_shards=total_shards,
+                    shard_folders=shard_folders,
                 )
             else:
                 stats = convert_json_with_stats(
@@ -743,6 +967,9 @@ Examples:
                     logger=logger,
                     full_set=full_set,
                     limit=debug_limit,
+                    shard_index=shard_index,
+                    total_shards=total_shards,
+                    shard_folders=shard_folders,
                 )
 
             all_stats.append(stats)
@@ -802,6 +1029,56 @@ Examples:
         sys.exit(1)
     else:
         logger.info("All conversions completed successfully!")
+
+    # Auto-merge shards if this is the last shard
+    if auto_merge and total_shards > 1 and shard_index == total_shards - 1:
+        logger.info("")
+        logger.info("=" * 60)
+        logger.info("AUTO-MERGE: Starting automatic shard merging...")
+        logger.info("=" * 60)
+
+        merged_dir = os.path.join(base_out_dir, "merged")
+        os.makedirs(merged_dir, exist_ok=True)
+
+        for data_type in converted:
+            base_lmdb_name = f"{prefix}{DEFAULT_LMDB_NAMES[data_type]}"
+            base_name = base_lmdb_name.replace(".lmdb", "")
+
+            # Find all shard LMDBs for this data type (in shard subdirectories)
+            shard_lmdbs = []
+            for i in range(total_shards):
+                # Look in each shard subdirectory
+                shard_dir = os.path.join(base_out_dir, f"shard_{i}")
+                shard_path = os.path.join(shard_dir, f"{base_name}_shard_{i}.lmdb")
+                if os.path.exists(shard_path):
+                    shard_lmdbs.append(shard_path)
+                else:
+                    logger.warning(f"Shard LMDB not found: {shard_path}")
+
+            if len(shard_lmdbs) != total_shards:
+                logger.warning(
+                    f"Expected {total_shards} shards for {data_type} but found {len(shard_lmdbs)}. "
+                    f"Skipping merge for {data_type}."
+                )
+                continue
+
+            logger.info(f"Merging {data_type}: {len(shard_lmdbs)} shards")
+
+            try:
+                merged_path = merge_shards(
+                    shard_lmdbs=shard_lmdbs,
+                    output_path=os.path.join(merged_dir, base_lmdb_name),
+                    logger=logger,
+                )
+                logger.info(f"  -> Merged: {merged_path}")
+            except Exception as e:
+                logger.error(f"Failed to merge {data_type} shards: {e}")
+                import traceback
+                logger.debug(traceback.format_exc())
+
+        logger.info("=" * 60)
+        logger.info(f"AUTO-MERGE COMPLETE: Merged LMDBs in {merged_dir}")
+        logger.info("=" * 60)
 
 
 if __name__ == "__main__":
