@@ -1,4 +1,4 @@
-import os, threading, subprocess
+import os, threading, subprocess, shlex
 from glob import glob
 from pathlib import Path
 
@@ -44,22 +44,18 @@ def controller_single(
         else:
             os.system(
                 "{} ".format(orca)
-                + folder_choice
-                + "/reactants"
-                + "/input.in > "
-                + folder_choice
-                + "/reactants/output.out"
+                + shlex.quote(folder_choice + "/reactants/input.in")
+                + " > "
+                + shlex.quote(folder_choice + "/reactants/output.out")
             )
         if len(glob(folder_choice + "/products" + "/*.wfn")) > 0:
             print("dft calc already done - products")
         else:
             os.system(
                 "{} ".format(orca)
-                + folder_choice
-                + "/products"
-                + "/input.in > "
-                + folder_choice
-                + "/products/output.out"
+                + shlex.quote(folder_choice + "/products/input.in")
+                + " > "
+                + shlex.quote(folder_choice + "/products/output.out")
             )
 
         if not just_dft:
@@ -72,7 +68,7 @@ def controller_single(
             else:
                 cwd = os.getcwd()
                 os.chdir(folder_choice + "/reactants")
-                subprocess.run(folder_choice + "/reactants/props.sh")
+                subprocess.run(["bash", folder_choice + "/reactants/props.sh"])
                 os.chdir(cwd)
 
             if len(glob(folder_choice + "/products/CPprop.txt")) > 0 and not redo_qtaim:
@@ -81,7 +77,7 @@ def controller_single(
             else:
                 cwd = os.getcwd()
                 os.chdir(folder_choice + "/products")
-                subprocess.run(folder_choice + "/products/props.sh")
+                subprocess.run(["bash", folder_choice + "/products/props.sh"])
                 os.chdir(cwd)
 
     else:
@@ -91,10 +87,9 @@ def controller_single(
         else:
             os.system(
                 "{} ".format(orca)
-                + folder_choice
-                + "/input.in > "
-                + folder_choice
-                + "/output.out"
+                + shlex.quote(folder_choice + "/input.in")
+                + " > "
+                + shlex.quote(folder_choice + "/output.out")
             )
 
         if not just_dft:
@@ -104,5 +99,5 @@ def controller_single(
             else:
                 cwd = os.getcwd()
                 os.chdir(folder_choice)
-                subprocess.run(folder_choice + "/props.sh")
+                subprocess.run(["bash", folder_choice + "/props.sh"])
                 os.chdir(cwd)

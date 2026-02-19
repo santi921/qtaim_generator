@@ -168,7 +168,7 @@ def get_folders_from_file(
                 and folder_inputs.startswith(root_omol_inputs)
             ):
                 folder_relative = folder_inputs[len(root_omol_inputs) :].lstrip(os.sep)
-                folder_outputs = root_omol_results + os.sep + folder_relative
+                folder_outputs = os.path.join(root_omol_results, folder_relative)
             else:
                 folder_outputs = folder_inputs
 
@@ -188,10 +188,11 @@ def get_folders_from_file(
                     if logger:
                         logger.info(f"Skipping {folder} due to pre-validation pass")
                     return None
-            except Exception:
+            except Exception as e:
+                #print(f"Pre-validation exception for {folder_outputs}: {type(e).__name__}: {e}")
                 if logger:
                     logger.info(
-                        f"Adding {folder} to run list after pre-validation exception"
+                        f"Adding {folder} to run list after pre-validation exception: {type(e).__name__}: {e}"
                     )
                 return folder
 
