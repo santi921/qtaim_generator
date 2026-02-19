@@ -125,17 +125,17 @@ def write_conversion(
         read_file = read_file.split(".gbw")[0]
         f.write(
             "{} ".format(orca_2mkl_cmd)
-            + str(Path.home().joinpath(out_folder, read_file))
+            + "'" + str(Path.home().joinpath(out_folder, read_file)) + "'"
             + " -molden\n"
         )
-        # also have it clean up the gbw file, .molden.input file 
-        
+        # also have it clean up the gbw file, .molden.input file
+
         if os.path.exists(str(Path.home().joinpath(out_folder, read_file + ".molden.input"))):
-            f.write("rm {}.molden.input\n".format(str(Path.home().joinpath(out_folder, read_file))))
+            f.write("rm '{}.molden.input'\n".format(str(Path.home().joinpath(out_folder, read_file))))
 
         # check if gbw file exists
         if os.path.exists(str(Path.home().joinpath(out_folder, read_file + ".gbw"))):
-            f.write("rm {}.gbw\n".format(str(Path.home().joinpath(out_folder, read_file))))
+            f.write("rm '{}.gbw'\n".format(str(Path.home().joinpath(out_folder, read_file))))
 
     st = os.stat(out_file)
     os.chmod(out_file, st.st_mode | stat.S_IEXEC)
@@ -176,7 +176,7 @@ def write_multiwfn_exe(
         with open(out_file, "w") as f:
             f.write("#!/bin/bash\n")
             if convert_gbw:
-                f.write("orca_2mkl " + str(Path.home().joinpath(out_folder)) + "\n")
+                f.write("orca_2mkl '" + str(Path.home().joinpath(out_folder)) + "'\n")
 
             multiwfn_input_file_root = multiwfn_input_file.split("/")[-1].split(".")[0]
             bare_file = read_file.split("/")[-1]
@@ -190,20 +190,20 @@ def write_multiwfn_exe(
             
             f.write(
                 "{} ".format(multi_wfn_cmd)  # multiwfn command
-                + gbw_loc  # wfn/gbw file
-                + " < {} | tee ".format(multiwfn_input_file)  # multiwfn input file
-                + str(
+                + "'" + gbw_loc + "'"  # wfn/gbw file
+                + " < '{}' | tee ".format(multiwfn_input_file)  # multiwfn input file
+                + "'" + str(
                     Path.home().joinpath(
                         out_folder, "{}.out".format(multiwfn_input_file_root)
                     )
-                )  # output file
+                ) + "'"  # output file
                 + "\n"
             )
 
             if mv_cpprop:
                 f.write(
                     "mv CPprop.txt "
-                    + str(Path.home().joinpath(out_folder, "CPprop.txt"))
+                    + "'" + str(Path.home().joinpath(out_folder, "CPprop.txt")) + "'"
                     + "\n"
                 )
 
