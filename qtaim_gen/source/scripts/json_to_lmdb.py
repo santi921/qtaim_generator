@@ -1030,9 +1030,54 @@ def main():
     else:
         logger.info("All conversions completed successfully!")
 
+    # Write sentinel file to signal this shard is fully done (chunks merged, all types complete)
+    if total_shards > 1:
+        shard_dir = os.path.join(base_out_dir, f"shard_{shard_index}")
+        sentinel_path = os.path.join(shard_dir, f"shard_{shard_index}.done")
+        with open(sentinel_path, "w") as f:
+            f.write(f"shard {shard_index} completed at {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+            f.write(f"data types: {', '.join(converted)}\n")
+        logger.info(f"Wrote sentinel file: {sentinel_path}")
+
     # Auto-merge shards if this is the last shard
     if auto_merge and total_shards > 1 and shard_index == total_shards - 1:
         logger.info("")
+        logger.info("=" * 60)
+        logger.info("AUTO-MERGE: Waiting for all shards to complete...")
+        logger.info("=" * 60)
+
+        # Poll for sentinel files from all shards before merging
+        max_wait = 3600 * 6  # 6 hours
+        poll_interval = 30  # seconds
+        waited = 0
+
+        expected_sentinels = [
+            os.path.join(base_out_dir, f"shard_{i}", f"shard_{i}.done")
+            for i in range(total_shards)
+        ]
+
+        while waited < max_wait:
+            missing = [p for p in expected_sentinels if not os.path.exists(p)]
+            if not missing:
+                logger.info("All shard sentinel files detected. Proceeding with merge.")
+                break
+            logger.info(
+                f"Waiting for {len(missing)}/{total_shards} shard(s) to finish... "
+                f"({waited}s elapsed, polling every {poll_interval}s)"
+            )
+            for p in missing[:5]:
+                logger.info(f"  waiting on: {os.path.basename(os.path.dirname(p))}")
+            if len(missing) > 5:
+                logger.info(f"  ... and {len(missing) - 5} more")
+            time.sleep(poll_interval)
+            waited += poll_interval
+        else:
+            missing = [p for p in expected_sentinels if not os.path.exists(p)]
+            logger.error(
+                f"Timed out after {max_wait}s waiting for {len(missing)} shard(s). "
+                f"Proceeding with available shards only."
+            )
+
         logger.info("=" * 60)
         logger.info("AUTO-MERGE: Starting automatic shard merging...")
         logger.info("=" * 60)
