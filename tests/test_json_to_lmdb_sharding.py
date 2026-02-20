@@ -301,5 +301,333 @@ class TestSharding:
         env.close()
 
 
+class TestShardedVsNonSharded:
+    """End-to-end test: sharded conversion + merge must produce
+    the same LMDB contents as a single non-sharded conversion.
+
+    This catches bugs like the glob-cleanup pattern that was
+    deleting merged shard files (charge_shard_0.lmdb matched by
+    charge_*.lmdb cleanup).
+    """
+
+    base_tests = Path(__file__).parent
+    dir_data = str(base_tests / "test_files" / "lmdb_tests") + os.sep
+
+    # Data types that have JSON files in the test fixtures
+    JSON_TYPES = ["charge", "bond", "qtaim", "fuzzy_full", "other"]
+
+    @classmethod
+    def setup_class(cls):
+        cls.temp_dir = tempfile.mkdtemp()
+        cls.logger = logging.getLogger("test_sharded_vs_nonsharded")
+        cls.logger.setLevel(logging.DEBUG)
+        if not cls.logger.handlers:
+            handler = logging.StreamHandler()
+            handler.setLevel(logging.DEBUG)
+            cls.logger.addHandler(handler)
+
+        # Discover the 4 job folders (orca5, orca5_rks, orca5_uks, orca6_rks)
+        all_folders = sorted(
+            os.path.basename(os.path.normpath(f))
+            for f in glob(os.path.join(cls.dir_data, "*/"))
+            if os.path.basename(os.path.normpath(f)) not in
+               ("generator_lmdbs", "generator_lmdbs_merged", "qtaim")
+        )
+        assert len(all_folders) == 4, f"Expected 4 job folders, got {all_folders}"
+        cls.all_folders = all_folders
+
+    @classmethod
+    def teardown_class(cls):
+        if hasattr(cls, "temp_dir") and os.path.exists(cls.temp_dir):
+            shutil.rmtree(cls.temp_dir)
+
+    # ------------------------------------------------------------------
+    # helpers
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _nan_equal(a, b) -> bool:
+        """Deep equality that treats NaN == NaN as True."""
+        import math
+        if isinstance(a, float) and isinstance(b, float):
+            if math.isnan(a) and math.isnan(b):
+                return True
+            return a == b
+        if isinstance(a, dict) and isinstance(b, dict):
+            if a.keys() != b.keys():
+                return False
+            return all(
+                TestShardedVsNonSharded._nan_equal(a[k], b[k]) for k in a
+            )
+        if isinstance(a, (list, tuple)) and isinstance(b, (list, tuple)):
+            if len(a) != len(b):
+                return False
+            return all(
+                TestShardedVsNonSharded._nan_equal(x, y) for x, y in zip(a, b)
+            )
+        return a == b
+
+    @staticmethod
+    def _read_lmdb(path: str) -> dict:
+        """Read all (key -> deserialized value) pairs from an LMDB file,
+        excluding the 'length' meta-key."""
+        env = lmdb.open(path, subdir=False, readonly=True, lock=False)
+        data = {}
+        with env.begin() as txn:
+            for key, value in txn.cursor():
+                k = key.decode("ascii")
+                if k != "length":
+                    data[k] = pkl.loads(value)
+        env.close()
+        return data
+
+    @staticmethod
+    def _read_lmdb_length(path: str) -> int:
+        """Read the 'length' meta-key from an LMDB."""
+        env = lmdb.open(path, subdir=False, readonly=True, lock=False)
+        with env.begin() as txn:
+            raw = txn.get("length".encode())
+            length = pkl.loads(raw) if raw else 0
+        env.close()
+        return length
+
+    @staticmethod
+    def _make_symlinked_root(dest_root: str, src_root: str, folders: list):
+        """Create *dest_root* with symlinks to only the listed folders
+        from *src_root*."""
+        os.makedirs(dest_root, exist_ok=True)
+        for folder in folders:
+            src = os.path.join(src_root, folder)
+            dst = os.path.join(dest_root, folder)
+            if not os.path.exists(dst):
+                os.symlink(src, dst)
+
+    # ------------------------------------------------------------------
+    # tests
+    # ------------------------------------------------------------------
+    def test_sharded_vs_nonsharded_json_types(self):
+        """For every JSON data type, sharded (2-shard) + merge must match
+        non-sharded conversion."""
+        from qtaim_gen.source.utils.lmdbs import json_2_lmdbs
+
+        total_shards = 2
+        chunk_size = 2  # small chunk to exercise chunking + merging
+
+        for data_type in self.JSON_TYPES:
+            # --- non-sharded reference ---
+            noshard_dir = os.path.join(self.temp_dir, f"noshard_{data_type}") + os.sep
+            os.makedirs(noshard_dir, exist_ok=True)
+            noshard_lmdb = f"{data_type}.lmdb"
+
+            json_2_lmdbs(
+                root_dir=self.dir_data,
+                out_dir=noshard_dir,
+                data_type=data_type,
+                out_lmdb=noshard_lmdb,
+                chunk_size=chunk_size,
+                clean=True,
+                merge=True,
+            )
+            noshard_path = os.path.join(noshard_dir, noshard_lmdb)
+            assert os.path.exists(noshard_path), \
+                f"Non-sharded LMDB not created for {data_type}"
+
+            # --- sharded conversion (2 shards) ---
+            # Partition folders: even-indexed → shard 0, odd-indexed → shard 1
+            shard_assignments = [[], []]
+            for i, folder in enumerate(self.all_folders):
+                shard_assignments[i % total_shards].append(folder)
+
+            shard_lmdb_paths = []
+            for shard_idx in range(total_shards):
+                # Create a temp root dir with symlinks to only this shard's folders
+                shard_root = os.path.join(
+                    self.temp_dir, f"shard_root_{data_type}_{shard_idx}"
+                ) + os.sep
+                self._make_symlinked_root(
+                    shard_root, self.dir_data, shard_assignments[shard_idx]
+                )
+
+                shard_out = os.path.join(
+                    self.temp_dir, f"shard_out_{data_type}", f"shard_{shard_idx}"
+                ) + os.sep
+                os.makedirs(shard_out, exist_ok=True)
+
+                shard_lmdb_name = f"{data_type}_shard_{shard_idx}.lmdb"
+                json_2_lmdbs(
+                    root_dir=shard_root,
+                    out_dir=shard_out,
+                    data_type=data_type,
+                    out_lmdb=shard_lmdb_name,
+                    chunk_size=chunk_size,
+                    clean=True,
+                    merge=True,
+                )
+
+                shard_path = os.path.join(shard_out, shard_lmdb_name)
+                assert os.path.exists(shard_path), \
+                    f"Shard {shard_idx} LMDB not created for {data_type}"
+                shard_lmdb_paths.append(shard_path)
+
+            # --- merge shards ---
+            merged_path = os.path.join(
+                self.temp_dir, f"merged_{data_type}", f"{data_type}.lmdb"
+            )
+            os.makedirs(os.path.dirname(merged_path), exist_ok=True)
+            merge_shards(shard_lmdb_paths, merged_path, self.logger)
+
+            # --- compare ---
+            ref_data = self._read_lmdb(noshard_path)
+            merged_data = self._read_lmdb(merged_path)
+
+            # Same key sets
+            assert set(ref_data.keys()) == set(merged_data.keys()), (
+                f"{data_type}: key mismatch.\n"
+                f"  Non-sharded keys: {sorted(ref_data.keys())}\n"
+                f"  Merged keys:      {sorted(merged_data.keys())}"
+            )
+
+            # Same values (NaN-aware comparison)
+            for key in ref_data:
+                assert self._nan_equal(ref_data[key], merged_data[key]), (
+                    f"{data_type}: value mismatch for key '{key}'"
+                )
+
+            # Same length metadata
+            ref_len = self._read_lmdb_length(noshard_path)
+            merged_len = self._read_lmdb_length(merged_path)
+            assert ref_len == merged_len, (
+                f"{data_type}: length mismatch: "
+                f"non-sharded={ref_len}, merged={merged_len}"
+            )
+
+    def test_sharded_vs_nonsharded_structure(self):
+        """Structure (inp_files_2_lmdbs) sharded + merge must match
+        non-sharded conversion."""
+        from qtaim_gen.source.utils.lmdbs import inp_files_2_lmdbs
+
+        total_shards = 2
+        chunk_size = 2
+
+        # --- non-sharded ---
+        noshard_dir = os.path.join(self.temp_dir, "noshard_structure") + os.sep
+        os.makedirs(noshard_dir, exist_ok=True)
+        noshard_lmdb = "geom.lmdb"
+
+        inp_files_2_lmdbs(
+            root_dir=self.dir_data,
+            out_dir=noshard_dir,
+            out_lmdb=noshard_lmdb,
+            chunk_size=chunk_size,
+            clean=True,
+            merge=True,
+        )
+        noshard_path = os.path.join(noshard_dir, noshard_lmdb)
+        assert os.path.exists(noshard_path), "Non-sharded structure LMDB not created"
+
+        # --- sharded ---
+        shard_assignments = [[], []]
+        for i, folder in enumerate(self.all_folders):
+            shard_assignments[i % total_shards].append(folder)
+
+        shard_lmdb_paths = []
+        for shard_idx in range(total_shards):
+            shard_root = os.path.join(
+                self.temp_dir, f"shard_root_structure_{shard_idx}"
+            ) + os.sep
+            self._make_symlinked_root(
+                shard_root, self.dir_data, shard_assignments[shard_idx]
+            )
+
+            shard_out = os.path.join(
+                self.temp_dir, "shard_out_structure", f"shard_{shard_idx}"
+            ) + os.sep
+            os.makedirs(shard_out, exist_ok=True)
+
+            shard_lmdb_name = f"geom_shard_{shard_idx}.lmdb"
+            inp_files_2_lmdbs(
+                root_dir=shard_root,
+                out_dir=shard_out,
+                out_lmdb=shard_lmdb_name,
+                chunk_size=chunk_size,
+                clean=True,
+                merge=True,
+            )
+
+            shard_path = os.path.join(shard_out, shard_lmdb_name)
+            assert os.path.exists(shard_path), \
+                f"Shard {shard_idx} structure LMDB not created"
+            shard_lmdb_paths.append(shard_path)
+
+        # --- merge ---
+        merged_path = os.path.join(
+            self.temp_dir, "merged_structure", "geom.lmdb"
+        )
+        os.makedirs(os.path.dirname(merged_path), exist_ok=True)
+        merge_shards(shard_lmdb_paths, merged_path, self.logger)
+
+        # --- compare keys and length ---
+        ref_data = self._read_lmdb(noshard_path)
+        merged_data = self._read_lmdb(merged_path)
+
+        assert set(ref_data.keys()) == set(merged_data.keys()), (
+            f"Structure: key mismatch.\n"
+            f"  Non-sharded keys: {sorted(ref_data.keys())}\n"
+            f"  Merged keys:      {sorted(merged_data.keys())}"
+        )
+
+        ref_len = self._read_lmdb_length(noshard_path)
+        merged_len = self._read_lmdb_length(merged_path)
+        assert ref_len == merged_len, (
+            f"Structure: length mismatch: "
+            f"non-sharded={ref_len}, merged={merged_len}"
+        )
+
+    def test_shard_cleanup_preserves_merged_file(self):
+        """Regression test: chunk cleanup glob must not delete the merged
+        shard file.  e.g. charge_[0-9]*.lmdb must NOT match
+        charge_shard_0.lmdb."""
+        from qtaim_gen.source.utils.lmdbs import json_2_lmdbs
+
+        data_type = "charge"
+        shard_idx = 0
+        shard_out = os.path.join(
+            self.temp_dir, "cleanup_regression", f"shard_{shard_idx}"
+        ) + os.sep
+        os.makedirs(shard_out, exist_ok=True)
+
+        shard_lmdb_name = f"{data_type}_shard_{shard_idx}.lmdb"
+
+        # Write a dummy file that looks like the merged shard output.
+        # If cleanup incorrectly deletes it, the assertion below will fail.
+        dummy_shard_path = os.path.join(shard_out, shard_lmdb_name)
+        env = lmdb.open(dummy_shard_path, subdir=False, map_size=1024**2, lock=False)
+        with env.begin(write=True) as txn:
+            txn.put(b"sentinel", pkl.dumps("should_survive"))
+            txn.put(b"length", pkl.dumps(1))
+        env.close()
+
+        # Now run json_2_lmdbs which creates chunks and then cleans them up.
+        # The merged shard file (charge_shard_0.lmdb) must survive cleanup.
+        json_2_lmdbs(
+            root_dir=self.dir_data,
+            out_dir=shard_out,
+            data_type=data_type,
+            out_lmdb=f"{data_type}_final.lmdb",
+            chunk_size=2,
+            clean=True,
+            merge=True,
+        )
+
+        # The dummy shard file must still exist
+        assert os.path.exists(dummy_shard_path), (
+            f"Cleanup incorrectly deleted {shard_lmdb_name}! "
+            f"The [0-9]* glob pattern is not correctly excluding shard files."
+        )
+
+        # And the final merged file from this run must also exist
+        assert os.path.exists(os.path.join(shard_out, f"{data_type}_final.lmdb")), \
+            "Final merged LMDB was not created"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
