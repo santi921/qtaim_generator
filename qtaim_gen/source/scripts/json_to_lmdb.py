@@ -522,6 +522,7 @@ def convert_json_with_stats(
         merge=merge,
         move_files=move_files,
         limit=limit,
+        shard_folders=shard_folders,
     )
     stats.lmdb_write_time_sec = time.time() - write_start
 
@@ -625,6 +626,7 @@ def convert_structure_with_stats(
         clean=clean,
         merge=merge,
         limit=limit,
+        shard_folders=shard_folders,
     )
     stats.lmdb_write_time_sec = time.time() - write_start
 

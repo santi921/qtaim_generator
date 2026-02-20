@@ -81,7 +81,7 @@ def write_lmdb(
         os.makedirs(lmdb_dir, exist_ok=True)
 
     db = lmdb.open(
-        lmdb_dir + lmdb_name,
+        os.path.join(lmdb_dir, lmdb_name),
         map_size=int(1099511627776 * 2),
         subdir=False,
         meminit=False,
@@ -157,9 +157,10 @@ def merge_lmdbs(db_paths: str, out_path: str, output_file: str):
 
     # update length
     txn_out = env_out.begin(write=True)
-    # print("length: {}".format(idx))
     txn_out.put("length".encode("ascii"), pickle.dumps(idx, protocol=-1))
     txn_out.commit()
+
+    print(f"Merged {len(db_paths)} chunks -> {os.path.join(out_path, output_file)} ({idx} keys)")
 
     env_out.sync()
     env_out.close()
@@ -212,6 +213,7 @@ def json_2_lmdbs(
     merge: Optional[bool] = True,
     move_files: Optional[bool] = False,
     limit: Optional[int] = None,
+    shard_folders: Optional[List[str]] = None,
 ):
     """Converts folders of output json files to lmdb files.
     Args:
@@ -223,9 +225,19 @@ def json_2_lmdbs(
         clean (Optional[bool], optional): If True, delete the json files. Defaults to False.
         move_files (Optional[bool], optional): If files were moved into separate ./generator/ folders in each job
         limit (Optional[int], optional): Limit number of files to process (for debugging).
+        shard_folders (Optional[List[str]], optional): If set, only process these folder names (for sharding).
     """
     chunk_ind = 1
-    if move_files:
+    if shard_folders is not None:
+        # Only glob files from the assigned shard folders
+        files_target = []
+        for folder in shard_folders:
+            if move_files:
+                pattern = os.path.join(root_dir, folder, "generator", f"{data_type}.json")
+            else:
+                pattern = os.path.join(root_dir, folder, f"{data_type}.json")
+            files_target.extend(glob(pattern))
+    elif move_files:
         files_target = glob(
             root_dir + "*/generator/{}.json".format(data_type)
         )
@@ -249,18 +261,19 @@ def json_2_lmdbs(
         write_lmdb(data_dict, out_dir, f"{data_type}_{chunk_ind}.lmdb")
         chunk_ind += 1
 
-    files_out = glob("{}/{}_*.lmdb".format(out_dir, data_type))
-    #print("files_out: ", files_out)
+    # Use [0-9]* to match only numbered chunks (e.g., charge_1.lmdb)
+    # and avoid matching the shard merged file (e.g., charge_shard_0.lmdb)
+    files_out = glob("{}/{}_[0-9]*.lmdb".format(out_dir, data_type))
 
     if merge:
         merge_lmdbs(files_out, out_dir, out_lmdb)
 
         cleanup_lmdb_files(
-            directory=out_dir, pattern="{}_*.lmdb".format(data_type), dry_run=not clean
+            directory=out_dir, pattern="{}_[0-9]*.lmdb".format(data_type), dry_run=not clean
         )
         cleanup_lmdb_files(
             directory=out_dir,
-            pattern="{}_*.lmdb-lock".format(data_type),
+            pattern="{}_[0-9]*.lmdb-lock".format(data_type),
             dry_run=not clean,
         )
 
@@ -273,6 +286,7 @@ def inp_files_2_lmdbs(
     clean: Optional[bool] = True,
     merge: Optional[bool] = True,
     limit: Optional[int] = None,
+    shard_folders: Optional[List[str]] = None,
 ):
     """
     Converts orca inp files into lmdbs at scale.
@@ -284,8 +298,14 @@ def inp_files_2_lmdbs(
         clean (Optional[bool], optional): If True, delete the input files. Defaults to False.
         limit (Optional[int], optional): Limit number of files to process (for debugging).
         merge (Optional[bool], optional): If True, merge the lmdb files after creation. Defaults to True.
+        shard_folders (Optional[List[str]], optional): If set, only process these folder names (for sharding).
     """
-    files = glob(root_dir + "*/*.inp")
+    if shard_folders is not None:
+        files = []
+        for folder in shard_folders:
+            files.extend(glob(os.path.join(root_dir, folder, "*.inp")))
+    else:
+        files = glob(root_dir + "*/*.inp")
 
     # Apply limit for debug mode
     if limit is not None:
@@ -330,17 +350,17 @@ def inp_files_2_lmdbs(
         write_lmdb(data_dict, out_dir, f"geom_{chunk_ind}.lmdb")
         chunk_ind += 1
 
-    files_out = glob("{}/geom_*.lmdb".format(out_dir))
+    files_out = glob("{}/geom_[0-9]*.lmdb".format(out_dir))
 
     if merge:
         merge_lmdbs(files_out, out_dir, out_lmdb)
 
         cleanup_lmdb_files(
-            directory=out_dir, pattern="{}_*.lmdb".format("geom"), dry_run=not clean
+            directory=out_dir, pattern="{}_[0-9]*.lmdb".format("geom"), dry_run=not clean
         )
         cleanup_lmdb_files(
             directory=out_dir,
-            pattern="{}_*.lmdb-lock".format("geom"),
+            pattern="{}_[0-9]*.lmdb-lock".format("geom"),
             dry_run=not clean,
         )
 
