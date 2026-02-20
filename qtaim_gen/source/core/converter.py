@@ -709,6 +709,8 @@ class Converter:
         """
         if file_location is None:
             file_location = self.config_path
+        if file_location is None:
+            return
         self.logger.info(f"Overwriting config file at {file_location}")
         with open(file_location, "w") as f:
             json.dump(self.config_dict, f, indent=4)
@@ -907,7 +909,7 @@ class Converter:
             logger.info("Applying merged scalers to LMDB...")
             env = lmdb.open(output_path, subdir=False, map_size=map_size)
             count = 0
-            metadata_keys = {b'scaled', b'scaler_finalized'}
+            metadata_keys = {b'scaled', b'scaler_finalized', b'length'}
             with env.begin(write=True) as txn:
                 cursor = txn.cursor()
                 for key, value in cursor:
