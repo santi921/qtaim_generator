@@ -1,0 +1,86 @@
+
+                                 *****************
+                                 * O   R   C   A *
+                                 *****************
+
+---------------------------------
+CARTESIAN COORDINATES (ANGSTROEM)
+---------------------------------
+  O     -1.451190    1.589690   -0.983560
+  C     -0.540660    2.348620   -1.300470
+  H      0.257080    4.322760   -1.544960
+
+
+----------------
+TOTAL SCF ENERGY
+----------------
+
+Total Energy       :       -100.12345678901234 Eh            -2724.12345 eV
+
+Components:
+Nuclear Repulsion  :         50.12345678900000 Eh             1363.67890 eV
+Electronic Energy  :       -150.24691357801234 Eh            -4087.80235 eV
+One Electron Energy:       -200.98765432100000 Eh            -5469.12345 eV
+Two Electron Energy:         50.74074074298766 Eh             1381.32110 eV
+
+Virial components:
+Potential Energy   :       -199.87654321000000 Eh            -5438.87654 eV
+Kinetic Energy     :         99.75308642098766 Eh             2714.75309 eV
+Virial Ratio       :          2.00371234567890
+
+
+---------------
+SCF CONVERGENCE
+---------------
+
+  Last Energy change         ...    5.5555e-09  Tolerance :   1.0000e-08
+  Last MAX-Density change    ...    2.2222e-03  Tolerance :   1.0000e-07
+  Last RMS-Density change    ...    3.3333e-05  Tolerance :   5.0000e-09
+  Last DIIS Error            ...    4.4444e-06  Tolerance :   5.0000e-07
+
+
+-------------------------   --------------------
+FINAL SINGLE POINT ENERGY       -100.123456789012
+-------------------------   --------------------
+
+
+-----------------------
+MULLIKEN ATOMIC CHARGES
+-----------------------
+   0 O :   -0.500000
+   1 C :    0.300000
+   2 H :    0.200000
+Sum of atomic charges:    0.0000000
+
+
+----------------
+TOTAL SCF ENERGY
+----------------
+
+Total Energy       :       -200.98765432109876 Eh            -5469.98765 eV
+
+Components:
+Nuclear Repulsion  :         60.12345678900000 Eh             1635.67890 eV
+Electronic Energy  :       -261.11111111009876 Eh            -7105.66655 eV
+One Electron Energy:       -350.98765432100000 Eh            -9550.12345 eV
+Two Electron Energy:         89.87654321090124 Eh             2444.45690 eV
+
+Virial components:
+Potential Energy   :       -399.87654321000000 Eh           -10882.87654 eV
+Kinetic Energy     :        198.88888888890124 Eh             5412.88889 eV
+Virial Ratio       :          2.00527654321098
+
+---------------
+SCF CONVERGENCE
+---------------
+
+  Last Energy change         ...    1.1111e-09  Tolerance :   1.0000e-08
+  Last MAX-Density change    ...    8.8888e-04  Tolerance :   1.0000e-07
+  Last RMS-Density change    ...    7.7777e-06  Tolerance :   5.0000e-09
+  Last DIIS Error            ...    6.6666e-07  Tolerance :   5.0000e-07
+
+
+-------------------------   --------------------
+FINAL SINGLE POINT ENERGY       -200.987654321099
+-------------------------   --------------------
+

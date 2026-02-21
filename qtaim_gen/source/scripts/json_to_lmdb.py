@@ -50,7 +50,7 @@ import sys
 import time
 from dataclasses import dataclass, field
 from glob import glob
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Optional, Set, Tuple
 
 from qtaim_gen.source.utils.lmdbs import json_2_lmdbs, inp_files_2_lmdbs
 
@@ -306,7 +306,7 @@ def merge_shards(
     shard_lmdbs: List[str],
     output_path: str,
     logger: logging.Logger,
-) -> str:
+) -> Tuple[str, int]:
     """
     Merge multiple shard LMDB files into a single LMDB.
 
@@ -316,7 +316,7 @@ def merge_shards(
         logger: Logger instance
 
     Returns:
-        Path to the merged LMDB file
+        Tuple of (path to the merged LMDB file, number of entries merged)
     """
     import lmdb
     import pickle
@@ -387,7 +387,7 @@ def merge_shards(
     out_env.close()
     logger.info(f"Merge complete: {merged_count} entries written to {output_path}")
 
-    return output_path
+    return output_path, merged_count
 
 
 def log_first_entry(lmdb_path: str, data_type: str, logger: logging.Logger):
@@ -1087,6 +1087,9 @@ def main():
         merged_dir = os.path.join(base_out_dir, "merged")
         os.makedirs(merged_dir, exist_ok=True)
 
+        # Build lookup of this shard's entry counts per data type for sanity checking
+        last_shard_counts = {s.data_type: s.files_converted for s in all_stats}
+
         for data_type in converted:
             base_lmdb_name = f"{prefix}{DEFAULT_LMDB_NAMES[data_type]}"
             base_name = base_lmdb_name.replace(".lmdb", "")
@@ -1112,12 +1115,31 @@ def main():
             logger.info(f"Merging {data_type}: {len(shard_lmdbs)} shards")
 
             try:
-                merged_path = merge_shards(
+                merged_path, merged_count = merge_shards(
                     shard_lmdbs=shard_lmdbs,
                     output_path=os.path.join(merged_dir, base_lmdb_name),
                     logger=logger,
                 )
                 logger.info(f"  -> Merged: {merged_path}")
+
+                # Sanity check: merged total should be roughly
+                # last_shard_count * total_shards (shards differ by at most 1 folder)
+                my_count = last_shard_counts.get(data_type, 0)
+                if my_count > 0:
+                    expected = my_count * total_shards
+                    deviation = abs(merged_count - expected) / expected
+                    if deviation > 0.25:
+                        logger.warning(
+                            f"SANITY CHECK: {data_type} merged {merged_count} entries but "
+                            f"expected ~{expected} (this shard had {my_count} x {total_shards} shards). "
+                            f"Deviation: {deviation:.0%}. Some shards may have failed or processed different data."
+                        )
+                    else:
+                        logger.info(
+                            f"  Sanity check OK: {merged_count} merged vs ~{expected} expected "
+                            f"({deviation:.1%} deviation)"
+                        )
+
             except Exception as e:
                 logger.error(f"Failed to merge {data_type} shards: {e}")
                 import traceback
