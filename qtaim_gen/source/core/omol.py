@@ -1104,6 +1104,7 @@ def move_results_to_folder(
         "fuzzy_full.json",
         "qtaim.json",
         "other.json",
+        "orca.json",
     ]
     results_folder = os.path.join(folder, "generator")
 
@@ -1146,6 +1147,101 @@ def move_results_to_folder(
                     logger.error(f"Error moving file {file}: {e}")
 
 
+def _validate_parse_completeness(orca_dict: dict) -> bool:
+    """Thin wrapper — canonical implementation lives in parse_orca."""
+    from qtaim_gen.source.core.parse_orca import validate_parse_completeness
+    return validate_parse_completeness(orca_dict)
+
+
+def _run_orca_parse(
+    folder: str,
+    move_results: bool,
+    logger: logging.Logger,
+    delete_out: bool = False,
+) -> None:
+    """Parse orca.out -> orca.json + merge into charge.json/bond.json.
+
+    Handles:
+    - Both 'orca.out' and 'output.out' filenames (via shared find_orca_output_file)
+    - Missing orca.out (skip silently)
+    - Writes orca_parse timing into timings.json for checkpoint support
+    - Atomic writes throughout including timings.json (crash-safe)
+    - Optionally deletes orca.out after successful parse (28-114MB files)
+    - Validates parse completeness before allowing deletion
+    - Merge is additive/idempotent -- safe to re-run
+    """
+    from qtaim_gen.source.core.parse_orca import (
+        parse_orca_output,
+        write_orca_json,
+        merge_orca_into_charge_json,
+        merge_orca_into_bond_json,
+        find_orca_output_file,
+        _atomic_json_write,
+    )
+
+    orca_out_path = find_orca_output_file(folder)
+    if orca_out_path is None:
+        logger.info("No orca.out found in %s -- skipping ORCA parse", folder)
+        return
+
+    t_start = time.time()
+    try:
+        orca_dict = parse_orca_output(orca_out_path)
+
+        # Validate completeness before committing (protects against truncated .out files)
+        if not _validate_parse_completeness(orca_dict):
+            logger.warning(
+                "ORCA parse produced incomplete result (%d keys) for %s -- "
+                "keeping orca.out for retry",
+                len(orca_dict),
+                orca_out_path,
+            )
+            # Still write partial orca.json (partial data better than none)
+            write_orca_json(folder, orca_dict)
+            return  # Do NOT delete, do NOT merge
+
+        write_orca_json(folder, orca_dict)
+        # Resolve merge targets: prefer generator/ when move_results=True,
+        # fall back to root (normal flow where parse_multiwfn just wrote them)
+        charge_path = os.path.join(folder, "charge.json")
+        bond_path = os.path.join(folder, "bond.json")
+        if move_results:
+            gen_charge = os.path.join(folder, "generator", "charge.json")
+            gen_bond = os.path.join(folder, "generator", "bond.json")
+            if os.path.isfile(gen_charge):
+                charge_path = gen_charge
+            if os.path.isfile(gen_bond):
+                bond_path = gen_bond
+        merge_orca_into_charge_json(orca_dict, charge_path)
+        merge_orca_into_bond_json(orca_dict, bond_path)
+        elapsed = round(time.time() - t_start, 2)
+        logger.info("Parsed orca.out in %.2f s (%d keys)", elapsed, len(orca_dict))
+
+        # Write orca_parse timing into timings.json (atomic write for crash safety)
+        if move_results:
+            timings_path = os.path.join(folder, "generator", "timings.json")
+        else:
+            timings_path = os.path.join(folder, "timings.json")
+
+        if os.path.isfile(timings_path) and os.path.getsize(timings_path) > 0:
+            with open(timings_path, "r") as f:
+                timings = json.load(f)
+            timings["orca_parse"] = elapsed
+            _atomic_json_write(timings_path, timings)
+
+        # Delete orca.out AFTER successful parse + merge + timing checkpoint
+        if delete_out:
+            try:
+                os.remove(orca_out_path)
+                logger.info("Deleted %s after successful parse", orca_out_path)
+            except OSError as e:
+                logger.warning("Could not delete %s: %s", orca_out_path, e)
+
+    except Exception as e:
+        logger.error("Error parsing orca.out in %s: %s", folder, e)
+        # On error, orca.out is NOT deleted -- allows retry
+
+
 def gbw_analysis(
     folder: str,
     multiwfn_cmd: str,
@@ -1165,6 +1261,7 @@ def gbw_analysis(
     full_set: int = 0,
     move_results: bool = True,
     patch_path: bool= False,
+    check_orca: bool = False,
 ) -> None:
     """
     Run a full analysis on a folder of gbw files
@@ -1335,6 +1432,7 @@ def gbw_analysis(
                     verbose=False,
                     move_results=move_results,
                     logger=logger,
+                    check_orca=check_orca,
                 )
             except Exception as e:
                 logger.error(f"Error during validation checks: {e}")
@@ -1349,6 +1447,32 @@ def gbw_analysis(
 
             # attempt to reparse if output exists but validation failed
             else:
+                # Check if orca.json is the ONLY missing piece — if so, just
+                # run _run_orca_parse without parse_multiwfn (which would try
+                # to read .txt files that may have been cleaned up already)
+                try:
+                    tf_without_orca = validation_checks(
+                        folder_check,
+                        full_set=full_set,
+                        verbose=False,
+                        move_results=move_results,
+                        logger=logger,
+                        check_orca=False,
+                    )
+                except Exception:
+                    tf_without_orca = False
+
+                if tf_without_orca:
+                    # Everything passes except orca — orca-only reparse
+                    logger.info(
+                        "Validation passes without orca check - running orca-only parse"
+                    )
+                    _run_orca_parse(folder, move_results, logger)
+                    if move_results:
+                        move_results_to_folder(folder, logger=logger, clean=clean)
+                    logger.info("gbw_analysis completed (orca-only) in folder: %s", folder)
+                    return
+
                 try:
                     logger.warning(
                         "Output exists but validation failed - attempting to reparse before re-running analysis"
@@ -1361,6 +1485,9 @@ def gbw_analysis(
                         full_set=full_set,
                     )
 
+                    # Also reparse ORCA output
+                    _run_orca_parse(folder, move_results, logger)
+
                     if move_results:
                         move_results_to_folder(folder, logger=logger, clean=clean)
 
@@ -1370,6 +1497,7 @@ def gbw_analysis(
                         verbose=False,
                         move_results=move_results,
                         logger=logger,
+                        check_orca=check_orca,
                     )
 
                     if tf_validation:
@@ -1420,6 +1548,9 @@ def gbw_analysis(
         folder, separate=separate, debug=debug, logger=logger, full_set=full_set
     )
 
+    # Parse ORCA output file (if present)
+    _run_orca_parse(folder, move_results, logger)
+
     # move all results to a results folder
 
     if move_results:
@@ -1431,6 +1562,7 @@ def gbw_analysis(
         verbose=True,
         move_results=move_results,
         logger=logger,
+        check_orca=check_orca,
     )
     logger.info("gbw_analysis completed in folder: {}".format(folder))
     logger.info("Validation status: {}".format(tf_validation))
@@ -1438,8 +1570,16 @@ def gbw_analysis(
 
     # ONLY CLEAN IF VALIDATION PASSED
     if clean and tf_validation:
-        #    # clean some of the mess
         logger.info("... Cleaning up")
+        # Delete orca.out after validated parse (28-114 MB files)
+        from qtaim_gen.source.core.parse_orca import find_orca_output_file
+        orca_out_path = find_orca_output_file(folder)
+        if orca_out_path is not None:
+            try:
+                os.remove(orca_out_path)
+                logger.info("Deleted %s after validated parse", orca_out_path)
+            except OSError as e:
+                logger.warning("Could not delete %s: %s", orca_out_path, e)
         clean_jobs(
             folder,
             separate=separate,

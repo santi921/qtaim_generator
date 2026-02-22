@@ -18,12 +18,14 @@ from qtaim_gen.source.core.parse_orca import (
     merge_orca_into_charge_json,
     merge_orca_into_bond_json,
     _atomic_json_write,
+    find_orca_output_file,
+    validate_parse_completeness,
 )
+from qtaim_gen.source.utils.validation import validate_orca_dict, validation_checks
 
 TEST_FILES = Path(__file__).parent / "test_files" / "orca_outs"
 
 FIXTURE_RKS = str(TEST_FILES / "minimal_rks.out")
-FIXTURE_MBIS = str(TEST_FILES / "minimal_mbis.out")
 FIXTURE_TRUNCATED = str(TEST_FILES / "minimal_truncated.out")
 FIXTURE_DUPLICATE = str(TEST_FILES / "minimal_duplicate_energy.out")
 
@@ -34,11 +36,6 @@ FIXTURE_DUPLICATE = str(TEST_FILES / "minimal_duplicate_energy.out")
 @pytest.fixture
 def rks_result():
     return parse_orca_output(FIXTURE_RKS)
-
-
-@pytest.fixture
-def mbis_result():
-    return parse_orca_output(FIXTURE_MBIS)
 
 
 @pytest.fixture
@@ -125,296 +122,6 @@ class TestParseBondPairs:
         assert _parse_bond_pairs("no bonds here") == []
 
 
-# ── Section extraction tests (minimal_rks.out) ──────────────────────
-
-
-class TestRKSParsing:
-
-    def test_keys_present(self, rks_result):
-        expected_keys = {
-            "final_energy_eh",
-            "scf_converged",
-            "scf_cycles",
-            "energy_components",
-            "scf_convergence",
-            "homo_eh",
-            "homo_ev",
-            "lumo_eh",
-            "lumo_ev",
-            "homo_lumo_gap_eh",
-            "n_electrons",
-            "n_orbitals",
-            "mulliken_charges",
-            "loewdin_charges",
-            "loewdin_bond_orders",
-            "mayer_population",
-            "mayer_charges",
-            "mayer_bond_orders",
-            "gradient",
-            "gradient_norm",
-            "gradient_rms",
-            "gradient_max",
-            "dipole_au",
-            "dipole_magnitude_au",
-            "quadrupole_au",
-            "rotational_constants_cm1",
-            "total_run_time_s",
-        }
-        assert expected_keys.issubset(set(rks_result.keys()))
-
-    def test_final_energy(self, rks_result):
-        assert rks_result["final_energy_eh"] == pytest.approx(
-            -1342.545352755517, rel=1e-12
-        )
-        assert rks_result["scf_converged"] is True
-
-    def test_energy_components(self, rks_result):
-        ec = rks_result["energy_components"]
-        assert ec["nuclear_repulsion_eh"] == pytest.approx(2557.63336953413, rel=1e-10)
-        assert ec["electronic_energy_eh"] == pytest.approx(
-            -3900.95884095306155, rel=1e-10
-        )
-        assert ec["one_electron_energy_eh"] == pytest.approx(
-            -6910.10794669760344, rel=1e-10
-        )
-        assert ec["two_electron_energy_eh"] == pytest.approx(
-            3009.14910574454188, rel=1e-10
-        )
-        assert ec["virial_ratio"] == pytest.approx(2.00292811861515, rel=1e-10)
-        assert ec["nl_energy_eh"] == pytest.approx(0.780114040230, rel=1e-10)
-        assert ec["xc_energy_eh"] == pytest.approx(-130.730757296629, rel=1e-10)
-
-    def test_scf_convergence(self, rks_result):
-        sc = rks_result["scf_convergence"]
-        assert sc["energy_change"] == pytest.approx(1.2276e-09, rel=1e-3)
-        assert sc["max_density_change"] == pytest.approx(1.7607e-03, rel=1e-3)
-        assert sc["rms_density_change"] == pytest.approx(1.0580e-05, rel=1e-3)
-        assert sc["diis_error"] == pytest.approx(8.0031e-06, rel=1e-3)
-
-    def test_orbital_energies(self, rks_result):
-        assert rks_result["homo_eh"] == pytest.approx(-0.311606, rel=1e-5)
-        assert rks_result["homo_ev"] == pytest.approx(-8.4792, rel=1e-4)
-        assert rks_result["lumo_eh"] == pytest.approx(-0.009184, rel=1e-5)
-        assert rks_result["lumo_ev"] == pytest.approx(-0.2499, rel=1e-3)
-        assert rks_result["homo_lumo_gap_eh"] == pytest.approx(0.302422, rel=1e-5)
-
-    def test_mulliken_charges(self, rks_result):
-        mc = rks_result["mulliken_charges"]
-        assert len(mc) == 53
-        assert mc["1_O"] == pytest.approx(-0.740774, rel=1e-5)
-        assert mc["2_C"] == pytest.approx(0.978726, rel=1e-5)
-        assert mc["53_H"] == pytest.approx(0.292385, rel=1e-5)
-
-    def test_loewdin_charges(self, rks_result):
-        lc = rks_result["loewdin_charges"]
-        assert len(lc) == 53
-        assert lc["1_O"] == pytest.approx(0.048565, rel=1e-5)
-        assert lc["9_N"] == pytest.approx(0.081577, rel=1e-5)
-
-    def test_loewdin_bond_orders(self, rks_result):
-        lb = rks_result["loewdin_bond_orders"]
-        assert lb["1_O_to_2_C"] == pytest.approx(2.5719, rel=1e-4)
-        assert lb["1_O_to_3_C"] == pytest.approx(0.3283, rel=1e-4)
-        assert len(lb) > 50
-
-    def test_mayer_population(self, rks_result):
-        mp = rks_result["mayer_population"]
-        assert len(mp) == 53
-        assert mp["1_O"]["va"] == pytest.approx(1.5029, rel=1e-4)
-        assert mp["1_O"]["bva"] == pytest.approx(1.5029, rel=1e-4)
-
-    def test_mayer_bond_orders(self, rks_result):
-        mb = rks_result["mayer_bond_orders"]
-        assert mb["1_O_to_2_C"] == pytest.approx(1.3593, rel=1e-4)
-        assert len(mb) > 30
-
-    def test_gradient(self, rks_result):
-        g = rks_result["gradient"]
-        assert len(g) == 53
-        assert g["1_O"] == pytest.approx(
-            [0.000385692, 0.000381587, 0.000766511], rel=1e-5
-        )
-        assert g["2_C"] == pytest.approx(
-            [0.020861570, 0.020973062, -0.008697032], rel=1e-5
-        )
-
-    def test_dipole(self, rks_result):
-        assert rks_result["dipole_au"] == pytest.approx(
-            [1.363229353, 0.571139804, -0.220405496], rel=1e-8
-        )
-        assert rks_result["dipole_magnitude_au"] == pytest.approx(
-            1.494380650, rel=1e-8
-        )
-
-    def test_quadrupole(self, rks_result):
-        assert rks_result["quadrupole_au"] == pytest.approx(
-            [
-                -126.887126542,
-                -116.801679527,
-                -133.912552927,
-                -3.526753699,
-                6.943015886,
-                1.386549503,
-            ],
-            rel=1e-8,
-        )
-
-    def test_scf_cycles(self, rks_result):
-        assert rks_result["scf_cycles"] == 15
-
-    def test_gradient_stats(self, rks_result):
-        assert rks_result["gradient_norm"] == pytest.approx(0.1700783337, rel=1e-8)
-        assert rks_result["gradient_rms"] == pytest.approx(0.0134880892, rel=1e-8)
-        assert rks_result["gradient_max"] == pytest.approx(0.0542779604, rel=1e-8)
-
-    def test_mayer_charges(self, rks_result):
-        mc = rks_result["mayer_charges"]
-        assert len(mc) == 53
-        # QA column: "  0 O      8.7408     8.0000    -0.7408 ..."
-        assert mc["1_O"] == pytest.approx(-0.7408, rel=1e-4)
-        assert mc["2_C"] == pytest.approx(0.9787, rel=1e-4)
-        assert mc["9_N"] == pytest.approx(-0.0592, rel=1e-3)
-
-    def test_total_run_time(self, rks_result):
-        # 0 days 0 hours 24 minutes 5 seconds 906 msec = 1445.906 s
-        assert rks_result["total_run_time_s"] == pytest.approx(1445.906, rel=1e-6)
-
-    def test_rotational_constants(self, rks_result):
-        assert rks_result["rotational_constants_cm1"] == pytest.approx(
-            [0.013421, 0.001535, 0.001508], rel=1e-4
-        )
-
-
-# ── Section extraction tests (minimal_mbis.out) ─────────────────────
-
-
-class TestMBISParsing:
-
-    def test_keys_present(self, mbis_result):
-        expected_keys = {
-            "final_energy_eh",
-            "scf_converged",
-            "scf_convergence",
-            "homo_eh",
-            "lumo_eh",
-            "mulliken_charges",
-            "loewdin_charges",
-            "loewdin_bond_orders",
-            "mayer_population",
-            "mayer_bond_orders",
-            "dipole_au",
-            "dipole_magnitude_au",
-            "quadrupole_au",
-            "hirshfeld_charges",
-            "hirshfeld_spins",
-            "mbis_charges",
-            "mbis_populations",
-            "mbis_spins",
-            "mbis_valence_populations",
-            "mbis_valence_widths",
-        }
-        assert expected_keys.issubset(set(mbis_result.keys()))
-
-    def test_final_energy(self, mbis_result):
-        assert mbis_result["final_energy_eh"] == pytest.approx(
-            -1219.951729570202, rel=1e-12
-        )
-
-    def test_scf_convergence(self, mbis_result):
-        sc = mbis_result["scf_convergence"]
-        assert sc["energy_change"] == pytest.approx(9.3337e-09, rel=1e-3)
-        assert sc["max_density_change"] == pytest.approx(1.4386e-02, rel=1e-3)
-
-    def test_orbital_energies(self, mbis_result):
-        assert mbis_result["homo_eh"] == pytest.approx(-0.329493, rel=1e-5)
-        assert mbis_result["lumo_eh"] == pytest.approx(-0.022592, rel=1e-5)
-
-    def test_mulliken_charges(self, mbis_result):
-        mc = mbis_result["mulliken_charges"]
-        assert len(mc) == 49
-        assert mc["1_N"] == pytest.approx(-0.560555, rel=1e-5)
-
-    def test_loewdin_charges(self, mbis_result):
-        lc = mbis_result["loewdin_charges"]
-        assert len(lc) == 49
-        assert lc["1_N"] == pytest.approx(0.168557, rel=1e-5)
-
-    def test_mayer_population(self, mbis_result):
-        mp = mbis_result["mayer_population"]
-        assert len(mp) == 49
-        assert mp["1_N"]["va"] == pytest.approx(1.8457, rel=1e-4)
-        assert mp["1_N"]["bva"] == pytest.approx(1.8457, rel=1e-4)
-
-    def test_mayer_charges(self, mbis_result):
-        mc = mbis_result["mayer_charges"]
-        assert len(mc) == 49
-        # QA column: "  0 N      7.5606     7.0000    -0.5606 ..."
-        assert mc["1_N"] == pytest.approx(-0.5606, rel=1e-4)
-        assert mc["2_O"] == pytest.approx(-0.6223, rel=1e-4)
-
-    def test_mayer_bond_orders(self, mbis_result):
-        mb = mbis_result["mayer_bond_orders"]
-        assert mb["1_N_to_3_C"] == pytest.approx(1.5313, rel=1e-4)
-
-    def test_dipole(self, mbis_result):
-        assert mbis_result["dipole_au"] == pytest.approx(
-            [0.508615974, 0.146156735, -1.868354990], rel=1e-8
-        )
-        assert mbis_result["dipole_magnitude_au"] == pytest.approx(
-            1.941855393, rel=1e-8
-        )
-
-    def test_quadrupole(self, mbis_result):
-        assert mbis_result["quadrupole_au"] == pytest.approx(
-            [
-                -101.956832521,
-                -107.601885343,
-                -132.499347966,
-                6.456454883,
-                1.201925623,
-                2.017424645,
-            ],
-            rel=1e-8,
-        )
-
-    def test_hirshfeld_charges(self, mbis_result):
-        hc = mbis_result["hirshfeld_charges"]
-        assert len(hc) == 112
-        assert hc["1_Ac"] == pytest.approx(0.187646, rel=1e-5)
-        assert hc["112_H"] == pytest.approx(0.025076, rel=1e-5)
-
-    def test_hirshfeld_spins(self, mbis_result):
-        hs = mbis_result["hirshfeld_spins"]
-        assert len(hs) == 112
-        assert hs["1_Ac"] == pytest.approx(0.0, abs=1e-6)
-
-    def test_mbis_charges(self, mbis_result):
-        mc = mbis_result["mbis_charges"]
-        assert len(mc) == 112
-        assert mc["1_Ac"] == pytest.approx(2.439318, rel=1e-5)
-        assert mc["2_C"] == pytest.approx(-1.111020, rel=1e-5)
-
-    def test_mbis_populations(self, mbis_result):
-        mp = mbis_result["mbis_populations"]
-        assert len(mp) == 112
-        assert mp["1_Ac"] == pytest.approx(26.560682, rel=1e-5)
-
-    def test_mbis_spins(self, mbis_result):
-        ms = mbis_result["mbis_spins"]
-        assert len(ms) == 112
-        assert ms["1_Ac"] == pytest.approx(0.0, abs=1e-6)
-
-    def test_mbis_valence_populations(self, mbis_result):
-        vp = mbis_result["mbis_valence_populations"]
-        assert len(vp) == 112
-        assert vp["1_Ac"] == pytest.approx(6.581989, rel=1e-5)
-
-    def test_mbis_valence_widths(self, mbis_result):
-        vw = mbis_result["mbis_valence_widths"]
-        assert len(vw) == 112
-        assert vw["1_Ac"] == pytest.approx(0.408576, rel=1e-5)
-
-
 # ── Truncated file handling ──────────────────────────────────────────
 
 
@@ -480,67 +187,6 @@ class TestDuplicateSections:
         assert mc["3_H"] == pytest.approx(0.200000, abs=1e-6)
 
 
-# ── Parametrized section presence across fixtures ────────────────────
-
-
-@pytest.mark.parametrize(
-    "fixture_path, expected_keys",
-    [
-        (
-            FIXTURE_RKS,
-            [
-                "final_energy_eh",
-                "scf_cycles",
-                "energy_components",
-                "scf_convergence",
-                "homo_eh",
-                "mulliken_charges",
-                "loewdin_charges",
-                "loewdin_bond_orders",
-                "mayer_population",
-                "mayer_charges",
-                "mayer_bond_orders",
-                "gradient",
-                "gradient_norm",
-                "gradient_rms",
-                "gradient_max",
-                "dipole_au",
-                "quadrupole_au",
-                "rotational_constants_cm1",
-                "total_run_time_s",
-            ],
-        ),
-        (
-            FIXTURE_MBIS,
-            [
-                "final_energy_eh",
-                "scf_convergence",
-                "homo_eh",
-                "mulliken_charges",
-                "loewdin_charges",
-                "mayer_charges",
-                "hirshfeld_charges",
-                "mbis_charges",
-                "mbis_valence_populations",
-            ],
-        ),
-        (
-            FIXTURE_DUPLICATE,
-            ["final_energy_eh", "energy_components", "scf_convergence", "mulliken_charges"],
-        ),
-        (
-            FIXTURE_TRUNCATED,
-            ["energy_components", "scf_convergence", "homo_eh"],
-        ),
-    ],
-    ids=["rks", "mbis", "duplicate", "truncated"],
-)
-def test_section_presence(fixture_path, expected_keys):
-    result = parse_orca_output(fixture_path)
-    for key in expected_keys:
-        assert key in result, f"Missing key {key!r} in parse result"
-
-
 # ── Missing / nonexistent file handling ──────────────────────────────
 
 
@@ -600,63 +246,107 @@ class TestWriteOrcaJson:
         )
 
 
-class TestMergeOrcaIntoChargeJson:
+# Real Multiwfn job folder for integration merge tests
+LMDB_TEST_ORCA6 = Path(__file__).parent / "test_files" / "lmdb_tests" / "orca6_rks"
 
-    def test_merge_adds_orca_keys(self, tmp_job_dir, rks_result):
-        charge_path = os.path.join(tmp_job_dir, "charge.json")
-        existing = {"mulliken": {"charge": {"1_O": -0.5}}}
-        with open(charge_path, "w") as f:
-            json.dump(existing, f)
+
+@pytest.fixture
+def real_job_dir(tmp_path):
+    """Copy real Multiwfn charge.json + bond.json into a tmp dir for merge testing."""
+    import shutil
+    dest = tmp_path / "job"
+    dest.mkdir()
+    for name in ("charge.json", "bond.json"):
+        shutil.copy2(str(LMDB_TEST_ORCA6 / name), str(dest / name))
+    return str(dest)
+
+
+class TestMergeOrcaIntoChargeJson:
+    """Merge ORCA-parsed charges into real Multiwfn charge.json (53-atom orca6_rks)."""
+
+    def test_preserves_all_multiwfn_methods(self, real_job_dir, rks_result):
+        charge_path = os.path.join(real_job_dir, "charge.json")
+        with open(charge_path, "r") as f:
+            original_keys = set(json.load(f).keys())
 
         merge_orca_into_charge_json(rks_result, charge_path)
 
         with open(charge_path, "r") as f:
             merged = json.load(f)
 
-        # Original data preserved
-        assert "mulliken" in merged
-        # ORCA data added
-        assert "mulliken_orca" in merged
-        assert "loewdin_orca" in merged
-        assert "mayer_orca" in merged
-        assert merged["mulliken_orca"]["charge"]["1_O"] == pytest.approx(
-            -0.740774, rel=1e-5
+        # Every original Multiwfn method should still be present
+        for key in original_keys:
+            assert key in merged, f"Multiwfn key '{key}' was lost after merge"
+
+    def test_multiwfn_values_unchanged(self, real_job_dir, rks_result):
+        charge_path = os.path.join(real_job_dir, "charge.json")
+        with open(charge_path, "r") as f:
+            before = json.load(f)
+
+        merge_orca_into_charge_json(rks_result, charge_path)
+
+        with open(charge_path, "r") as f:
+            after = json.load(f)
+
+        # Spot-check Multiwfn values are untouched
+        assert after["becke"]["charge"]["1_O"] == pytest.approx(
+            before["becke"]["charge"]["1_O"], rel=1e-12
         )
-        assert merged["mayer_orca"]["charge"]["1_O"] == pytest.approx(
-            -0.7408, rel=1e-4
+        assert after["adch"]["charge"]["2_C"] == pytest.approx(
+            before["adch"]["charge"]["2_C"], rel=1e-12
+        )
+        assert after["bader"]["charge"]["53_H"] == pytest.approx(
+            before["bader"]["charge"]["53_H"], rel=1e-12
         )
 
-    def test_merge_with_mbis(self, tmp_job_dir, mbis_result):
-        charge_path = os.path.join(tmp_job_dir, "charge.json")
-        with open(charge_path, "w") as f:
-            json.dump({}, f)
-
-        merge_orca_into_charge_json(mbis_result, charge_path)
+    def test_orca_charge_keys_added(self, real_job_dir, rks_result):
+        charge_path = os.path.join(real_job_dir, "charge.json")
+        merge_orca_into_charge_json(rks_result, charge_path)
 
         with open(charge_path, "r") as f:
             merged = json.load(f)
 
-        assert "hirshfeld_orca" in merged
-        assert "mbis_orca" in merged
+        assert "mulliken_orca" in merged
+        assert "loewdin_orca" in merged
         assert "mayer_orca" in merged
-        assert merged["mayer_orca"]["charge"]["1_N"] == pytest.approx(
-            -0.5606, rel=1e-4
-        )
-        assert merged["hirshfeld_orca"]["charge"]["1_Ac"] == pytest.approx(
-            0.187646, rel=1e-5
-        )
-        assert merged["mbis_orca"]["charge"]["1_Ac"] == pytest.approx(
-            2.439318, rel=1e-5
-        )
-        assert "spin" in merged["hirshfeld_orca"]
-        assert "spin" in merged["mbis_orca"]
-        assert "population" in merged["mbis_orca"]
 
-    def test_idempotent(self, tmp_job_dir, rks_result):
-        """Merging twice should produce same result."""
-        charge_path = os.path.join(tmp_job_dir, "charge.json")
-        with open(charge_path, "w") as f:
-            json.dump({"original": True}, f)
+    def test_orca_mulliken_values(self, real_job_dir, rks_result):
+        charge_path = os.path.join(real_job_dir, "charge.json")
+        merge_orca_into_charge_json(rks_result, charge_path)
+
+        with open(charge_path, "r") as f:
+            merged = json.load(f)
+
+        orca_mull = merged["mulliken_orca"]["charge"]
+        assert len(orca_mull) == 53
+        assert orca_mull["1_O"] == pytest.approx(-0.740774, rel=1e-5)
+        assert orca_mull["53_H"] == pytest.approx(0.292385, rel=1e-5)
+
+    def test_orca_mayer_values(self, real_job_dir, rks_result):
+        charge_path = os.path.join(real_job_dir, "charge.json")
+        merge_orca_into_charge_json(rks_result, charge_path)
+
+        with open(charge_path, "r") as f:
+            merged = json.load(f)
+
+        orca_mayer = merged["mayer_orca"]["charge"]
+        assert len(orca_mayer) == 53
+        assert orca_mayer["1_O"] == pytest.approx(-0.7408, rel=1e-4)
+
+    def test_orca_vs_multiwfn_same_atoms(self, real_job_dir, rks_result):
+        """ORCA and Multiwfn charges should have the same atom keys."""
+        charge_path = os.path.join(real_job_dir, "charge.json")
+        merge_orca_into_charge_json(rks_result, charge_path)
+
+        with open(charge_path, "r") as f:
+            merged = json.load(f)
+
+        mfwn_atoms = set(merged["becke"]["charge"].keys())
+        orca_atoms = set(merged["mulliken_orca"]["charge"].keys())
+        assert mfwn_atoms == orca_atoms
+
+    def test_idempotent(self, real_job_dir, rks_result):
+        charge_path = os.path.join(real_job_dir, "charge.json")
 
         merge_orca_into_charge_json(rks_result, charge_path)
         with open(charge_path, "r") as f:
@@ -669,46 +359,76 @@ class TestMergeOrcaIntoChargeJson:
         assert first == second
 
     def test_skips_missing_file(self, tmp_job_dir, rks_result):
-        """Should not raise when charge.json doesn't exist."""
         charge_path = os.path.join(tmp_job_dir, "charge.json")
         merge_orca_into_charge_json(rks_result, charge_path)
         assert not os.path.isfile(charge_path)
 
     def test_skips_corrupt_json(self, tmp_job_dir, rks_result):
-        """Should not raise when charge.json is corrupt."""
         charge_path = os.path.join(tmp_job_dir, "charge.json")
         with open(charge_path, "w") as f:
             f.write("{invalid json")
         merge_orca_into_charge_json(rks_result, charge_path)
-        # File should remain unchanged (corrupt)
         with open(charge_path, "r") as f:
             assert f.read() == "{invalid json"
 
 
 class TestMergeOrcaIntoBondJson:
+    """Merge ORCA-parsed bond orders into real Multiwfn bond.json (53-atom orca6_rks)."""
 
-    def test_merge_adds_orca_keys(self, tmp_job_dir, rks_result):
-        bond_path = os.path.join(tmp_job_dir, "bond.json")
-        existing = {"fuzzy": {"1_O_to_2_C": 1.5}}
-        with open(bond_path, "w") as f:
-            json.dump(existing, f)
+    def test_preserves_multiwfn_bond_orders(self, real_job_dir, rks_result):
+        bond_path = os.path.join(real_job_dir, "bond.json")
+        with open(bond_path, "r") as f:
+            before = json.load(f)
 
+        merge_orca_into_bond_json(rks_result, bond_path)
+
+        with open(bond_path, "r") as f:
+            after = json.load(f)
+
+        # Multiwfn fuzzy_bond and ibsi_bond should be untouched
+        assert after["fuzzy_bond"]["1_O_to_2_C"] == pytest.approx(
+            before["fuzzy_bond"]["1_O_to_2_C"], rel=1e-12
+        )
+        assert after["ibsi_bond"]["1_O_to_2_C"] == pytest.approx(
+            before["ibsi_bond"]["1_O_to_2_C"], rel=1e-12
+        )
+
+    def test_orca_bond_keys_added(self, real_job_dir, rks_result):
+        bond_path = os.path.join(real_job_dir, "bond.json")
         merge_orca_into_bond_json(rks_result, bond_path)
 
         with open(bond_path, "r") as f:
             merged = json.load(f)
 
-        assert "fuzzy" in merged  # original preserved
-        assert "mayer_orca" in merged
-        assert "loewdin_orca" in merged
-        assert merged["mayer_orca"]["1_O_to_2_C"] == pytest.approx(
-            1.3593, rel=1e-4
-        )
+        assert "fuzzy_bond" in merged  # Multiwfn preserved
+        assert "ibsi_bond" in merged   # Multiwfn preserved
+        assert "mayer_orca" in merged   # ORCA added
+        assert "loewdin_orca" in merged # ORCA added
 
-    def test_idempotent(self, tmp_job_dir, rks_result):
-        bond_path = os.path.join(tmp_job_dir, "bond.json")
-        with open(bond_path, "w") as f:
-            json.dump({"original": True}, f)
+    def test_orca_mayer_bond_values(self, real_job_dir, rks_result):
+        bond_path = os.path.join(real_job_dir, "bond.json")
+        merge_orca_into_bond_json(rks_result, bond_path)
+
+        with open(bond_path, "r") as f:
+            merged = json.load(f)
+
+        mayer = merged["mayer_orca"]
+        assert len(mayer) == 90
+        assert mayer["10_C_to_11_C"] == pytest.approx(0.1624, rel=1e-4)
+
+    def test_orca_loewdin_bond_values(self, real_job_dir, rks_result):
+        bond_path = os.path.join(real_job_dir, "bond.json")
+        merge_orca_into_bond_json(rks_result, bond_path)
+
+        with open(bond_path, "r") as f:
+            merged = json.load(f)
+
+        loewdin = merged["loewdin_orca"]
+        assert len(loewdin) == 179
+        assert loewdin["10_C_to_11_C"] == pytest.approx(1.0424, rel=1e-4)
+
+    def test_idempotent(self, real_job_dir, rks_result):
+        bond_path = os.path.join(real_job_dir, "bond.json")
 
         merge_orca_into_bond_json(rks_result, bond_path)
         with open(bond_path, "r") as f:
@@ -735,76 +455,580 @@ def test_orca_parse_state_enum():
     assert OrcaParseState.IDLE.value != OrcaParseState.SCF_ENERGY_BLOCK.value
 
 
-# ── Optional full reference file tests ────────────────────────────────
-# These parse real (large) ORCA output files from data/orca_outs_4_reference/.
+# ── Full reference file tests ─────────────────────────────────────────
+# Parse real ORCA output files from data/orca_outs_4_reference/ and validate
+# actual numeric values against known-good outputs.
 # Skipped if the reference directory is not present.
 
 REFERENCE_DIR = Path(__file__).parent.parent / "data" / "orca_outs_4_reference"
-
-REFERENCE_FILES = {
-    "orca6_rks": REFERENCE_DIR / "orca6_rks.out",
-    "orca_mbis_nbo_act_ecp_1": REFERENCE_DIR / "orca_mbis_nbo_act_ecp_1.out",
-    "orca_mbis_nbo_act_ecp_2": REFERENCE_DIR / "orca_mbis_nbo_act_ecp_2.out",
-    "orca_mbis_nbo_non_act_1": REFERENCE_DIR / "orca_mbis_nbo_non_act_1.out",
-    "orca_mbis_nbo_non_act_2": REFERENCE_DIR / "orca_mbis_nbo_non_act_2.out",
-    "orca_spice_omol": REFERENCE_DIR / "orca_spice_omol.out",
-}
-
 _ref_available = REFERENCE_DIR.is_dir()
 
+_skip_no_ref = pytest.mark.skipif(not _ref_available, reason="Reference files not present")
 
-@pytest.mark.skipif(not _ref_available, reason="Reference files not present")
-@pytest.mark.parametrize(
-    "name, path",
-    [(k, str(v)) for k, v in REFERENCE_FILES.items()],
-    ids=list(REFERENCE_FILES.keys()),
-)
-class TestFullReferenceFiles:
-    """Parse full (28-114MB) ORCA output files and validate structure."""
 
-    def test_parses_without_error(self, name, path):
-        if not os.path.isfile(path):
-            pytest.skip(f"Reference file {path} not found")
-        result = parse_orca_output(path)
-        assert isinstance(result, dict)
-        assert len(result) > 0, f"{name} produced empty dict"
+@pytest.fixture(scope="module")
+def ref_orca6_rks():
+    """Parse orca6_rks.out once per module (RKS, 53 atoms, no MBIS)."""
+    path = REFERENCE_DIR / "orca6_rks.out"
+    if not path.is_file():
+        pytest.skip("orca6_rks.out not found")
+    return parse_orca_output(str(path))
 
-    def test_has_final_energy(self, name, path):
-        if not os.path.isfile(path):
-            pytest.skip(f"Reference file {path} not found")
-        result = parse_orca_output(path)
-        assert "final_energy_eh" in result, f"{name} missing final_energy_eh"
-        assert isinstance(result["final_energy_eh"], float)
-        assert result["final_energy_eh"] < 0
 
-    def test_has_core_sections(self, name, path):
-        if not os.path.isfile(path):
-            pytest.skip(f"Reference file {path} not found")
-        result = parse_orca_output(path)
-        # All reference files should have these core sections
-        for key in ["scf_converged", "energy_components", "homo_eh",
-                     "mulliken_charges", "loewdin_charges",
-                     "dipole_au", "dipole_magnitude_au"]:
-            assert key in result, f"{name} missing {key}"
+@pytest.fixture(scope="module")
+def ref_uks_mbis():
+    """Parse orca_mbis_nbo_non_act_1.out once per module (UKS, 64 atoms, MBIS, Po/Te)."""
+    path = REFERENCE_DIR / "orca_mbis_nbo_non_act_1.out"
+    if not path.is_file():
+        pytest.skip("orca_mbis_nbo_non_act_1.out not found")
+    return parse_orca_output(str(path))
 
-    def test_charge_counts_consistent(self, name, path):
-        if not os.path.isfile(path):
-            pytest.skip(f"Reference file {path} not found")
-        result = parse_orca_output(path)
-        n_mulliken = len(result.get("mulliken_charges", {}))
-        n_loewdin = len(result.get("loewdin_charges", {}))
-        if n_mulliken > 0 and n_loewdin > 0:
-            assert n_mulliken == n_loewdin, (
-                f"{name}: Mulliken ({n_mulliken}) != Loewdin ({n_loewdin}) atom count"
-            )
 
-    def test_mbis_present_for_mbis_files(self, name, path):
-        """Files with 'mbis' in the name should have MBIS sections."""
-        if "mbis" not in name:
-            pytest.skip("Not an MBIS file")
-        if not os.path.isfile(path):
-            pytest.skip(f"Reference file {path} not found")
-        result = parse_orca_output(path)
-        assert "mbis_charges" in result, f"{name} missing mbis_charges"
-        assert "mbis_populations" in result, f"{name} missing mbis_populations"
-        assert "hirshfeld_charges" in result, f"{name} missing hirshfeld_charges"
+@pytest.fixture(scope="module")
+def ref_rks_mbis():
+    """Parse orca_mbis_nbo_non_act_2.out once per module (RKS, 40 atoms, MBIS converged, Po)."""
+    path = REFERENCE_DIR / "orca_mbis_nbo_non_act_2.out"
+    if not path.is_file():
+        pytest.skip("orca_mbis_nbo_non_act_2.out not found")
+    return parse_orca_output(str(path))
+
+
+@_skip_no_ref
+class TestRefOrca6RKS:
+    """Value-based tests against real orca6_rks.out (RKS, 53-atom organic)."""
+
+    def test_final_energy(self, ref_orca6_rks):
+        assert ref_orca6_rks["final_energy_eh"] == pytest.approx(
+            -1342.545352755517, rel=1e-12
+        )
+
+    def test_scf_metadata(self, ref_orca6_rks):
+        assert ref_orca6_rks["scf_converged"] is True
+        assert ref_orca6_rks["scf_cycles"] == 15
+        assert ref_orca6_rks["n_electrons"] == pytest.approx(210.0)
+        assert ref_orca6_rks["n_orbitals"] == 1301
+
+    def test_energy_components(self, ref_orca6_rks):
+        ec = ref_orca6_rks["energy_components"]
+        assert ec["nuclear_repulsion_eh"] == pytest.approx(2557.63336953413, rel=1e-10)
+        assert ec["electronic_energy_eh"] == pytest.approx(-3900.9588409530616, rel=1e-10)
+        assert ec["virial_ratio"] == pytest.approx(2.00292811861515, rel=1e-10)
+        assert ec["xc_energy_eh"] == pytest.approx(-130.730757296629, rel=1e-10)
+
+    def test_scf_convergence(self, ref_orca6_rks):
+        sc = ref_orca6_rks["scf_convergence"]
+        assert sc["energy_change"] == pytest.approx(1.2276e-09, rel=1e-3)
+        assert sc["diis_error"] == pytest.approx(8.0031e-06, rel=1e-3)
+
+    def test_orbital_energies(self, ref_orca6_rks):
+        assert ref_orca6_rks["homo_eh"] == pytest.approx(-0.311606, rel=1e-5)
+        assert ref_orca6_rks["lumo_eh"] == pytest.approx(-0.009184, rel=1e-5)
+        assert ref_orca6_rks["homo_lumo_gap_eh"] == pytest.approx(0.302422, rel=1e-5)
+
+    def test_mulliken_charges(self, ref_orca6_rks):
+        mc = ref_orca6_rks["mulliken_charges"]
+        assert len(mc) == 53
+        assert mc["1_O"] == pytest.approx(-0.740774, rel=1e-5)
+        assert mc["53_H"] == pytest.approx(0.292385, rel=1e-5)
+
+    def test_loewdin_charges(self, ref_orca6_rks):
+        lc = ref_orca6_rks["loewdin_charges"]
+        assert len(lc) == 53
+        assert lc["1_O"] == pytest.approx(0.048565, rel=1e-5)
+        assert lc["53_H"] == pytest.approx(0.142150, rel=1e-5)
+
+    def test_mayer_charges(self, ref_orca6_rks):
+        mc = ref_orca6_rks["mayer_charges"]
+        assert len(mc) == 53
+        assert mc["1_O"] == pytest.approx(-0.7408, rel=1e-4)
+        assert mc["53_H"] == pytest.approx(0.2924, rel=1e-4)
+
+    def test_no_spin_columns(self, ref_orca6_rks):
+        """RKS should not produce spin columns."""
+        assert "mulliken_spins" not in ref_orca6_rks
+        assert "loewdin_spins" not in ref_orca6_rks
+
+    def test_no_mbis(self, ref_orca6_rks):
+        """RKS-only file should not have MBIS or Hirshfeld sections."""
+        assert "mbis_charges" not in ref_orca6_rks
+        assert "hirshfeld_charges" not in ref_orca6_rks
+
+    def test_loewdin_bond_orders(self, ref_orca6_rks):
+        lb = ref_orca6_rks["loewdin_bond_orders"]
+        assert len(lb) == 179
+        assert lb["10_C_to_11_C"] == pytest.approx(1.0424, rel=1e-4)
+
+    def test_mayer_bond_orders(self, ref_orca6_rks):
+        mb = ref_orca6_rks["mayer_bond_orders"]
+        assert len(mb) == 90
+        assert mb["10_C_to_11_C"] == pytest.approx(0.1624, rel=1e-4)
+
+    def test_gradient(self, ref_orca6_rks):
+        g = ref_orca6_rks["gradient"]
+        assert len(g) == 53
+        assert g["1_O"] == pytest.approx(
+            [0.000385692, 0.000381587, 0.000766511], rel=1e-5
+        )
+
+    def test_gradient_stats(self, ref_orca6_rks):
+        assert ref_orca6_rks["gradient_norm"] == pytest.approx(0.1700783337, rel=1e-8)
+        assert ref_orca6_rks["gradient_rms"] == pytest.approx(0.0134880892, rel=1e-8)
+        assert ref_orca6_rks["gradient_max"] == pytest.approx(0.0542779604, rel=1e-8)
+
+    def test_dipole(self, ref_orca6_rks):
+        assert ref_orca6_rks["dipole_au"] == pytest.approx(
+            [1.363229353, 0.571139804, -0.220405496], rel=1e-8
+        )
+        assert ref_orca6_rks["dipole_magnitude_au"] == pytest.approx(1.49438065, rel=1e-8)
+
+    def test_quadrupole(self, ref_orca6_rks):
+        assert ref_orca6_rks["quadrupole_au"] == pytest.approx(
+            [-126.887126542, -116.801679527, -133.912552927,
+             -3.526753699, 6.943015886, 1.386549503],
+            rel=1e-8,
+        )
+
+    def test_rotational_constants(self, ref_orca6_rks):
+        assert ref_orca6_rks["rotational_constants_cm1"] == pytest.approx(
+            [0.013421, 0.001535, 0.001508], rel=1e-4
+        )
+
+    def test_total_run_time(self, ref_orca6_rks):
+        assert ref_orca6_rks["total_run_time_s"] == pytest.approx(2454.733, rel=1e-6)
+
+    def test_charge_atom_counts_consistent(self, ref_orca6_rks):
+        """All charge-type dicts should have the same atom count."""
+        n = 53
+        assert len(ref_orca6_rks["mulliken_charges"]) == n
+        assert len(ref_orca6_rks["loewdin_charges"]) == n
+        assert len(ref_orca6_rks["mayer_charges"]) == n
+        assert len(ref_orca6_rks["mayer_population"]) == n
+
+
+@_skip_no_ref
+class TestRefUKSMBIS:
+    """Value-based tests against real orca_mbis_nbo_non_act_1.out
+    (UKS, 64 atoms, Po/Te heavy elements, MBIS + Hirshfeld, spin columns)."""
+
+    def test_final_energy(self, ref_uks_mbis):
+        assert ref_uks_mbis["final_energy_eh"] == pytest.approx(
+            -2671.064484741533, rel=1e-12
+        )
+
+    def test_scf_metadata(self, ref_uks_mbis):
+        assert ref_uks_mbis["scf_converged"] is True
+        assert ref_uks_mbis["scf_cycles"] == 23
+        assert ref_uks_mbis["n_electrons"] == pytest.approx(158.0)
+        assert ref_uks_mbis["n_orbitals"] == 1368
+
+    def test_energy_components(self, ref_uks_mbis):
+        ec = ref_uks_mbis["energy_components"]
+        assert ec["nuclear_repulsion_eh"] == pytest.approx(5853.314934011381, rel=1e-10)
+        assert ec["electronic_energy_eh"] == pytest.approx(-8525.490670378018, rel=1e-10)
+        assert ec["virial_ratio"] == pytest.approx(2.97867610849658, rel=1e-10)
+        assert ec["xc_energy_eh"] == pytest.approx(-175.863000371855, rel=1e-10)
+
+    def test_scf_convergence(self, ref_uks_mbis):
+        sc = ref_uks_mbis["scf_convergence"]
+        assert sc["energy_change"] == pytest.approx(5.3224e-09, rel=1e-3)
+        assert sc["diis_error"] == pytest.approx(0.00071014, rel=1e-3)
+
+    def test_orbital_energies(self, ref_uks_mbis):
+        assert ref_uks_mbis["homo_eh"] == pytest.approx(-0.559159, rel=1e-5)
+        assert ref_uks_mbis["lumo_eh"] == pytest.approx(-0.41149, rel=1e-5)
+        assert ref_uks_mbis["homo_lumo_gap_eh"] == pytest.approx(0.147669, rel=1e-4)
+
+    def test_mulliken_charges(self, ref_uks_mbis):
+        mc = ref_uks_mbis["mulliken_charges"]
+        assert len(mc) == 64
+        assert mc["1_Po"] == pytest.approx(-0.465047, rel=1e-5)
+        assert mc["64_H"] == pytest.approx(0.461158, rel=1e-5)
+
+    def test_loewdin_charges(self, ref_uks_mbis):
+        lc = ref_uks_mbis["loewdin_charges"]
+        assert len(lc) == 64
+        assert lc["1_Po"] == pytest.approx(-0.074407, rel=1e-5)
+        assert lc["64_H"] == pytest.approx(0.047861, rel=1e-5)
+
+    def test_mayer_charges(self, ref_uks_mbis):
+        mc = ref_uks_mbis["mayer_charges"]
+        assert len(mc) == 64
+        assert mc["1_Po"] == pytest.approx(-0.465, rel=1e-3)
+
+    def test_mulliken_spins(self, ref_uks_mbis):
+        """UKS should produce non-zero spin populations on heavy atoms."""
+        ms = ref_uks_mbis["mulliken_spins"]
+        assert len(ms) == 64
+        assert ms["1_Po"] == pytest.approx(0.342488, rel=1e-5)
+        assert ms["21_Te"] == pytest.approx(0.176223, rel=1e-5)
+        # All values should be non-zero for this open-shell system
+        assert all(abs(v) > 1e-6 for v in ms.values())
+
+    def test_loewdin_spins(self, ref_uks_mbis):
+        ls = ref_uks_mbis["loewdin_spins"]
+        assert len(ls) == 64
+        assert ls["1_Po"] == pytest.approx(0.326781, rel=1e-5)
+        assert all(abs(v) > 1e-6 for v in ls.values())
+
+    def test_hirshfeld_charges(self, ref_uks_mbis):
+        hc = ref_uks_mbis["hirshfeld_charges"]
+        assert len(hc) == 64
+        assert hc["1_Po"] == pytest.approx(0.246689, rel=1e-5)
+        assert hc["64_H"] == pytest.approx(0.068135, rel=1e-5)
+
+    def test_hirshfeld_spins(self, ref_uks_mbis):
+        hs = ref_uks_mbis["hirshfeld_spins"]
+        assert len(hs) == 64
+        assert hs["1_Po"] == pytest.approx(0.335693, rel=1e-5)
+        assert all(abs(v) > 1e-6 for v in hs.values())
+
+    def test_mbis_charges_all_nan(self, ref_uks_mbis):
+        """MBIS fitting diverged (144 iters) — all atoms should be NaN, not just heavy ones."""
+        import math
+        mc = ref_uks_mbis["mbis_charges"]
+        assert len(mc) == 64
+        assert all(math.isnan(v) for v in mc.values())
+
+    def test_mbis_spins_all_nan(self, ref_uks_mbis):
+        """MBIS fitting diverged — all spins should be NaN."""
+        import math
+        mbs = ref_uks_mbis["mbis_spins"]
+        assert len(mbs) == 64
+        assert all(math.isnan(v) for v in mbs.values())
+
+    def test_mbis_populations(self, ref_uks_mbis):
+        mp = ref_uks_mbis["mbis_populations"]
+        assert len(mp) == 64
+
+    def test_mbis_valence_widths(self, ref_uks_mbis):
+        vw = ref_uks_mbis["mbis_valence_widths"]
+        assert len(vw) == 64
+
+    def test_loewdin_bond_orders(self, ref_uks_mbis):
+        lb = ref_uks_mbis["loewdin_bond_orders"]
+        assert len(lb) == 212
+        assert lb["11_C_to_12_Te"] == pytest.approx(1.2767, rel=1e-4)
+
+    def test_mayer_bond_orders(self, ref_uks_mbis):
+        mb = ref_uks_mbis["mayer_bond_orders"]
+        assert len(mb) == 87
+        assert mb["11_C_to_12_Te"] == pytest.approx(0.8021, rel=1e-4)
+
+    def test_gradient(self, ref_uks_mbis):
+        g = ref_uks_mbis["gradient"]
+        assert len(g) == 64
+        assert g["1_Po"] == pytest.approx(
+            [-0.013658833, -0.013986185, -0.03158535], rel=1e-5
+        )
+
+    def test_gradient_stats(self, ref_uks_mbis):
+        assert ref_uks_mbis["gradient_norm"] == pytest.approx(0.1962350659, rel=1e-8)
+        assert ref_uks_mbis["gradient_rms"] == pytest.approx(0.014162046, rel=1e-8)
+        assert ref_uks_mbis["gradient_max"] == pytest.approx(0.0596251334, rel=1e-8)
+
+    def test_dipole(self, ref_uks_mbis):
+        assert ref_uks_mbis["dipole_au"] == pytest.approx(
+            [-0.230531505, -0.507879878, 0.775276307], rel=1e-8
+        )
+        assert ref_uks_mbis["dipole_magnitude_au"] == pytest.approx(0.955060259, rel=1e-8)
+
+    def test_quadrupole(self, ref_uks_mbis):
+        assert ref_uks_mbis["quadrupole_au"] == pytest.approx(
+            [-140.223601754, -135.06209933, -148.577865221,
+             -3.751992159, 0.472254585, 2.442162234],
+            rel=1e-8,
+        )
+
+    def test_rotational_constants(self, ref_uks_mbis):
+        assert ref_uks_mbis["rotational_constants_cm1"] == pytest.approx(
+            [0.002189, 0.002155, 0.001979], rel=1e-4
+        )
+
+    def test_total_run_time(self, ref_uks_mbis):
+        assert ref_uks_mbis["total_run_time_s"] == pytest.approx(5374.756, rel=1e-6)
+
+    def test_charge_atom_counts_consistent(self, ref_uks_mbis):
+        """All charge/spin dicts should have the same atom count (64)."""
+        n = 64
+        assert len(ref_uks_mbis["mulliken_charges"]) == n
+        assert len(ref_uks_mbis["loewdin_charges"]) == n
+        assert len(ref_uks_mbis["mayer_charges"]) == n
+        assert len(ref_uks_mbis["hirshfeld_charges"]) == n
+        assert len(ref_uks_mbis["mbis_charges"]) == n
+        assert len(ref_uks_mbis["mulliken_spins"]) == n
+        assert len(ref_uks_mbis["loewdin_spins"]) == n
+
+    def test_all_keys_present(self, ref_uks_mbis):
+        """UKS+MBIS should produce the full set of 36 keys."""
+        expected = {
+            "final_energy_eh", "scf_converged", "scf_cycles", "scf_convergence",
+            "energy_components", "homo_eh", "homo_ev", "lumo_eh", "lumo_ev",
+            "homo_lumo_gap_eh", "n_electrons", "n_orbitals",
+            "mulliken_charges", "mulliken_spins",
+            "loewdin_charges", "loewdin_spins",
+            "mayer_charges", "mayer_population", "mayer_bond_orders",
+            "loewdin_bond_orders",
+            "hirshfeld_charges", "hirshfeld_spins",
+            "mbis_charges", "mbis_populations", "mbis_spins",
+            "mbis_valence_populations", "mbis_valence_widths",
+            "gradient", "gradient_norm", "gradient_rms", "gradient_max",
+            "dipole_au", "dipole_magnitude_au", "quadrupole_au",
+            "rotational_constants_cm1", "total_run_time_s",
+        }
+        assert expected.issubset(set(ref_uks_mbis.keys()))
+
+
+@_skip_no_ref
+class TestRefRKSMBIS:
+    """Value-based tests for real MBIS values from orca_mbis_nbo_non_act_2.out
+    (RKS, 40 atoms, Po, MBIS converged in 73 iterations)."""
+
+    def test_final_energy(self, ref_rks_mbis):
+        assert ref_rks_mbis["final_energy_eh"] == pytest.approx(
+            -1546.295655240122, rel=1e-12
+        )
+
+    def test_mbis_charges(self, ref_rks_mbis):
+        mc = ref_rks_mbis["mbis_charges"]
+        assert len(mc) == 40
+        assert mc["1_Po"] == pytest.approx(1.644959, rel=1e-5)
+        assert mc["2_O"] == pytest.approx(-0.485639, rel=1e-5)
+        assert mc["3_C"] == pytest.approx(0.626927, rel=1e-5)
+        assert mc["10_N"] == pytest.approx(-0.353352, rel=1e-5)
+        assert mc["40_H"] == pytest.approx(0.136429, rel=1e-5)
+
+    def test_mbis_populations(self, ref_rks_mbis):
+        mp = ref_rks_mbis["mbis_populations"]
+        assert len(mp) == 40
+        assert mp["1_Po"] == pytest.approx(22.355041, rel=1e-5)
+        assert mp["2_O"] == pytest.approx(8.485639, rel=1e-5)
+
+    def test_mbis_spins_zero_for_rks(self, ref_rks_mbis):
+        """RKS MBIS should have all-zero spins (not NaN)."""
+        ms = ref_rks_mbis["mbis_spins"]
+        assert len(ms) == 40
+        assert all(v == pytest.approx(0.0, abs=1e-6) for v in ms.values())
+
+    def test_mbis_valence_populations(self, ref_rks_mbis):
+        vp = ref_rks_mbis["mbis_valence_populations"]
+        assert len(vp) == 40
+        assert vp["1_Po"] == pytest.approx(9.290057, rel=1e-5)
+        assert vp["10_N"] == pytest.approx(5.732071, rel=1e-5)
+
+    def test_mbis_valence_widths(self, ref_rks_mbis):
+        vw = ref_rks_mbis["mbis_valence_widths"]
+        assert len(vw) == 40
+        assert vw["1_Po"] == pytest.approx(0.433629, rel=1e-5)
+        assert vw["10_N"] == pytest.approx(0.440995, rel=1e-5)
+
+    def test_hirshfeld_charges(self, ref_rks_mbis):
+        hc = ref_rks_mbis["hirshfeld_charges"]
+        assert len(hc) == 40
+        assert hc["1_Po"] == pytest.approx(0.714931, rel=1e-5)
+        assert hc["40_H"] == pytest.approx(0.057653, rel=1e-5)
+
+    def test_no_spin_columns(self, ref_rks_mbis):
+        """RKS should not produce Mulliken/Loewdin spin columns."""
+        assert "mulliken_spins" not in ref_rks_mbis
+        assert "loewdin_spins" not in ref_rks_mbis
+
+    def test_charge_counts_consistent(self, ref_rks_mbis):
+        n = 40
+        assert len(ref_rks_mbis["mulliken_charges"]) == n
+        assert len(ref_rks_mbis["loewdin_charges"]) == n
+        assert len(ref_rks_mbis["mbis_charges"]) == n
+        assert len(ref_rks_mbis["hirshfeld_charges"]) == n
+        assert len(ref_rks_mbis["mbis_populations"]) == n
+        assert len(ref_rks_mbis["mbis_valence_populations"]) == n
+        assert len(ref_rks_mbis["mbis_valence_widths"]) == n
+
+
+# ── find_orca_output_file tests ──────────────────────────────────────
+
+
+class TestFindOrcaOutputFile:
+
+    def test_finds_orca_out(self, tmp_job_dir):
+        path = os.path.join(tmp_job_dir, "orca.out")
+        with open(path, "w") as f:
+            f.write("dummy")
+        assert find_orca_output_file(tmp_job_dir) == path
+
+    def test_finds_output_out(self, tmp_job_dir):
+        path = os.path.join(tmp_job_dir, "output.out")
+        with open(path, "w") as f:
+            f.write("dummy")
+        assert find_orca_output_file(tmp_job_dir) == path
+
+    def test_prefers_orca_out_over_output_out(self, tmp_job_dir):
+        for name in ("orca.out", "output.out"):
+            with open(os.path.join(tmp_job_dir, name), "w") as f:
+                f.write("dummy")
+        result = find_orca_output_file(tmp_job_dir)
+        assert result.endswith("orca.out")
+
+    def test_returns_none_when_missing(self, tmp_job_dir):
+        assert find_orca_output_file(tmp_job_dir) is None
+
+
+# ── validate_parse_completeness tests ───────────────────────────────
+
+
+class TestValidateParseCompleteness:
+
+    def test_complete_dict(self, rks_result):
+        assert validate_parse_completeness(rks_result) is True
+
+    def test_energy_only_is_incomplete(self):
+        assert validate_parse_completeness({"final_energy_eh": -100.0}) is False
+
+    def test_charges_only_is_incomplete(self):
+        assert validate_parse_completeness({"mulliken_charges": {"1_O": -0.5}}) is False
+
+    def test_empty_dict_is_incomplete(self):
+        assert validate_parse_completeness({}) is False
+
+    def test_energy_plus_loewdin_is_complete(self):
+        d = {"final_energy_eh": -100.0, "loewdin_charges": {"1_O": -0.5}}
+        assert validate_parse_completeness(d) is True
+
+    def test_truncated_fixture_is_incomplete(self, truncated_result):
+        # truncated fixture has energy_components but NOT final_energy_eh
+        assert validate_parse_completeness(truncated_result) is False
+
+
+# ── validate_orca_dict tests ─────────────────────────────────────────
+
+
+class TestValidateOrcaDict:
+
+    def test_absent_file_is_valid(self, tmp_job_dir):
+        path = os.path.join(tmp_job_dir, "orca.json")
+        assert validate_orca_dict(path) is True
+
+    def test_empty_file_is_invalid(self, tmp_job_dir):
+        path = os.path.join(tmp_job_dir, "orca.json")
+        with open(path, "w") as f:
+            f.write("")
+        assert validate_orca_dict(path) is False
+
+    def test_corrupt_json_is_invalid(self, tmp_job_dir):
+        path = os.path.join(tmp_job_dir, "orca.json")
+        with open(path, "w") as f:
+            f.write("{invalid")
+        assert validate_orca_dict(path) is False
+
+    def test_empty_dict_is_invalid(self, tmp_job_dir):
+        path = os.path.join(tmp_job_dir, "orca.json")
+        with open(path, "w") as f:
+            json.dump({}, f)
+        assert validate_orca_dict(path) is False
+
+    def test_valid_minimal(self, tmp_job_dir):
+        path = os.path.join(tmp_job_dir, "orca.json")
+        with open(path, "w") as f:
+            json.dump({"final_energy_eh": -100.0}, f)
+        assert validate_orca_dict(path) is True
+
+    def test_wrong_type_fails(self, tmp_job_dir):
+        path = os.path.join(tmp_job_dir, "orca.json")
+        with open(path, "w") as f:
+            json.dump({"final_energy_eh": "not_a_number"}, f)
+        assert validate_orca_dict(path) is False
+
+    def test_bad_array_length_fails(self, tmp_job_dir):
+        path = os.path.join(tmp_job_dir, "orca.json")
+        with open(path, "w") as f:
+            json.dump({"final_energy_eh": -100.0, "dipole_au": [1.0, 2.0]}, f)
+        assert validate_orca_dict(path) is False
+
+    def test_correct_array_length_passes(self, tmp_job_dir):
+        path = os.path.join(tmp_job_dir, "orca.json")
+        with open(path, "w") as f:
+            json.dump({"final_energy_eh": -100.0, "dipole_au": [1.0, 2.0, 3.0]}, f)
+        assert validate_orca_dict(path) is True
+
+    def test_roundtrip_with_rks(self, tmp_job_dir, rks_result):
+        """Write parsed result, then validate it."""
+        write_orca_json(tmp_job_dir, rks_result)
+        path = os.path.join(tmp_job_dir, "orca.json")
+        assert validate_orca_dict(path) is True
+
+
+# ── validation_checks check_orca flag tests ──────────────────────────
+# Uses a copy of tests/test_files/lmdb_tests/orca6_rks with the timings.json
+# patched to include the fuzzy_bond key so base validation passes.
+
+LMDB_TEST_FOLDER = Path(__file__).parent / "test_files" / "lmdb_tests" / "orca6_rks"
+
+
+@pytest.fixture
+def valid_job_dir(tmp_path):
+    """Copy a real test job folder and patch timings.json so validation passes."""
+    import shutil
+    dest = tmp_path / "job"
+    shutil.copytree(str(LMDB_TEST_FOLDER), str(dest))
+    # Patch timings.json to include all keys that validate_timing_dict expects
+    # for full_set=0 (the test folder's timings.json predates some newer keys)
+    timings_path = dest / "timings.json"
+    with open(timings_path, "r") as f:
+        timings = json.load(f)
+    for key in ("fuzzy_bond", "becke_fuzzy_density", "hirsh_fuzzy_density"):
+        if key not in timings:
+            timings[key] = 5.0
+    with open(timings_path, "w") as f:
+        json.dump(timings, f)
+    # Patch fuzzy_full.json — add hirsh_fuzzy_density if missing
+    # (test fixture predates this key; validator requires it at full_set=0)
+    fuzzy_path = dest / "fuzzy_full.json"
+    with open(fuzzy_path, "r") as f:
+        fuzzy = json.load(f)
+    if "hirsh_fuzzy_density" not in fuzzy:
+        # Mirror the becke_fuzzy_density structure (same atom keys)
+        fuzzy["hirsh_fuzzy_density"] = dict(fuzzy["becke_fuzzy_density"])
+    with open(fuzzy_path, "w") as f:
+        json.dump(fuzzy, f)
+    return str(dest)
+
+
+class TestValidationChecksOrcaFlag:
+
+    def test_passes_without_orca_json_when_not_required(self, valid_job_dir):
+        result = validation_checks(
+            valid_job_dir, full_set=0, move_results=False, check_orca=False
+        )
+        assert result is True
+
+    def test_fails_without_orca_json_when_required(self, valid_job_dir):
+        result = validation_checks(
+            valid_job_dir, full_set=0, move_results=False, check_orca=True
+        )
+        assert result is False
+
+    def test_passes_with_valid_orca_json_when_required(self, valid_job_dir):
+        orca_path = os.path.join(valid_job_dir, "orca.json")
+        with open(orca_path, "w") as f:
+            json.dump({"final_energy_eh": -100.0}, f)
+        result = validation_checks(
+            valid_job_dir, full_set=0, move_results=False, check_orca=True
+        )
+        assert result is True
+
+    def test_fails_with_corrupt_orca_json_when_required(self, valid_job_dir):
+        orca_path = os.path.join(valid_job_dir, "orca.json")
+        with open(orca_path, "w") as f:
+            f.write("{corrupt")
+        result = validation_checks(
+            valid_job_dir, full_set=0, move_results=False, check_orca=True
+        )
+        assert result is False
+
+    def test_validates_present_orca_even_when_not_required(self, valid_job_dir):
+        """When check_orca=False but orca.json is present and corrupt, should fail."""
+        orca_path = os.path.join(valid_job_dir, "orca.json")
+        with open(orca_path, "w") as f:
+            f.write("{corrupt")
+        result = validation_checks(
+            valid_job_dir, full_set=0, move_results=False, check_orca=False
+        )
+        assert result is False

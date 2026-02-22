@@ -11,6 +11,7 @@ import logging
 import os
 import tempfile
 from enum import Enum, auto
+from typing import List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +37,7 @@ class OrcaParseState(Enum):
 
 # ── Utilities ──────────────────────────────────────────────────────────
 
-def parse_orca_float(value_str: str):
+def parse_orca_float(value_str: str) -> Optional[float]:
     """Parse a float that may use Fortran D notation or be overflowed."""
     s = value_str.strip()
     if not s or "***" in s:
@@ -58,7 +59,7 @@ def _bond_key(i: int, elem_i: str, j: int, elem_j: str) -> str:
     return f"{i + 1}_{elem_i.strip()}_to_{j + 1}_{elem_j.strip()}"
 
 
-def _parse_charge_line(line: str):
+def _parse_charge_line(line: str) -> Tuple[Optional[int], Optional[str], List[float]]:
     """Parse a Mulliken/Loewdin charge line.
 
     Handles two ORCA formats:
@@ -90,7 +91,7 @@ def _parse_charge_line(line: str):
     return None, None, []
 
 
-def _parse_run_time(line: str):
+def _parse_run_time(line: str) -> Optional[float]:
     """Parse ORCA run time line to total seconds.
 
     Format: 'TOTAL RUN TIME: 0 days 0 hours 24 minutes 5 seconds 906 msec'
@@ -111,7 +112,7 @@ def _parse_run_time(line: str):
         return None
 
 
-def _parse_bond_pairs(line: str) -> list:
+def _parse_bond_pairs(line: str) -> List[Tuple[str, float]]:
     """Parse bond order pairs from ORCA format: B(  0-N ,  2-C ) :   1.5313 ..."""
     pairs = []
     parts = line.split("B(")
@@ -134,6 +135,26 @@ def _parse_bond_pairs(line: str) -> list:
         except (ValueError, IndexError):
             continue
     return pairs
+
+
+def _finalize_orbitals(
+    result: dict,
+    last_occupied_energy: Optional[float],
+    last_occupied_ev: Optional[float],
+    first_virtual_energy: Optional[float],
+    first_virtual_ev: Optional[float],
+    n_electrons: float,
+    n_orbitals: int,
+) -> None:
+    """Write orbital energy results into *result* dict."""
+    result["homo_eh"] = last_occupied_energy
+    result["homo_ev"] = last_occupied_ev
+    result["lumo_eh"] = first_virtual_energy
+    result["lumo_ev"] = first_virtual_ev
+    if last_occupied_energy is not None and first_virtual_energy is not None:
+        result["homo_lumo_gap_eh"] = first_virtual_energy - last_occupied_energy
+    result["n_electrons"] = n_electrons
+    result["n_orbitals"] = n_orbitals
 
 
 # ── Main parser ────────────────────────────────────────────────────────
@@ -185,6 +206,7 @@ def parse_orca_output(orca_out_path: str) -> dict:
     # Dipole/quadrupole accumulators
     dipole_lines = []
     quadrupole_lines = []
+    quadrupole_has_tot = False
     rotational_lines = []
 
     # Mayer state tracking
@@ -198,8 +220,6 @@ def parse_orca_output(orca_out_path: str) -> dict:
 
     # Section line counters for skipping headers
     section_line_count = 0
-
-    # Gradient tracking
 
     try:
         with open(orca_out_path, "r", buffering=8 * 1024 * 1024,
@@ -299,6 +319,7 @@ def parse_orca_output(orca_out_path: str) -> dict:
                     elif stripped == "QUADRUPOLE MOMENT":
                         state = OrcaParseState.QUADRUPOLE
                         quadrupole_lines = []
+                        quadrupole_has_tot = False
                         section_line_count = 0
 
                     elif stripped == "Rotational spectrum":
@@ -376,14 +397,7 @@ def parse_orca_output(orca_out_path: str) -> dict:
                 elif state == OrcaParseState.ORBITAL_ENERGIES:
                     stripped = line.strip()
                     if (stripped == "" or stripped.startswith("----")) and section_line_count > 3:
-                        result["homo_eh"] = last_occupied_energy
-                        result["homo_ev"] = last_occupied_ev
-                        result["lumo_eh"] = first_virtual_energy
-                        result["lumo_ev"] = first_virtual_ev
-                        if last_occupied_energy is not None and first_virtual_energy is not None:
-                            result["homo_lumo_gap_eh"] = first_virtual_energy - last_occupied_energy
-                        result["n_electrons"] = n_electrons
-                        result["n_orbitals"] = n_orbitals
+                        _finalize_orbitals(result, last_occupied_energy, last_occupied_ev, first_virtual_energy, first_virtual_ev, n_electrons, n_orbitals)
                         state = OrcaParseState.IDLE
                         continue
                     parts = line.split()
@@ -394,14 +408,7 @@ def parse_orca_output(orca_out_path: str) -> dict:
                             occ = float(parts[1])
                             if occ not in (0.0, 1.0, 2.0):
                                 # Not a valid orbital line; terminate
-                                result["homo_eh"] = last_occupied_energy
-                                result["homo_ev"] = last_occupied_ev
-                                result["lumo_eh"] = first_virtual_energy
-                                result["lumo_ev"] = first_virtual_ev
-                                if last_occupied_energy is not None and first_virtual_energy is not None:
-                                    result["homo_lumo_gap_eh"] = first_virtual_energy - last_occupied_energy
-                                result["n_electrons"] = n_electrons
-                                result["n_orbitals"] = n_orbitals
+                                _finalize_orbitals(result, last_occupied_energy, last_occupied_ev, first_virtual_energy, first_virtual_ev, n_electrons, n_orbitals)
                                 state = OrcaParseState.IDLE
                                 continue
                             e_eh = float(parts[2])
@@ -640,6 +647,7 @@ def parse_orca_output(orca_out_path: str) -> dict:
                         _parse_dipole_block(dipole_lines, result)
                         state = OrcaParseState.QUADRUPOLE
                         quadrupole_lines = []
+                        quadrupole_has_tot = False
                         section_line_count = 0
                         continue
                     if "Rotational spectrum" in line:
@@ -652,9 +660,9 @@ def parse_orca_output(orca_out_path: str) -> dict:
 
                 # ── QUADRUPOLE MOMENT ──────────────────────────────
                 elif state == OrcaParseState.QUADRUPOLE:
-                    # Only exit after we've seen the TOT line (data starts late in section)
-                    has_tot = any("TOT" in l for l in quadrupole_lines)
-                    if line.strip() == "" and has_tot:
+                    if "TOT" in line:
+                        quadrupole_has_tot = True
+                    if line.strip() == "" and quadrupole_has_tot:
                         _parse_quadrupole_block(quadrupole_lines, result)
                         state = OrcaParseState.IDLE
                         continue
@@ -664,8 +672,7 @@ def parse_orca_output(orca_out_path: str) -> dict:
                         rotational_lines = []
                         section_line_count = 0
                         continue
-                    # Exit if we hit another section delimiter after seeing data
-                    if line.startswith("---") and has_tot:
+                    if line.startswith("---") and quadrupole_has_tot:
                         _parse_quadrupole_block(quadrupole_lines, result)
                         state = OrcaParseState.IDLE
                         continue
@@ -722,21 +729,14 @@ def parse_orca_output(orca_out_path: str) -> dict:
     elif state == OrcaParseState.SCF_CONVERGENCE and scf_convergence:
         result["scf_convergence"] = scf_convergence
     elif state == OrcaParseState.ORBITAL_ENERGIES:
-        result["homo_eh"] = last_occupied_energy
-        result["homo_ev"] = last_occupied_ev
-        result["lumo_eh"] = first_virtual_energy
-        result["lumo_ev"] = first_virtual_ev
-        if last_occupied_energy is not None and first_virtual_energy is not None:
-            result["homo_lumo_gap_eh"] = first_virtual_energy - last_occupied_energy
-        result["n_electrons"] = n_electrons
-        result["n_orbitals"] = n_orbitals
+        _finalize_orbitals(result, last_occupied_energy, last_occupied_ev, first_virtual_energy, first_virtual_ev, n_electrons, n_orbitals)
 
     return result
 
 
 # ── Block parsers for accumulated lines ────────────────────────────────
 
-def _parse_dipole_block(lines: list, result: dict):
+def _parse_dipole_block(lines: list, result: dict) -> None:
     """Parse collected dipole section lines."""
     for line in lines:
         if "Total Dipole Moment" in line and ":" in line:
@@ -755,7 +755,7 @@ def _parse_dipole_block(lines: list, result: dict):
                     result["dipole_magnitude_au"] = val
 
 
-def _parse_quadrupole_block(lines: list, result: dict):
+def _parse_quadrupole_block(lines: list, result: dict) -> None:
     """Parse collected quadrupole section lines."""
     for line in lines:
         if line.strip().startswith("TOT"):
@@ -772,7 +772,7 @@ def _parse_quadrupole_block(lines: list, result: dict):
                 result["quadrupole_au"] = vals[:6]  # xx, yy, zz, xy, xz, yz
 
 
-def _parse_rotational_block(lines: list, result: dict):
+def _parse_rotational_block(lines: list, result: dict) -> None:
     """Parse collected rotational constants lines."""
     for line in lines:
         if "Rotational constants in cm-1" in line:
@@ -787,23 +787,62 @@ def _parse_rotational_block(lines: list, result: dict):
                     result["rotational_constants_cm1"] = vals[:3]
 
 
+# ── Validation ────────────────────────────────────────────────────────
+
+
+def validate_parse_completeness(orca_dict: dict) -> bool:
+    """Check that the parse produced enough data to justify merging/deletion.
+
+    A truncated orca.out may parse successfully but produce a nearly-empty dict.
+    Require at least final energy + one charge population.
+    """
+    has_energy = "final_energy_eh" in orca_dict
+    has_any_charges = any(
+        k in orca_dict
+        for k in (
+            "mulliken_charges",
+            "loewdin_charges",
+            "hirshfeld_charges",
+            "mbis_charges",
+        )
+    )
+    return has_energy and has_any_charges
+
+
+# ── Shared utilities ──────────────────────────────────────────────────
+
+
+def find_orca_output_file(folder: str) -> Optional[str]:
+    """Find orca.out or output.out in a folder.
+
+    Returns the full path if found, None otherwise.
+    Used by both the pipeline (_run_orca_parse in omol.py) and the
+    retroactive CLI (parse_orca_out.py) to avoid duplicating this logic.
+    """
+    for name in ("orca.out", "output.out"):
+        path = os.path.join(folder, name)
+        if os.path.isfile(path):
+            return path
+    return None
+
+
 # ── JSON I/O with atomic writes ───────────────────────────────────────
 
-def _atomic_json_write(path: str, data: dict):
+def _atomic_json_write(path: str, data: dict, indent: Optional[int] = 4) -> None:
     """Write JSON atomically using temp-file-then-rename."""
     dir_name = os.path.dirname(path) or "."
     with tempfile.NamedTemporaryFile(
         mode="w", dir=dir_name, suffix=".tmp", delete=False
     ) as tmp:
-        json.dump(data, tmp, indent=4)
+        json.dump(data, tmp, indent=indent)
         tmp_path = tmp.name
     os.replace(tmp_path, path)
 
 
-def write_orca_json(folder: str, orca_dict: dict):
-    """Write orca.json to the specified folder with atomic write."""
+def write_orca_json(folder: str, orca_dict: dict) -> None:
+    """Write orca.json to the specified folder with compact atomic write."""
     path = os.path.join(folder, "orca.json")
-    _atomic_json_write(path, orca_dict)
+    _atomic_json_write(path, orca_dict, indent=None)
 
 
 def merge_orca_into_charge_json(orca_dict: dict, charge_json_path: str):
