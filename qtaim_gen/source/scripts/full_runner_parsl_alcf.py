@@ -193,6 +193,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         help="require orca.json during validation (for retroactive ORCA .out parsing)",
     )
 
+    parser.add_argument(
+        "--exhaustive_qtaim",
+        action="store_true",
+        help="use exhaustive QTAIM critical point search (spherical search around atoms)",
+    )
+
     args = parser.parse_args(argv)
     # print(args)
     for key, value in vars(args).items():
@@ -220,6 +226,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     clean_first: bool = bool(getattr(args, "clean_first", False))
     patch_path: bool = bool(getattr(args, "patch_path", False))
     check_orca: bool = bool(getattr(args, "check_orca", False))
+    exhaustive_qtaim: bool = bool(getattr(args, "exhaustive_qtaim", False))
 
     # parsl args
     type_runner: str = str(getattr(args, "type_runner", "local"))
@@ -330,6 +337,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             clean_first=clean_first,
             patch_path=patch_path,
             check_orca=check_orca,
+            exhaustive_qtaim=exhaustive_qtaim,
         )
         for f in folders_run
     ]

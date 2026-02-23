@@ -221,6 +221,7 @@ def create_jobs(
     logger: Optional[logging.Logger] = None,
     full_set: int = 0,
     patch_path: bool= False,
+    exhaustive_qtaim: bool = False,
 ) -> None:
     """
     Create job files for multiwfn analysis
@@ -307,7 +308,7 @@ def create_jobs(
                 job_dict["qtaim"] = os.path.join(folder, "qtaim.txt")
                 # write qtaim data file
                 with open(os.path.join(folder, "qtaim.txt"), "w") as f:
-                    data = qtaim_data()
+                    data = qtaim_data(exhaustive=exhaustive_qtaim)
                     f.write(data)
 
             elif routine == "fuzzy_full":
@@ -1301,6 +1302,7 @@ def gbw_analysis(
     move_results: bool = True,
     patch_path: bool= False,
     check_orca: bool = False,
+    exhaustive_qtaim: bool = False,
 ) -> None:
     """
     Run a full analysis on a folder of gbw files
@@ -1576,6 +1578,7 @@ def gbw_analysis(
             logger=logger,
             full_set=full_set,
             patch_path=patch_path,
+            exhaustive_qtaim=exhaustive_qtaim,
         )
         # run jobs
         run_jobs(

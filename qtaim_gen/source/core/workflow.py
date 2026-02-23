@@ -63,6 +63,7 @@ def process_folder(
     full_set: bool = False,
     move_results: bool = True,
     check_orca: bool = False,
+    exhaustive_qtaim: bool = False,
 ) -> Dict[str, Any]:
     """Process a single folder and return a small status dict.
 
@@ -171,6 +172,7 @@ def process_folder(
             preprocess_compressed=preprocess_compressed,
             move_results=move_results,
             check_orca=check_orca,
+            exhaustive_qtaim=exhaustive_qtaim,
         )
         t1: float = time.time()
 
@@ -238,6 +240,7 @@ def process_folder_alcf(
     ] = None,  # root where to store results, should mimic root_omol_inputs
     root_omol_inputs: Optional[str] = None,  # root where input folders are located
     check_orca: bool = False,
+    exhaustive_qtaim: bool = False,
 ) -> Dict[str, Any]:
     """Process a single folder and return a small status dict.
 
@@ -418,6 +421,7 @@ def process_folder_alcf(
             move_results=move_results,
             patch_path=patch_path,
             check_orca=check_orca,
+            exhaustive_qtaim=exhaustive_qtaim,
         )
         t1: float = time.time()
 
