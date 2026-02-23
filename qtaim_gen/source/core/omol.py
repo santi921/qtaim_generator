@@ -1505,6 +1505,16 @@ def gbw_analysis(
                     _run_orca_parse(folder, move_results, logger)
                     if move_results:
                         move_results_to_folder(folder, logger=logger, clean=clean)
+                    # Clean up orca.out after successful orca-only parse (28-114 MB)
+                    if clean:
+                        from qtaim_gen.source.core.parse_orca import find_orca_output_file
+                        orca_out_path = find_orca_output_file(folder)
+                        if orca_out_path is not None:
+                            try:
+                                os.remove(orca_out_path)
+                                logger.info("Deleted %s after orca-only parse", orca_out_path)
+                            except OSError as e:
+                                logger.warning("Could not delete %s: %s", orca_out_path, e)
                     logger.info("gbw_analysis completed (orca-only) in folder: %s", folder)
                     return
 
