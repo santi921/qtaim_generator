@@ -381,20 +381,20 @@ def find_cp_map(dft_dict, atom_cp_dict, margin=0.5):
     """
     ret_dict, qtaim_to_dft = {}, {}
     missing_atoms = []
+    available_cps = dict(atom_cp_dict)  # mutable copy — remove CPs once matched
     for k, v in dft_dict.items():
         v_send = {"element": v["element"], "pos": v["pos"], "ind": k}
 
-        # if k.split("_")[0].isdigit():
         # finds cp by distance and naming scheme from CPprop.txt
         ret_key, dict_ret = find_cp(
-            v_send, atom_cp_dict, margin=margin
+            v_send, available_cps, margin=margin
         )  # find_cp returns cp_key, cp_dict
         if ret_key != False:
             ret_dict[k] = dict_ret
             qtaim_to_dft[k] = {"key": ret_key, "pos": dict_ret["pos_ang"]}
+            del available_cps[ret_key]  # prevent double-matching
 
         else:
-            # print("CP no match found in dft")
             ret_dict[k] = {}
             qtaim_to_dft[k] = {"key": -1, "pos": []}
             missing_atoms.append(k)
