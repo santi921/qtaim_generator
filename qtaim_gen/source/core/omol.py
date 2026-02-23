@@ -1145,6 +1145,31 @@ def _validate_parse_completeness(orca_dict: dict) -> bool:
     return validate_parse_completeness(orca_dict)
 
 
+def _extract_orca_out_from_archive(folder: str, logger: logging.Logger) -> bool:
+    """Try to extract just orca.out from orca.tar.zst in *folder*.
+
+    Returns True if orca.out was successfully extracted.
+    """
+    tar_zst = os.path.join(folder, "orca.tar.zst")
+    if not os.path.isfile(tar_zst):
+        return False
+
+    try:
+        subprocess.run(
+            ["tar", "--zstd", "-xf", "orca.tar.zst", "orca.out"],
+            cwd=folder,
+            check=True,
+            capture_output=True,
+        )
+        extracted = os.path.isfile(os.path.join(folder, "orca.out"))
+        if extracted:
+            logger.info("Extracted orca.out from orca.tar.zst")
+        return extracted
+    except (subprocess.CalledProcessError, FileNotFoundError) as e:
+        logger.warning("Could not extract orca.out from archive: %s", e)
+        return False
+
+
 def _run_orca_parse(
     folder: str,
     move_results: bool,
@@ -1155,6 +1180,7 @@ def _run_orca_parse(
 
     Handles:
     - Both 'orca.out' and 'output.out' filenames (via shared find_orca_output_file)
+    - Extracts orca.out from orca.tar.zst if not already on disk
     - Missing orca.out (skip silently)
     - Writes orca_parse timing into timings.json for checkpoint support
     - Atomic writes throughout including timings.json (crash-safe)
@@ -1171,6 +1197,12 @@ def _run_orca_parse(
     )
 
     orca_out_path = find_orca_output_file(folder)
+    extracted_from_archive = False
+    if orca_out_path is None:
+        # orca.out may still be inside the compressed archive
+        if _extract_orca_out_from_archive(folder, logger):
+            orca_out_path = find_orca_output_file(folder)
+            extracted_from_archive = True
     if orca_out_path is None:
         logger.info("No orca.out found in %s -- skipping ORCA parse", folder)
         return
@@ -1189,6 +1221,12 @@ def _run_orca_parse(
             )
             # Still write partial orca.json (partial data better than none)
             write_orca_json(folder, orca_dict)
+            # Clean up extracted file — archive still has it for retry
+            if extracted_from_archive:
+                try:
+                    os.remove(orca_out_path)
+                except OSError:
+                    pass
             return  # Do NOT delete, do NOT merge
 
         write_orca_json(folder, orca_dict)
@@ -1220,8 +1258,9 @@ def _run_orca_parse(
             timings["orca_parse"] = elapsed
             atomic_json_write(timings_path, timings)
 
-        # Delete orca.out AFTER successful parse + merge + timing checkpoint
-        if delete_out:
+        # Delete orca.out AFTER successful parse + merge + timing checkpoint.
+        # Always clean up if we extracted it from the archive (archive still has it).
+        if delete_out or extracted_from_archive:
             try:
                 os.remove(orca_out_path)
                 logger.info("Deleted %s after successful parse", orca_out_path)
@@ -1230,7 +1269,12 @@ def _run_orca_parse(
 
     except Exception as e:
         logger.error("Error parsing orca.out in %s: %s", folder, e)
-        # On error, orca.out is NOT deleted -- allows retry
+        # On error, clean up extracted file (archive still has it for retry)
+        if extracted_from_archive:
+            try:
+                os.remove(orca_out_path)
+            except OSError:
+                pass
 
 
 def gbw_analysis(
