@@ -12,6 +12,7 @@ from qtaim_gen.source.utils.validation import (
 )
 
 from qtaim_gen.source.utils.io import check_results_exist
+from qtaim_gen.source.utils.atomic_write import atomic_json_write
 
 from qtaim_gen.source.data.multiwfn import (
     charge_data,
@@ -667,13 +668,11 @@ def run_jobs(
 
         # save timings to file in folder - at each step for check pointing
         try:
-            with open(os.path.join(folder_check, "timings.json"), "w") as f:
-                json.dump(timings, f, indent=4)
-                logger.info(f"Saved timings.json in {folder}")
+            atomic_json_write(os.path.join(folder_check, "timings.json"), timings)
+            logger.info(f"Saved timings.json in {folder}")
 
             if prof_mem:
-                with open(os.path.join(folder_check, "memory.json"), "w") as f:
-                    json.dump(memory, f, indent=4)
+                atomic_json_write(os.path.join(folder_check, "memory.json"), memory)
 
         except Exception as e:
             logger.error(f"Error saving timings.json: {e}")
@@ -850,8 +849,7 @@ def parse_multiwfn(
                             )
                             continue
 
-                        with open(json_file, "w") as f:
-                            json.dump(data, f, indent=4)
+                        atomic_json_write(json_file, data)
                         logger.info(f"Parsed {routine} output to {json_file}")
 
                     except Exception as e:
@@ -894,8 +892,7 @@ def parse_multiwfn(
                     )
                     continue
 
-                with open(json_file, "w") as f:
-                    json.dump(qtaim_dict, f, indent=4)
+                atomic_json_write(json_file, qtaim_dict)
                 # if return_dicts:
                 #    compiled_dicts["qtaim"] = qtaim_dict
                 logger.info(f"Parsed qtaim output to {json_file}")
@@ -938,29 +935,25 @@ def parse_multiwfn(
                     #    os.remove(os.path.join(folder, file))
 
         if charge_dict_compiled:
-            with open(os.path.join(folder, "charge.json"), "w") as f:
-                json.dump(charge_dict_compiled, f, indent=4)
+            atomic_json_write(os.path.join(folder, "charge.json"), charge_dict_compiled)
             # if return_dicts:
             #    compiled_dicts["charge"] = charge_dict_compiled
             logger.info("Compiled charge.json")
 
         if bond_dict_compiled:
-            with open(os.path.join(folder, "bond.json"), "w") as f:
-                json.dump(bond_dict_compiled, f, indent=4)
+            atomic_json_write(os.path.join(folder, "bond.json"), bond_dict_compiled)
             # if return_dicts:
             #    compiled_dicts["bond"] = bond_dict_compiled
             logger.info("Compiled bond.json")
 
         if fuzzy_dict_compiled:
-            with open(os.path.join(folder, "fuzzy_full.json"), "w") as f:
-                json.dump(fuzzy_dict_compiled, f, indent=4)
+            atomic_json_write(os.path.join(folder, "fuzzy_full.json"), fuzzy_dict_compiled)
             # if return_dicts:
             #    compiled_dicts["fuzzy_full"] = fuzzy_dict_compiled
             logger.info("Compiled fuzzy_full.json")
 
         if other_dict_compiled:
-            with open(os.path.join(folder, "other.json"), "w") as f:
-                json.dump(other_dict_compiled, f, indent=4)
+            atomic_json_write(os.path.join(folder, "other.json"), other_dict_compiled)
             # if return_dicts:
             #    compiled_dicts["other"] = other_dict_compiled
             logger.info("Compiled other.json")
@@ -1126,8 +1119,7 @@ def move_results_to_folder(
                         data_merged = {**data_existing, **data_new}
                     else:
                         data_merged = data_new  # if not dict, just overwrite
-                    with open(os.path.join(results_folder, file), "w") as f:
-                        json.dump(data_merged, f, indent=4)
+                    atomic_json_write(os.path.join(results_folder, file), data_merged)
 
                     logger.info(f"Merged {file} into results folder")
                     # remove the original file
@@ -1176,7 +1168,6 @@ def _run_orca_parse(
         merge_orca_into_charge_json,
         merge_orca_into_bond_json,
         find_orca_output_file,
-        _atomic_json_write,
     )
 
     orca_out_path = find_orca_output_file(folder)
@@ -1227,7 +1218,7 @@ def _run_orca_parse(
             with open(timings_path, "r") as f:
                 timings = json.load(f)
             timings["orca_parse"] = elapsed
-            _atomic_json_write(timings_path, timings)
+            atomic_json_write(timings_path, timings)
 
         # Delete orca.out AFTER successful parse + merge + timing checkpoint
         if delete_out:

@@ -382,5 +382,11 @@ full-runner-parsl-alcf --num_folders 15000 --orca_2mkl_cmd $HOME/orca_6_0_0/orca
         --root_omol_inputs /lus/eagle/projects/OMol25/ 
 
 
+full-runner-parsl --clean --restart \
+--multiwfn_cmd /global/scratch/users/santiagovargas/Multiwfn/Multiwfn_3.8_dev_bin_Linux/Multiwfn \
+--orca_2mkl_cmd /global/scratch/users/santiagovargas/orca_6_0_1_linux_x86-64_shared_openmpi416/orca_2mkl \
+--n_threads 10 --n_threads_per_job 10 --full_set 0 --move_results --type_runner local \
+--job_file ../pdb_fragments_300K_refined.txt --num_folders 1 --preprocess_compressed
+
 
 """

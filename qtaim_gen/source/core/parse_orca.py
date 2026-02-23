@@ -9,9 +9,10 @@ to orca.json and merging charge/bond data into existing charge.json/bond.json.
 import json
 import logging
 import os
-import tempfile
 from enum import Enum, auto
 from typing import List, Optional, Tuple
+
+from qtaim_gen.source.utils.atomic_write import atomic_json_write
 
 logger = logging.getLogger(__name__)
 
@@ -828,21 +829,11 @@ def find_orca_output_file(folder: str) -> Optional[str]:
 
 # ── JSON I/O with atomic writes ───────────────────────────────────────
 
-def _atomic_json_write(path: str, data: dict, indent: Optional[int] = 4) -> None:
-    """Write JSON atomically using temp-file-then-rename."""
-    dir_name = os.path.dirname(path) or "."
-    with tempfile.NamedTemporaryFile(
-        mode="w", dir=dir_name, suffix=".tmp", delete=False
-    ) as tmp:
-        json.dump(data, tmp, indent=indent)
-        tmp_path = tmp.name
-    os.replace(tmp_path, path)
-
 
 def write_orca_json(folder: str, orca_dict: dict) -> None:
     """Write orca.json to the specified folder with compact atomic write."""
     path = os.path.join(folder, "orca.json")
-    _atomic_json_write(path, orca_dict, indent=None)
+    atomic_json_write(path, orca_dict, indent=None)
 
 
 def merge_orca_into_charge_json(orca_dict: dict, charge_json_path: str):
@@ -897,7 +888,7 @@ def merge_orca_into_charge_json(orca_dict: dict, charge_json_path: str):
         modified = True
 
     if modified:
-        _atomic_json_write(charge_json_path, charge_data)
+        atomic_json_write(charge_json_path, charge_data)
 
 
 def merge_orca_into_bond_json(orca_dict: dict, bond_json_path: str):
@@ -926,4 +917,4 @@ def merge_orca_into_bond_json(orca_dict: dict, bond_json_path: str):
         modified = True
 
     if modified:
-        _atomic_json_write(bond_json_path, bond_data)
+        atomic_json_write(bond_json_path, bond_data)

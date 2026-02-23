@@ -1,4 +1,6 @@
+import json
 import os
+import tempfile
 from typing import Dict, Sequence, Any, Union, List, Tuple, Optional
 import time
 import random
@@ -9,6 +11,7 @@ from rdkit import Chem
 
 from qtaim_gen.source.core.parse_qtaim import dft_inp_to_dict
 from qtaim_gen.source.utils.validation import validation_checks
+from qtaim_gen.source.utils.atomic_write import atomic_json_write  # re-export
 
 # RDKit periodic table for element lookups
 _PERIODIC_TABLE = Chem.GetPeriodicTable()
@@ -139,6 +142,7 @@ def get_folders_from_file(
     full_set: int = 0,
     logger: Any = None,
     max_workers: int = 8,
+    check_orca: bool = False,
 ) -> List[str]:
     print(
         f"collecting {num_folders} folders from {job_file} with pre_validate={pre_validate} (parallelized)"
@@ -179,6 +183,7 @@ def get_folders_from_file(
                     verbose=False,
                     move_results=move_results,
                     logger=logger,
+                    check_orca=check_orca,
                 )
                 if not tf_validation:
                     if logger:

@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from qtaim_gen.source.utils.atomic_write import atomic_json_write
 from qtaim_gen.source.core.parse_orca import (
     OrcaParseState,
     _atom_key,
@@ -17,7 +18,6 @@ from qtaim_gen.source.core.parse_orca import (
     write_orca_json,
     merge_orca_into_charge_json,
     merge_orca_into_bond_json,
-    _atomic_json_write,
     find_orca_output_file,
     validate_parse_completeness,
 )
@@ -219,15 +219,15 @@ class TestAtomicJsonWrite:
     def test_writes_valid_json(self, tmp_job_dir):
         path = os.path.join(tmp_job_dir, "test.json")
         data = {"key": "value", "number": 42}
-        _atomic_json_write(path, data)
+        atomic_json_write(path, data)
         with open(path, "r") as f:
             loaded = json.load(f)
         assert loaded == data
 
     def test_overwrites_existing(self, tmp_job_dir):
         path = os.path.join(tmp_job_dir, "test.json")
-        _atomic_json_write(path, {"old": True})
-        _atomic_json_write(path, {"new": True})
+        atomic_json_write(path, {"old": True})
+        atomic_json_write(path, {"new": True})
         with open(path, "r") as f:
             loaded = json.load(f)
         assert loaded == {"new": True}
