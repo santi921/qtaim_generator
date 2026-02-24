@@ -188,6 +188,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
 
     parser.add_argument(
+        "--wfx",
+        action="store_true",
+        help="Use .wfx wavefunction format instead of .wfn (more stable for heavy atoms, Z > 36)",
         "--check_orca",
         action="store_true",
         help="require orca.json during validation (for retroactive ORCA .out parsing)",
@@ -225,6 +228,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     root_omol_inputs: Optional[str] = getattr(args, "root_omol_inputs", None)
     clean_first: bool = bool(getattr(args, "clean_first", False))
     patch_path: bool = bool(getattr(args, "patch_path", False))
+    wfx: bool = bool(getattr(args, "wfx", False))
     check_orca: bool = bool(getattr(args, "check_orca", False))
     exhaustive_qtaim: bool = bool(getattr(args, "exhaustive_qtaim", False))
 
@@ -336,6 +340,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             root_omol_inputs=root_omol_inputs,
             clean_first=clean_first,
             patch_path=patch_path,
+            wfx=wfx,
             check_orca=check_orca,
             exhaustive_qtaim=exhaustive_qtaim,
         )

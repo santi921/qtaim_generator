@@ -87,6 +87,12 @@ def main(argv=None):
         "--move_results", action="store_true", help="move results to a separate folder"
     )
 
+    parser.add_argument(
+        "--wfx",
+        action="store_true",
+        help="Use .wfx wavefunction format instead of .wfn (more stable for heavy atoms, Z > 36)",
+    )
+
     args = parser.parse_args(argv)
 
     overrun_running = bool(args.overrun_running) if "overrun_running" in args else False
@@ -104,6 +110,7 @@ def main(argv=None):
     full_set = int(args.full_set) if "full_set" in args else 0
     overwrite = bool(args.overwrite) if "overwrite" in args else False
     move_results = bool(args.move_results) if "move_results" in args else False
+    wfx: bool = bool(getattr(args, "wfx", False))
     job_file = args.job_file
 
     # set env vars
@@ -186,6 +193,7 @@ def main(argv=None):
                     logger=logging.getLogger("gbw_analysis"),
                     preprocess_compressed=preprocess_compressed,
                     move_results=move_results,
+                    wfx=wfx,
                 )  # works!
             except Exception as e:
                 print(f"Error in gbw_analysis for {run_root}: {e}")

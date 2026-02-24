@@ -166,6 +166,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
 
     parser.add_argument(
+        "--wfx",
+        action="store_true",
+        help="Use .wfx wavefunction format instead of .wfn (more stable for heavy atoms, Z > 36)",
         "--exhaustive_qtaim",
         action="store_true",
         help="use exhaustive QTAIM critical point search (spherical search around atoms)",
@@ -194,6 +197,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     dry_run: bool = bool(getattr(args, "dry_run", False))
     overwrite = bool(args.overwrite) if "overwrite" in args else False
     clean_first: bool = bool(getattr(args, "clean_first", False))
+    wfx: bool = bool(getattr(args, "wfx", False))
     exhaustive_qtaim: bool = bool(getattr(args, "exhaustive_qtaim", False))
 
     # parsl args
@@ -283,6 +287,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             preprocess_compressed=preprocess_compressed,
             move_results=move_results,
             clean_first=clean_first,
+            wfx=wfx,
             exhaustive_qtaim=exhaustive_qtaim,
         )
         for f in folders_run

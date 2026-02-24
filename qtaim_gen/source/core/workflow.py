@@ -62,6 +62,7 @@ def process_folder(
     orca_6: bool = True,
     full_set: bool = False,
     move_results: bool = True,
+    wfx: bool = False,
     check_orca: bool = False,
     exhaustive_qtaim: bool = False,
 ) -> Dict[str, Any]:
@@ -171,6 +172,7 @@ def process_folder(
             full_set=full_set,
             preprocess_compressed=preprocess_compressed,
             move_results=move_results,
+            wfx=wfx,
             check_orca=check_orca,
             exhaustive_qtaim=exhaustive_qtaim,
         )
@@ -239,6 +241,7 @@ def process_folder_alcf(
         str
     ] = None,  # root where to store results, should mimic root_omol_inputs
     root_omol_inputs: Optional[str] = None,  # root where input folders are located
+    wfx: bool = False,
     check_orca: bool = False,
     exhaustive_qtaim: bool = False,
 ) -> Dict[str, Any]:
@@ -267,6 +270,7 @@ def process_folder_alcf(
         "orca.property.txt",
         "orca.engrad",
         "orca_stderr",
+        "orca.wfx", 
         "orca.wfn", # this is specific to HPC where we are moving wfns to process
         #"orca.inp"  # this is specific to HPC where we are moving wfns to process
     ]
@@ -420,6 +424,7 @@ def process_folder_alcf(
             preprocess_compressed=preprocess_compressed,
             move_results=move_results,
             patch_path=patch_path,
+            wfx=wfx,
             check_orca=check_orca,
             exhaustive_qtaim=exhaustive_qtaim,
         )
