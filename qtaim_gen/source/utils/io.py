@@ -13,6 +13,29 @@ from qtaim_gen.source.utils.validation import validation_checks
 # RDKit periodic table for element lookups
 _PERIODIC_TABLE = Chem.GetPeriodicTable()
 
+# Wavefunction file extensions, ordered by preference (.wfx preferred over .wfn)
+WFN_EXTENSIONS = (".wfx", ".wfn")
+
+
+def find_wavefunction_file(folder: str) -> Optional[str]:
+    """Find a wavefunction file (.wfx or .wfn) in folder.
+
+    Returns absolute path to the file, preferring .wfx over .wfn
+    when both exist. Returns None if neither is found.
+    """
+    from glob import glob as _glob
+
+    for ext in WFN_EXTENSIONS:
+        matches = _glob(os.path.join(folder, f"*{ext}"))
+        if matches:
+            return matches[0]
+    return None
+
+
+def has_wavefunction_file(folder: str) -> bool:
+    """Check if any wavefunction file (.wfn or .wfx) exists in folder."""
+    return find_wavefunction_file(folder) is not None
+
 
 def get_bonds_from_coords(
     species: List[str],

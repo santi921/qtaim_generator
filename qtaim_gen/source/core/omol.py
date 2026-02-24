@@ -219,20 +219,22 @@ def create_jobs(
     debug: bool = True,
     logger: Optional[logging.Logger] = None,
     full_set: int = 0,
-    patch_path: bool= False,
+    patch_path: bool = False,
+    wfx: bool = False,
 ) -> None:
     """
     Create job files for multiwfn analysis
     Takes:
         folder(str): folder to create jobs in
         multiwfn_cmd(str): command to run multiwfn
-        orca_2mkl_cmd(str): command to run orca_2mkl  
+        orca_2mkl_cmd(str): command to run orca_2mkl
         separate(bool): whether to separate the analysis into different files
         overwrite(bool): whether to overwrite the output files
         orca_6(bool): whether calc is from orca6
         logger(logging.Logger): logger to log messages
         full_set(int): whether to use full set of analysis (1) or minimal (0)
         patch_path(bool): whether to patch the pathing in the multiwfn input files
+        wfx(bool): whether to use .wfx format instead of .wfn for conversion
 
     """
     if logger is None:
@@ -248,12 +250,15 @@ def create_jobs(
     if debug:  # just run qtaim in debug mode
         routine_list = ["qtaim"]
 
-    wfn_present = False
+    # Determine target wavefunction extension based on --wfx flag
+    wf_ext = ".wfx" if wfx else ".wfn"
+
+    wf_present = False
+    file_wf_search = None
     for file in os.listdir(folder):
-        # print(file)
-        if file.endswith(".wfn"):
-            wfn_present = True
-            file_wfn_search = os.path.join(folder, file)
+        if file.endswith((".wfn", ".wfx")):
+            wf_present = True
+            file_wf_search = os.path.join(folder, file)
 
     bool_gbw = False
     file_read = None
@@ -262,27 +267,27 @@ def create_jobs(
         if file.endswith(".gbw"):
             bool_gbw = True
             file_gbw = os.path.join(folder, file)
-            file_wfn = file.replace(".gbw", ".wfn")
-            # if there is a wfn change its name to the gbw prefix
-            if wfn_present:
-                if file_wfn not in os.listdir(folder):
-                    logger.info(f"Renaming WFN file to: {file_wfn}")
+            file_wf = file.replace(".gbw", wf_ext)
+            # if there is a wfn/wfx, rename to match gbw prefix
+            if wf_present:
+                if file_wf not in os.listdir(folder):
+                    logger.info(f"Renaming wavefunction file to: {file_wf}")
                     os.rename(
-                        os.path.join(folder, file_wfn_search),
-                        os.path.join(folder, file_wfn),
+                        file_wf_search,
+                        os.path.join(folder, file_wf),
                     )
 
             file_molden = file.replace(".gbw", ".molden.input")
             file_molden = os.path.join(folder, file_molden)
-            file_read = os.path.join(folder, file_wfn)
+            file_read = os.path.join(folder, file_wf)
 
-        if file.endswith(".wfn"):
+        if file.endswith((".wfn", ".wfx")):
             file_read = os.path.join(folder, file)
 
-    if not wfn_present and bool_gbw:
+    if not wf_present and bool_gbw:
         logger.info(f"file_gbw: {file_gbw}")
         logger.info(f"out folder: {folder}")
-        logger.info("wfn not there - writing conversion script")
+        logger.info("wavefunction file not found - writing conversion script")
         try:
             write_conversion(
                 out_folder=folder,
@@ -363,10 +368,14 @@ def create_jobs(
             elif routine == "convert":
                 job_dict["convert"] = os.path.join(folder, "convert.txt")
                 with open(os.path.join(folder, "convert.txt"), "w") as f:
-                    file_wfn = file_gbw.replace(".gbw", ".wfn")
-                    file_wfn_bare = file_wfn.split("/")[-1]
-                    #print("file_wfn: {}".format(file_wfn))
-                    data = "100\n2\n5\n{}\n0\nq\n".format(file_wfn_bare)
+                    file_wf_target = file_gbw.replace(".gbw", wf_ext)
+                    file_wf_bare = file_wf_target.split("/")[-1]
+                    if wfx:
+                        # Multiwfn menu 100 -> 2 -> 4: export to .wfx
+                        data = "100\n2\n4\n{}\n0\nq\n".format(file_wf_bare)
+                    else:
+                        # Multiwfn menu 100 -> 2 -> 5: export to .wfn
+                        data = "100\n2\n5\n{}\n0\nq\n".format(file_wf_bare)
                     f.write(data)
 
             # else:
@@ -519,15 +528,16 @@ def run_jobs(
     if debug:
         order_of_operations = ["qtaim"]
 
-    wfn_present = False
+    wf_present = False
+    conv_file = None
     for file in os.listdir(folder):
-        if file.endswith(".wfn"):
-            wfn_present = True
+        if file.endswith((".wfn", ".wfx")):
+            wf_present = True
         if file.endswith("convert.in"):
             conv_file = os.path.join(folder, file)
 
-    # run conversion script if wfn file is not present
-    if not wfn_present:
+    # run conversion script if wavefunction file is not present
+    if not wf_present:
         logger.info("Running conversion script")
         if conv_file is None:
             logger.error("No conversion script (convert.in) found in folder.")
@@ -1043,8 +1053,8 @@ def clean_jobs(
             if file.endswith("fuzzy_full.txt"):
                 os.remove(os.path.join(folder, file))
                 logger.info(f"Removed {file}")
-            if file.endswith("wfn"):
-                # if there is a gbw in the folder remove wfn
+            if file.endswith((".wfn", ".wfx")):
+                # if there is a gbw in the folder remove wfn/wfx
                 if any(f.endswith(".gbw") for f in os.listdir(folder)):
                     os.remove(os.path.join(folder, file))
                     logger.info(f"Removed {file}")
@@ -1164,7 +1174,8 @@ def gbw_analysis(
     preprocess_compressed: bool = False,
     full_set: int = 0,
     move_results: bool = True,
-    patch_path: bool= False,
+    patch_path: bool = False,
+    wfx: bool = False,
 ) -> None:
     """
     Run a full analysis on a folder of gbw files
@@ -1186,9 +1197,10 @@ def gbw_analysis(
         preprocess_compressed(bool): whether to preprocess compressed files (not implemented yet)
         full_set(int): refined set of cheaper calcs or full set of analysis
         move_results(bool): whether to move results to a single results folder after analysis
+        wfx(bool): whether to use .wfx format instead of .wfn for conversion
     Writes:
         - settings.ini file with memory and n_threads
-        - jobs for conversion to wfn and multiwfn analysis
+        - jobs for conversion to wfn/wfx and multiwfn analysis
         - timings.json file with timings for each step
         - bond.json, charge.json, fuzzy_full.json, qtaim.json, other.json files with parsed data
     Returns:
@@ -1209,7 +1221,7 @@ def gbw_analysis(
     if preprocess_compressed:
         logger.info("Preprocessing compressed files in folder: {}".format(folder))
         # check if the required files are already uncompressed - .inp, .wfn
-        required_files = [".inp", ".wfn"]
+        required_files = [".inp", ".wfn", ".wfx"]
         uncompressed_files = [
             f for f in os.listdir(folder) if f.endswith(tuple(required_files))
         ]
@@ -1399,6 +1411,7 @@ def gbw_analysis(
             logger=logger,
             full_set=full_set,
             patch_path=patch_path,
+            wfx=wfx,
         )
         # run jobs
         run_jobs(
