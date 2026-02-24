@@ -31,7 +31,6 @@ STATIC_SUFFIXES = (
     ".molden.input",
     "settings.ini",
     "orca.gbw.zstd0",
-    "orca.out"
 )
 
 def should_delete(filename: str) -> bool:

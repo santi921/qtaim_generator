@@ -115,6 +115,12 @@ def get_val_breakdown_from_folder(
         )
         info["val_other"] = tf_other
 
+    # check orca (optional)
+    orca_file = os.path.join(folder, "orca.json")
+    if os.path.exists(orca_file) and os.path.getsize(orca_file) > 0:
+        tf_orca = validate_orca_dict(orca_file, n_atoms=n_atoms, logger=None)
+        info["val_orca"] = tf_orca
+
     return info
 
 
@@ -440,12 +446,117 @@ def validate_qtaim_dict(
     return True
 
 
+def validate_orca_dict(
+    orca_json_loc: str,
+    n_atoms: int = None,
+    verbose: bool = False,
+    logger=None,
+) -> bool:
+    """Validate orca.json structure and data integrity.
+
+    Returns True if valid, False if malformed.
+    Returns True if file is absent (backward compat -- absence is valid).
+    """
+    if not os.path.exists(orca_json_loc):
+        return True  # Absent orca.json is valid (backward compat)
+
+    if os.path.getsize(orca_json_loc) == 0:
+        if logger:
+            logger.error("Empty orca.json at %s", orca_json_loc)
+        return False
+
+    try:
+        with open(orca_json_loc, "r") as f:
+            data = json.load(f)
+    except (json.JSONDecodeError, OSError) as e:
+        if logger:
+            logger.error("Invalid orca.json at %s: %s", orca_json_loc, e)
+        return False
+
+    if not isinstance(data, dict):
+        if logger:
+            logger.error("orca.json is not a dict at %s", orca_json_loc)
+        return False
+
+    if len(data) == 0:
+        if logger:
+            logger.error("orca.json is empty dict at %s", orca_json_loc)
+        return False
+
+    # Type checks for known keys
+    type_checks = {
+        "final_energy_eh": (int, float),
+        "scf_converged": (bool,),
+        "scf_cycles": (int,),
+        "total_run_time_s": (int, float),
+        "gradient_norm": (int, float),
+        "gradient_rms": (int, float),
+        "gradient_max": (int, float),
+    }
+    for key, types in type_checks.items():
+        if key in data and data[key] is not None:
+            if not isinstance(data[key], types):
+                if logger:
+                    logger.error(
+                        "orca.json key '%s' has wrong type at %s", key, orca_json_loc
+                    )
+                return False
+
+    # Array length checks
+    array_checks = {
+        "dipole_au": 3,
+        "quadrupole_au": 6,
+        "rotational_constants_cm1": 3,
+    }
+    for key, expected_len in array_checks.items():
+        if key in data:
+            if not isinstance(data[key], list) or len(data[key]) != expected_len:
+                if logger:
+                    logger.error(
+                        "orca.json key '%s' must be %d-element list at %s",
+                        key,
+                        expected_len,
+                        orca_json_loc,
+                    )
+                return False
+
+    # Atom count checks for charge dicts (warning only)
+    if n_atoms is not None:
+        charge_keys = [
+            "mulliken_charges",
+            "loewdin_charges",
+            "hirshfeld_charges",
+            "mbis_charges",
+        ]
+        for key in charge_keys:
+            if key in data and isinstance(data[key], dict):
+                if len(data[key]) != n_atoms:
+                    if verbose:
+                        print(
+                            f"orca.json key '{key}' has {len(data[key])} atoms, "
+                            f"expected {n_atoms}"
+                        )
+                    if logger:
+                        logger.warning(
+                            "orca.json key '%s' has %d atoms, expected %d at %s",
+                            key,
+                            len(data[key]),
+                            n_atoms,
+                            orca_json_loc,
+                        )
+
+    if verbose:
+        print("orca.json structure is valid.")
+    return True
+
+
 def validation_checks(
     folder: str,
     verbose: bool = False,
     full_set: int = 0,
     move_results: bool = True,
-    logger: any = None,
+    logger=None,
+    check_orca: bool = False,
 ):
     """
     Run all validation checks on the json files in the given folder.
@@ -559,6 +670,33 @@ def validation_checks(
         if logger:
             logger.error(f"Bond json validation failed in folder: {folder}")
         tf_cond = False
+
+    # ORCA validation -- optional unless check_orca=True
+    orca_json_loc = os.path.join(folder_check_res, "orca.json")
+    if check_orca:
+        # When check_orca is set, orca.json is REQUIRED
+        if not os.path.exists(orca_json_loc):
+            if logger:
+                logger.error(
+                    f"Missing required orca.json in folder: {folder_check_res}"
+                )
+            if verbose:
+                print(f"Missing required orca.json in folder: {folder_check_res}")
+            tf_cond = False
+        elif not validate_orca_dict(
+            orca_json_loc, n_atoms=n_atoms, verbose=verbose, logger=logger
+        ):
+            if logger:
+                logger.error(f"ORCA json validation failed in folder: {folder}")
+            tf_cond = False
+    elif os.path.exists(orca_json_loc):
+        # When check_orca is NOT set, still validate if present (but don't require it)
+        if not validate_orca_dict(
+            orca_json_loc, n_atoms=n_atoms, verbose=verbose, logger=logger
+        ):
+            if logger:
+                logger.error(f"ORCA json validation failed in folder: {folder}")
+            tf_cond = False
 
     if verbose:
         print("All validation checks passed.")

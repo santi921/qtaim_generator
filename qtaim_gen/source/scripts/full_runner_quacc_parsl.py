@@ -224,6 +224,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         "--move_results", action="store_true", help="move results to a separate folder"
     )
 
+    parser.add_argument(
+        "--exhaustive_qtaim",
+        action="store_true",
+        help="use exhaustive QTAIM critical point search (spherical search around atoms)",
+    )
+
     args = parser.parse_args(argv)
 
     # Safely extract boolean flags and other values using getattr
@@ -243,6 +249,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     job_file: str = getattr(args, "job_file")
     dry_run: bool = bool(getattr(args, "dry_run", False))
     overwrite = bool(args.overwrite) if "overwrite" in args else False
+    exhaustive_qtaim: bool = bool(getattr(args, "exhaustive_qtaim", False))
 
     # set env vars
     resource.setrlimit(
@@ -331,6 +338,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             debug=debug,
             preprocess_compressed=preprocess_compressed,
             move_results=move_results,
+            exhaustive_qtaim=exhaustive_qtaim,
         )
         for f in folders_run
     ]
