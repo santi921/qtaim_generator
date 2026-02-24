@@ -169,6 +169,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         "--wfx",
         action="store_true",
         help="Use .wfx wavefunction format instead of .wfn (more stable for heavy atoms, Z > 36)",
+    )
+
+    parser.add_argument(        
         "--exhaustive_qtaim",
         action="store_true",
         help="use exhaustive QTAIM critical point search (spherical search around atoms)",

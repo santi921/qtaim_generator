@@ -191,6 +191,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         "--wfx",
         action="store_true",
         help="Use .wfx wavefunction format instead of .wfn (more stable for heavy atoms, Z > 36)",
+    )   
+    
+    parser.add_argument(
         "--check_orca",
         action="store_true",
         help="require orca.json during validation (for retroactive ORCA .out parsing)",
