@@ -371,11 +371,11 @@ def create_jobs(
                     file_wf_target = file_gbw.replace(".gbw", wf_ext)
                     file_wf_bare = file_wf_target.split("/")[-1]
                     if wfx:
-                        # Multiwfn menu 100 -> 2 -> 5: export to .wfx
-                        data = "100\n2\n5\n{}\n0\nq\n".format(file_wf_bare)
-                    else:
-                        # Multiwfn menu 100 -> 2 -> 4: export to .wfn
+                        # Multiwfn menu 100 -> 2 -> 4: export to .wfx
                         data = "100\n2\n4\n{}\n0\nq\n".format(file_wf_bare)
+                    else:
+                        # Multiwfn menu 100 -> 2 -> 5: export to .wfn
+                        data = "100\n2\n5\n{}\n0\nq\n".format(file_wf_bare)
                     f.write(data)
 
             # else:

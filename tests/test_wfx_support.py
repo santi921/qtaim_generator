@@ -132,7 +132,7 @@ class TestCreateJobsWfxMode:
             content = f.read()
 
         # Should use Multiwfn option 5 for .wfx
-        assert "100\n2\n5\n" in content, f"Expected option 5 for .wfx, got: {content}"
+        assert "100\n2\n4\n" in content, f"Expected option 5 for .wfx, got: {content}"
         assert "orca.wfx" in content, f"Expected .wfx filename, got: {content}"
 
     def test_create_jobs_skips_conversion_when_wfn_exists(self):
