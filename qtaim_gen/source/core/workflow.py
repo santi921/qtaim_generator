@@ -62,6 +62,7 @@ def process_folder(
     orca_6: bool = True,
     full_set: bool = False,
     move_results: bool = True,
+    wfx: bool = False,
 ) -> Dict[str, Any]:
     """Process a single folder and return a small status dict.
 
@@ -169,6 +170,7 @@ def process_folder(
             full_set=full_set,
             preprocess_compressed=preprocess_compressed,
             move_results=move_results,
+            wfx=wfx,
         )
         t1: float = time.time()
 
@@ -236,6 +238,7 @@ def process_folder_alcf(
         str
     ] = None,  # root where to store results, should mimic root_omol_inputs
     root_omol_inputs: Optional[str] = None,  # root where input folders are located
+    wfx: bool = False,
 ) -> Dict[str, Any]:
     """Process a single folder and return a small status dict.
 
@@ -263,7 +266,8 @@ def process_folder_alcf(
         "orca.out",
         "orca.engrad",
         "orca_stderr",
-        "orca.wfn", # this is specific to HPC where we are moving wfns to process 
+        "orca.wfn",  # this is specific to HPC where we are moving wfns to process
+        "orca.wfx", 
         #"orca.inp"  # this is specific to HPC where we are moving wfns to process
     ]
 
@@ -415,10 +419,11 @@ def process_folder_alcf(
             preprocess_compressed=preprocess_compressed,
             move_results=move_results,
             patch_path=patch_path,
+            wfx=wfx,
         )
         t1: float = time.time()
 
-        # remove density_mat.npz, orca.gbw.zstd0, orca.gbw, orca.tar.zst from results folder    
+        # remove density_mat.npz, orca.gbw.zstd0, orca.gbw, orca.tar.zst from results folder
         if clean:    
             for fn in files_to_remove:
                 fp = os.path.join(folder, fn)

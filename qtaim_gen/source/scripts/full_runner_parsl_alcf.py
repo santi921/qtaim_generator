@@ -187,6 +187,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         help="sometimes multiwfn has issues with pathing so this will just write the input with the relative path",
     )
 
+    parser.add_argument(
+        "--wfx",
+        action="store_true",
+        help="Use .wfx wavefunction format instead of .wfn (more stable for heavy atoms, Z > 36)",
+    )
+
     args = parser.parse_args(argv)
     # print(args)
     for key, value in vars(args).items():
@@ -213,6 +219,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     root_omol_inputs: Optional[str] = getattr(args, "root_omol_inputs", None)
     clean_first: bool = bool(getattr(args, "clean_first", False))
     patch_path: bool = bool(getattr(args, "patch_path", False))
+    wfx: bool = bool(getattr(args, "wfx", False))
 
     # parsl args
     type_runner: str = str(getattr(args, "type_runner", "local"))
@@ -321,6 +328,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             root_omol_inputs=root_omol_inputs,
             clean_first=clean_first,
             patch_path=patch_path,
+            wfx=wfx,
         )
         for f in folders_run
     ]

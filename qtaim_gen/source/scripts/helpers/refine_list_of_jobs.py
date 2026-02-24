@@ -147,12 +147,13 @@ def main(argv: Optional[List[str]] = None) -> int:
                 folder_outputs = folder_inputs
             # check if folder exists with more than 3 files
             if os.path.exists(folder_outputs):
-                # check if there is no orca.wfn file in the folder and that there is no gbw_analysis.log file
-                if not os.path.exists(
-                    os.path.join(folder_outputs, "orca.wfn")
-                ) and os.path.exists(os.path.join(folder_outputs, "gbw_analysis.log")):
+                # check if there is no wavefunction file in the folder and that there is no gbw_analysis.log file
+                from qtaim_gen.source.utils.io import has_wavefunction_file
+                if not has_wavefunction_file(folder_outputs) and os.path.exists(
+                    os.path.join(folder_outputs, "gbw_analysis.log")
+                ):
                     print(
-                        f"Orphaned job detected: {folder_outputs} missing orca.wfn w log present"
+                        f"Orphaned job detected: {folder_outputs} missing wfn/wfx w log present"
                     )
                     count_orphaned += 1
 

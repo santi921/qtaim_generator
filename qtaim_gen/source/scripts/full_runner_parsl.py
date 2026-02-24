@@ -165,6 +165,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         help="clean folder before running analysis",
     )
 
+    parser.add_argument(
+        "--wfx",
+        action="store_true",
+        help="Use .wfx wavefunction format instead of .wfn (more stable for heavy atoms, Z > 36)",
+    )
+
     args = parser.parse_args(argv)
     # print(args)
     for key, value in vars(args).items():
@@ -188,6 +194,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     dry_run: bool = bool(getattr(args, "dry_run", False))
     overwrite = bool(args.overwrite) if "overwrite" in args else False
     clean_first: bool = bool(getattr(args, "clean_first", False))
+    wfx: bool = bool(getattr(args, "wfx", False))
 
     # parsl args
     type_runner: str = str(getattr(args, "type_runner", "local"))
@@ -276,6 +283,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             preprocess_compressed=preprocess_compressed,
             move_results=move_results,
             clean_first=clean_first,
+            wfx=wfx,
         )
         for f in folders_run
     ]
