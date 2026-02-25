@@ -5,6 +5,7 @@ from typing import Dict, Sequence, Any, Union, List, Tuple, Optional
 import time
 import random
 import concurrent.futures
+import zipfile
 from tqdm import tqdm
 import numpy as np
 from rdkit import Chem
@@ -166,6 +167,7 @@ def get_folders_from_file(
     logger: Any = None,
     max_workers: int = 8,
     check_orca: bool = False,
+    check_ecp: bool = False,
 ) -> List[str]:
     print(
         f"collecting {num_folders} folders from {job_file} with pre_validate={pre_validate} (parallelized)"
@@ -213,6 +215,13 @@ def get_folders_from_file(
                         logger.info(f"Adding {folder} to run list after pre-validation")
                     return folder
                 else:
+                    # validation passed — check ECP if requested
+                    if check_ecp:
+                        ecp_status = check_ecp_for_folder(folder_outputs)
+                        if ecp_status != ECP_PASSED:
+                            if logger:
+                                logger.info(f"Adding {folder} to run list: ECP status={ecp_status}")
+                            return folder
                     if logger:
                         logger.info(f"Skipping {folder} due to pre-validation pass")
                     return None
@@ -247,6 +256,46 @@ def get_folders_from_file(
         folders_run = folders[:num_folders]
 
     return folders_run
+
+
+# ECP zip-validation status codes
+ECP_NO_ZIP = 0   # zip missing, empty, corrupt, or lacks adch.out/cm5.out
+ECP_PASSED = 1
+ECP_FAILED = -1
+
+
+def check_ecp_for_folder(folder_outputs: str) -> int:
+    """Check whether ECP loaded successfully for a completed job folder.
+
+    Inspects {folder_outputs}/generator/out_files.zip for adch.out or cm5.out
+    and searches for "Loading EDF library finished!" to confirm ECP was active.
+
+    Args:
+        folder_outputs: Path to the job output folder containing generator/ subdirectory
+
+    Returns:
+        ECP_NO_ZIP (0)  - zip missing, empty, corrupt, or lacks candidate files
+        ECP_PASSED (1)  - EDF library line found; ECP loaded correctly
+        ECP_FAILED (-1) - candidate files found but EDF line absent; ECP failed
+    """
+    zip_path = os.path.join(folder_outputs, "generator", "out_files.zip")
+    if not os.path.isfile(zip_path):
+        return ECP_NO_ZIP
+    target = "Loading EDF library finished!"
+    candidates = ["adch.out", "cm5.out"]
+    try:
+        with zipfile.ZipFile(zip_path, "r") as zf:
+            names = set(zf.namelist())
+            present = [c for c in candidates if c in names]
+            if not present:
+                return ECP_NO_ZIP
+            for cand in present:
+                data = zf.read(cand).decode("utf-8", errors="replace")
+                if target in data:
+                    return ECP_PASSED
+            return ECP_FAILED
+    except (zipfile.BadZipFile, OSError):
+        return ECP_NO_ZIP
 
 
 def pull_ecp_dict(orca_out: str) -> Dict[int, Dict[str, Union[str, float]]]:
