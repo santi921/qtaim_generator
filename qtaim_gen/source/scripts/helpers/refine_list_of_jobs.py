@@ -92,6 +92,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         help="require orca.json during validation (for retroactive ORCA .out parsing)",
     )
 
+    parser.add_argument(
+        "--check_ecp",
+        action="store_true",
+        help="filter out jobs where ECP loaded successfully; keep only ECP_FAILED and ECP_NO_ZIP jobs",
+    )
+
     args = parser.parse_args(argv)
     # print(args)
     for key, value in vars(args).items():
@@ -104,6 +110,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     job_file: str = getattr(args, "job_file")
     orphaned_check: bool = bool(getattr(args, "check_orphaned", False))
     check_orca: bool = bool(getattr(args, "check_orca", False))
+    check_ecp: bool = bool(getattr(args, "check_ecp", False))
     refined_job_file: str = getattr(args, "refined_job_file", "refined_jobs.txt")
     root_omol_results: Optional[str] = getattr(args, "root_omol_results", None)
     root_omol_inputs: Optional[str] = getattr(args, "root_omol_inputs", None)
@@ -134,6 +141,30 @@ def main(argv: Optional[List[str]] = None) -> int:
     if not folders_run:
         print(f"No folders found in {job_file}")
         return []
+
+    if check_ecp:
+        from qtaim_gen.source.utils.io import check_ecp_for_folder, ECP_PASSED
+        ecp_filtered = []
+        count_ecp_passed = 0
+        for folder_inputs in folders_run:
+            if (
+                root_omol_inputs
+                and root_omol_results
+                and folder_inputs.startswith(root_omol_inputs)
+            ):
+                folder_relative = folder_inputs[len(root_omol_inputs):].lstrip(os.sep)
+                folder_outputs = os.path.join(root_omol_results, folder_relative)
+            else:
+                folder_outputs = folder_inputs
+
+            status = check_ecp_for_folder(folder_outputs)
+            if status != ECP_PASSED:
+                ecp_filtered.append(folder_inputs)
+            else:
+                count_ecp_passed += 1
+
+        print(f"ECP check: {count_ecp_passed} jobs passed ECP (removed), {len(ecp_filtered)} jobs kept")
+        folders_run = ecp_filtered
 
     # save refined job file
     with open(refined_job_file, "w") as f:
@@ -179,59 +210,13 @@ if __name__ == "__main__":
 """
 stragglers nakb, dna, droplet, mo_hydrides
 
-python refine_list_of_jobs.py --root_omol_inputs /lus/eagle/projects/OMol25/ \
---job_file /lus/eagle/projects/generator/jobs_by_topdir/mo_hydrides_refined.txt --move_results \
---refined_job_file /lus/eagle/projects/generator/jobs_by_topdir/mo_hydrides_refined.txt \
-    --full_set 0 --root_omol_results /lus/eagle/projects/generator/OMol25_postprocessing/ 
-1 left - 2/20
 
-python refine_list_of_jobs.py --root_omol_inputs /lus/eagle/projects/OMol25/ \
---job_file /lus/eagle/projects/generator/jobs_by_topdir/droplet_refined.txt --move_results \
---refined_job_file /lus/eagle/projects/generator/jobs_by_topdir/droplet_refined.txt \
-    --full_set 0 --root_omol_results /lus/eagle/projects/generator/OMol25_postprocessing/ 
-2 left - running rn (2/20)
-
-python refine_list_of_jobs.py --root_omol_inputs /lus/eagle/projects/OMol25/ \
---job_file /lus/eagle/projects/generator/jobs_by_topdir/nakb_refined.txt --move_results \
---refined_job_file /lus/eagle/projects/generator/jobs_by_topdir/nakb_refined.txt \
-    --full_set 0 --root_omol_results /lus/eagle/projects/generator/OMol25_postprocessing/ 
-22 left - running rn (2/20)
-
-python refine_list_of_jobs.py --root_omol_inputs /lus/eagle/projects/OMol25/ \
---job_file /lus/eagle/projects/generator/jobs_by_topdir/dna_refined.txt --move_results \
---refined_job_file /lus/eagle/projects/generator/jobs_by_topdir/dna_refined.txt \
-    --full_set 0 --root_omol_results /lus/eagle/projects/generator/OMol25_postprocessing/ 
-5 left  - running rn (2/20)
-
-python refine_list_of_jobs.py --root_omol_inputs /lus/eagle/projects/OMol25/ \
---job_file /lus/eagle/projects/generator/jobs_by_topdir/orbnet_denali_refined.txt --move_results \
---refined_job_file /lus/eagle/projects/generator/jobs_by_topdir/orbnet_denali_refined.txt \
-    --full_set 0 --root_omol_results /lus/eagle/projects/generator/OMol25_postprocessing/ 
-2 left - running rn (2/20)
+# qtaim edge cases - no CPs detected so no CPprop.txt files is produced
 
 python refine_list_of_jobs.py --root_omol_inputs /lus/eagle/projects/OMol25/ \
 --job_file /lus/eagle/projects/generator/jobs_by_topdir/spice_refined.txt --move_results \
 --refined_job_file /lus/eagle/projects/generator/jobs_by_topdir/spice_refined.txt \
     --full_set 0 --root_omol_results /lus/eagle/projects/generator/OMol25_postprocessing/ 
-1397 left - running rn (2/20)
-
-
-
-# PACKAGED TOGETHER
-python refine_list_of_jobs.py --root_omol_inputs /lus/eagle/projects/OMol25/ \
---job_file /lus/eagle/projects/generator/jobs_by_topdir/packaged_together.txt --move_results \
---refined_job_file /lus/eagle/projects/generator/jobs_by_topdir/packaged_together.txt \
-    --full_set 0 --root_omol_results /lus/eagle/projects/generator/OMol25_postprocessing/ 
-
-python refine_list_of_jobs.py --root_omol_inputs /lus/eagle/projects/OMol25/ \
---job_file /lus/eagle/projects/generator/jobs_by_topdir/geom_orca6_refined.txt --move_results \
---refined_job_file /lus/eagle/projects/generator/jobs_by_topdir/geom_orca6_refined.txt \
-    --full_set 0 --root_omol_results /lus/eagle/projects/generator/OMol25_postprocessing/ 
-5 left - running rn (2/20)
-
-cat geom_orca6_refined.txt >> packaged_together.txt
-
-cat spice_refined.txt >> packaged_together.txt
 
 
 # tuo
