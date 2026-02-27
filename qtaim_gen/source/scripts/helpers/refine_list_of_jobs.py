@@ -136,35 +136,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         move_results=move_results,
         full_set=full_set,
         check_orca=check_orca,
+        check_ecp=check_ecp,
     )
 
     if not folders_run:
         print(f"No folders found in {job_file}")
         return []
-
-    if check_ecp:
-        from qtaim_gen.source.utils.io import check_ecp_for_folder, ECP_PASSED
-        ecp_filtered = []
-        count_ecp_passed = 0
-        for folder_inputs in folders_run:
-            if (
-                root_omol_inputs
-                and root_omol_results
-                and folder_inputs.startswith(root_omol_inputs)
-            ):
-                folder_relative = folder_inputs[len(root_omol_inputs):].lstrip(os.sep)
-                folder_outputs = os.path.join(root_omol_results, folder_relative)
-            else:
-                folder_outputs = folder_inputs
-
-            status = check_ecp_for_folder(folder_outputs)
-            if status != ECP_PASSED:
-                ecp_filtered.append(folder_inputs)
-            else:
-                count_ecp_passed += 1
-
-        print(f"ECP check: {count_ecp_passed} jobs passed ECP (removed), {len(ecp_filtered)} jobs kept")
-        folders_run = ecp_filtered
 
     # save refined job file
     with open(refined_job_file, "w") as f:
@@ -248,4 +225,10 @@ full-runner-parsl-alcf --num_folders 1 --orca_2mkl_cmd $HOME/orca_6_0_0/orca_2mk
     --queue workq-route  --restart  --n_nodes 1 --job_file ../jobs_by_topdir/spice_test.txt  --n_threads_per_job 10 \
     --preprocess_compressed --root_omol_results /lus/eagle/projects/generator/OMol25_postprocessing/ --root_omol_inputs /lus/eagle/projects/OMol25/
 
+
+
+python refine_list_of_jobs.py --root_omol_inputs /p/lustre5/bennion1/Omol2025-4M-DiversitySet/ \
+--job_file /p/lustre5/vargas58/validate/low_spin_23_heavy_tuo.txt --move_results \
+--refined_job_file /p/lustre5/vargas58/validate/low_spin_23_heavy_tuo_refined.txt \
+    --full_set 0 --root_omol_results /p/lustre5/vargas58/OMol4M/ --check_ecp
 """
