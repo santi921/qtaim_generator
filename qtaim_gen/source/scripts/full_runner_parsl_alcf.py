@@ -191,9 +191,18 @@ def main(argv: Optional[List[str]] = None) -> int:
         "--wfx",
         action="store_true",
         help="Use .wfx wavefunction format instead of .wfn (more stable for heavy atoms, Z > 36)",
+    )   
+    
+    parser.add_argument(
         "--check_orca",
         action="store_true",
         help="require orca.json during validation (for retroactive ORCA .out parsing)",
+    )
+
+    parser.add_argument(
+        "--check_ecp",
+        action="store_true",
+        help="queue jobs that passed validation but have ECP_FAILED or ECP_NO_ZIP status (use with --clean_first to restart them)",
     )
 
     parser.add_argument(
@@ -230,6 +239,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     patch_path: bool = bool(getattr(args, "patch_path", False))
     wfx: bool = bool(getattr(args, "wfx", False))
     check_orca: bool = bool(getattr(args, "check_orca", False))
+    check_ecp: bool = bool(getattr(args, "check_ecp", False))
     exhaustive_qtaim: bool = bool(getattr(args, "exhaustive_qtaim", False))
 
     # parsl args
@@ -304,6 +314,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         move_results=move_results,
         full_set=full_set,
         check_orca=check_orca,
+        check_ecp=check_ecp,
     )
 
     if not folders_run:

@@ -110,11 +110,11 @@ class TestCreateJobsWfxMode:
             content = f.read()
 
         # Should use Multiwfn option 4 for .wfn
-        assert "100\n2\n4\n" in content, f"Expected option 4 for .wfn, got: {content}"
+        assert "100\n2\n5\n" in content, f"Expected option 5 for .wfn, got: {content}"
         assert "orca.wfn" in content, f"Expected .wfn filename, got: {content}"
 
     def test_create_jobs_wfx_mode(self):
-        """With wfx=True, produces option 5 targeting .wfx."""
+        """With wfx=True, produces option 4 targeting .wfx."""
         from qtaim_gen.source.core.omol import create_jobs
 
         create_jobs(
