@@ -1,10 +1,17 @@
 #!/usr/bin/env python3
 import os
+import logging
 import argparse
 from typing import Optional, List
 from qtaim_gen.source.utils.io import get_folders_from_file
 
 should_stop = False
+
+logger = logging.getLogger("refine_list_of_jobs")
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+)
 
 
 def handle_signal(signum, frame):
@@ -137,6 +144,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         full_set=full_set,
         check_orca=check_orca,
         check_ecp=check_ecp,
+        logger=logger,
     )
 
     if not folders_run:
@@ -165,6 +173,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             if os.path.exists(folder_outputs):
                 # check if there is no wavefunction file in the folder and that there is no gbw_analysis.log file
                 from qtaim_gen.source.utils.io import has_wavefunction_file
+
                 if not has_wavefunction_file(folder_outputs) and os.path.exists(
                     os.path.join(folder_outputs, "gbw_analysis.log")
                 ):
@@ -185,38 +194,44 @@ if __name__ == "__main__":
     raise SystemExit(main())
 
 """
-stragglers nakb, dna, droplet, mo_hydrides
+------------------------------------------------------------------------
+alcf redos for zips 
+------------------------------------------------------------------------
 
 
-# qtaim edge cases - no CPs detected so no CPprop.txt files is produced
 
 python refine_list_of_jobs.py --root_omol_inputs /lus/eagle/projects/OMol25/ \
---job_file /lus/eagle/projects/generator/jobs_by_topdir/spice_refined.txt --move_results \
---refined_job_file /lus/eagle/projects/generator/jobs_by_topdir/spice_refined.txt \
+--job_file /lus/eagle/projects/generator/jobs_by_topdir/mo_hydrides_heavy_alcf_refined.txt --move_results \
+--refined_job_file /lus/eagle/projects/generator/jobs_by_topdir/mo_hydrides_heavy_alcf_refined.txt --check_ecp \
     --full_set 0 --root_omol_results /lus/eagle/projects/generator/OMol25_postprocessing/ 
 
-
+    
 # tuo
 python refine_list_of_jobs.py --root_omol_inputs /p/lustre5/bennion1/Omol2025-4M-DiversitySet/ \
 --job_file /p/lustre5/vargas58/generator_working/job_lists/ml_mo_refined.txt --move_results \
 --refined_job_file /p/lustre5/vargas58/generator_working/job_lists/ml_mo_refined.txt \
     --full_set 0 --root_omol_results /p/lustre5/vargas58/OMol4M/
 
-
-
+done
+cat electrolytes_scaled_sep_refined.txt >> packaged_together.txt
 cat pmechdb_refined.txt >> packaged_together.txt
 cat rmechdb_refined.txt >> packaged_together.txt
-cat electrolytes_scaled_sep_refined.txt >> packaged_together.txt
-cat electrolytes_reactivity_refined.txt >> packaged_together.txt
 cat rgd_uks_refined.txt >> packaged_together.txt
 cat rpmd_refined.txt >> packaged_together.txt
+cat low_spin_23_refined.txt >> packaged_together.txt
+
+finish
+cat electrolytes_reactivity_refined.txt >> packaged_together.txt
 cat pdb_fragments_300K_refined.txt >> packaged_together.txt
 cat pdb_pockets_400K_refined.txt >> packaged_together.txt
-cat low_spin_23_refined.txt >> packaged_together.txt
 cat pdb_fragments_400K_refined.txt >> packaged_together.txt
 cat rna_refined.txt >> packaged_together.txt
+cat ml_mo_refined.txt >> packaged_together.txt
+cat ml_protein_interface_refined.txt >> packaged_together.txt
+cat protein_interface_refined.txt >> packaged_together.txt
 cat tm_react_refined.txt >> packaged_together.txt
 cat scaled_separations_exp_refined.txt >> packaged_together.txt
+cat 5A_elytes_refined.txt >> packaged_together.txt
 
 
 full-runner-parsl-alcf --num_folders 1 --orca_2mkl_cmd $HOME/orca_6_0_0/orca_2mkl \
@@ -227,8 +242,18 @@ full-runner-parsl-alcf --num_folders 1 --orca_2mkl_cmd $HOME/orca_6_0_0/orca_2mk
 
 
 
-python refine_list_of_jobs.py --root_omol_inputs /p/lustre5/bennion1/Omol2025-4M-DiversitySet/ \
---job_file /p/lustre5/vargas58/validate/low_spin_23_heavy_tuo.txt --move_results \
---refined_job_file /p/lustre5/vargas58/validate/low_spin_23_heavy_tuo_refined.txt \
-    --full_set 0 --root_omol_results /p/lustre5/vargas58/OMol4M/ --check_ecp
+python refine_list_of_jobs.py --root_omol_inputs /lus/eagle/projects/OMol25/ \
+--job_file /lus/eagle/projects/generator/jobs_by_topdir/spice_heavy_alcf.txt --move_results \
+--refined_job_file /lus/eagle/projects/generator/jobs_by_topdir/spice_heavy_alcf_refined.txt \
+    --full_set 0 --root_omol_results /lus/eagle/projects/generator/OMol25_postprocessing/ --check_ecp
+
+
+python refine_list_of_jobs.py --root_omol_inputs /lus/eagle/projects/OMol25/ \
+--job_file /lus/eagle/projects/generator/jobs_by_topdir/spice.txt --move_results \
+--refined_job_file /lus/eagle/projects/generator/jobs_by_topdir/spice_refined.txt \
+    --full_set 0 --root_omol_results /lus/eagle/projects/generator/OMol25_postprocessing/ --check_ecp
+
 """
+
+
+
