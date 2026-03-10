@@ -28,13 +28,8 @@ from qtaim_embed.data.processing import (
 )
 from qtaim_embed.core.molwrapper import MoleculeWrapper
 from qtaim_embed.utils.grapher import get_grapher
-#try: 
-
-from qtaim_embed.data.lmdb import serialize_dgl_graph, load_dgl_graph_from_serialized
-serial_func = serialize_dgl_graph
-#except: 
-#    from qtaim_embed.data.lmdb import serialize_graph
-#    serial_func = serialize_graph
+from qtaim_embed.data.lmdb import serialize_graph, load_graph_from_serialized
+serial_func = serialize_graph
 
 from qtaim_gen.source.utils.lmdbs import (
     get_elements_from_structure_lmdb,
@@ -486,7 +481,7 @@ class Converter:
                 if key_str not in self.config_dict["filter_list"]:
                     # process graph
                     try:
-                        graph = load_dgl_graph_from_serialized(pickle.loads(value))
+                        graph = load_graph_from_serialized(pickle.loads(value))
                     except Exception as e:
                         self.logger.exception(f"Failed to load graph for key {key_str}: {e}")
                         continue
@@ -498,7 +493,7 @@ class Converter:
                     txn.put(
                         f"{key_str}".encode("ascii"),
                         pickle.dumps(
-                            serialize_dgl_graph(graph[0], ret=True), protocol=-1
+                            serialize_graph(graph[0], ret=True), protocol=-1
                         ),
                     )
                     txn.commit()
@@ -918,16 +913,16 @@ class Converter:
                         continue
 
                     try:
-                        # Deserialize: pickle.loads returns bytes, then deserialize to DGLGraph
+                        # Deserialize: pickle.loads returns bytes, then deserialize to PyG HeteroData
                         serialized_bytes = pickle.loads(value)
-                        graph = load_dgl_graph_from_serialized(serialized_bytes)
+                        graph = load_graph_from_serialized(serialized_bytes)
 
                         # Apply scalers - feature scaler expects a list
                         graph = merged_feature_scaler([graph])
                         graph = merged_label_scaler(graph)
 
                         # Serialize and write back
-                        serialized_bytes = serialize_dgl_graph(graph[0], ret=True)
+                        serialized_bytes = serialize_graph(graph[0], ret=True)
                         txn.put(key, pickle.dumps(serialized_bytes, protocol=-1))
                         count += 1
                     except Exception as e:
@@ -1114,7 +1109,7 @@ class BaseConverter(Converter):
                 self.label_scaler_iterative.update([first_graph])
                 write_buffer.append((
                     f"{key_str}".encode("ascii"),
-                    pickle.dumps(serialize_dgl_graph(first_graph, ret=True), protocol=-1),
+                    pickle.dumps(serialize_graph(first_graph, ret=True), protocol=-1),
                 ))
                 processed_count += 1
                 first_key_idx = idx + 1
@@ -1153,7 +1148,7 @@ class BaseConverter(Converter):
 
                         write_buffer.append((
                             f"{key_str}".encode("ascii"),
-                            pickle.dumps(serialize_dgl_graph(graph, ret=True), protocol=-1),
+                            pickle.dumps(serialize_graph(graph, ret=True), protocol=-1),
                         ))
                         processed_count += 1
 
@@ -1370,7 +1365,7 @@ class QTAIMConverter(Converter):
                 self.label_scaler_iterative.update([first_graph])
                 write_buffer.append((
                     f"{key_str}".encode("ascii"),
-                    pickle.dumps(serialize_dgl_graph(first_graph, ret=True), protocol=-1),
+                    pickle.dumps(serialize_graph(first_graph, ret=True), protocol=-1),
                 ))
                 processed_count += 1
                 first_key_idx = idx + 1
@@ -1409,7 +1404,7 @@ class QTAIMConverter(Converter):
 
                         write_buffer.append((
                             f"{key_str}".encode("ascii"),
-                            pickle.dumps(serialize_dgl_graph(graph, ret=True), protocol=-1),
+                            pickle.dumps(serialize_graph(graph, ret=True), protocol=-1),
                         ))
                         processed_count += 1
 
@@ -1965,7 +1960,7 @@ class GeneralConverter(Converter):
                     self.label_scaler_iterative.update([first_graph])
                     write_buffer.append((
                         f"{key_str}".encode("ascii"),
-                        pickle.dumps(serialize_dgl_graph(first_graph, ret=True), protocol=-1),
+                        pickle.dumps(serialize_graph(first_graph, ret=True), protocol=-1),
                     ))
                     processed_count += 1
                     first_key_idx = idx + 1
@@ -2012,7 +2007,7 @@ class GeneralConverter(Converter):
 
                         write_buffer.append((
                             f"{key_str}".encode("ascii"),
-                            pickle.dumps(serialize_dgl_graph(graph, ret=True), protocol=-1),
+                            pickle.dumps(serialize_graph(graph, ret=True), protocol=-1),
                         ))
                         processed_count += 1
 
