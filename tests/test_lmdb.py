@@ -1018,11 +1018,12 @@ class TestSharding:
                 txn.put("length".encode(), pkl.dumps(5))
             env.close()
 
-        # Merge shards
+        # Merge shards — returns (path, count) tuple
         merged_path = os.path.join(self.temp_dir, "merged.lmdb")
-        result_path = merge_shards(shard_paths, merged_path, self.logger)
+        result_path, merged_count = merge_shards(shard_paths, merged_path, self.logger)
 
         assert result_path == merged_path, "merge_shards should return the output path"
+        assert merged_count == 15, f"Expected 15 merged entries, got {merged_count}"
         assert os.path.exists(merged_path), "Merged LMDB should exist"
 
         # Verify merged data
@@ -1071,10 +1072,11 @@ class TestSharding:
 
         merged_path = os.path.join(self.temp_dir, "merged_missing.lmdb")
 
-        # Should not raise, but warn
-        result_path = merge_shards(shard_paths, merged_path, self.logger)
+        # Should not raise, but warn — returns (path, count) tuple
+        result_path, merged_count = merge_shards(shard_paths, merged_path, self.logger)
 
         assert os.path.exists(result_path), "Merged LMDB should still be created"
+        assert merged_count == 1, f"Expected 1 merged entry, got {merged_count}"
 
         # Verify it contains data from the existing shard
         env = lmdb.open(merged_path, subdir=False, readonly=True, lock=False)

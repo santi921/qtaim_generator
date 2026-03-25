@@ -69,30 +69,27 @@ def split_graph_labels(
     """
     Splits the graph into features and labels.
 
+    For each node type that has a 'feat' attribute, extracts label columns
+    (include_locs) into a 'labels' attribute and keeps the remaining columns
+    (exclude_locs) as 'feat'.
+
+    Works with PyG HeteroData: features are at graph[node_type].feat.
+
     Args:
-        graph (Any): The DGL graph.
-        include_names (Dict[str, List[str]]): Names of features to include in labels.
-        include_locs (Dict[str, List[int]]): Indices of features to include in labels.
-        exclude_locs (Dict[str, List[int]]): Indices of features to exclude from labels.
-
-    Returns:
-        None
+        graph: PyG HeteroData graph.
+        include_names: Node types to split {node_type: [label_names]}.
+        include_locs: Column indices to extract as labels {node_type: [int]}.
+        exclude_locs: Column indices to keep as features {node_type: [int]}.
     """
-    labels = {}
-    features_new = {}
+    for node_type in graph.node_types:
+        if node_type not in include_names:
+            continue
+        if not hasattr(graph[node_type], "feat"):
+            continue
 
-    for key, value in graph.ndata["feat"].items():
-        if key in include_names.keys():
-            graph_features = {}
-
-            graph_features[key] = graph.ndata["feat"][key][:, exclude_locs[key]]
-
-            features_new.update(graph_features)
-
-            labels[key] = graph.ndata["feat"][key][:, include_locs[key]]
-
-        graph.ndata["feat"] = features_new
-        graph.ndata["labels"] = labels
+        feat = graph[node_type].feat
+        graph[node_type].labels = feat[:, include_locs[node_type]]
+        graph[node_type].feat = feat[:, exclude_locs[node_type]]
 
 
 def initialize_grapher(
