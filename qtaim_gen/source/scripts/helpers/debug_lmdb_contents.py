@@ -6,13 +6,13 @@ import pickle
 import sys
 from collections import Counter
 
-# Try to import DGL deserialization functions
+# Try to import graph deserialization functions
 try:
-    from qtaim_embed.data.lmdb import load_dgl_graph_from_serialized
-    HAS_DGL_DESER = True
+    from qtaim_embed.data.lmdb import load_graph_from_serialized
+    HAS_GRAPH_DESER = True
 except ImportError:
-    HAS_DGL_DESER = False
-    print("Warning: qtaim_embed not available, DGL graph deserialization disabled")
+    HAS_GRAPH_DESER = False
+    print("Warning: qtaim_embed not available, graph deserialization disabled")
 
 def inspect_lmdb(lmdb_path, deserialize_graphs=True):
     """Inspect LMDB and categorize entries by type.
@@ -68,9 +68,9 @@ def inspect_lmdb(lmdb_path, deserialize_graphs=True):
                     bytes_objects += 1
 
                     # Try to deserialize as DGL graph
-                    if deserialize_graphs and HAS_DGL_DESER:
+                    if deserialize_graphs and HAS_GRAPH_DESER:
                         try:
-                            graph = load_dgl_graph_from_serialized(obj)
+                            graph = load_graph_from_serialized(obj)
                             # Successfully deserialized to DGL graph
 
                             # Analyze feature/label sizes by node type
@@ -129,7 +129,7 @@ def inspect_lmdb(lmdb_path, deserialize_graphs=True):
     if bytes_objects > 0:
         print(f"\nDGL Deserialization:")
         print(f"  Bytes objects found: {bytes_objects}")
-        if HAS_DGL_DESER and deserialize_graphs:
+        if HAS_GRAPH_DESER and deserialize_graphs:
             print(f"  Successfully deserialized: {successful_deser}")
             print(f"  Failed to deserialize: {failed_deser}")
         else:
