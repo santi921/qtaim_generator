@@ -453,7 +453,21 @@ def parse_config_gen_to_embed(
     if "allowed_spins" not in config_dict.keys():
         config_dict["allowed_spins"] = None
 
-    # create config
+    # Split config defaults
+    if "split_method" not in config_dict:
+        config_dict["split_method"] = "random"
+    if "split_ratios" not in config_dict:
+        config_dict["split_ratios"] = [0.8, 0.1, 0.1]
+    if "split_seed" not in config_dict:
+        config_dict["split_seed"] = 42
+
+    # Validate split + sharding mutual exclusivity
+    total_shards = config_dict.get("total_shards", 1)
+    if total_shards > 1 and config_dict.get("_split_enabled", False):
+        raise ValueError(
+            "Splitting and sharding are mutually exclusive. "
+            f"Got total_shards={total_shards} with --split enabled."
+        )
 
     return config_dict
 
