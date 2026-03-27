@@ -291,7 +291,7 @@ def test_merge_with_scaling(tmp_path):
     # Verify the merged LMDB contains valid graphs
     import lmdb
     import pickle
-    from qtaim_embed.data.lmdb import load_dgl_graph_from_serialized
+    from qtaim_embed.data.lmdb import load_graph_from_serialized
 
     env = lmdb.open(merged_path, readonly=True, subdir=False, lock=False)
     with env.begin() as txn:
@@ -307,11 +307,11 @@ def test_merge_with_scaling(tmp_path):
             # Verify we can deserialize the graph
             try:
                 serialized_bytes = pickle.loads(value)
-                graph = load_dgl_graph_from_serialized(serialized_bytes)
+                graph = load_graph_from_serialized(serialized_bytes)
 
-                # Verify it's a valid DGL graph
-                assert hasattr(graph, 'ndata'), f"Key {key} should be a valid DGL graph"
-                assert hasattr(graph, 'edata'), f"Key {key} should be a valid DGL graph"
+                # Verify it's a valid PyG HeteroData graph
+                assert hasattr(graph, 'node_types'), f"Key {key} should be a valid PyG HeteroData graph"
+                assert hasattr(graph, 'edge_types'), f"Key {key} should be a valid PyG HeteroData graph"
                 graph_count += 1
             except Exception as e:
                 pytest.fail(f"Failed to deserialize graph at key {key}: {e}")

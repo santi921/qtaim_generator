@@ -1072,7 +1072,7 @@ class TestSharding:
 
         merged_path = os.path.join(self.temp_dir, "merged_missing.lmdb")
 
-        # Should not raise, but warn — returns (path, count) tuple
+        # Should not raise, but warn
         result_path, merged_count = merge_shards(shard_paths, merged_path, self.logger)
 
         assert os.path.exists(result_path), "Merged LMDB should still be created"

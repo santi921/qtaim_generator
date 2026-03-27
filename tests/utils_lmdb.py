@@ -21,18 +21,18 @@ def get_first_graph(converter):
 
 
 def check_graph_equality(graph1, graph2):
-    """Check that two PyG HeteroData graphs have same-shaped but different features."""
-    for node_type in graph1.node_types:
-        for attr in ("feat", "labels"):
-            if hasattr(graph1[node_type], attr) and hasattr(graph2[node_type], attr):
-                ft_1 = getattr(graph1[node_type], attr)
-                ft_2 = getattr(graph2[node_type], attr)
-                assert (
-                    ft_1.shape == ft_2.shape
-                ), f"Graph features shapes changed! {node_type}.{attr}. Graph 1: {ft_1.shape}, Graph 2: {ft_2.shape}"
-                assert not np.array_equal(
-                    ft_1.cpu().numpy(), ft_2.cpu().numpy()
-                ), f"Graph features are the same! {node_type}.{attr}."
+    for attr_name in ["feat", "labels"]:
+        for ntype in graph1.node_types:
+            if not hasattr(graph1[ntype], attr_name):
+                continue
+            ft_1 = getattr(graph1[ntype], attr_name)
+            ft_2 = getattr(graph2[ntype], attr_name)
+            assert (
+                ft_1.shape == ft_2.shape
+            ), f"Graph features shapes changed! {attr_name} {ntype}. Graph 1: {ft_1.shape}, Graph 2: {ft_2.shape}"
+            assert not np.array_equal(
+                ft_1.cpu().numpy(), ft_2.cpu().numpy()
+            ), f"Graph features are the same! {attr_name} {ntype}."
 
 
 def get_benchmark_info(converter):

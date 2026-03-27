@@ -19,7 +19,7 @@ def inspect_lmdb(lmdb_path, deserialize_graphs=True):
 
     Args:
         lmdb_path: Path to LMDB file
-        deserialize_graphs: If True and qtaim_embed available, deserialize DGL graphs from bytes
+        deserialize_graphs: If True and qtaim_embed available, deserialize graphs from bytes
     """
     print(f"\n{'='*60}")
     print(f"Inspecting: {lmdb_path}")
@@ -59,46 +59,44 @@ def inspect_lmdb(lmdb_path, deserialize_graphs=True):
                 # Categorize
                 if key_str in ['scaled', 'scaler_finalized']:
                     metadata_keys.append((key_str, obj_type, obj))
-                elif obj_type == 'DGLGraph' or (hasattr(obj, 'ndata') and hasattr(obj, 'edata')):
+                elif obj_type == 'HeteroData' or (hasattr(obj, 'node_types') and hasattr(obj, 'edge_types')):
                     graph_keys.append((key_str, obj_type))
                 elif obj_type in ['int', 'str', 'bool', 'float']:
                     error_keys.append((key_str, obj_type, obj))
                 elif obj_type == 'bytes':
-                    # Bytes object - might be serialized DGL graph
+                    # Bytes object - might be serialized graph
                     bytes_objects += 1
 
-                    # Try to deserialize as DGL graph
+                    # Try to deserialize as PyG graph
                     if deserialize_graphs and HAS_GRAPH_DESER:
                         try:
                             graph = load_graph_from_serialized(obj)
-                            # Successfully deserialized to DGL graph
 
                             # Analyze feature/label sizes by node type
                             feature_info = []
-                            for ntype in graph.ntypes:
-                                ndata = graph.nodes[ntype].data
-                                if ndata:
-                                    for feat_name, feat_tensor in ndata.items():
-                                        feature_info.append(f"{ntype}.{feat_name}: {tuple(feat_tensor.shape)}")
+                            for ntype in graph.node_types:
+                                store = graph[ntype]
+                                for attr_name in store.keys():
+                                    tensor = getattr(store, attr_name)
+                                    if hasattr(tensor, 'shape'):
+                                        feature_info.append(f"{ntype}.{attr_name}: {tuple(tensor.shape)}")
 
                             # Create summary
-                            basic_info = f"{graph.num_nodes()} nodes, {graph.num_edges()} edges"
+                            basic_info = f"node_types={graph.node_types}"
                             if feature_info:
                                 feat_summary = "; Features: " + ", ".join(feature_info[:3])
                                 if len(feature_info) > 3:
                                     feat_summary += f" + {len(feature_info)-3} more"
                                 basic_info += feat_summary
 
-                            graph_keys.append((key_str, 'DGLGraph(deserialized)', basic_info, graph))
+                            graph_keys.append((key_str, 'HeteroData(deserialized)', basic_info, graph))
                             successful_deser += 1
-                            type_counter['DGLGraph(deserialized)'] += 1
+                            type_counter['HeteroData(deserialized)'] += 1
                         except Exception as deser_e:
-                            # Failed to deserialize - probably not a DGL graph
                             failed_deser += 1
                             error_keys.append((key_str, 'BYTES(failed_deser)',
                                              f"{len(obj)} bytes, error: {str(deser_e)[:50]}"))
                     else:
-                        # Deserialization disabled or not available
                         error_keys.append((key_str, 'RAW_BYTES',
                                          f"{len(obj)} bytes, starts with {obj[:20]}"))
                 else:
@@ -127,7 +125,7 @@ def inspect_lmdb(lmdb_path, deserialize_graphs=True):
 
     # Print deserialization stats if applicable
     if bytes_objects > 0:
-        print(f"\nDGL Deserialization:")
+        print(f"\nGraph Deserialization:")
         print(f"  Bytes objects found: {bytes_objects}")
         if HAS_GRAPH_DESER and deserialize_graphs:
             print(f"  Successfully deserialized: {successful_deser}")
@@ -156,23 +154,28 @@ def inspect_lmdb(lmdb_path, deserialize_graphs=True):
             first_graph_item = graph_keys[0]
             key, obj_type, info, graph = first_graph_item
             print(f"\n  Detailed Feature/Label Breakdown for '{key}':")
-            for ntype in graph.ntypes:
-                ndata = graph.nodes[ntype].data
-                if ndata:
-                    print(f"    {ntype} node features:")
-                    for feat_name, feat_tensor in ndata.items():
-                        print(f"      {feat_name}: shape={tuple(feat_tensor.shape)}, dtype={feat_tensor.dtype}")
+            for ntype in graph.node_types:
+                store = graph[ntype]
+                attrs = store.keys()
+                if attrs:
+                    print(f"    {ntype} node attributes:")
+                    for attr_name in attrs:
+                        tensor = getattr(store, attr_name)
+                        if hasattr(tensor, 'shape'):
+                            print(f"      {attr_name}: shape={tuple(tensor.shape)}, dtype={tensor.dtype}")
                 else:
-                    print(f"    {ntype} node features: (none)")
+                    print(f"    {ntype} node attributes: (none)")
 
             # Check edge features
-            if graph.etypes:
-                for etype in graph.canonical_etypes[:3]:  # Show first 3 edge types
-                    edata = graph.edges[etype].data
-                    if edata:
-                        print(f"    {etype} edge features:")
-                        for feat_name, feat_tensor in edata.items():
-                            print(f"      {feat_name}: shape={tuple(feat_tensor.shape)}, dtype={feat_tensor.dtype}")
+            for etype in list(graph.edge_types)[:3]:
+                store = graph[etype]
+                attrs = store.keys()
+                if attrs:
+                    print(f"    {etype} edge attributes:")
+                    for attr_name in attrs:
+                        tensor = getattr(store, attr_name)
+                        if hasattr(tensor, 'shape') and attr_name != 'edge_index':
+                            print(f"      {attr_name}: shape={tuple(tensor.shape)}, dtype={tensor.dtype}")
 
     # Print errors
     if error_keys:
@@ -199,7 +202,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Inspect LMDB contents and identify problematic entries")
     parser.add_argument("lmdb_paths", nargs="+", help="Path(s) to LMDB file(s)")
     parser.add_argument("--no-deserialize", action="store_true",
-                       help="Skip DGL graph deserialization (faster but less detailed)")
+                       help="Skip graph deserialization (faster but less detailed)")
 
     args = parser.parse_args()
 

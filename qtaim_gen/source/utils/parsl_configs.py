@@ -1,5 +1,7 @@
 # config.py
 import os
+import uuid
+from datetime import datetime
 from parsl.config import Config
 from parsl.providers import PBSProProvider, LocalProvider, SlurmProvider
 from parsl.executors import HighThroughputExecutor, FluxExecutor
@@ -9,6 +11,13 @@ from parsl.launchers import MpiExecLauncher, SrunLauncher
 from parsl.executors.threads import ThreadPoolExecutor
 from parsl.addresses import address_by_hostname
 from parsl.monitoring.monitoring import MonitoringHub
+
+
+def _unique_run_dir(prefix: str = "runinfo") -> str:
+    """Generate a unique run directory to avoid collisions between concurrent Parsl jobs."""
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    short_uuid = uuid.uuid4().hex[:8]
+    return os.path.join(prefix, f"{timestamp}_{short_uuid}")
 
 
 def alcf_config(
@@ -49,6 +58,7 @@ def alcf_config(
         monitoring = None
 
     nersc_single_tile_config = Config(
+        run_dir=_unique_run_dir(),
         executors=[
             HighThroughputExecutor(
                 label="htex_cpu",
@@ -144,6 +154,7 @@ def nersc_config(
         monitoring = None
 
     lrc_config = Config(
+        run_dir=_unique_run_dir(),
         executors=[
             HighThroughputExecutor(
                 label="htex_cpu",
@@ -253,7 +264,8 @@ def base_config(n_workers: int = 128) -> Config:
         Config: A Parsl configuration object.
     """
     local_threads = Config(
-        executors=[ThreadPoolExecutor(max_threads=n_workers, label="local_threads")]
+        run_dir=_unique_run_dir(),
+        executors=[ThreadPoolExecutor(max_threads=n_workers, label="local_threads")],
     )
     return local_threads
 
@@ -290,6 +302,7 @@ def tuo_flux_config(
         monitoring = None
 
     flux_cfg = Config(
+        run_dir=_unique_run_dir(),
         executors=[
             FluxExecutor(
                 label="flux",

@@ -129,7 +129,8 @@ def validate_timing_dict(
     verbose: bool = False,
     full_set: int = 0,
     spin_tf: bool = False,
-    logger: any = None
+    logger: any = None,
+    n_atoms: int = None,
 ):
     """
     Basic check that the timing json file has the expected structure.
@@ -193,7 +194,18 @@ def validate_timing_dict(
                 return False
 
         # check that the times aren't tiny
+        # For small molecules (n_atoms <= 2), bond-related timings may be
+        # legitimately near-zero since there are few or no bonds to analyze
+        bond_related_keys = {
+            "fuzzy_bond", "ibsi_bond", "laplacian_bond",
+            "becke_fuzzy_density", "hirsh_fuzzy_density",
+            "elf_fuzzy", "mbis_fuzzy_density",
+            "grad_norm_rho_fuzzy", "laplacian_rho_fuzzy",
+        }
+        is_small_molecule = n_atoms is not None and n_atoms <= 2
         if timing_dict[key] < 1e-6 and key != "convert":
+            if is_small_molecule and key in bond_related_keys:
+                continue  # acceptable for small molecules
             if logger:
                 logger.error(
                     f"Timing for '{key}' is too small: {timing_dict[key]} seconds."
@@ -216,11 +228,15 @@ def validate_timing_dict(
 
 
 def validate_bond_dict(
-    bond_json_loc: str, verbose: bool = False, full_set: int = 0, logger: any = None
+    bond_json_loc: str, verbose: bool = False, full_set: int = 0, logger: any = None,
+    n_atoms: int = None,
 ):
     """
     Basic check that the bond json file has the expected structure.
     Check that it has the keys 'fuzzy_bond', 'ibsi_bond', and 'laplacian_bond'.
+
+    For small molecules (n_atoms <= 2), missing bond keys are acceptable
+    since there may be no bonds to analyze.
     """
     with open(bond_json_loc, "r") as f:
         bond_dict = json.load(f)
@@ -232,8 +248,12 @@ def validate_bond_dict(
     if full_set > 1:
         expected_keys += ["laplacian_bond"]
 
+    is_small_molecule = n_atoms is not None and n_atoms <= 2
+
     for key in expected_keys:
         if key not in bond_dict:
+            if is_small_molecule:
+                continue  # acceptable for small molecules
             if verbose:
                 print(f"Missing expected key '{key}' in bond json.")
             if logger:

@@ -3,7 +3,7 @@ import lmdb
 import pickle as pkl
 import numpy as np
 from qtaim_gen.source.core.converter import BaseConverter
-from qtaim_embed.data.lmdb import load_dgl_graph_from_serialized
+from qtaim_embed.data.lmdb import load_graph_from_serialized
 from tests.utils_lmdb import get_first_graph
 
 
@@ -46,9 +46,11 @@ def test_key_normalization_and_scaling(tmp_path):
 
     # ensure at least one feature tensor changed after scaling
     changed = False
-    for node_level in first_pre.ndata["feat"].keys():
-        ft1 = first_pre.ndata["feat"][node_level]
-        ft2 = first_post.ndata["feat"][node_level]
+    for ntype in first_pre.node_types:
+        if not hasattr(first_pre[ntype], "feat"):
+            continue
+        ft1 = first_pre[ntype].feat
+        ft2 = first_post[ntype].feat
         if not np.array_equal(ft1.cpu().numpy(), ft2.cpu().numpy()):
             changed = True
             break

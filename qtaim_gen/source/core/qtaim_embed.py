@@ -76,20 +76,22 @@ def split_graph_labels(
     Works with PyG HeteroData: features are at graph[node_type].feat.
 
     Args:
-        graph: PyG HeteroData graph.
-        include_names: Node types to split {node_type: [label_names]}.
-        include_locs: Column indices to extract as labels {node_type: [int]}.
-        exclude_locs: Column indices to keep as features {node_type: [int]}.
-    """
-    for node_type in graph.node_types:
-        if node_type not in include_names:
-            continue
-        if not hasattr(graph[node_type], "feat"):
-            continue
+        graph (Any): The PyG HeteroData graph.
+        include_names (Dict[str, List[str]]): Names of features to include in labels.
+        include_locs (Dict[str, List[int]]): Indices of features to include in labels.
+        exclude_locs (Dict[str, List[int]]): Indices of features to exclude from labels.
 
-        feat = graph[node_type].feat
-        graph[node_type].labels = feat[:, include_locs[node_type]]
-        graph[node_type].feat = feat[:, exclude_locs[node_type]]
+    Returns:
+        None
+    """
+    for ntype in list(graph.node_types):
+        if not hasattr(graph[ntype], "feat"):
+            continue
+        feat_tensor = graph[ntype].feat
+        if ntype in include_names:
+            graph[ntype].feat = feat_tensor[:, exclude_locs[ntype]]
+            graph[ntype].labels = feat_tensor[:, include_locs[ntype]]
+        # node types not in include_names keep their feat unchanged
 
 
 def initialize_grapher(
