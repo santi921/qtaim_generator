@@ -211,6 +211,78 @@ class TestEdgeCases:
         assert result == {}
 
 
+# ── Empty bond section edge cases ─────────────────────────────────────
+
+
+EDGE_CASE_DIR = Path(__file__).parent.parent / "data" / "buggy_qtaim" / "edge_cases" / "orca_Outs"
+FIXTURE_EMPTY_BONDS_LI2 = str(EDGE_CASE_DIR / "orca.out")
+FIXTURE_EMPTY_BONDS_NALI = str(EDGE_CASE_DIR / "orca_2.out")
+
+
+class TestEmptyBondSections:
+    """Edge case: molecules with no bonds above threshold (Li2, NaLi)."""
+
+    @pytest.fixture
+    def li2_result(self):
+        return parse_orca_output(FIXTURE_EMPTY_BONDS_LI2)
+
+    @pytest.fixture
+    def nali_result(self):
+        return parse_orca_output(FIXTURE_EMPTY_BONDS_NALI)
+
+    def test_li2_has_final_energy(self, li2_result):
+        assert "final_energy_eh" in li2_result
+        assert li2_result["final_energy_eh"] == pytest.approx(-14.4499, rel=1e-3)
+
+    def test_nali_has_final_energy(self, nali_result):
+        assert "final_energy_eh" in nali_result
+        assert nali_result["final_energy_eh"] == pytest.approx(-169.2668, rel=1e-3)
+
+    def test_empty_loewdin_bonds_absent(self, li2_result):
+        """Empty bond section -> key absent, not empty dict."""
+        assert "loewdin_bond_orders" not in li2_result
+
+    def test_empty_mayer_bonds_absent(self, li2_result):
+        """'no bond orders to print' -> key absent."""
+        assert "mayer_bond_orders" not in li2_result
+
+    def test_mayer_population_still_parsed(self, li2_result):
+        """Mayer population data should survive even with empty bonds."""
+        assert "mayer_population" in li2_result
+        assert "mayer_charges" in li2_result
+        assert len(li2_result["mayer_charges"]) == 2
+
+    @pytest.mark.parametrize("key", [
+        "gradient", "gradient_norm", "gradient_rms", "gradient_max",
+        "dipole_au", "quadrupole_au", "rotational_constants_cm1",
+        "total_run_time_s", "scf_converged",
+    ])
+    def test_subsequent_sections_parsed(self, li2_result, key):
+        """All sections after empty bonds must still be reached."""
+        assert key in li2_result, f"Missing key: {key}"
+
+    @pytest.mark.parametrize("key", [
+        "gradient", "gradient_norm", "gradient_rms", "gradient_max",
+        "dipole_au", "quadrupole_au", "rotational_constants_cm1",
+        "total_run_time_s", "scf_converged",
+    ])
+    def test_nali_subsequent_sections_parsed(self, nali_result, key):
+        """NaLi: all sections after empty bonds must still be reached."""
+        assert key in nali_result, f"Missing key: {key}"
+
+    def test_li2_key_count(self, li2_result):
+        assert len(li2_result) >= 24
+
+    def test_nali_key_count(self, nali_result):
+        assert len(nali_result) >= 24
+
+    def test_li2_gradient_has_2_atoms(self, li2_result):
+        assert len(li2_result["gradient"]) == 2
+
+    def test_nali_gradient_has_2_atoms(self, nali_result):
+        assert len(nali_result["gradient"]) == 2
+
+
 # ── JSON I/O tests ───────────────────────────────────────────────────
 
 
