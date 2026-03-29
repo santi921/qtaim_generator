@@ -449,10 +449,11 @@ def parse_orca_output(orca_out_path: str) -> dict:
                 # ── LOEWDIN ATOMIC CHARGES ─────────────────────────
                 elif state == OrcaParseState.LOEWDIN_CHARGES:
                     if line.strip() == "" or line.strip().startswith("---"):
-                        if line.strip() == "" and loewdin_charges:
-                            result["loewdin_charges"] = loewdin_charges
-                            if loewdin_has_spin and loewdin_spins:
-                                result["loewdin_spins"] = loewdin_spins
+                        if line.strip() == "":
+                            if loewdin_charges:
+                                result["loewdin_charges"] = loewdin_charges
+                                if loewdin_has_spin and loewdin_spins:
+                                    result["loewdin_spins"] = loewdin_spins
                             state = OrcaParseState.IDLE
                         continue
                     idx, elem, vals = _parse_charge_line(line)
@@ -463,8 +464,9 @@ def parse_orca_output(orca_out_path: str) -> dict:
 
                 # ── LOEWDIN BOND ORDERS ────────────────────────────
                 elif state == OrcaParseState.LOEWDIN_BOND_ORDERS:
-                    if line.strip() == "" and loewdin_bonds:
-                        result["loewdin_bond_orders"] = loewdin_bonds
+                    if line.strip() == "":
+                        if loewdin_bonds:
+                            result["loewdin_bond_orders"] = loewdin_bonds
                         state = OrcaParseState.IDLE
                         continue
                     if "B(" in line:
@@ -515,8 +517,9 @@ def parse_orca_output(orca_out_path: str) -> dict:
 
                 # ── MAYER BOND ORDERS ──────────────────────────────
                 elif state == OrcaParseState.MAYER_BOND_ORDERS:
-                    if line.strip() == "" and mayer_bonds:
-                        result["mayer_bond_orders"] = mayer_bonds
+                    if line.strip() == "" or "no bond orders to print" in line:
+                        if mayer_bonds:
+                            result["mayer_bond_orders"] = mayer_bonds
                         state = OrcaParseState.IDLE
                         continue
                     if "B(" in line:
@@ -618,8 +621,9 @@ def parse_orca_output(orca_out_path: str) -> dict:
 
                 # ── CARTESIAN GRADIENT ─────────────────────────────
                 elif state == OrcaParseState.GRADIENT:
-                    if line.strip() == "" and gradient:
-                        result["gradient"] = gradient
+                    if line.strip() == "" and section_line_count > 3:
+                        if gradient:
+                            result["gradient"] = gradient
                         state = OrcaParseState.IDLE
                         continue
                     # Format: "   1   O   :    0.000385692    0.000381587    0.000766511"
