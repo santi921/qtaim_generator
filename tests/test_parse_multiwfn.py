@@ -3,6 +3,7 @@ from pathlib import Path
 import numpy as np
 
 from qtaim_gen.source.core.parse_multiwfn import (
+    _extract_au_float,
     parse_bond_order_doc,
     parse_other_doc,
     parse_charge_doc,
@@ -338,3 +339,57 @@ class TestMultiwfnParser:
         assert np.isclose(
             density_dict["sum"], 65.99996761, atol=1e-3
         ), "wrong value for becke fuzzy density for 13_H"
+
+
+EDGE_CASES = Path(__file__).parent / "test_files" / "edge_cases"
+
+
+class TestExtractAuFloat:
+    """Unit tests for _extract_au_float helper."""
+
+    def test_normal_token(self):
+        assert np.isclose(_extract_au_float("1048.617"), 1048.617, atol=1e-3)
+
+    def test_overflow_no_colon(self):
+        assert np.isclose(
+            _extract_au_float("(a.u.)1048.6171082"), 1048.6171082, atol=1e-6
+        )
+
+    def test_overflow_with_colon(self):
+        assert np.isclose(
+            _extract_au_float("(a.u.):1048.6171082"), 1048.6171082, atol=1e-6
+        )
+
+    def test_negative_overflow(self):
+        assert np.isclose(
+            _extract_au_float("(a.u.)-1048.617"), -1048.617, atol=1e-3
+        )
+
+    def test_small_normal_value(self):
+        assert np.isclose(_extract_au_float("0.0262041"), 0.0262041, atol=1e-6)
+
+
+class TestLargeMoleculeEdgeCases:
+    """Tests for parsing large-molecule Multiwfn output with field overflows."""
+
+    def test_parse_adch_large_molecule(self):
+        file_path = str(EDGE_CASES / "adch.out")
+        charges, atomic_dipoles, dipole_info = parse_charge_doc_adch(file_path)
+        assert len(charges) == 123, f"expected 123 atoms, got {len(charges)}"
+        assert len(atomic_dipoles) == 123, f"expected 123 atomic dipoles, got {len(atomic_dipoles)}"
+        assert np.isclose(
+            dipole_info["mag"], 1048.6171, atol=0.1
+        ), f"adch dipole magnitude wrong: {dipole_info['mag']}"
+        assert len(dipole_info["xyz"]) == 3, "expected 3 XYZ dipole components"
+        assert np.isclose(dipole_info["xyz"][0], 431.44, atol=0.1)
+
+    def test_parse_becke_large_molecule(self):
+        file_path = str(EDGE_CASES / "becke.out")
+        charges, atomic_dipoles, dipole_info = parse_charge_becke(file_path)
+        assert len(charges) == 136, f"expected 136 atoms, got {len(charges)}"
+        assert len(atomic_dipoles) == 136, f"expected 136 atomic dipoles, got {len(atomic_dipoles)}"
+        assert np.isclose(
+            dipole_info["mag"], 1346.2753, atol=0.1
+        ), f"becke dipole magnitude wrong: {dipole_info['mag']}"
+        assert len(dipole_info["xyz"]) == 3, "expected 3 XYZ dipole components"
+        assert np.isclose(dipole_info["xyz"][0], -952.46, atol=0.1)

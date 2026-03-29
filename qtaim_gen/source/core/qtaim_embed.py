@@ -69,6 +69,12 @@ def split_graph_labels(
     """
     Splits the graph into features and labels.
 
+    For each node type that has a 'feat' attribute, extracts label columns
+    (include_locs) into a 'labels' attribute and keeps the remaining columns
+    (exclude_locs) as 'feat'.
+
+    Works with PyG HeteroData: features are at graph[node_type].feat.
+
     Args:
         graph (Any): The PyG HeteroData graph.
         include_names (Dict[str, List[str]]): Names of features to include in labels.

@@ -1,6 +1,21 @@
 from qtaim_gen.source.core.parse_qtaim import get_qtaim_descs, merge_qtaim_inds
 
 
+def _extract_au_float(token: str) -> float:
+    """Extract float from a token that may have '(a.u.)' or '(a.u.):' prefix glued to it.
+
+    Multiwfn uses fixed-width formatting. For large dipole values the number
+    overflows its field and concatenates directly to the unit marker, e.g.
+    '(a.u.)1048.617' or '(a.u.):1048.617' instead of a standalone '1048.617'.
+    """
+    if token.startswith("(a.u.)"):
+        remainder = token[6:]
+        if remainder.startswith(":"):
+            remainder = remainder[1:]
+        return float(remainder)
+    return float(token)
+
+
 def parse_charge_doc(charge_out_txt):
     """
     Method to parse the charge out from multiwfn
@@ -93,7 +108,7 @@ def parse_charge_doc(charge_out_txt):
                 dipole_info["cm5"]["xyz"] = float_cm5_xyz
 
             if dipole_adch_key in line:
-                float_dipole_adch = float(line.split()[-3])
+                float_dipole_adch = _extract_au_float(line.split()[-3])
                 dipole_info["adch"]["mag"] = float_dipole_adch
 
             if dipole_adch_xyz_key in line:
@@ -183,7 +198,7 @@ def parse_charge_base(charge_out_txt, corrected=False, dipole=True):
 
             if dipole_key in line:
                 if corrected:
-                    float_dipole_temp = float(line.split()[-3])
+                    float_dipole_temp = _extract_au_float(line.split()[-3])
                 else:
                     float_dipole_temp = float(line.split()[-2])
                 dipole_info["mag"] = float_dipole_temp
@@ -384,7 +399,7 @@ def parse_charge_becke(charge_out_txt):
                     atomic_dipole_dict[ind + "_" + element] = [float(i) for i in dipole]
 
             if dipole_key in line:
-                float_dipole_temp = float(line.split()[-3])
+                float_dipole_temp = _extract_au_float(line.split()[-3])
                 dipole_info["mag"] = float_dipole_temp
 
             if dipole_xyz_key in line:
@@ -468,7 +483,7 @@ def parse_charge_doc_adch(charge_out_txt):
                     atomic_dipole_dict[ind + "_" + element] = [float(i) for i in dipole]
 
             if dipole_adch_key in line:
-                float_dipole_adch = float(line.split()[-3])
+                float_dipole_adch = _extract_au_float(line.split()[-3])
                 dipole_info["mag"] = float_dipole_adch
 
             if dipole_adch_xyz_key in line:

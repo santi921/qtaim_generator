@@ -1018,7 +1018,7 @@ class TestSharding:
                 txn.put("length".encode(), pkl.dumps(5))
             env.close()
 
-        # Merge shards
+        # Merge shards — returns (path, count) tuple
         merged_path = os.path.join(self.temp_dir, "merged.lmdb")
         result_path, merged_count = merge_shards(shard_paths, merged_path, self.logger)
 

@@ -182,6 +182,10 @@ class Converter:
         self.save_unfinalized_scaler = config_dict.get("save_unfinalized_scaler", False)
         self.auto_merge = config_dict.get("auto_merge", False)
 
+        # Optional key filtering for multi-vertical pipeline
+        raw_include = config_dict.get("include_keys")
+        self.include_keys: set | None = set(raw_include) if raw_include is not None else None
+
         if self.total_shards > 1:
             self.logger.info(f"Sharding enabled: shard {self.shard_index + 1} of {self.total_shards}")
             if self.auto_merge and self.shard_index == self.total_shards - 1:
@@ -573,14 +577,25 @@ class Converter:
 
     def _partition_keys(self, keys: list) -> list:
         """
-        Partition keys for this shard using deterministic modulo assignment.
+        Filter and partition keys for processing.
+
+        When include_keys is set (multi-vertical pipeline), only keys in
+        that set are kept. Then sharding is applied if total_shards > 1.
 
         Args:
-            keys: List of all keys to partition
+            keys: List of all keys from source LMDB
 
         Returns:
-            List of keys assigned to this shard
+            List of keys assigned to this job
         """
+        if self.include_keys is not None:
+            keys = [
+                k for k in keys
+                if (k.decode("ascii") if isinstance(k, bytes) else str(k))
+                in self.include_keys
+            ]
+            self.logger.info(f"include_keys filter: {len(keys)} keys retained")
+
         if self.total_shards <= 1:
             return keys
 
