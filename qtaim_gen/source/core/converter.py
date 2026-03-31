@@ -1480,6 +1480,7 @@ class GeneralConverter(Converter):
             "fuzzy_full_lmdb": "fuzzy",
             "fuzzy_lmdb": "fuzzy",
             "other_lmdb": "other",
+            "bond_lmdb": "bond",
             "bonds_lmdb": "bond",
         }
         if "data_inputs" in self.config_dict:
@@ -1572,7 +1573,11 @@ class GeneralConverter(Converter):
                         dict_charge_raw, global_feats["n_atoms"], self.charge_filter
                     )
                     global_feats.update(global_dipole_feats)
-                    atom_feats.update(atom_feats_charge)
+                    for atom_idx, charge_feats in atom_feats_charge.items():
+                        if atom_idx in atom_feats:
+                            atom_feats[atom_idx].update(charge_feats)
+                        else:
+                            atom_feats[atom_idx] = charge_feats
                 else:
                     failures["charge"].append(key_str)
                     if self.missing_data_strategy == "skip":
@@ -1810,11 +1815,20 @@ class GeneralConverter(Converter):
                                 atom_keys=None,
                                 bond_keys=None,
                             )
+                            # Auto-discover QTAIM atom/bond keys
+                            sample_atom = next((v for v in atom_feats.values() if v), {})
+                            for feat_key in sample_atom.keys():
+                                if feat_key not in self.keys_data["atom"]:
+                                    self.keys_data["atom"].append(feat_key)
+                            sample_bond = next((v for v in bond_feats.values() if v), {})
+                            for feat_key in sample_bond.keys():
+                                if feat_key not in self.keys_data["bond"]:
+                                    self.keys_data["bond"].append(feat_key)
                         else:
                             self.logger.debug(f"Key {key_str}: QTAIM data missing in LMDB, skipping")
                             first_key_idx = idx + 1
                             continue
-                    
+
                     except Exception as e:
                         self.logger.warning(f"Key {key_str}: Failed to parse QTAIM data: {e}", exc_info=True)
                         first_key_idx = idx + 1
@@ -1836,7 +1850,11 @@ class GeneralConverter(Converter):
                                 if feat_key not in self.keys_data["global"]:
                                     self.keys_data["global"].append(feat_key)
                             global_feats.update(global_dipole_feats)
-                            atom_feats.update(atom_feats_charge)
+                            for atom_idx, charge_feats in atom_feats_charge.items():
+                                if atom_idx in atom_feats:
+                                    atom_feats[atom_idx].update(charge_feats)
+                                else:
+                                    atom_feats[atom_idx] = charge_feats
 
                         elif self.missing_data_strategy == "skip":
                             self.logger.debug(f"Key {key_str}: charge data missing, skipping")
