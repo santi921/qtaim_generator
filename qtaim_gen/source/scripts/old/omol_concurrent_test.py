@@ -134,4 +134,5 @@ def main():
     run_case(test_case, threads)
 
 
-main()
+if __name__ == "__main__":
+    main()
