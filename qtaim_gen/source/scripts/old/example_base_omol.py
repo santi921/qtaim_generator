@@ -71,6 +71,7 @@ def main():
         print("Error in gbw_analysis - case 3")
 
 
-main()
+if __name__ == "__main__":
+    main()
 
 # /global/scratch/users/santiagovargas/gbws_cleaning_lean/ml_elytes/elytes_md_eqv2_electro_512_C3H8O_3_group_133_shell_0_0_1_1341/orca.wfn

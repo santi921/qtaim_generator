@@ -2,6 +2,15 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Shared Skills
+
+For available skills and tool guidance, read the relevant files in `/home/santiagovargas/dev/claude-skills/` as needed:
+- **Scientific** (PyG, PyTorch Lightning, RDKit, pymatgen, matplotlib, scikit-learn): `scientific/`
+- **Code review & planning** (multi-agent reviews, brainstorm/plan/work workflows): `compound/`
+- **Document processing** (PDF, XLSX): `documents/`
+
+Read the specific skill file when you need detailed API patterns or usage guidance for a task.
+
 ## Project Overview
 
 **qtaim_generator** is a high-throughput post-processing package for quantum chemistry calculations. It wraps Multiwfn/ORCA to generate ML-ready descriptors (QTAIM, partial charges, bond orders) from DFT outputs, and converts them to graph-based LMDB datasets for training with `qtaim_embed`.
