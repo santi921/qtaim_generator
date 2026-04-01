@@ -588,7 +588,7 @@ def run_jobs(
             )
             n_atoms = len(dft_dict["mol"])
             dict_val = get_val_breakdown_from_folder(
-                folder, n_atoms=n_atoms, full_set=full_set, spin_tf=spin_tf
+                folder_check, n_atoms=n_atoms, full_set=full_set, spin_tf=spin_tf
             )
 
     for order in order_of_operations:
