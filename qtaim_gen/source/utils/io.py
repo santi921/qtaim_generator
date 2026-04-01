@@ -565,6 +565,7 @@ def check_results_exist(folder: str, move_results: bool) -> bool:
         "other.json",
         "fuzzy_full.json",
         "charge.json",
+        "bond.json",
     ]
     for file in required_files:
         file_check = os.path.join(folder, file)
