@@ -569,17 +569,21 @@ def run_jobs(
     # create a json file to store job status
 
     timings = {}
-    # run multiwfn scripts
-    if move_results:
-        folder_check = os.path.join(folder, "generator")
+    # On restart, timings may be in generator/ (previous completed run) or
+    # job root (interrupted run before move_results_to_folder ran).
+    # Check generator/ first, fall back to job root.
+    gen_timings = os.path.join(folder, "generator", "timings.json")
+    root_timings = os.path.join(folder, "timings.json")
+    if os.path.exists(gen_timings):
+        timings_read_path = gen_timings
     else:
-        folder_check = folder
+        timings_read_path = root_timings
 
-    if os.path.exists(os.path.join(folder_check, "timings.json")):
+    if os.path.exists(timings_read_path):
 
-        with open(os.path.join(folder_check, "timings.json"), "r") as f:
+        with open(timings_read_path, "r") as f:
             # check that timings isn't empty
-            if os.path.getsize(os.path.join(folder_check, "timings.json")) > 0:
+            if os.path.getsize(timings_read_path) > 0:
                 timings = json.load(f)
 
         if restart:
@@ -587,8 +591,10 @@ def run_jobs(
                 folder, logger=None, verbose=False
             )
             n_atoms = len(dft_dict["mol"])
+            # Result JSONs live next to timings — use same parent dir
+            val_folder = os.path.dirname(timings_read_path)
             dict_val = get_val_breakdown_from_folder(
-                folder_check, n_atoms=n_atoms, full_set=full_set, spin_tf=spin_tf
+                val_folder, n_atoms=n_atoms, full_set=full_set, spin_tf=spin_tf
             )
 
     for order in order_of_operations:
@@ -645,8 +651,6 @@ def run_jobs(
                         )
                         continue
 
-        else:
-            folder_check = folder
         if prof_mem:
             memory = {}
 
@@ -677,13 +681,13 @@ def run_jobs(
             logger.error(f"Error running {mfwn_file}: {e}")
             timings[order] = -1
 
-        # save timings to file in folder - at each step for check pointing
+        # save timings to job root — move_results_to_folder() relocates at the end
         try:
-            atomic_json_write(os.path.join(folder_check, "timings.json"), timings)
+            atomic_json_write(os.path.join(folder, "timings.json"), timings)
             logger.info(f"Saved timings.json in {folder}")
 
             if prof_mem:
-                atomic_json_write(os.path.join(folder_check, "memory.json"), memory)
+                atomic_json_write(os.path.join(folder, "memory.json"), memory)
 
         except Exception as e:
             logger.error(f"Error saving timings.json: {e}")
@@ -1262,16 +1266,21 @@ def _run_orca_parse(
         logger.info("Parsed orca.out in %.2f s (%d keys)", elapsed, len(orca_dict))
 
         # Write orca_parse timing into timings.json (atomic write for crash safety)
-        if move_results:
-            timings_path = os.path.join(folder, "generator", "timings.json")
+        # Read from wherever timings currently lives, always write to job root
+        gen_timings = os.path.join(folder, "generator", "timings.json")
+        root_timings = os.path.join(folder, "timings.json")
+        if os.path.isfile(gen_timings) and os.path.getsize(gen_timings) > 0:
+            timings_read = gen_timings
+        elif os.path.isfile(root_timings) and os.path.getsize(root_timings) > 0:
+            timings_read = root_timings
         else:
-            timings_path = os.path.join(folder, "timings.json")
+            timings_read = None
 
-        if os.path.isfile(timings_path) and os.path.getsize(timings_path) > 0:
-            with open(timings_path, "r") as f:
+        if timings_read is not None:
+            with open(timings_read, "r") as f:
                 timings = json.load(f)
             timings["orca_parse"] = elapsed
-            atomic_json_write(timings_path, timings)
+            atomic_json_write(root_timings, timings)
 
         # Delete orca.out AFTER successful parse + merge + timing checkpoint.
         # Always clean up if we extracted it from the archive (archive still has it).
@@ -1457,17 +1466,23 @@ def gbw_analysis(
                         logger.error(f"Error removing intermediate file {file}: {e}")
 
     if restart:
-        # check if the timings file exists
-        if move_results:
-            timings_path = os.path.join(folder, "generator", "timings.json")
-        else:
-            timings_path = os.path.join(folder, "timings.json")
+        # Check both locations: generator/ (previous completed run) and
+        # job root (interrupted run before move_results_to_folder ran)
+        gen_timings = os.path.join(folder, "generator", "timings.json")
+        root_timings = os.path.join(folder, "timings.json")
 
-        if not os.path.exists(timings_path) or os.path.getsize(timings_path) == 0:
+        if os.path.exists(gen_timings) and os.path.getsize(gen_timings) > 0:
+            timings_path = gen_timings
+        elif os.path.exists(root_timings) and os.path.getsize(root_timings) > 0:
+            timings_path = root_timings
+        else:
+            timings_path = None
+
+        if timings_path is None:
             logger.warning("No timings file found - starting from scratch!")
             restart = False
         else:
-            logger.info("Timings file found - restarting from last step.")
+            logger.info("Timings file found at %s - restarting.", timings_path)
 
     # check if output already exists
     if not overwrite:
