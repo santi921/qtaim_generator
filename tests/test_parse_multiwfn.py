@@ -4,6 +4,7 @@ import numpy as np
 
 from qtaim_gen.source.core.parse_multiwfn import (
     _extract_au_float,
+    _split_fortran_floats,
     parse_bond_order_doc,
     parse_other_doc,
     parse_charge_doc,
@@ -393,3 +394,81 @@ class TestLargeMoleculeEdgeCases:
         ), f"becke dipole magnitude wrong: {dipole_info['mag']}"
         assert len(dipole_info["xyz"]) == 3, "expected 3 XYZ dipole components"
         assert np.isclose(dipole_info["xyz"][0], -952.46, atol=0.1)
+
+
+class TestSplitFortranFloats:
+    """Unit tests for _split_fortran_floats helper that handles column overflow."""
+
+    def test_normal_tokens_pass_through(self):
+        assert _split_fortran_floats(["1.0", "-2.5", "3.14"]) == ["1.0", "-2.5", "3.14"]
+
+    def test_concatenated_negative_pair(self):
+        result = _split_fortran_floats(["-990.879181-1009.749968"])
+        assert len(result) == 2
+        assert np.isclose(float(result[0]), -990.879181, atol=1e-6)
+        assert np.isclose(float(result[1]), -1009.749968, atol=1e-6)
+
+    def test_mixed_concat_and_normal(self):
+        result = _split_fortran_floats(["-990.879181-1009.749968", "-653.968178"])
+        assert len(result) == 3
+        assert np.isclose(float(result[0]), -990.879181, atol=1e-6)
+        assert np.isclose(float(result[1]), -1009.749968, atol=1e-6)
+        assert np.isclose(float(result[2]), -653.968178, atol=1e-6)
+
+    def test_positive_value_no_split(self):
+        result = _split_fortran_floats(["431.441513"])
+        assert result == ["431.441513"]
+
+    def test_empty_list(self):
+        assert _split_fortran_floats([]) == []
+
+    def test_au_token_filtered(self):
+        """Non-numeric '(a.u.)' tokens should be filtered out."""
+        result = _split_fortran_floats(["(a.u.)", "-990.879181-1009.749968", "-653.968178"])
+        assert len(result) == 3
+        floats = [float(x) for x in result]
+        assert np.isclose(floats[0], -990.879181, atol=1e-6)
+        assert np.isclose(floats[1], -1009.749968, atol=1e-6)
+        assert np.isclose(floats[2], -653.968178, atol=1e-6)
+
+
+class TestFortranOverflowEdgeCases:
+    """Tests for parsing Multiwfn output files with Fortran column overflow
+    in dipole XYZ vectors (e.g. '-990.879181-1009.749968')."""
+
+    def test_parse_adch_2_fortran_overflow(self):
+        """adch_2.out has concatenated dipole XYZ values."""
+        file_path = str(EDGE_CASES / "adch_2.out")
+        charges, atomic_dipoles, dipole_info = parse_charge_doc_adch(file_path)
+        assert len(charges) == 119, f"expected 119 atoms, got {len(charges)}"
+        assert len(atomic_dipoles) == 119
+        assert np.isclose(dipole_info["mag"], 1558.5605, atol=0.1)
+        assert len(dipole_info["xyz"]) == 3, "should have 3 XYZ components after split"
+        assert np.isclose(dipole_info["xyz"][0], -990.879181, atol=0.01)
+        assert np.isclose(dipole_info["xyz"][1], -1009.749968, atol=0.01)
+        assert np.isclose(dipole_info["xyz"][2], -653.968178, atol=0.01)
+
+    def test_parse_becke_2_fortran_overflow(self):
+        """becke_2.out has concatenated dipole XYZ values."""
+        file_path = str(EDGE_CASES / "becke_2.out")
+        charges, atomic_dipoles, dipole_info = parse_charge_becke(file_path)
+        assert len(charges) == 119, f"expected 119 atoms, got {len(charges)}"
+        assert len(atomic_dipoles) == 119
+        assert np.isclose(dipole_info["mag"], 1563.4249, atol=0.1)
+        assert len(dipole_info["xyz"]) == 3
+        assert np.isclose(dipole_info["xyz"][0], -993.865061, atol=0.01)
+        assert np.isclose(dipole_info["xyz"][1], -1012.952241, atol=0.01)
+        assert np.isclose(dipole_info["xyz"][2], -656.092732, atol=0.01)
+
+    def test_parse_hirshfeld_2_fortran_overflow(self):
+        """hirshfeld_2.out has concatenated dipole XYZ in the vector line."""
+        file_path = str(EDGE_CASES / "hirshfeld_2.out")
+        charges, dipole_info = parse_charge_base(
+            file_path, corrected=False, dipole=True
+        )
+        assert len(charges) == 119, f"expected 119 atoms, got {len(charges)}"
+        assert np.isclose(dipole_info["mag"], 1558.325406, atol=0.1)
+        assert len(dipole_info["xyz"]) == 3
+        assert np.isclose(dipole_info["xyz"][0], -990.754330, atol=0.01)
+        assert np.isclose(dipole_info["xyz"][1], -1009.896429, atol=0.01)
+        assert np.isclose(dipole_info["xyz"][2], -653.370593, atol=0.01)

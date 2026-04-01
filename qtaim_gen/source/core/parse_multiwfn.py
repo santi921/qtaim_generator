@@ -1,6 +1,13 @@
 from qtaim_gen.source.core.parse_qtaim import get_qtaim_descs, merge_qtaim_inds
 
 
+import re
+
+# Regex for splitting Fortran-overflowed numeric tokens like '-990.879181-1009.749968'
+# Matches a float (with optional sign) followed by another float starting with '-'
+_FORTRAN_CONCAT_RE = re.compile(r'(?<=[0-9])(-)')
+
+
 def _extract_au_float(token: str) -> float:
     """Extract float from a token that may have '(a.u.)' or '(a.u.):' prefix glued to it.
 
@@ -14,6 +21,49 @@ def _extract_au_float(token: str) -> float:
             remainder = remainder[1:]
         return float(remainder)
     return float(token)
+
+
+def _split_fortran_floats(tokens: list) -> list:
+    """Split tokens that contain Fortran column-overflow concatenated floats.
+
+    Multiwfn uses fixed-width Fortran formatting. When two consecutive large
+    negative numbers overflow their field widths, they concatenate directly:
+      '-990.879181-1009.749968'  (should be two values: -990.879181 and -1009.749968)
+
+    Also filters out non-numeric tokens like '(a.u.)' or 'a.u.' that may
+    appear when overflow shifts column boundaries.
+
+    This function splits such tokens so downstream float() calls succeed.
+    """
+    result = []
+    for t in tokens:
+        # Skip non-numeric tokens that sometimes appear due to column shifts
+        if t.startswith("(a.u.)") or t == "a.u.":
+            continue
+        # Try direct conversion first (fast path)
+        try:
+            float(t)
+            result.append(t)
+            continue
+        except ValueError:
+            pass
+        # Split on '-' that follows a digit (negative sign glued to previous number)
+        parts = _FORTRAN_CONCAT_RE.split(t)
+        # _FORTRAN_CONCAT_RE.split('-990.879181-1009.749968')
+        # => ['-990.879181', '-', '1009.749968']
+        # Reassemble: first part as-is, then each separator + next part
+        reassembled = []
+        i = 0
+        while i < len(parts):
+            if i + 1 < len(parts) and parts[i + 1] == '-':
+                reassembled.append(parts[i])
+                reassembled.append('-' + parts[i + 2])
+                i += 3
+            else:
+                reassembled.append(parts[i])
+                i += 1
+        result.extend(reassembled)
+    return result
 
 
 def parse_charge_doc(charge_out_txt):
@@ -103,7 +153,7 @@ def parse_charge_doc(charge_out_txt):
                 dipole_info["cm5"]["mag"] = float_dipole_cm5
 
             if dipole_cm5_xyz_key in line:
-                str_nums = line.split()[7:-1]
+                str_nums = _split_fortran_floats(line.split()[7:-1])
                 float_cm5_xyz = [float(num) for num in str_nums]
                 dipole_info["cm5"]["xyz"] = float_cm5_xyz
 
@@ -112,7 +162,7 @@ def parse_charge_doc(charge_out_txt):
                 dipole_info["adch"]["mag"] = float_dipole_adch
 
             if dipole_adch_xyz_key in line:
-                str_nums = line.split()[8:]
+                str_nums = _split_fortran_floats(line.split()[8:])
                 float_adch_xyz = [float(num) for num in str_nums]
                 dipole_info["adch"]["xyz"] = float_adch_xyz
 
@@ -121,7 +171,7 @@ def parse_charge_doc(charge_out_txt):
                     float_dipole_temp = float(line.split()[-2])
                     dipole_info[dipole_order[dipole_index]]["mag"] = float_dipole_temp
                 if dipole_xyz_key in line:
-                    str_nums = line.split()[5:-1]
+                    str_nums = _split_fortran_floats(line.split()[5:-1])
                     float_diple_xyz_temp = [float(num) for num in str_nums]
                     dipole_info[dipole_order[dipole_index]][
                         "xyz"
@@ -205,9 +255,9 @@ def parse_charge_base(charge_out_txt, corrected=False, dipole=True):
 
             if dipole_xyz_key in line:
                 if corrected:
-                    str_nums = line.split()[-3:]
+                    str_nums = _split_fortran_floats(line.split()[-3:])
                 else:
-                    str_nums = line.split()[5:-1]
+                    str_nums = _split_fortran_floats(line.split()[5:-1])
                 float_diple_xyz_temp = [float(num) for num in str_nums]
                 dipole_info["xyz"] = float_diple_xyz_temp
 
@@ -403,7 +453,7 @@ def parse_charge_becke(charge_out_txt):
                 dipole_info["mag"] = float_dipole_temp
 
             if dipole_xyz_key in line:
-                str_nums = line.split()[-3:]
+                str_nums = _split_fortran_floats(line.split()[-3:])
                 float_diple_xyz_temp = [float(num) for num in str_nums]
                 dipole_info["xyz"] = float_diple_xyz_temp
 
@@ -414,10 +464,6 @@ def parse_charge_becke(charge_out_txt):
             if atomic_dipole_key in line:
                 trigger_dipole = True
                 atomic_dipole_dict = {}
-
-    # print("charge dict overall keys: ", charge_dict_overall.keys())
-    # print("dipole info keys: ", dipole_info.keys())
-    # print("atomic_dipole_dict_overall keys: ", atomic_dipole_dict_overall.keys())
 
     return charge_dict_overall, atomic_dipole_dict_overall, dipole_info
 
@@ -487,7 +533,7 @@ def parse_charge_doc_adch(charge_out_txt):
                 dipole_info["mag"] = float_dipole_adch
 
             if dipole_adch_xyz_key in line:
-                str_nums = line.split()[8:]
+                str_nums = _split_fortran_floats(line.split()[8:])
                 float_adch_xyz = [float(num) for num in str_nums]
                 dipole_info["xyz"] = float_adch_xyz
 
