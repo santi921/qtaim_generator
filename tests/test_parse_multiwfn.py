@@ -432,6 +432,87 @@ class TestSplitFortranFloats:
         assert np.isclose(floats[2], -653.968178, atol=1e-6)
 
 
+class TestFortranOverflowEdgeCases3:
+    """Tests for _3 edge case files (139-atom protein fragment):
+    - adch_3/becke_3: concatenated dipole XYZ in both Hirshfeld and ADC sections
+    - hirshfeld_3: concatenated dipole XYZ
+    - cm5_3: asterisk overflow (********) in CM5 dipole Z component
+    """
+
+    def test_parse_adch_3_fortran_overflow(self):
+        file_path = str(EDGE_CASES / "adch_3.out")
+        charges, atomic_dipoles, dipole_info = parse_charge_doc_adch(file_path)
+        assert len(charges) == 139, f"expected 139 atoms, got {len(charges)}"
+        assert len(atomic_dipoles) == 139
+        assert np.isclose(dipole_info["mag"], 1536.6853156, atol=0.1)
+        assert len(dipole_info["xyz"]) == 3
+        assert np.isclose(dipole_info["xyz"][0], -920.70713, atol=0.01)
+        assert np.isclose(dipole_info["xyz"][1], -657.50725, atol=0.01)
+        assert np.isclose(dipole_info["xyz"][2], -1039.89632, atol=0.01)
+        assert np.isclose(charges["1_C"], -0.3010114, atol=1e-3)
+        assert np.isclose(charges["139_H"], 0.06504135, atol=1e-3)
+
+    def test_parse_becke_3_fortran_overflow(self):
+        file_path = str(EDGE_CASES / "becke_3.out")
+        charges, atomic_dipoles, dipole_info = parse_charge_becke(file_path)
+        assert len(charges) == 139, f"expected 139 atoms, got {len(charges)}"
+        assert len(atomic_dipoles) == 139
+        assert np.isclose(dipole_info["mag"], 1537.7637936, atol=0.1)
+        assert len(dipole_info["xyz"]) == 3
+        assert np.isclose(dipole_info["xyz"][0], -921.361692, atol=0.01)
+        assert np.isclose(dipole_info["xyz"][1], -657.908738, atol=0.01)
+        assert np.isclose(dipole_info["xyz"][2], -1040.656624, atol=0.01)
+        assert np.isclose(charges["1_C"], -0.2683871, atol=1e-3)
+        assert np.isclose(charges["139_H"], 0.0222125, atol=1e-3)
+
+    def test_parse_hirshfeld_3_fortran_overflow(self):
+        file_path = str(EDGE_CASES / "hirshfeld_3.out")
+        charges, dipole_info = parse_charge_base(
+            file_path, corrected=False, dipole=True
+        )
+        assert len(charges) == 139, f"expected 139 atoms, got {len(charges)}"
+        assert np.isclose(dipole_info["mag"], 1537.101194, atol=0.1)
+        assert len(dipole_info["xyz"]) == 3
+        assert np.isclose(dipole_info["xyz"][0], -922.036924, atol=0.01)
+        assert np.isclose(dipole_info["xyz"][1], -656.383404, atol=0.01)
+        assert np.isclose(dipole_info["xyz"][2], -1040.0427, atol=0.01)
+        assert np.isclose(charges["1_C"], -0.08210226, atol=1e-3)
+        assert np.isclose(charges["139_H"], 0.01669355, atol=1e-3)
+
+    def test_parse_cm5_3_asterisk_overflow(self):
+        """cm5_3.out has '**********' for the Z dipole component (Fortran field overflow)
+        and the CM5 magnitude label concatenated with the value.
+        parse_charge_base returns Hirshfeld dipole (first match) and CM5 charges (last
+        'Final atomic charges:' section). The asterisk does not cause a crash here
+        because parse_charge_base uses the Hirshfeld dipole key, not the CM5-specific one.
+        """
+        file_path = str(EDGE_CASES / "cm5_3.out")
+        charges, dipole_info = parse_charge_base(
+            file_path, corrected=False, dipole=True
+        )
+        assert len(charges) == 139, f"expected 139 atoms, got {len(charges)}"
+        assert np.isclose(charges["1_C"], -0.21245274, atol=1e-3)
+        assert np.isclose(charges["139_H"], 0.07437931, atol=1e-3)
+        # dipole_info reflects the Hirshfeld dipole (first match in file)
+        assert np.isclose(dipole_info["mag"], 1537.101194, atol=0.1)
+
+    def test_parse_charge_doc_cm5_3_magnitude_concat(self):
+        """parse_charge_doc on cm5_3.out: CM5 magnitude glued to key
+        ('Total dipole moment from CM5 charges1537.0019201') and Z component
+        overflowed to '**********' must not crash; Z should be NaN.
+        """
+        from qtaim_gen.source.core.parse_multiwfn import parse_charge_doc
+        import math
+
+        file_path = str(EDGE_CASES / "cm5_3.out")
+        _, _, dipole_info = parse_charge_doc(file_path)
+        assert np.isclose(dipole_info["cm5"]["mag"], 1537.0019201, atol=0.1)
+        assert len(dipole_info["cm5"]["xyz"]) == 3
+        assert np.isclose(dipole_info["cm5"]["xyz"][0], -921.45822, atol=0.01)
+        assert np.isclose(dipole_info["cm5"]["xyz"][1], -657.02420, atol=0.01)
+        assert math.isnan(dipole_info["cm5"]["xyz"][2])
+
+
 class TestFortranOverflowEdgeCases:
     """Tests for parsing Multiwfn output files with Fortran column overflow
     in dipole XYZ vectors (e.g. '-990.879181-1009.749968')."""

@@ -149,13 +149,34 @@ def parse_charge_doc(charge_out_txt):
                     atomic_dipole_dict[ind + "_" + element] = [float(i) for i in dipole]
 
             if dipole_cm5_key in line:
-                float_dipole_cm5 = float(line.split()[-2])
-                dipole_info["cm5"]["mag"] = float_dipole_cm5
+                # Handle Fortran overflow where value is glued to key:
+                # 'Total dipole moment from CM5 charges1537.0019201 a.u.'
+                rest = line[line.index(dipole_cm5_key) + len(dipole_cm5_key):]
+                float_dipole_cm5 = float(rest.split()[0])
+                dipole_info.setdefault("cm5", {})["mag"] = float_dipole_cm5
 
             if dipole_cm5_xyz_key in line:
-                str_nums = _split_fortran_floats(line.split()[7:-1])
-                float_cm5_xyz = [float(num) for num in str_nums]
-                dipole_info["cm5"]["xyz"] = float_cm5_xyz
+                # Handle Fortran overflow where values are glued to key and/or
+                # a component overflows to '**********':
+                # 'X/Y/Z of dipole moment from CM5 charges-921.45822-657.02420**********'
+                rest = line[line.index(dipole_cm5_xyz_key) + len(dipole_cm5_xyz_key):]
+                tokens = rest.split()
+                if tokens and tokens[-1] in ("a.u.", "(a.u.)"):
+                    tokens = tokens[:-1]
+                tokens = _split_fortran_floats(tokens)
+                # Split tokens that mix a float with trailing asterisks: '-657.02420**...'
+                expanded = []
+                for t in tokens:
+                    m = re.search(r'\*+', t)
+                    if m and m.start() > 0:
+                        expanded.append(t[: m.start()])
+                        expanded.append(t[m.start() :])
+                    else:
+                        expanded.append(t)
+                float_cm5_xyz = [
+                    float("nan") if set(t) == {"*"} else float(t) for t in expanded
+                ]
+                dipole_info.setdefault("cm5", {})["xyz"] = float_cm5_xyz
 
             if dipole_adch_key in line:
                 float_dipole_adch = _extract_au_float(line.split()[-3])
