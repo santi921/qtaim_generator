@@ -304,4 +304,5 @@ def main():
         print("file format not supported")
 
 
-main()
+if __name__ == "__main__":
+    main()
