@@ -1,6 +1,6 @@
 import pickle as pkl
 from copy import deepcopy
-from qtaim_embed.data.lmdb import load_dgl_graph_from_serialized
+from qtaim_embed.data.lmdb import load_graph_from_serialized
 import numpy as np
 import lmdb
 import pickle
@@ -13,7 +13,7 @@ def get_first_graph(converter):
         cursor = txn.cursor()
         for key, value in cursor:
             try:
-                graph = deepcopy(load_dgl_graph_from_serialized(pkl.loads(value)))
+                graph = deepcopy(load_graph_from_serialized(pkl.loads(value)))
                 break
             except Exception:
                 pass
@@ -21,16 +21,18 @@ def get_first_graph(converter):
 
 
 def check_graph_equality(graph1, graph2):
-    for graph_level in ["feat", "labels"]:
-        for node_level in graph1.ndata[graph_level].keys():
-            ft_1 = graph1.ndata[graph_level][node_level]
-            ft_2 = graph2.ndata[graph_level][node_level]
+    for attr_name in ["feat", "labels"]:
+        for ntype in graph1.node_types:
+            if not hasattr(graph1[ntype], attr_name):
+                continue
+            ft_1 = getattr(graph1[ntype], attr_name)
+            ft_2 = getattr(graph2[ntype], attr_name)
             assert (
                 ft_1.shape == ft_2.shape
-            ), f"Graph features shapes changed! {graph_level} {node_level}. Graph 1: {ft_1.shape}, Graph 2: {ft_2.shape}"
+            ), f"Graph features shapes changed! {attr_name} {ntype}. Graph 1: {ft_1.shape}, Graph 2: {ft_2.shape}"
             assert not np.array_equal(
                 ft_1.cpu().numpy(), ft_2.cpu().numpy()
-            ), f"Graph features are the same! {graph_level} {node_level}."
+            ), f"Graph features are the same! {attr_name} {ntype}."
 
 
 def get_benchmark_info(converter):

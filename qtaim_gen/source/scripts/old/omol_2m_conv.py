@@ -226,4 +226,5 @@ def main():
         txn.commit()
 
 
-main()
+if __name__ == "__main__":
+    main()

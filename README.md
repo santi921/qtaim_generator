@@ -74,7 +74,140 @@ Jsons, pkls, and bson can all be parsed.
 
 
 # Overview - Full Usage
-# TODO
+
+The "full" pipeline computes a rich set of descriptors (partial charges, bond orders, fuzzy densities, QTAIM critical points) and converts them into PyTorch Geometric (PyG) heterograph LMDBs for training with [qtaim_embed](https://github.com/santi921/qtaim_embed).
+
+## Pipeline: JSON → LMDB → Graphs
+
+### Step 1: JSON → Typed LMDBs
+After running `parse-data`, convert the per-job JSON outputs into typed LMDB files:
+
+```bash
+json-to-lmdb --file jobs.pkl --root /path/to/job_folders --out /path/to/lmdbs
+```
+
+This produces separate LMDB files for each data type: `structure.lmdb`, `charge.lmdb`, `qtaim.lmdb`, `bond.lmdb`, `fuzzy.lmdb`, `other.lmdb`.
+
+For large datasets, use sharded mode:
+```bash
+json-to-lmdb --file jobs.pkl --root /path/to/job_folders --out /path/to/lmdbs --sharded --n_shards 4
+```
+
+See `docs/SHARDING_GUIDE.md` for details on sharded conversion and merging.
+
+### Step 2: LMDB → PyG Heterographs
+Run a converter to build graph LMDBs from the typed LMDBs:
+
+```bash
+generator-to-embed --config /path/to/converter_config.json
+```
+
+The converter reads from typed LMDBs (Step 1 output) and writes a single graph LMDB containing serialized PyG `HeteroData` objects.
+
+## Converter Types
+
+| Converter | Use Case | Required LMDBs |
+|-----------|----------|-----------------|
+| `BaseConverter` | Structural info only (positions, elements, connectivity) | `geom_lmdb` |
+| `QTAIMConverter` | QTAIM bond paths + critical point properties | `geom_lmdb`, `qtaim_lmdb` |
+| `GeneralConverter` | Flexible — supports multiple bonding/charge/bond/fuzzy schemes | `geom_lmdb` + any combination |
+| `ASELMDBConverter` | ASE-formatted LMDB inputs | ASE LMDB file |
+
+## Converter Config Reference
+
+Configs are JSON files. See `qtaim_gen/source/scripts/helpers/configs_converter/` for working examples.
+
+### Minimal config (BaseConverter)
+```json
+{
+  "chunk": -1,
+  "filter_list": ["length", "scaled"],
+  "restart": false,
+  "allowed_ring_size": [3, 4, 5, 6, 7, 8],
+  "keys_target": { "atom": [], "bond": [], "global": ["n_atoms"] },
+  "keys_data": { "atom": [], "bond": [], "global": ["n_atoms"] },
+  "lmdb_path": "/path/to/output_dir",
+  "lmdb_name": "graphs.lmdb",
+  "lmdb_locations": {
+    "geom_lmdb": "/path/to/structure.lmdb"
+  },
+  "n_workers": 8,
+  "batch_size": 500
+}
+```
+
+### GeneralConverter config keys
+
+| Key | Description |
+|-----|-------------|
+| `lmdb_locations` | Dict mapping LMDB type keys to file paths (e.g. `"geom_lmdb"`, `"charge_lmdb"`, `"qtaim_lmdb"`, `"bonds_lmdb"`, `"fuzzy_lmdb"` or `"fuzzy_full_lmdb"`, `"other_lmdb"`) |
+| `data_inputs` | List of data sources to use: `["geom", "qtaim", "charge", "fuzzy", "bond", "other"]`. If omitted, auto-detected from `lmdb_locations`. |
+| `bonding_scheme` | How bonds are defined: `"structural"` (coordinate-based), `"bonding"` (bond orders), or `"qtaim"` (bond paths) |
+| `bond_list_definition` | Which bond order type defines the bond list: `"fuzzy"`, `"ibsi"`, `"laplacian"` |
+| `bond_cutoff` | Minimum bond order to count as a bond (e.g. `0.3`) |
+| `bond_filter` | Bond features to include: `["fuzzy"]`, `["ibsi"]`, `["fuzzy", "ibsi"]` |
+| `charge_filter` | Charge schemes to include: `["hirshfeld", "adch", "cm5", "becke"]` |
+| `fuzzy_filter` | Fuzzy density features: `["becke_fuzzy_density", "hirsh_fuzzy_density"]` |
+| `keys_data` | Feature keys for atom/bond/global node types |
+| `keys_target` | Target keys for training labels |
+| `allowed_ring_size` | Filter molecules by ring sizes |
+| `allowed_charges` / `allowed_spins` | Filter by molecular charge/spin (null = no filter) |
+| `missing_data_strategy` | `"skip"` (drop molecules with missing data) or `"impute"` |
+
+### Example: GeneralConverter with fuzzy bonds + charges
+```json
+{
+  "chunk": -1,
+  "filter_list": ["length", "scaled"],
+  "restart": false,
+  "allowed_ring_size": [3, 4, 5, 6, 7, 8],
+  "keys_target": { "atom": [], "bond": [], "global": ["n_atoms"] },
+  "keys_data": {
+    "atom": ["charge_hirshfeld", "charge_adch"],
+    "bond": [],
+    "global": ["n_atoms", "charge_hirshfeld_dipole_mag"]
+  },
+  "lmdb_path": "/path/to/output",
+  "lmdb_name": "general_graphs.lmdb",
+  "lmdb_locations": {
+    "geom_lmdb": "/path/to/structure.lmdb",
+    "charge_lmdb": "/path/to/charge.lmdb",
+    "bonds_lmdb": "/path/to/bond.lmdb",
+    "fuzzy_full_lmdb": "/path/to/fuzzy.lmdb"
+  },
+  "bonding_scheme": "bonding",
+  "bond_list_definition": "fuzzy",
+  "bond_cutoff": 0.3,
+  "bond_filter": ["fuzzy"],
+  "charge_filter": ["hirshfeld", "adch"],
+  "fuzzy_filter": ["becke_fuzzy_density", "hirsh_fuzzy_density"],
+  "missing_data_strategy": "skip",
+  "n_workers": 8,
+  "batch_size": 500
+}
+```
+
+## Output Graph Structure
+
+The output LMDB contains serialized PyG `HeteroData` graphs with node types:
+- `atom`: Per-atom features (charges, QTAIM descriptors, fuzzy densities)
+- `bond`: Per-bond features (bond orders, IBSI, fuzzy bond values)
+- `global`: Molecular-level features (dipole moments, atom count)
+
+Edges connect atoms to bonds (`atom_to_bond`) and atoms to global (`atom_to_global`).
+
+```python
+import lmdb, pickle
+from qtaim_embed.data.lmdb import load_graph_from_serialized
+
+env = lmdb.open("graphs.lmdb", readonly=True, subdir=False, lock=False)
+with env.begin() as txn:
+    value = txn.get(b"molecule_key")
+    graph = load_graph_from_serialized(pickle.loads(value))
+    print(graph.node_types)       # ['atom', 'bond', 'global']
+    print(graph['atom'].feat.shape)  # [n_atoms, n_features]
+env.close()
+```
 
 
  ## Citation 

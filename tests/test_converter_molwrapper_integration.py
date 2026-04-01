@@ -19,7 +19,7 @@ from typing import Dict, Any
 # Try to import qtaim-embed dependencies
 try:
     from qtaim_gen.source.core.converter import BaseConverter, QTAIMConverter, GeneralConverter
-    from qtaim_embed.data.lmdb import load_dgl_graph_from_serialized
+    from qtaim_embed.data.lmdb import load_graph_from_serialized
     from qtaim_embed.core.molwrapper import MoleculeWrapper
     QTAIM_EMBED_AVAILABLE = True
 except ImportError:
@@ -685,7 +685,7 @@ class TestConverterEndToEnd:
 
         key_str, mol_wrapper, failures = _extract_molwrapper_from_converter(converter)
 
-        # Convert to DGL graph using grapher
+        # Convert to PyG graph using grapher
         from qtaim_embed.utils.grapher import get_grapher
 
         # Get element set for grapher - pymatgen MoleculeGraph has .molecule attribute
@@ -707,12 +707,12 @@ class TestConverterEndToEnd:
         )
 
         # Build graph
-        dgl_graph = grapher.build_graph(mol_wrapper)
+        pyg_graph = grapher.build_graph(mol_wrapper)
 
         # Verify graph structure
-        assert dgl_graph is not None, "Should create DGL graph"
-        # DGL graph is heterogeneous with 'atom', 'bond', 'global' node types
-        atom_count = dgl_graph.num_nodes('atom')
+        assert pyg_graph is not None, "Should create PyG HeteroData graph"
+        # PyG graph is heterogeneous with 'atom', 'bond', 'global' node types
+        atom_count = pyg_graph["atom"].num_nodes
         assert atom_count > 0, "Graph should have atom nodes"
         assert atom_count == len(mol_wrapper.mol_graph), \
             f"Atom node count ({atom_count}) should match MoleculeWrapper ({len(mol_wrapper.mol_graph)})"

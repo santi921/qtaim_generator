@@ -28,13 +28,8 @@ from qtaim_embed.data.processing import (
 )
 from qtaim_embed.core.molwrapper import MoleculeWrapper
 from qtaim_embed.utils.grapher import get_grapher
-#try: 
-
-from qtaim_embed.data.lmdb import serialize_dgl_graph, load_dgl_graph_from_serialized
-serial_func = serialize_dgl_graph
-#except: 
-#    from qtaim_embed.data.lmdb import serialize_graph
-#    serial_func = serialize_graph
+from qtaim_embed.data.lmdb import serialize_graph, load_graph_from_serialized
+serial_func = serialize_graph
 
 from qtaim_gen.source.utils.lmdbs import (
     get_elements_from_structure_lmdb,
@@ -186,6 +181,10 @@ class Converter:
         self.skip_scaling = config_dict.get("skip_scaling", False)
         self.save_unfinalized_scaler = config_dict.get("save_unfinalized_scaler", False)
         self.auto_merge = config_dict.get("auto_merge", False)
+
+        # Optional key filtering for multi-vertical pipeline
+        raw_include = config_dict.get("include_keys")
+        self.include_keys: set | None = set(raw_include) if raw_include is not None else None
 
         if self.total_shards > 1:
             self.logger.info(f"Sharding enabled: shard {self.shard_index + 1} of {self.total_shards}")
@@ -486,7 +485,7 @@ class Converter:
                 if key_str not in self.config_dict["filter_list"]:
                     # process graph
                     try:
-                        graph = load_dgl_graph_from_serialized(pickle.loads(value))
+                        graph = load_graph_from_serialized(pickle.loads(value))
                     except Exception as e:
                         self.logger.exception(f"Failed to load graph for key {key_str}: {e}")
                         continue
@@ -498,7 +497,7 @@ class Converter:
                     txn.put(
                         f"{key_str}".encode("ascii"),
                         pickle.dumps(
-                            serialize_dgl_graph(graph[0], ret=True), protocol=-1
+                            serialize_graph(graph[0], ret=True), protocol=-1
                         ),
                     )
                     txn.commit()
@@ -578,14 +577,25 @@ class Converter:
 
     def _partition_keys(self, keys: list) -> list:
         """
-        Partition keys for this shard using deterministic modulo assignment.
+        Filter and partition keys for processing.
+
+        When include_keys is set (multi-vertical pipeline), only keys in
+        that set are kept. Then sharding is applied if total_shards > 1.
 
         Args:
-            keys: List of all keys to partition
+            keys: List of all keys from source LMDB
 
         Returns:
-            List of keys assigned to this shard
+            List of keys assigned to this job
         """
+        if self.include_keys is not None:
+            keys = [
+                k for k in keys
+                if (k.decode("ascii") if isinstance(k, bytes) else str(k))
+                in self.include_keys
+            ]
+            self.logger.info(f"include_keys filter: {len(keys)} keys retained")
+
         if self.total_shards <= 1:
             return keys
 
@@ -918,16 +928,16 @@ class Converter:
                         continue
 
                     try:
-                        # Deserialize: pickle.loads returns bytes, then deserialize to DGLGraph
+                        # Deserialize: pickle.loads returns bytes, then deserialize to PyG HeteroData
                         serialized_bytes = pickle.loads(value)
-                        graph = load_dgl_graph_from_serialized(serialized_bytes)
+                        graph = load_graph_from_serialized(serialized_bytes)
 
                         # Apply scalers - feature scaler expects a list
                         graph = merged_feature_scaler([graph])
                         graph = merged_label_scaler(graph)
 
                         # Serialize and write back
-                        serialized_bytes = serialize_dgl_graph(graph[0], ret=True)
+                        serialized_bytes = serialize_graph(graph[0], ret=True)
                         txn.put(key, pickle.dumps(serialized_bytes, protocol=-1))
                         count += 1
                     except Exception as e:
@@ -1114,7 +1124,7 @@ class BaseConverter(Converter):
                 self.label_scaler_iterative.update([first_graph])
                 write_buffer.append((
                     f"{key_str}".encode("ascii"),
-                    pickle.dumps(serialize_dgl_graph(first_graph, ret=True), protocol=-1),
+                    pickle.dumps(serialize_graph(first_graph, ret=True), protocol=-1),
                 ))
                 processed_count += 1
                 first_key_idx = idx + 1
@@ -1153,7 +1163,7 @@ class BaseConverter(Converter):
 
                         write_buffer.append((
                             f"{key_str}".encode("ascii"),
-                            pickle.dumps(serialize_dgl_graph(graph, ret=True), protocol=-1),
+                            pickle.dumps(serialize_graph(graph, ret=True), protocol=-1),
                         ))
                         processed_count += 1
 
@@ -1370,7 +1380,7 @@ class QTAIMConverter(Converter):
                 self.label_scaler_iterative.update([first_graph])
                 write_buffer.append((
                     f"{key_str}".encode("ascii"),
-                    pickle.dumps(serialize_dgl_graph(first_graph, ret=True), protocol=-1),
+                    pickle.dumps(serialize_graph(first_graph, ret=True), protocol=-1),
                 ))
                 processed_count += 1
                 first_key_idx = idx + 1
@@ -1409,7 +1419,7 @@ class QTAIMConverter(Converter):
 
                         write_buffer.append((
                             f"{key_str}".encode("ascii"),
-                            pickle.dumps(serialize_dgl_graph(graph, ret=True), protocol=-1),
+                            pickle.dumps(serialize_graph(graph, ret=True), protocol=-1),
                         ))
                         processed_count += 1
 
@@ -1459,8 +1469,30 @@ class GeneralConverter(Converter):
         }
 
         self.bonding_scheme = self.config_dict.get("bonding_scheme", "structural")
-        self.data_inputs = self.config_dict.get("data_inputs", ["geom", "qtaim", "charge"]) # add fuzzy_full, bonds, other as possible data inputs
-        
+
+        # Auto-detect data_inputs from available LMDB sources if not explicitly set
+        # This ensures Phase 1 (grapher init) and Phase 2 (parallel processing) read
+        # the same data sources consistently.
+        _lmdb_to_data_input = {
+            "geom_lmdb": "geom",
+            "qtaim_lmdb": "qtaim",
+            "charge_lmdb": "charge",
+            "fuzzy_full_lmdb": "fuzzy",
+            "fuzzy_lmdb": "fuzzy",
+            "other_lmdb": "other",
+            "bond_lmdb": "bond",
+            "bonds_lmdb": "bond",
+        }
+        if "data_inputs" in self.config_dict:
+            self.data_inputs = self.config_dict["data_inputs"]
+        else:
+            available_lmdbs = set(self.config_dict.get("lmdb_locations", {}).keys())
+            auto_detected = []
+            for lmdb_key, data_name in _lmdb_to_data_input.items():
+                if lmdb_key in available_lmdbs and data_name not in auto_detected:
+                    auto_detected.append(data_name)
+            self.data_inputs = auto_detected if auto_detected else ["geom", "qtaim", "charge"]
+
         if config_dict.get("charge_filter", None) is not None:
             self.charge_filter = config_dict["charge_filter"]
 
@@ -1477,14 +1509,13 @@ class GeneralConverter(Converter):
         self.missing_data_strategy = config_dict.get("missing_data_strategy", "skip")
         self.sentinel_value = config_dict.get("sentinel_value", float("nan"))
 
-        # assert that for each data input, the corresponding LMDB is in the config dict in "lmdb_locations"
-    
-        for data_input in self.data_inputs:
-            key = f"{data_input}_lmdb"
-            
-            assert (
-                key in self.config_dict["lmdb_locations"].keys()
-            ), f"The config file must contain a key '{key}'"
+        # Build reverse mapping: data_input name -> actual LMDB key in lmdb_dict
+        # This resolves naming inconsistencies (e.g. "fuzzy" -> "fuzzy_full_lmdb" or "fuzzy_lmdb")
+        self._data_input_to_lmdb_key = {}
+        available_lmdbs = set(self.config_dict.get("lmdb_locations", {}).keys())
+        for lmdb_key, data_name in _lmdb_to_data_input.items():
+            if lmdb_key in available_lmdbs and data_name not in self._data_input_to_lmdb_key:
+                self._data_input_to_lmdb_key[data_name] = lmdb_key
 
 
 
@@ -1513,7 +1544,7 @@ class GeneralConverter(Converter):
 
         try:
             # Structure
-            value_structure = self.__getitem__("geom_lmdb", key)
+            value_structure = self.__getitem__(self._data_input_to_lmdb_key["geom"], key)
             if value_structure is None:
                 failures["structure"].append(key_str)
                 return (key_str, None, failures)
@@ -1536,13 +1567,17 @@ class GeneralConverter(Converter):
         # Charge data
         if "charge" in self.data_inputs:
             try:
-                dict_charge_raw = self.__getitem__("charge_lmdb", key)
+                dict_charge_raw = self.__getitem__(self._data_input_to_lmdb_key["charge"], key)
                 if dict_charge_raw is not None:
                     atom_feats_charge, global_dipole_feats = parse_charge_data(
                         dict_charge_raw, global_feats["n_atoms"], self.charge_filter
                     )
                     global_feats.update(global_dipole_feats)
-                    atom_feats.update(atom_feats_charge)
+                    for atom_idx, charge_feats in atom_feats_charge.items():
+                        if atom_idx in atom_feats:
+                            atom_feats[atom_idx].update(charge_feats)
+                        else:
+                            atom_feats[atom_idx] = charge_feats
                 else:
                     failures["charge"].append(key_str)
                     if self.missing_data_strategy == "skip":
@@ -1557,12 +1592,12 @@ class GeneralConverter(Converter):
         connected_bond_paths = None
         if "qtaim" in self.data_inputs:
             try:
-                dict_qtaim_raw = self.__getitem__("qtaim_lmdb", key)
+                dict_qtaim_raw = self.__getitem__(self._data_input_to_lmdb_key["qtaim"], key)
                 if dict_qtaim_raw is not None:
                     (_, _, atom_feats, bond_feats, connected_bond_paths) = parse_qtaim_data(
                         dict_qtaim_raw, atom_feats, bond_feats,
-                        atom_keys=self.keys_data["atom"],
-                        bond_keys=self.keys_data["bond"],
+                        atom_keys=None,
+                        bond_keys=None,
                     )
                 else:
                     failures["qtaim"].append(key_str)
@@ -1577,7 +1612,7 @@ class GeneralConverter(Converter):
         # Fuzzy data
         if "fuzzy" in self.data_inputs:
             try:
-                dict_fuzzy_raw = self.__getitem__("fuzzy_lmdb", key)
+                dict_fuzzy_raw = self.__getitem__(self._data_input_to_lmdb_key["fuzzy"], key)
                 if dict_fuzzy_raw is not None:
                     atom_feats_fuzzy, global_fuzzy_feats = parse_fuzzy_data(
                         dict_fuzzy_raw, global_feats["n_atoms"], self.fuzzy_filter
@@ -1601,7 +1636,7 @@ class GeneralConverter(Converter):
         # Other data
         if "other" in self.data_inputs:
             try:
-                dict_other_raw = self.__getitem__("other_lmdb", key)
+                dict_other_raw = self.__getitem__(self._data_input_to_lmdb_key["other"], key)
                 if dict_other_raw is not None:
                     global_other_feats = parse_other_data(dict_other_raw, self.other_filter)
                     global_feats.update(global_other_feats)
@@ -1619,7 +1654,7 @@ class GeneralConverter(Converter):
         bonds_from_lmdb = None
         if "bond" in self.data_inputs:
             try:
-                dict_bonds_raw = self.__getitem__("bond_lmdb", key)
+                dict_bonds_raw = self.__getitem__(self._data_input_to_lmdb_key["bond"], key)
                 if dict_bonds_raw is not None:
                     bond_feats_from_lmdb, bonds_from_lmdb = parse_bond_data(
                         dict_bonds_raw,
@@ -1657,6 +1692,20 @@ class GeneralConverter(Converter):
         else:
             selected_bond_definitions = bond_list
 
+        # Ensure all selected bonds have features (fill missing with 0.0)
+        if bond_feats and selected_bond_definitions:
+            bond_keys_expected = set()
+            for bf in bond_feats.values():
+                bond_keys_expected.update(bf.keys())
+            for bond_def in selected_bond_definitions:
+                bond_tuple = tuple(sorted(bond_def)) if not isinstance(bond_def, tuple) else bond_def
+                if bond_tuple not in bond_feats:
+                    bond_feats[bond_tuple] = {k: 0.0 for k in bond_keys_expected}
+                else:
+                    for k in bond_keys_expected:
+                        if k not in bond_feats[bond_tuple]:
+                            bond_feats[bond_tuple][k] = 0.0
+
         # Build graph
         try:
             mol_wrapper = MoleculeWrapper(
@@ -1684,7 +1733,7 @@ class GeneralConverter(Converter):
 
             return (key_str, graph, failures)
         except Exception as e:
-            self.logger.error(f"Error building graph for key {key_str}: {e}")
+            self.logger.error(f"Error building graph for key {key_str}: {e}", exc_info=True)
             failures["graph"].append(key_str)
             return (key_str, None, failures)
 
@@ -1732,7 +1781,7 @@ class GeneralConverter(Converter):
             try:
                 # Step 1: Get geometry data
                 try:
-                    value_structure = self.__getitem__("geom_lmdb", key)
+                    value_structure = self.__getitem__(self._data_input_to_lmdb_key["geom"], key)
                     if value_structure is None:
                         self.logger.debug(f"Key {key_str}: geometry data is None")
                         first_key_idx = idx + 1
@@ -1757,21 +1806,29 @@ class GeneralConverter(Converter):
 
                 # Step 3: QTAIM data
                 connected_bond_paths = None
-                if "qtaim_lmdb" in self.lmdb_dict:
+                if "qtaim" in self._data_input_to_lmdb_key:
                     try:
-                        # hypothesis 1 - the raw dict is broken - unlikely bc this is working on qtaim normal
-                        dict_qtaim_raw = self.__getitem__("qtaim_lmdb", key)
+                        dict_qtaim_raw = self.__getitem__(self._data_input_to_lmdb_key["qtaim"], key)
                         if dict_qtaim_raw is not None:
                             (_, _, atom_feats, bond_feats, connected_bond_paths) = parse_qtaim_data(
                                 dict_qtaim_raw, atom_feats, bond_feats,
-                                atom_keys=self.keys_data["atom"],
-                                bond_keys=self.keys_data["bond"],
+                                atom_keys=None,
+                                bond_keys=None,
                             )
+                            # Auto-discover QTAIM atom/bond keys
+                            sample_atom = next((v for v in atom_feats.values() if v), {})
+                            for feat_key in sample_atom.keys():
+                                if feat_key not in self.keys_data["atom"]:
+                                    self.keys_data["atom"].append(feat_key)
+                            sample_bond = next((v for v in bond_feats.values() if v), {})
+                            for feat_key in sample_bond.keys():
+                                if feat_key not in self.keys_data["bond"]:
+                                    self.keys_data["bond"].append(feat_key)
                         else:
                             self.logger.debug(f"Key {key_str}: QTAIM data missing in LMDB, skipping")
                             first_key_idx = idx + 1
                             continue
-                    
+
                     except Exception as e:
                         self.logger.warning(f"Key {key_str}: Failed to parse QTAIM data: {e}", exc_info=True)
                         first_key_idx = idx + 1
@@ -1779,9 +1836,9 @@ class GeneralConverter(Converter):
 
 
                 # Step 4: Charge data
-                if "charge_lmdb" in self.lmdb_dict:
+                if "charge" in self._data_input_to_lmdb_key:
                     try:
-                        dict_charge_raw = self.__getitem__("charge_lmdb", key)
+                        dict_charge_raw = self.__getitem__(self._data_input_to_lmdb_key["charge"], key)
                         if dict_charge_raw is not None:
                             atom_feats_charge, global_dipole_feats = parse_charge_data(
                                 dict_charge_raw, global_feats["n_atoms"], self.charge_filter
@@ -1793,7 +1850,11 @@ class GeneralConverter(Converter):
                                 if feat_key not in self.keys_data["global"]:
                                     self.keys_data["global"].append(feat_key)
                             global_feats.update(global_dipole_feats)
-                            atom_feats.update(atom_feats_charge)
+                            for atom_idx, charge_feats in atom_feats_charge.items():
+                                if atom_idx in atom_feats:
+                                    atom_feats[atom_idx].update(charge_feats)
+                                else:
+                                    atom_feats[atom_idx] = charge_feats
 
                         elif self.missing_data_strategy == "skip":
                             self.logger.debug(f"Key {key_str}: charge data missing, skipping")
@@ -1808,9 +1869,9 @@ class GeneralConverter(Converter):
 
 
                 # Step 5: Fuzzy data
-                if "fuzzy_lmdb" in self.lmdb_dict:
+                if "fuzzy" in self._data_input_to_lmdb_key:
                     try:
-                        dict_fuzzy_raw = self.__getitem__("fuzzy_lmdb", key)
+                        dict_fuzzy_raw = self.__getitem__(self._data_input_to_lmdb_key["fuzzy"], key)
                         if dict_fuzzy_raw is not None:
                             atom_feats_fuzzy, global_fuzzy_feats = parse_fuzzy_data(
                                 dict_fuzzy_raw, global_feats["n_atoms"], self.fuzzy_filter
@@ -1835,9 +1896,9 @@ class GeneralConverter(Converter):
 
 
                 # Step 6: Other data
-                if "other_lmdb" in self.lmdb_dict:
+                if "other" in self._data_input_to_lmdb_key:
                     try:
-                        dict_other_raw = self.__getitem__("other_lmdb", key)
+                        dict_other_raw = self.__getitem__(self._data_input_to_lmdb_key["other"], key)
                         if dict_other_raw is not None:
                             global_other_feats = parse_other_data(dict_other_raw, self.other_filter)
                             for feat_key in global_other_feats.keys():
@@ -1856,9 +1917,9 @@ class GeneralConverter(Converter):
 
                 # Step 7: Bonds LMDB
                 bonds_from_lmdb = None
-                if "bonds_lmdb" in self.lmdb_dict:
+                if "bond" in self._data_input_to_lmdb_key:
                     try:
-                        dict_bonds_raw = self.__getitem__("bonds_lmdb", key)
+                        dict_bonds_raw = self.__getitem__(self._data_input_to_lmdb_key["bond"], key)
                         if dict_bonds_raw is not None:
                             bond_feats_from_lmdb, bonds_from_lmdb = parse_bond_data(
                                 dict_bonds_raw, bond_filter=self.bond_filter,
@@ -1889,6 +1950,21 @@ class GeneralConverter(Converter):
                     self.logger.warning(f"Key {key_str}: Failed to select bond definitions: {e}", exc_info=True)
                     first_key_idx = idx + 1
                     continue
+
+                # Step 8b: Ensure all selected bonds have features (fill missing with 0.0)
+                # This handles cases where structural bonds don't have bond order data
+                if bond_feats and selected_bond_definitions:
+                    bond_keys_expected = set()
+                    for bf in bond_feats.values():
+                        bond_keys_expected.update(bf.keys())
+                    for bond_def in selected_bond_definitions:
+                        bond_tuple = tuple(sorted(bond_def)) if not isinstance(bond_def, tuple) else bond_def
+                        if bond_tuple not in bond_feats:
+                            bond_feats[bond_tuple] = {k: 0.0 for k in bond_keys_expected}
+                        else:
+                            for k in bond_keys_expected:
+                                if k not in bond_feats[bond_tuple]:
+                                    bond_feats[bond_tuple][k] = 0.0
 
                 # Step 9: Build MoleculeWrapper
                 try:
@@ -1965,7 +2041,7 @@ class GeneralConverter(Converter):
                     self.label_scaler_iterative.update([first_graph])
                     write_buffer.append((
                         f"{key_str}".encode("ascii"),
-                        pickle.dumps(serialize_dgl_graph(first_graph, ret=True), protocol=-1),
+                        pickle.dumps(serialize_graph(first_graph, ret=True), protocol=-1),
                     ))
                     processed_count += 1
                     first_key_idx = idx + 1
@@ -2012,7 +2088,7 @@ class GeneralConverter(Converter):
 
                         write_buffer.append((
                             f"{key_str}".encode("ascii"),
-                            pickle.dumps(serialize_dgl_graph(graph, ret=True), protocol=-1),
+                            pickle.dumps(serialize_graph(graph, ret=True), protocol=-1),
                         ))
                         processed_count += 1
 

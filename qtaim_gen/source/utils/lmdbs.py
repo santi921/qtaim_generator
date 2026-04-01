@@ -453,7 +453,21 @@ def parse_config_gen_to_embed(
     if "allowed_spins" not in config_dict.keys():
         config_dict["allowed_spins"] = None
 
-    # create config
+    # Split config defaults
+    if "split_method" not in config_dict:
+        config_dict["split_method"] = "random"
+    if "split_ratios" not in config_dict:
+        config_dict["split_ratios"] = [0.8, 0.1, 0.1]
+    if "split_seed" not in config_dict:
+        config_dict["split_seed"] = 42
+
+    # Validate split + sharding mutual exclusivity
+    total_shards = config_dict.get("total_shards", 1)
+    if total_shards > 1 and config_dict.get("_split_enabled", False):
+        raise ValueError(
+            "Splitting and sharding are mutually exclusive. "
+            f"Got total_shards={total_shards} with --split enabled."
+        )
 
     return config_dict
 
@@ -770,8 +784,10 @@ def parse_bond_data(
             if bond_key_tuple not in bond_feats:
                 bond_feats[bond_key_tuple] = {}
 
-            # store under the original section key (e.g., 'fuzzy' or 'ibsi_bond')
-            bond_feats[bond_key_tuple][k] = float(bond_value)
+            # Normalize key: strip _bond suffix for consistent naming
+            # (some LMDB sources store 'ibsi_bond' while others store 'ibsi')
+            normalized_k = k[:-5] if k.endswith("_bond") else k
+            bond_feats[bond_key_tuple][normalized_k] = float(bond_value)
 
     # If a cutoff is provided, or a bond_filter is provided, do a second pass
     # to filter bond_feats and bond_list based on the feature used to define
@@ -779,22 +795,9 @@ def parse_bond_data(
     # - cutoff (float): keep bonds where feature >= cutoff
     # - bond_filter (list): if cutoff is None, fall back to presence/non-zero behavior
     if cutoff is not None or bond_filter is not None:
-        # determine the actual key name used in the payload (could be 'fuzzy' or 'fuzzy_bond')
-        candidate_keys = [bond_list_definition, bond_list_definition + "_bond"]
-        filter_key = None
-        for ck in candidate_keys:
-            if ck in dict_bond:
-                filter_key = ck
-                break
-        # if still not found, try to find something from bond_filter
-        if filter_key is None and bond_filter is not None:
-            for ck in candidate_keys:
-                if ck in bond_filter:
-                    filter_key = ck
-                    break
-        # final fallback: if bond_filter explicitly provided, use its first element
-        if filter_key is None and bond_filter is not None and len(bond_filter) > 0:
-            filter_key = bond_filter[0]
+        # determine the filter key using the normalized form (without _bond suffix)
+        # since bond_feats keys are now normalized
+        filter_key = bond_list_definition  # already normalized (e.g. 'fuzzy', 'ibsi')
 
         allowed = set()
         for b in bond_list:

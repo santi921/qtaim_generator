@@ -524,6 +524,16 @@ def merge_qtaim_inds(
 
         for k, v in bond_cps.items():
             bond_list_unsorted = v["connected_bond_paths"]
+            # Skip bonds where any connected atom has no CP match
+            if any(
+                not isinstance(qtaim_to_dft.get(i - 1, {}).get("key"), str)
+                for i in bond_list_unsorted
+            ):
+                print(
+                    f"Warning: skipping bond CP {k}, "
+                    "connected atom has no QTAIM match"
+                )
+                continue
             # print(bond_list_unsorted)
             bond_list_unsorted = [
                 int(qtaim_to_dft[i - 1]["key"].split("_")[0]) - 1
