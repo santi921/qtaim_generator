@@ -91,9 +91,9 @@ If all charge sub-jobs have positive timings but `charge.json` is corrupted:
 3. Final `validation_checks()` fails → logged as warning
 4. User re-runs with `--overwrite` or `--clean_first`
 
-### Phantom Keys at Source
+### Phantom Keys at Runtime
 
-Remove `charge_separate`, `bond_separate`, `other_separate`, `fuzzy_full` from `ORDER_OF_OPERATIONS_separate` directly. These have no `.mfwn` files; the actual sub-jobs come from the data dicts appended at runtime. Currently they create spurious timing=-1 entries and error logs.
+`charge_separate`, `bond_separate`, `other_separate`, `fuzzy_full` have no `.mfwn` files and must not appear in the `run_jobs()` execution list. However, `create_jobs()` depends on them to expand the individual sub-job `.mfwn` files, so they cannot be removed from `ORDER_OF_OPERATIONS_separate`. Fix: filter them at runtime inside `run_jobs()` only.
 
 ### `separate=False` + `restart=True` NameError
 
@@ -111,7 +111,7 @@ Wrap `json.load()` with `JSONDecodeError` handling. Log warning, treat as empty 
 - [ ] Sub-jobs with `timings[order] == -1` (error) are re-run
 - [ ] Sub-jobs absent from `timings.json` are run
 - [ ] `get_val_breakdown_from_folder()` no longer called on restart path
-- [ ] Phantom keys removed from `ORDER_OF_OPERATIONS_separate`
+- [ ] Phantom keys (`charge_separate`, `bond_separate`, `other_separate`, `fuzzy_full`) filtered at runtime in `run_jobs()` — constant left intact for `create_jobs()`
 - [ ] `separate=False, restart=True` does not raise `NameError`
 - [ ] Corrupted `timings.json` handled gracefully (log + fresh start)
 - [ ] Category-level `validation_checks()` still runs as final sanity check
@@ -138,7 +138,7 @@ Wrap `json.load()` with `JSONDecodeError` handling. Log warning, treat as empty 
 - [ ] `clean_first` preserves `.processing.lock`
 - [ ] Corrupted `timings.json` → fresh start
 - [ ] `separate=False, restart=True` no NameError
-- [ ] Phantom keys absent from operations list
+- [ ] Phantom keys absent from the operations list passed to `run_jobs()` (filtered, not removed from constant)
 - [ ] Lock heartbeat updates mtime
 
 ## Dependencies & Risks
@@ -153,27 +153,14 @@ Wrap `json.load()` with `JSONDecodeError` handling. Log warning, treat as empty 
 
 ### Phase A: Per-sub-job restart + cleanup
 
-#### [omol.py](qtaim_gen/source/core/omol.py) - `ORDER_OF_OPERATIONS_separate` cleanup
+#### [omol.py](qtaim_gen/source/core/omol.py) - Phantom key filter in `run_jobs()`
 
-Remove phantom keys at the source:
+`ORDER_OF_OPERATIONS_separate` is left intact — `create_jobs()` uses `charge_separate`, `bond_separate`, `other_separate`, `fuzzy_full` to expand sub-job `.mfwn` files. Filter only at runtime in `run_jobs()`:
 
 ```python
-# BEFORE (line 57-63)
-ORDER_OF_OPERATIONS_separate = [
-    "fuzzy_full",
-    "charge_separate",
-    "bond_separate",
-    "qtaim",
-    "other_separate",
-]
-
-# AFTER
-ORDER_OF_OPERATIONS_separate = [
-    "qtaim",
-]
+_phantom_keys = {"charge_separate", "bond_separate", "other_separate", "fuzzy_full"}
+order_of_operations = [o for o in order_of_operations if o not in _phantom_keys]
 ```
-
-The individual sub-job keys (`hirshfeld`, `adch`, `fuzzy_bond`, etc.) are appended dynamically from the data dicts at runtime.
 
 #### [omol.py](qtaim_gen/source/core/omol.py) - `run_jobs()` restart refactor
 
