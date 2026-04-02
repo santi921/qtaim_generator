@@ -51,17 +51,14 @@ def _split_fortran_floats(tokens: list) -> list:
         parts = _FORTRAN_CONCAT_RE.split(t)
         # _FORTRAN_CONCAT_RE.split('-990.879181-1009.749968')
         # => ['-990.879181', '-', '1009.749968']
-        # Reassemble: first part as-is, then each separator + next part
-        reassembled = []
-        i = 0
-        while i < len(parts):
-            if i + 1 < len(parts) and parts[i + 1] == '-':
-                reassembled.append(parts[i])
-                reassembled.append('-' + parts[i + 2])
-                i += 3
-            else:
-                reassembled.append(parts[i])
-                i += 1
+        # _FORTRAN_CONCAT_RE.split('-862.341-1363.724-1008.731')
+        # => ['-862.341', '-', '1363.724', '-', '1008.731']
+        # Reassemble: first part as-is, then each (separator, value) pair.
+        # re.split with a capturing group always produces an odd-length list:
+        # [val0, sep1, val1, sep2, val2, ...]
+        reassembled = [parts[0]]
+        for j in range(1, len(parts), 2):
+            reassembled.append('-' + parts[j + 1])
         result.extend(reassembled)
     return result
 
@@ -176,6 +173,11 @@ def parse_charge_doc(charge_out_txt):
                 float_cm5_xyz = [
                     float("nan") if set(t) == {"*"} else float(t) for t in expanded
                 ]
+                # When multiple trailing components overflow together their
+                # asterisks merge into one token, so fewer than 3 values are
+                # produced.  Pad with NaN so the list always has 3 elements.
+                while len(float_cm5_xyz) < 3:
+                    float_cm5_xyz.append(float("nan"))
                 dipole_info.setdefault("cm5", {})["xyz"] = float_cm5_xyz
 
             if dipole_adch_key in line:
@@ -276,7 +278,11 @@ def parse_charge_base(charge_out_txt, corrected=False, dipole=True):
 
             if dipole_xyz_key in line:
                 if corrected:
-                    str_nums = _split_fortran_floats(line.split()[-3:])
+                    # Key = "X/Y/Z of dipole moment from the charge (a.u.)" = 8
+                    # tokens; use index-based slicing so that when all 3 XYZ
+                    # values concatenate into one token (Fortran overflow) we
+                    # don't accidentally pick up 'charge' / '(a.u.)' tokens.
+                    str_nums = _split_fortran_floats(line.split()[8:])
                 else:
                     str_nums = _split_fortran_floats(line.split()[5:-1])
                 float_diple_xyz_temp = [float(num) for num in str_nums]
@@ -474,7 +480,10 @@ def parse_charge_becke(charge_out_txt):
                 dipole_info["mag"] = float_dipole_temp
 
             if dipole_xyz_key in line:
-                str_nums = _split_fortran_floats(line.split()[-3:])
+                # Use index-based slicing (key = 8 tokens) to avoid grabbing
+                # 'charge' / '(a.u.)' tokens when all 3 XYZ values are
+                # concatenated into a single token (Fortran column overflow).
+                str_nums = _split_fortran_floats(line.split()[8:])
                 float_diple_xyz_temp = [float(num) for num in str_nums]
                 dipole_info["xyz"] = float_diple_xyz_temp
 
