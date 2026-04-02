@@ -502,14 +502,12 @@ def run_jobs(
     if logger is None:
         logger = logging.getLogger("gbw_analysis")
 
+    spin_tf = check_spin(folder)
+
     if separate:
-        # copy the ORDER_OF_OPERATIONS_separate list
         order_of_operations = ORDER_OF_OPERATIONS_separate.copy()
-        # order_of_operations = ORDER_OF_OPERATIONS_separate
-        # order_of_operations = ["qtaim"]
         charge_dict = charge_data_dict(full_set=full_set)
         bond_dict = bond_order_dict(full_set=full_set)
-        spin_tf = check_spin(folder)
         fuzzy_dict = fuzzy_data(spin=spin_tf, full_set=full_set)
         other_dict = other_data_dict(full_set=full_set)
         [order_of_operations.append(i) for i in charge_dict.keys()]
@@ -517,15 +515,15 @@ def run_jobs(
         [order_of_operations.append(i) for i in fuzzy_dict.keys()]
         [order_of_operations.append(i) for i in other_dict.keys()]
 
-        """# remove "charge_separate" and "bond_separate" from list
-        if "charge_separate" in order_of_operations:
-            order_of_operations.remove("charge_separate")
-        if "bond_separate" in order_of_operations:
-            order_of_operations.remove("bond_separate")
-        if "fuzzy_full" in order_of_operations:
-            order_of_operations.remove("fuzzy_full")"""
+        # Filter phantom keys that have no .mfwn files (used by create_jobs only)
+        _phantom_keys = {"charge_separate", "bond_separate", "other_separate", "fuzzy_full"}
+        order_of_operations = [o for o in order_of_operations if o not in _phantom_keys]
     else:
         order_of_operations = ORDER_OF_OPERATIONS
+        charge_dict = {}
+        bond_dict = {}
+        fuzzy_dict = {}
+        other_dict = {}
 
     if debug:
         order_of_operations = ["qtaim"]
@@ -580,76 +578,24 @@ def run_jobs(
         timings_read_path = root_timings
 
     if os.path.exists(timings_read_path):
-
-        with open(timings_read_path, "r") as f:
-            # check that timings isn't empty
-            if os.path.getsize(timings_read_path) > 0:
-                timings = json.load(f)
-
-        if restart:
-            dft_dict = get_charge_spin_n_atoms_from_folder(
-                folder, logger=None, verbose=False
-            )
-            n_atoms = len(dft_dict["mol"])
-            # Result JSONs live next to timings — use same parent dir
-            val_folder = os.path.dirname(timings_read_path)
-            dict_val = get_val_breakdown_from_folder(
-                val_folder, n_atoms=n_atoms, full_set=full_set, spin_tf=spin_tf
-            )
+        if os.path.getsize(timings_read_path) > 0:
+            try:
+                with open(timings_read_path, "r") as f:
+                    timings = json.load(f)
+            except json.JSONDecodeError:
+                logger.warning(
+                    "Corrupted timings.json at %s -- starting fresh",
+                    timings_read_path,
+                )
+                timings = {}
 
     for order in order_of_operations:
-        # if restart, check if timing file exists
-        if restart:
-            if order in timings.keys():
-                # now check if validation checks pass
-                if order == "qtaim":
-                    if dict_val["val_qtaim"]:
-                        logger.info(
-                            f"Skipping {order} in {folder}: already completed successfully."
-                        )
-                        continue
-
-                elif order == "other":
-                    if dict_val["val_other"]:
-                        logger.info(
-                            f"Skipping {order} in {folder}: already completed successfully."
-                        )
-                        continue
-
-                elif order in charge_dict.keys():
-                    if dict_val.get(f"val_charge", False):
-                        logger.info(
-                            f"Skipping {order} in {folder}: already completed successfully."
-                        )
-                        continue
-
-                elif order in bond_dict.keys():
-                    if dict_val.get(f"val_bond", False):
-                        logger.info(
-                            f"Skipping {order} in {folder}: already completed successfully."
-                        )
-                        continue
-
-                elif order in other_dict.keys():
-                    if dict_val.get(f"val_other", False):
-                        logger.info(
-                            f"Skipping {order} in {folder}: already completed successfully."
-                        )
-                        continue
-
-                elif order in fuzzy_dict.keys():
-                    if dict_val.get(f"val_fuzzy", False):
-                        logger.info(
-                            f"Skipping {order} in {folder}: already completed successfully."
-                        )
-                        continue
-
-                elif order == "fuzzy_full":
-                    if dict_val.get(f"val_fuzzy", False):
-                        logger.info(
-                            f"Skipping {order} in {folder}: already completed successfully."
-                        )
-                        continue
+        # Per-sub-job restart: skip if this sub-job completed successfully
+        if restart and order in timings and timings[order] > 0:
+            logger.info(
+                f"Skipping {order} in {folder}: timing={timings[order]:.2f}s"
+            )
+            continue
 
         if prof_mem:
             memory = {}
@@ -685,6 +631,14 @@ def run_jobs(
         try:
             atomic_json_write(os.path.join(folder, "timings.json"), timings)
             logger.info(f"Saved timings.json in {folder}")
+
+            # Heartbeat: touch lock file to keep mtime fresh for stale detection
+            _lockfile = os.path.join(folder, ".processing.lock")
+            if os.path.exists(_lockfile):
+                try:
+                    os.utime(_lockfile, None)
+                except OSError:
+                    pass
 
             if prof_mem:
                 atomic_json_write(os.path.join(folder, "memory.json"), memory)

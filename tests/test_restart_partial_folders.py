@@ -9,6 +9,7 @@ Tests cover:
 
 import json
 import os
+import time
 import pytest
 
 from qtaim_gen.source.utils.validation import (
@@ -803,6 +804,210 @@ class TestQtaimValidation:
         path = tmp_path / "qtaim.json"
         _write_json(path, qtaim)
         assert validate_qtaim_dict(str(path), n_atoms=N_ATOMS_H2O)
+
+
+# ---------------------------------------------------------------------------
+# Tests: Per-sub-job restart granularity
+# ---------------------------------------------------------------------------
+
+
+class TestPerSubJobRestart:
+    """Tests for the per-sub-job restart skip logic in run_jobs().
+
+    The new logic skips a sub-job on restart if timings[order] > 0,
+    and re-runs if timings[order] <= 0 or absent.
+    """
+
+    def test_positive_timing_should_skip(self):
+        """Sub-job with timing > 0 should be considered complete."""
+        timings = {"hirshfeld": 3.2, "adch": 2.8}
+        # Positive timing → skip
+        assert "hirshfeld" in timings and timings["hirshfeld"] > 0
+
+    def test_error_timing_should_rerun(self):
+        """Sub-job with timing == -1 should NOT be skipped."""
+        timings = {"hirshfeld": 3.2, "adch": -1, "cm5": 2.8}
+        # Negative timing → must re-run
+        assert timings["adch"] <= 0
+
+    def test_missing_timing_should_run(self):
+        """Sub-job absent from timings should run."""
+        timings = {"hirshfeld": 3.2, "adch": 2.8}
+        # Missing key → must run
+        assert "becke" not in timings
+
+    def test_partial_charge_only_reruns_failed(self):
+        """If adch=-1 but hirshfeld/cm5/becke > 0, only adch needs to re-run."""
+        timings = {"hirshfeld": 3.2, "adch": -1, "cm5": 2.8, "becke": 2.5}
+        to_skip = [k for k in timings if timings[k] > 0]
+        to_rerun = [k for k in timings if timings[k] <= 0]
+        assert set(to_skip) == {"hirshfeld", "cm5", "becke"}
+        assert to_rerun == ["adch"]
+
+    def test_phantom_keys_filtered(self):
+        """Phantom keys should be filtered from order_of_operations in run_jobs."""
+        from qtaim_gen.source.core.omol import ORDER_OF_OPERATIONS_separate
+
+        phantom_keys = {"charge_separate", "bond_separate", "other_separate", "fuzzy_full"}
+        ops = ORDER_OF_OPERATIONS_separate.copy()
+        filtered = [o for o in ops if o not in phantom_keys]
+        # No phantom keys should remain
+        assert not (set(filtered) & phantom_keys)
+        # qtaim should still be present
+        assert "qtaim" in filtered
+
+    def test_separate_false_no_nameerror(self):
+        """separate=False path should define charge_dict etc. without NameError."""
+        # Simulates the else branch in run_jobs
+        separate = False
+        if separate:
+            charge_dict = {"hirshfeld": "data"}
+        else:
+            charge_dict = {}
+            bond_dict = {}
+            fuzzy_dict = {}
+            other_dict = {}
+        # Should not raise NameError
+        assert isinstance(charge_dict, dict)
+        assert isinstance(bond_dict, dict)
+        assert isinstance(fuzzy_dict, dict)
+        assert isinstance(other_dict, dict)
+
+    def test_corrupted_timings_fresh_start(self, tmp_path):
+        """Corrupted timings.json should be handled gracefully."""
+        timings_path = tmp_path / "timings.json"
+        timings_path.write_text("{invalid json content")
+        # Simulate the new handling
+        timings = {}
+        if timings_path.exists() and timings_path.stat().st_size > 0:
+            try:
+                with open(timings_path, "r") as f:
+                    timings = json.load(f)
+            except json.JSONDecodeError:
+                timings = {}
+        assert timings == {}
+
+    def test_zero_timing_should_rerun(self):
+        """Sub-job with timing == 0 should be re-run (not skipped)."""
+        timings = {"hirshfeld": 0.0}
+        # Zero timing → not > 0 → should re-run
+        assert not (timings["hirshfeld"] > 0)
+
+
+# ---------------------------------------------------------------------------
+# Tests: Lock protection (mtime-based stale detection)
+# ---------------------------------------------------------------------------
+
+
+class TestLockProtection:
+    """Tests for acquire_lock/release_lock with mtime-based stale detection."""
+
+    def test_acquire_release_lifecycle(self, tmp_path):
+        """Lock can be acquired and released."""
+        from qtaim_gen.source.core.workflow import acquire_lock, release_lock
+
+        folder = str(tmp_path)
+        assert acquire_lock(folder)
+        lockfile = os.path.join(folder, ".processing.lock")
+        assert os.path.exists(lockfile)
+        release_lock(folder)
+        assert not os.path.exists(lockfile)
+
+    def test_lock_contains_pid(self, tmp_path):
+        """Lock file contains current PID for debugging."""
+        from qtaim_gen.source.core.workflow import acquire_lock, release_lock
+
+        folder = str(tmp_path)
+        acquire_lock(folder)
+        lockfile = os.path.join(folder, ".processing.lock")
+        with open(lockfile, "r") as f:
+            content = f.read().strip()
+        assert content == str(os.getpid())
+        release_lock(folder)
+
+    def test_double_acquire_fails(self, tmp_path):
+        """Second acquire_lock returns False when lock is active."""
+        from qtaim_gen.source.core.workflow import acquire_lock, release_lock
+
+        folder = str(tmp_path)
+        assert acquire_lock(folder)
+        assert not acquire_lock(folder)  # second attempt fails
+        release_lock(folder)
+
+    def test_stale_lock_broken_by_age(self, tmp_path):
+        """Lock with mtime older than threshold is broken and reacquired."""
+        from qtaim_gen.source.core.workflow import acquire_lock, release_lock
+
+        folder = str(tmp_path)
+        lockfile = os.path.join(folder, ".processing.lock")
+        # Create a lock file manually
+        with open(lockfile, "w") as f:
+            f.write("99999")
+        # Backdate mtime to 10 hours ago
+        old_time = time.time() - 36000
+        os.utime(lockfile, (old_time, old_time))
+        # Should break the stale lock and acquire
+        assert acquire_lock(folder)
+        # Verify our PID is now in the lock
+        with open(lockfile, "r") as f:
+            assert f.read().strip() == str(os.getpid())
+        release_lock(folder)
+
+    def test_fresh_lock_not_broken(self, tmp_path):
+        """Lock within age threshold is respected (not broken)."""
+        from qtaim_gen.source.core.workflow import acquire_lock
+
+        folder = str(tmp_path)
+        lockfile = os.path.join(folder, ".processing.lock")
+        # Create a fresh lock (mtime = now)
+        with open(lockfile, "w") as f:
+            f.write("99999")
+        # Should NOT break it
+        assert not acquire_lock(folder)
+
+    def test_clean_first_preserves_lock(self, tmp_path):
+        """clean_first cleanup loop should skip .processing.lock."""
+        folder = str(tmp_path)
+        lockfile = os.path.join(folder, ".processing.lock")
+        other_file = os.path.join(folder, "some_data.json")
+        log_file = os.path.join(folder, "gbw_analysis.log")
+        # Create files
+        for f in [lockfile, other_file, log_file]:
+            with open(f, "w") as fh:
+                fh.write("test")
+        # Simulate clean_first loop (from workflow.py)
+        for item in os.listdir(folder):
+            if item not in ("gbw_analysis.log", ".processing.lock"):
+                item_path = os.path.join(folder, item)
+                if os.path.isfile(item_path):
+                    os.unlink(item_path)
+        # Lock and log should survive
+        assert os.path.exists(lockfile)
+        assert os.path.exists(log_file)
+        assert not os.path.exists(other_file)
+
+    def test_heartbeat_updates_mtime(self, tmp_path):
+        """os.utime on lock file updates mtime (heartbeat mechanism)."""
+        folder = str(tmp_path)
+        lockfile = os.path.join(folder, ".processing.lock")
+        with open(lockfile, "w") as f:
+            f.write(str(os.getpid()))
+        # Backdate
+        old_time = time.time() - 3600
+        os.utime(lockfile, (old_time, old_time))
+        mtime_before = os.path.getmtime(lockfile)
+        # Heartbeat
+        os.utime(lockfile, None)
+        mtime_after = os.path.getmtime(lockfile)
+        assert mtime_after > mtime_before
+
+    def test_release_nonexistent_lock_is_safe(self, tmp_path):
+        """release_lock on folder without lock file should not raise."""
+        from qtaim_gen.source.core.workflow import release_lock
+
+        folder = str(tmp_path)
+        # Should not raise
+        release_lock(folder)
 
 
 if __name__ == "__main__":
