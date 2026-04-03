@@ -573,7 +573,9 @@ def run_jobs(
     # the {order}.json file check in the loop covers those ops by name.
     _compiled_map: dict = {}
     for _op in charge_dict:
-        _compiled_map[_op] = ("charge.json", _op)
+        # charge.json stores {"<op>": {"charge": {...}, "dipole": [...], ...}}
+        # so check the nested "charge" sub-key, not just the op-level dict
+        _compiled_map[_op] = ("charge.json", _op, "charge")
     for _op in bond_dict:
         _compiled_map[_op] = ("bond.json", _op)
     for _op in fuzzy_dict:
@@ -1302,7 +1304,10 @@ def _compiled_data_present(folder: str, order: str, compiled_map: dict) -> bool:
     """
     if order not in compiled_map:
         return False
-    json_name, key = compiled_map[order]
+    entry = compiled_map[order]
+    json_name = entry[0]
+    key = entry[1]
+    sub_key = entry[2] if len(entry) > 2 else None
     for base in [folder, os.path.join(folder, "generator")]:
         json_path = os.path.join(base, json_name)
         if not os.path.exists(json_path) or os.path.getsize(json_path) == 0:
@@ -1314,8 +1319,13 @@ def _compiled_data_present(folder: str, order: str, compiled_map: dict) -> bool:
                 # other ops: just verify the compiled JSON is non-empty
                 if data:
                     return True
+            elif sub_key is not None:
+                # charge ops: {"<op>": {"charge": {...}, ...}} — check the nested sub-key
+                # avoids false-positive when op-level dict exists but charge dict is empty
+                if bool(data.get(key, {}).get(sub_key)):
+                    return True
             else:
-                # charge/bond/fuzzy ops: key must exist AND value must be non-empty
+                # bond/fuzzy ops: key value is the data dict directly
                 if bool(data.get(key)):
                     return True
         except (json.JSONDecodeError, OSError):
