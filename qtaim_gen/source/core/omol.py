@@ -566,6 +566,21 @@ def run_jobs(
 
     # create a json file to store job status
 
+    # Maps each separate-mode operation → (compiled JSON filename, key to check).
+    # key=None for other_dict ops because other.json is built via dict.update()
+    # with scalar fields, not keyed by operation name.
+    # In non-separate mode all four dicts are empty so _compiled_map is empty;
+    # the {order}.json file check in the loop covers those ops by name.
+    _compiled_map: dict = {}
+    for _op in charge_dict:
+        _compiled_map[_op] = ("charge.json", _op)
+    for _op in bond_dict:
+        _compiled_map[_op] = ("bond.json", _op)
+    for _op in fuzzy_dict:
+        _compiled_map[_op] = ("fuzzy_full.json", _op)
+    for _op in other_dict:
+        _compiled_map[_op] = ("other.json", None)
+
     timings = {}
     # On restart, timings may be in generator/ (previous completed run) or
     # job root (interrupted run before move_results_to_folder ran).
@@ -590,12 +605,30 @@ def run_jobs(
                 timings = {}
 
     for order in order_of_operations:
-        # Per-sub-job restart: skip if this sub-job completed successfully
-        if restart and order in timings and timings[order] > 0:
-            logger.info(
-                f"Skipping {order} in {folder}: timing={timings[order]:.2f}s"
+        # Per-sub-job restart: data presence is the primary skip signal; timing
+        # is secondary. This handles cases where timings.json was reset/corrupted
+        # or a crash occurred between the mfwn script finishing and the timing write.
+        if restart:
+            has_files = (
+                os.path.exists(os.path.join(folder, f"{order}.out"))
+                or os.path.exists(os.path.join(folder, "generator", f"{order}.out"))
+                or os.path.exists(os.path.join(folder, f"{order}.json"))
+                or os.path.exists(os.path.join(folder, "generator", f"{order}.json"))
             )
-            continue
+            if has_files or _compiled_data_present(folder, order, _compiled_map):
+                _timing_str = (
+                    f", timing={timings[order]:.2f}s"
+                    if order in timings and timings[order] > 0
+                    else ", no timing entry"
+                )
+                logger.info(
+                    f"Skipping {order} in {folder}: data verified{_timing_str}"
+                )
+                continue
+            if order in timings and timings[order] > 0:
+                logger.warning(
+                    f"Timing present for '{order}' in {folder} but output data not found — re-running"
+                )
 
         if prof_mem:
             memory = {}
@@ -1074,8 +1107,7 @@ def move_results_to_folder(
     ]
     results_folder = os.path.join(folder, "generator")
 
-    if not os.path.exists(results_folder):
-        os.mkdir(results_folder)
+    os.makedirs(results_folder, exist_ok=True)
 
     for file in os.listdir(folder):
         if file in results_list:
@@ -1253,6 +1285,42 @@ def _run_orca_parse(
                 os.remove(orca_out_path)
             except OSError:
                 pass
+
+
+def _compiled_data_present(folder: str, order: str, compiled_map: dict) -> bool:
+    """Return True if compiled JSON output for `order` exists and is non-empty.
+
+    Checks both the job root (in-progress run) and the generator/ subfolder
+    (completed prior run after move_results_to_folder).
+
+    Args:
+        folder: Job folder path.
+        order: Operation name (e.g. 'hirshfeld', 'becke_fuzzy_density').
+        compiled_map: Maps operation name → (compiled_json_filename, key_or_None).
+            key=None for other_dict ops where other.json stores scalar fields
+            via dict.update(), not keyed by operation name.
+    """
+    if order not in compiled_map:
+        return False
+    json_name, key = compiled_map[order]
+    for base in [folder, os.path.join(folder, "generator")]:
+        json_path = os.path.join(base, json_name)
+        if not os.path.exists(json_path) or os.path.getsize(json_path) == 0:
+            continue
+        try:
+            with open(json_path, "r") as f:
+                data = json.load(f)
+            if key is None:
+                # other ops: just verify the compiled JSON is non-empty
+                if data:
+                    return True
+            else:
+                # charge/bond/fuzzy ops: key must exist AND value must be non-empty
+                if bool(data.get(key)):
+                    return True
+        except (json.JSONDecodeError, OSError):
+            continue
+    return False
 
 
 def gbw_analysis(
