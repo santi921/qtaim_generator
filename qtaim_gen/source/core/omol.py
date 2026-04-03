@@ -502,14 +502,12 @@ def run_jobs(
     if logger is None:
         logger = logging.getLogger("gbw_analysis")
 
+    spin_tf = check_spin(folder)
+
     if separate:
-        # copy the ORDER_OF_OPERATIONS_separate list
         order_of_operations = ORDER_OF_OPERATIONS_separate.copy()
-        # order_of_operations = ORDER_OF_OPERATIONS_separate
-        # order_of_operations = ["qtaim"]
         charge_dict = charge_data_dict(full_set=full_set)
         bond_dict = bond_order_dict(full_set=full_set)
-        spin_tf = check_spin(folder)
         fuzzy_dict = fuzzy_data(spin=spin_tf, full_set=full_set)
         other_dict = other_data_dict(full_set=full_set)
         [order_of_operations.append(i) for i in charge_dict.keys()]
@@ -517,15 +515,15 @@ def run_jobs(
         [order_of_operations.append(i) for i in fuzzy_dict.keys()]
         [order_of_operations.append(i) for i in other_dict.keys()]
 
-        """# remove "charge_separate" and "bond_separate" from list
-        if "charge_separate" in order_of_operations:
-            order_of_operations.remove("charge_separate")
-        if "bond_separate" in order_of_operations:
-            order_of_operations.remove("bond_separate")
-        if "fuzzy_full" in order_of_operations:
-            order_of_operations.remove("fuzzy_full")"""
+        # Filter phantom keys that have no .mfwn files (used by create_jobs only)
+        _phantom_keys = {"charge_separate", "bond_separate", "other_separate", "fuzzy_full"}
+        order_of_operations = [o for o in order_of_operations if o not in _phantom_keys]
     else:
         order_of_operations = ORDER_OF_OPERATIONS
+        charge_dict = {}
+        bond_dict = {}
+        fuzzy_dict = {}
+        other_dict = {}
 
     if debug:
         order_of_operations = ["qtaim"]
@@ -568,85 +566,72 @@ def run_jobs(
 
     # create a json file to store job status
 
+    # Maps each separate-mode operation → (compiled JSON filename, key to check).
+    # key=None for other_dict ops because other.json is built via dict.update()
+    # with scalar fields, not keyed by operation name.
+    # In non-separate mode all four dicts are empty so _compiled_map is empty;
+    # the {order}.json file check in the loop covers those ops by name.
+    _compiled_map: dict = {}
+    for _op in charge_dict:
+        # charge.json stores {"<op>": {"charge": {...}, "dipole": [...], ...}}
+        # so check the nested "charge" sub-key, not just the op-level dict
+        _compiled_map[_op] = ("charge.json", _op, "charge")
+    for _op in bond_dict:
+        _compiled_map[_op] = ("bond.json", _op)
+    for _op in fuzzy_dict:
+        _compiled_map[_op] = ("fuzzy_full.json", _op)
+    for _op in other_dict:
+        _compiled_map[_op] = ("other.json", None)
+
     timings = {}
-    # run multiwfn scripts
-    if move_results:
-        folder_check = os.path.join(folder, "generator")
+    # On restart, timings may be in generator/ (previous completed run) or
+    # job root (interrupted run before move_results_to_folder ran).
+    # Check generator/ first, fall back to job root.
+    gen_timings = os.path.join(folder, "generator", "timings.json")
+    root_timings = os.path.join(folder, "timings.json")
+    if os.path.exists(gen_timings):
+        timings_read_path = gen_timings
     else:
-        folder_check = folder
+        timings_read_path = root_timings
 
-    if os.path.exists(os.path.join(folder_check, "timings.json")):
-
-        with open(os.path.join(folder_check, "timings.json"), "r") as f:
-            # check that timings isn't empty
-            if os.path.getsize(os.path.join(folder_check, "timings.json")) > 0:
-                timings = json.load(f)
-
-        if restart:
-            dft_dict = get_charge_spin_n_atoms_from_folder(
-                folder, logger=None, verbose=False
-            )
-            n_atoms = len(dft_dict["mol"])
-            dict_val = get_val_breakdown_from_folder(
-                folder_check, n_atoms=n_atoms, full_set=full_set, spin_tf=spin_tf
-            )
+    if os.path.exists(timings_read_path):
+        if os.path.getsize(timings_read_path) > 0:
+            try:
+                with open(timings_read_path, "r") as f:
+                    timings = json.load(f)
+            except json.JSONDecodeError:
+                logger.warning(
+                    "Corrupted timings.json at %s -- starting fresh",
+                    timings_read_path,
+                )
+                timings = {}
 
     for order in order_of_operations:
-        # if restart, check if timing file exists
+        # Per-sub-job restart: data presence is the primary skip signal; timing
+        # is secondary. This handles cases where timings.json was reset/corrupted
+        # or a crash occurred between the mfwn script finishing and the timing write.
         if restart:
-            if order in timings.keys():
-                # now check if validation checks pass
-                if order == "qtaim":
-                    if dict_val["val_qtaim"]:
-                        logger.info(
-                            f"Skipping {order} in {folder}: already completed successfully."
-                        )
-                        continue
+            has_files = (
+                os.path.exists(os.path.join(folder, f"{order}.out"))
+                or os.path.exists(os.path.join(folder, "generator", f"{order}.out"))
+                or os.path.exists(os.path.join(folder, f"{order}.json"))
+                or os.path.exists(os.path.join(folder, "generator", f"{order}.json"))
+            )
+            if has_files or _compiled_data_present(folder, order, _compiled_map):
+                _timing_str = (
+                    f", timing={timings[order]:.2f}s"
+                    if order in timings and timings[order] > 0
+                    else ", no timing entry"
+                )
+                logger.info(
+                    f"Skipping {order} in {folder}: data verified{_timing_str}"
+                )
+                continue
+            if order in timings and timings[order] > 0:
+                logger.warning(
+                    f"Timing present for '{order}' in {folder} but output data not found — re-running"
+                )
 
-                elif order == "other":
-                    if dict_val["val_other"]:
-                        logger.info(
-                            f"Skipping {order} in {folder}: already completed successfully."
-                        )
-                        continue
-
-                elif order in charge_dict.keys():
-                    if dict_val.get(f"val_charge", False):
-                        logger.info(
-                            f"Skipping {order} in {folder}: already completed successfully."
-                        )
-                        continue
-
-                elif order in bond_dict.keys():
-                    if dict_val.get(f"val_bond", False):
-                        logger.info(
-                            f"Skipping {order} in {folder}: already completed successfully."
-                        )
-                        continue
-
-                elif order in other_dict.keys():
-                    if dict_val.get(f"val_other", False):
-                        logger.info(
-                            f"Skipping {order} in {folder}: already completed successfully."
-                        )
-                        continue
-
-                elif order in fuzzy_dict.keys():
-                    if dict_val.get(f"val_fuzzy", False):
-                        logger.info(
-                            f"Skipping {order} in {folder}: already completed successfully."
-                        )
-                        continue
-
-                elif order == "fuzzy_full":
-                    if dict_val.get(f"val_fuzzy", False):
-                        logger.info(
-                            f"Skipping {order} in {folder}: already completed successfully."
-                        )
-                        continue
-
-        else:
-            folder_check = folder
         if prof_mem:
             memory = {}
 
@@ -677,13 +662,21 @@ def run_jobs(
             logger.error(f"Error running {mfwn_file}: {e}")
             timings[order] = -1
 
-        # save timings to file in folder - at each step for check pointing
+        # save timings to job root — move_results_to_folder() relocates at the end
         try:
-            atomic_json_write(os.path.join(folder_check, "timings.json"), timings)
+            atomic_json_write(os.path.join(folder, "timings.json"), timings)
             logger.info(f"Saved timings.json in {folder}")
 
+            # Heartbeat: touch lock file to keep mtime fresh for stale detection
+            _lockfile = os.path.join(folder, ".processing.lock")
+            if os.path.exists(_lockfile):
+                try:
+                    os.utime(_lockfile, None)
+                except OSError:
+                    pass
+
             if prof_mem:
-                atomic_json_write(os.path.join(folder_check, "memory.json"), memory)
+                atomic_json_write(os.path.join(folder, "memory.json"), memory)
 
         except Exception as e:
             logger.error(f"Error saving timings.json: {e}")
@@ -1116,8 +1109,7 @@ def move_results_to_folder(
     ]
     results_folder = os.path.join(folder, "generator")
 
-    if not os.path.exists(results_folder):
-        os.mkdir(results_folder)
+    os.makedirs(results_folder, exist_ok=True)
 
     for file in os.listdir(folder):
         if file in results_list:
@@ -1262,16 +1254,21 @@ def _run_orca_parse(
         logger.info("Parsed orca.out in %.2f s (%d keys)", elapsed, len(orca_dict))
 
         # Write orca_parse timing into timings.json (atomic write for crash safety)
-        if move_results:
-            timings_path = os.path.join(folder, "generator", "timings.json")
+        # Read from wherever timings currently lives, always write to job root
+        gen_timings = os.path.join(folder, "generator", "timings.json")
+        root_timings = os.path.join(folder, "timings.json")
+        if os.path.isfile(gen_timings) and os.path.getsize(gen_timings) > 0:
+            timings_read = gen_timings
+        elif os.path.isfile(root_timings) and os.path.getsize(root_timings) > 0:
+            timings_read = root_timings
         else:
-            timings_path = os.path.join(folder, "timings.json")
+            timings_read = None
 
-        if os.path.isfile(timings_path) and os.path.getsize(timings_path) > 0:
-            with open(timings_path, "r") as f:
+        if timings_read is not None:
+            with open(timings_read, "r") as f:
                 timings = json.load(f)
             timings["orca_parse"] = elapsed
-            atomic_json_write(timings_path, timings)
+            atomic_json_write(root_timings, timings)
 
         # Delete orca.out AFTER successful parse + merge + timing checkpoint.
         # Always clean up if we extracted it from the archive (archive still has it).
@@ -1290,6 +1287,50 @@ def _run_orca_parse(
                 os.remove(orca_out_path)
             except OSError:
                 pass
+
+
+def _compiled_data_present(folder: str, order: str, compiled_map: dict) -> bool:
+    """Return True if compiled JSON output for `order` exists and is non-empty.
+
+    Checks both the job root (in-progress run) and the generator/ subfolder
+    (completed prior run after move_results_to_folder).
+
+    Args:
+        folder: Job folder path.
+        order: Operation name (e.g. 'hirshfeld', 'becke_fuzzy_density').
+        compiled_map: Maps operation name → (compiled_json_filename, key_or_None).
+            key=None for other_dict ops where other.json stores scalar fields
+            via dict.update(), not keyed by operation name.
+    """
+    if order not in compiled_map:
+        return False
+    entry = compiled_map[order]
+    json_name = entry[0]
+    key = entry[1]
+    sub_key = entry[2] if len(entry) > 2 else None
+    for base in [folder, os.path.join(folder, "generator")]:
+        json_path = os.path.join(base, json_name)
+        if not os.path.exists(json_path) or os.path.getsize(json_path) == 0:
+            continue
+        try:
+            with open(json_path, "r") as f:
+                data = json.load(f)
+            if key is None:
+                # other ops: just verify the compiled JSON is non-empty
+                if data:
+                    return True
+            elif sub_key is not None:
+                # charge ops: {"<op>": {"charge": {...}, ...}} — check the nested sub-key
+                # avoids false-positive when op-level dict exists but charge dict is empty
+                if bool(data.get(key, {}).get(sub_key)):
+                    return True
+            else:
+                # bond/fuzzy ops: key value is the data dict directly
+                if bool(data.get(key)):
+                    return True
+        except (json.JSONDecodeError, OSError):
+            continue
+    return False
 
 
 def gbw_analysis(
@@ -1457,17 +1498,23 @@ def gbw_analysis(
                         logger.error(f"Error removing intermediate file {file}: {e}")
 
     if restart:
-        # check if the timings file exists
-        if move_results:
-            timings_path = os.path.join(folder, "generator", "timings.json")
-        else:
-            timings_path = os.path.join(folder, "timings.json")
+        # Check both locations: generator/ (previous completed run) and
+        # job root (interrupted run before move_results_to_folder ran)
+        gen_timings = os.path.join(folder, "generator", "timings.json")
+        root_timings = os.path.join(folder, "timings.json")
 
-        if not os.path.exists(timings_path) or os.path.getsize(timings_path) == 0:
+        if os.path.exists(gen_timings) and os.path.getsize(gen_timings) > 0:
+            timings_path = gen_timings
+        elif os.path.exists(root_timings) and os.path.getsize(root_timings) > 0:
+            timings_path = root_timings
+        else:
+            timings_path = None
+
+        if timings_path is None:
             logger.warning("No timings file found - starting from scratch!")
             restart = False
         else:
-            logger.info("Timings file found - restarting from last step.")
+            logger.info("Timings file found at %s - restarting.", timings_path)
 
     # check if output already exists
     if not overwrite:

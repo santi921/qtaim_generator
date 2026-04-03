@@ -6,7 +6,6 @@ import argparse
 import parsl
 
 from typing import Optional, List
-import resource
 
 from qtaim_gen.source.core.workflow import run_folder_task
 from qtaim_gen.source.utils.parsl_configs import alcf_config, base_config
@@ -236,7 +235,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     ####################
 
     # set env vars - this is only for the main process; workers set their own envs
-    if resource == "local":
+    if type_runner == "local":
         os.environ["OMP_NUM_THREADS"] = "{}".format(n_threads_per_job)
 
     # to handle early stops on the pilot job
@@ -260,7 +259,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     if not folders_run:
         print(f"No folders found in {job_file}")
-        return []
+        return 1
 
     # If dry-run requested, print a short plan and exit
     if dry_run:

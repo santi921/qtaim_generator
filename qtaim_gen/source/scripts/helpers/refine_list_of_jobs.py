@@ -10,7 +10,7 @@ should_stop = False
 logger = logging.getLogger("refine_list_of_jobs")
 
 
-def handle_signal(signum, frame):
+def handle_signal(signum, _frame):
     global should_stop
     print(f"Received signal {signum}, initiating graceful shutdown...")
     should_stop = True
@@ -117,8 +117,6 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     for key, value in vars(args).items():
         logger.info(f"{key}: {value}")
-    # Safely extract boolean flags and other values using getattr
-    # overrun_running: bool = bool(getattr(args, "overrun_running", False))
 
     full_set: int = int(getattr(args, "full_set", 0))
     move_results: bool = bool(getattr(args, "move_results", False))
@@ -136,7 +134,6 @@ def main(argv: Optional[List[str]] = None) -> int:
         with open(job_file, "r") as f:
             num_folders = sum(1 for _ in f)
 
-    # set mem
     # Basic static checks before launching heavy work
     if not os.path.exists(job_file):
         logger.error(f"job_file '{job_file}' does not exist")
@@ -196,77 +193,8 @@ def main(argv: Optional[List[str]] = None) -> int:
                     )
                     count_orphaned += 1
 
-                # num_files = len(os.listdir(folder_outputs))
-                # if num_files > 3:
-                #    print(f"Orphaned job detected: {folder_outputs} with {num_files} files")
-                #    count_orphaned += 1
-
         logger.info(f"Total orphaned jobs detected: {count_orphaned}")
 
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
-"""
-------------------------------------------------------------------------
-alcf redos for zips 
-------------------------------------------------------------------------
-
-
-
-python refine_list_of_jobs.py --root_omol_inputs /lus/eagle/projects/OMol25/ \
---job_file /lus/eagle/projects/generator/jobs_by_topdir/mo_hydrides_heavy_alcf_refined.txt --move_results \
---refined_job_file /lus/eagle/projects/generator/jobs_by_topdir/mo_hydrides_heavy_alcf_refined.txt --check_ecp \
-    --full_set 0 --root_omol_results /lus/eagle/projects/generator/OMol25_postprocessing/ 
-
-    
-# tuo
-python refine_list_of_jobs.py --root_omol_inputs /p/lustre5/bennion1/Omol2025-4M-DiversitySet/ \
---job_file /p/lustre5/vargas58/generator_working/job_lists/ml_mo_refined.txt --move_results \
---refined_job_file /p/lustre5/vargas58/generator_working/job_lists/ml_mo_refined.txt \
-    --full_set 0 --root_omol_results /p/lustre5/vargas58/OMol4M/
-
-done
-cat electrolytes_scaled_sep_refined.txt >> packaged_together.txt
-cat pmechdb_refined.txt >> packaged_together.txt
-cat rmechdb_refined.txt >> packaged_together.txt
-cat rgd_uks_refined.txt >> packaged_together.txt
-cat rpmd_refined.txt >> packaged_together.txt
-cat low_spin_23_refined.txt >> packaged_together.txt
-
-finish
-cat 5A_elytes_refined.txt >> packaged_together.txt
-cat protein_core_refined.txt >> packaged_together.txt
-cat ml_elytes_refined.txt >> packaged_together.txt
-cat ml_mo_refined.txt >> packaged_together.txt
-cat protein_interface_refined.txt >> packaged_together.txt
-cat electrolytes_redox_refined.txt >> packaged_together.txt
-cat ml_protein_interface_refined.txt >> packaged_together.txt
-cat pdb_pockets_400K_refined.txt >> packaged_together.txt
-cat rna_refined.txt >> packaged_together.txt
-cat tm_react_refined.txt >> packaged_together.txt
-
-
-full-runner-parsl-alcf --num_folders 1 --orca_2mkl_cmd $HOME/orca_6_0_0/orca_2mkl \
-     --multiwfn_cmd $HOME/Multiwfn_3_8/Multiwfn_noGUI --full_set 0 --type_runner local \
-    --n_threads 220 --safety_factor 1.0 --move_results --preprocess_compressed --timeout_hr 12 \
-    --queue workq-route  --restart  --n_nodes 1 --job_file ../jobs_by_topdir/spice_test.txt  --n_threads_per_job 10 \
-    --preprocess_compressed --root_omol_results /lus/eagle/projects/generator/OMol25_postprocessing/ --root_omol_inputs /lus/eagle/projects/OMol25/
-
-
-
-python refine_list_of_jobs.py --root_omol_inputs /lus/eagle/projects/OMol25/ \
---job_file /lus/eagle/projects/generator/jobs_by_topdir/spice_heavy_alcf.txt --move_results \
---refined_job_file /lus/eagle/projects/generator/jobs_by_topdir/spice_heavy_alcf_refined.txt \
-    --full_set 0 --root_omol_results /lus/eagle/projects/generator/OMol25_postprocessing/ --check_ecp
-
-
-python refine_list_of_jobs.py --root_omol_inputs /lus/eagle/projects/OMol25/ \
---job_file /lus/eagle/projects/generator/jobs_by_topdir/spice.txt --move_results \
---refined_job_file /lus/eagle/projects/generator/jobs_by_topdir/spice_refined.txt \
-    --full_set 0 --root_omol_results /lus/eagle/projects/generator/OMol25_postprocessing/ --check_ecp
-
-"""
-
-
-
