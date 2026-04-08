@@ -53,7 +53,16 @@ def _check_file(fp: str, scratch: Optional[str], timeout: int) -> Optional[str]:
             out_file = os.path.join(tmpdir, fname[: -len(".zstd0")])
             cmd = ["unzstd", "-o", out_file, "-f", fp]
         elif fname.endswith(".tar.zst"):
-            cmd = ["tar", "--zstd", "-xf", fp, "-C", tmpdir]
+            tar_path = os.path.join(tmpdir, fname[: -len(".zst")])
+            decomp = subprocess.run(
+                ["unzstd", "-o", tar_path, "-f", fp],
+                capture_output=True,
+                timeout=timeout,
+            )
+            if decomp.returncode != 0:
+                stderr = decomp.stderr.decode(errors="replace").strip()
+                return f"decompress failed (rc={decomp.returncode}): {stderr[:200]}"
+            cmd = ["tar", "-xf", tar_path, "-C", tmpdir]
         elif fname.endswith(".tgz"):
             cmd = ["tar", "-xzf", fp, "-C", tmpdir]
         else:
