@@ -1,53 +1,134 @@
 #!/usr/bin/env python3
-"""Scan a job-list file for folders that contain empty compressed source files.
+"""Scan a job-list file for folders that contain bad compressed source files.
 
-Compressed files checked: *.gbw.zstd0, *.tar.zst, *.tgz
+Two checks per compressed file (*.gbw.zstd0, *.tar.zst, *.tgz):
+  1. Size check  - fail immediately if 0 bytes.
+  2. Decompress  - extract to a temp dir and verify the command succeeds.
+     Skipped when --no_decompress_check is passed.
+
+Exit codes: 0 = scan complete, 2 = job_file not found.
 
 Usage
 -----
-find-empty-compressed --job_file /path/to/jobs.txt \
-    --root_omol_inputs /p/lustre5/data/ \
-    --output empty_compressed_jobs.txt
+find-empty-compressed \\
+    --job_file /path/to/jobs.txt \\
+    --output bad_compressed_jobs.txt \\
+    --scratch /tmp \\
+    --timeout 120
 """
 import os
+import shutil
 import logging
 import argparse
-from typing import Optional, List
+import subprocess
+import tempfile
+from typing import Optional, List, Dict
 
 logger = logging.getLogger("find_empty_compressed")
 
 _COMPRESSED_EXTS = (".gbw.zstd0", ".tar.zst", ".tgz")
 
 
-def has_empty_compressed(folder: str) -> List[str]:
-    """Return list of empty compressed file names found in *folder*.
+def _check_file(fp: str, scratch: Optional[str], timeout: int) -> Optional[str]:
+    """Return None if the file is OK, or a short reason string if it is bad.
 
-    Returns an empty list if none found or folder does not exist.
+    Checks:
+      - size == 0  -> "empty (0 bytes)"
+      - decompress fails or times out -> reason from stderr / timeout
     """
-    if not os.path.isdir(folder):
-        return []
-    empties = []
+    # --- size check ---
     try:
-        for item in os.listdir(folder):
-            if any(item.endswith(ext) for ext in _COMPRESSED_EXTS):
-                fp = os.path.join(folder, item)
-                try:
-                    if os.path.getsize(fp) == 0:
-                        empties.append(item)
-                except OSError as e:
-                    logger.warning("Could not stat %s: %s", fp, e)
+        size = os.path.getsize(fp)
+    except OSError as e:
+        return f"cannot stat: {e}"
+
+    if size == 0:
+        return "empty (0 bytes)"
+
+    # --- decompress check ---
+    tmpdir = tempfile.mkdtemp(prefix="qtaim_check_", dir=scratch)
+    try:
+        fname = os.path.basename(fp)
+        if fname.endswith(".gbw.zstd0"):
+            out_file = os.path.join(tmpdir, fname[: -len(".zstd0")])
+            cmd = ["unzstd", "-o", out_file, "-f", fp]
+        elif fname.endswith(".tar.zst"):
+            cmd = ["tar", "--zstd", "-xf", fp, "-C", tmpdir]
+        elif fname.endswith(".tgz"):
+            cmd = ["tar", "-xzf", fp, "-C", tmpdir]
+        else:
+            return None  # unknown extension - skip decompress check
+
+        proc = subprocess.run(
+            cmd,
+            capture_output=True,
+            timeout=timeout,
+        )
+        if proc.returncode != 0:
+            stderr = proc.stderr.decode(errors="replace").strip()
+            return f"decompress failed (rc={proc.returncode}): {stderr[:200]}"
+
+    except subprocess.TimeoutExpired:
+        return f"decompress timed out after {timeout}s"
+    except FileNotFoundError as e:
+        return f"decompression tool not found: {e}"
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+    return None  # all good
+
+
+def check_folder(
+    folder: str,
+    scratch: Optional[str],
+    timeout: int,
+    skip_decompress: bool,
+) -> Dict[str, str]:
+    """Return a dict mapping filename -> reason for each bad compressed file in *folder*.
+
+    Empty dict means all files are OK (or no compressed files found).
+    """
+    bad: Dict[str, str] = {}
+    if not os.path.isdir(folder):
+        return bad
+
+    try:
+        items = os.listdir(folder)
     except OSError as e:
         logger.warning("Could not list %s: %s", folder, e)
-    return empties
+        return bad
+
+    for item in items:
+        if not any(item.endswith(ext) for ext in _COMPRESSED_EXTS):
+            continue
+
+        fp = os.path.join(folder, item)
+
+        if skip_decompress:
+            # size-only path
+            try:
+                size = os.path.getsize(fp)
+            except OSError as e:
+                bad[item] = f"cannot stat: {e}"
+                continue
+            if size == 0:
+                bad[item] = "empty (0 bytes)"
+        else:
+            reason = _check_file(fp, scratch, timeout)
+            if reason is not None:
+                bad[item] = reason
+
+    return bad
 
 
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         prog="find-empty-compressed",
         description=(
-            "Scan a job-list file for input folders that contain empty compressed "
+            "Scan a job-list file for input folders that contain bad compressed "
             "files (*.gbw.zstd0, *.tar.zst, *.tgz). "
-            "Writes the affected folder paths to --output."
+            "Each file is size-checked, then decompressed into a temp dir to verify "
+            "integrity. Affected folder paths are written to --output."
         ),
     )
 
@@ -61,15 +142,15 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument(
         "--output",
         type=str,
-        default="empty_compressed_jobs.txt",
-        help="path to write the list of affected folders (default: empty_compressed_jobs.txt)",
+        default="bad_compressed_jobs.txt",
+        help="path to write the list of affected folders (default: bad_compressed_jobs.txt)",
     )
 
     parser.add_argument(
         "--root_omol_inputs",
         type=str,
         default=None,
-        help="root of the input data tree; each line in job_file is relative to this root",
+        help="prepended to relative paths in job_file (normally paths are already absolute)",
     )
 
     parser.add_argument(
@@ -77,6 +158,29 @@ def main(argv: Optional[List[str]] = None) -> int:
         type=int,
         default=-1,
         help="maximum number of folders to scan (-1 = all)",
+    )
+
+    parser.add_argument(
+        "--scratch",
+        type=str,
+        default=None,
+        help=(
+            "directory to use as parent for temp extraction dirs "
+            "(default: system tempdir). Use a fast local path on HPC."
+        ),
+    )
+
+    parser.add_argument(
+        "--timeout",
+        type=int,
+        default=120,
+        help="per-file decompress timeout in seconds (default: 120)",
+    )
+
+    parser.add_argument(
+        "--no_decompress_check",
+        action="store_true",
+        help="skip the decompress step; only check file size",
     )
 
     parser.add_argument(
@@ -97,6 +201,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     output: str = args.output
     root_omol_inputs: Optional[str] = args.root_omol_inputs
     num_folders: int = args.num_folders
+    scratch: Optional[str] = args.scratch
+    timeout: int = args.timeout
+    skip_decompress: bool = args.no_decompress_check
 
     if not os.path.exists(job_file):
         logger.error("job_file '%s' does not exist", job_file)
@@ -108,27 +215,33 @@ def main(argv: Optional[List[str]] = None) -> int:
     if num_folders > 0:
         lines = lines[:num_folders]
 
-    logger.info("Scanning %d folders from %s", len(lines), job_file)
+    mode = "size-only" if skip_decompress else f"size + decompress (timeout={timeout}s)"
+    logger.info("Scanning %d folders from %s [%s]", len(lines), job_file, mode)
 
     affected: List[str] = []
+    n_empty = 0
+    n_corrupt = 0
+
     for folder_path in lines:
-        # job_file lines are normally absolute paths; root_omol_inputs only needed
-        # if relative paths are present in the file
         if root_omol_inputs and not os.path.isabs(folder_path):
             folder_path = os.path.join(root_omol_inputs, folder_path)
 
-        empties = has_empty_compressed(folder_path)
-        if empties:
-            logger.info("Empty compressed files in %s: %s", folder_path, empties)
+        bad = check_folder(folder_path, scratch, timeout, skip_decompress)
+        if bad:
+            for fname, reason in bad.items():
+                logger.info("BAD %s/%s : %s", folder_path, fname, reason)
+                if "empty" in reason:
+                    n_empty += 1
+                else:
+                    n_corrupt += 1
             affected.append(folder_path)
 
-    logger.info(
-        "%d / %d folders have empty compressed files -> %s",
-        len(affected),
-        len(lines),
-        output,
+    summary = (
+        f"{len(affected)} / {len(lines)} folders have bad compressed files "
+        f"({n_empty} empty, {n_corrupt} corrupt/failed) -> {output}"
     )
-    print(f"{len(affected)} folders with empty compressed files written to {output}")
+    logger.info(summary)
+    print(summary)
 
     with open(output, "w") as fh:
         for p in affected:
