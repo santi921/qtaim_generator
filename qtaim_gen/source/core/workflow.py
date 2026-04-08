@@ -353,6 +353,9 @@ def process_folder_alcf(
                     logger.error(f"Failed to remove {item_path}. Reason: {e}")
 
 
+    _COMPRESSED_EXTS = (".gbw.zstd0", ".tar.zst", ".tgz")
+    empty_compressed: list = []
+
     for item in os.listdir(folder_inputs):
         # skip "density_mat.npz"
         if item != "density_mat.npz":
@@ -363,9 +366,30 @@ def process_folder_alcf(
                 if not os.path.exists(d):
                     os.makedirs(d)
             else:
+                if any(item.endswith(ext) for ext in _COMPRESSED_EXTS):
+                    try:
+                        src_size = os.path.getsize(s)
+                    except OSError as _e:
+                        logger.error("Could not stat compressed file %s: %s", s, _e)
+                        empty_compressed.append(item)
+                        continue
+                    if src_size == 0:
+                        logger.error(
+                            "Empty compressed file detected: %s (0 bytes) - skipping copy",
+                            s,
+                        )
+                        empty_compressed.append(item)
+                        continue
+
                 if not os.path.exists(d):
                     shutil.copy2(s, d)
                     logger.info(f"Copied {s} to {d}")
+
+    if empty_compressed:
+        result["status"] = "error"
+        result["error"] = f"empty compressed files in source: {empty_compressed}"
+        release_lock(folder)
+        return result
 
     # remember current working directory and switch into the folder while processing
     orig_cwd: str = os.getcwd()
