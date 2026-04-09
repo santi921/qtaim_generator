@@ -75,6 +75,14 @@ def release_lock(folder: str) -> None:
         pass
 
 
+def teardown_logger(folder: str, name: str = "gbw_analysis") -> None:
+    """Close and detach all handlers from a folder's logger to prevent fd accumulation."""
+    logger = logging.getLogger(f"{name}-{folder}")
+    for handler in list(logger.handlers):
+        handler.close()
+        logger.removeHandler(handler)
+
+
 def process_folder(
     folder: str,
     multiwfn_cmd: Optional[str] = None,
@@ -123,11 +131,7 @@ def process_folder(
         result["error"] = "folder locked by active process"
         return result
 
-    # remember current working directory and switch into the folder while processing
-    orig_cwd: str = os.getcwd()
-
     try:
-        os.chdir(folder)
         if clean_first:
             # clean everything except gbw_analysis.log and .processing.lock
             for item in os.listdir(folder):
@@ -188,11 +192,8 @@ def process_folder(
             logger.info("Skipping %s: multiple mwfn files found", folder)
             result["status"] = "skipped"
             return result
-        # set env
-        # set omp stacksize
-        os.environ["OMP_STACKSIZE"] = omp_stacksize
+        subprocess_env = {**os.environ, "OMP_STACKSIZE": omp_stacksize}
 
-        # call the existing function (pass logger)
         t0: float = time.time()
         gbw_analysis(
             folder=folder,
@@ -213,10 +214,10 @@ def process_folder(
             wfx=wfx,
             check_orca=check_orca,
             exhaustive_qtaim=exhaustive_qtaim,
+            subprocess_env=subprocess_env,
         )
         t1: float = time.time()
 
-        # remove density_mat.npz, orca.gbw.zstd0, orca.gbw, orca.tar.zst from results folder
         files_to_remove = [
             "density_mat.npz",
             "orca.gbw.zstd0",
@@ -227,7 +228,6 @@ def process_folder(
             "orca.engrad",
             "orca_stderr",
         ]
-        results_folder = os.path.join(folder, "generator")
         for fn in files_to_remove:
             fp = os.path.join(folder, fn)
             if os.path.exists(fp):
@@ -249,12 +249,7 @@ def process_folder(
 
     finally:
         release_lock(folder)
-        # restore original working directory
-        try:
-            os.chdir(orig_cwd)
-        except Exception:
-            # best-effort restore; if this fails, log to stderr
-            print(f"Warning: failed to restore cwd to {orig_cwd}")
+        teardown_logger(folder)
 
 
 def process_folder_alcf(
@@ -315,12 +310,17 @@ def process_folder_alcf(
     ]
 
     # normalize to absolute path and set up logger
-    # remove root_omol_status from folder name
     folder_inputs = folder
-    if root_omol_inputs and folder_inputs.startswith(root_omol_inputs):
-        folder_relative = folder_inputs[len(root_omol_inputs) :].lstrip(os.sep)
-    folder_outputs = root_omol_results + os.sep + folder_relative
-    # copy files from folder_inputs to folder_outputs if they don't exist
+    if not root_omol_inputs or not root_omol_results:
+        result["status"] = "error"
+        result["error"] = "root_omol_inputs and root_omol_results are required"
+        return result
+    if not folder_inputs.startswith(root_omol_inputs):
+        result["status"] = "error"
+        result["error"] = f"folder {folder_inputs!r} does not start with root_omol_inputs {root_omol_inputs!r}"
+        return result
+    folder_relative = folder_inputs[len(root_omol_inputs):].lstrip(os.sep)
+    folder_outputs = os.path.join(root_omol_results, folder_relative)
 
     if not os.path.exists(folder_outputs):
         os.makedirs(folder_outputs)
@@ -335,82 +335,61 @@ def process_folder_alcf(
         result["error"] = "folder locked by active process"
         return result
 
-    if clean_first:
-        # clean everything except gbw_analysis.log and .processing.lock
-        for item in os.listdir(folder):
-            if item not in ("gbw_analysis.log", ".processing.lock"):
-                item_path = os.path.join(folder, item)
-                try:
-                    if os.path.isfile(item_path) or os.path.islink(item_path):
-                        os.unlink(item_path)
-                        logger.info(f"Removed file {item_path} due to clean_first flag")
-                    elif os.path.isdir(item_path):
-                        shutil.rmtree(item_path)
-                        logger.info(
-                            f"Removed directory {item_path} due to clean_first flag"
-                        )
-                except Exception as e:
-                    logger.error(f"Failed to remove {item_path}. Reason: {e}")
-
-
-    _COMPRESSED_EXTS = (".gbw.zstd0", ".tar.zst", ".tgz")
-    empty_compressed: list = []
-
-    for item in os.listdir(folder_inputs):
-        # skip "density_mat.npz"
-        if item != "density_mat.npz":
-            s = os.path.join(folder_inputs, item)
-            d = os.path.join(folder_outputs, item)
-
-            if os.path.isdir(s):
-                if not os.path.exists(d):
-                    os.makedirs(d)
-            else:
-                if any(item.endswith(ext) for ext in _COMPRESSED_EXTS):
-                    try:
-                        src_size = os.path.getsize(s)
-                    except OSError as _e:
-                        logger.error("Could not stat compressed file %s: %s", s, _e)
-                        empty_compressed.append(item)
-                        continue
-                    if src_size == 0:
-                        logger.error(
-                            "Empty compressed file detected: %s (0 bytes) - skipping copy",
-                            s,
-                        )
-                        empty_compressed.append(item)
-                        continue
-
-                if not os.path.exists(d):
-                    shutil.copy2(s, d)
-                    logger.info(f"Copied {s} to {d}")
-
-    if empty_compressed:
-        result["status"] = "error"
-        result["error"] = f"empty compressed files in source: {empty_compressed}"
-        release_lock(folder)
-        return result
-
-    # remember current working directory and switch into the folder while processing
-    orig_cwd: str = os.getcwd()
-
     try:
-        os.chdir(folder)
+        if clean_first:
+            # clean everything except gbw_analysis.log and .processing.lock
+            for item in os.listdir(folder):
+                if item not in ("gbw_analysis.log", ".processing.lock"):
+                    item_path = os.path.join(folder, item)
+                    try:
+                        if os.path.isfile(item_path) or os.path.islink(item_path):
+                            os.unlink(item_path)
+                            logger.info(f"Removed file {item_path} due to clean_first flag")
+                        elif os.path.isdir(item_path):
+                            shutil.rmtree(item_path)
+                            logger.info(
+                                f"Removed directory {item_path} due to clean_first flag"
+                            )
+                    except Exception as e:
+                        logger.error(f"Failed to remove {item_path}. Reason: {e}")
 
-        # pre-checks (idempotency)
-        # e.g. skip if outputs exist and not restart
-        """
-        outputs_present: bool = all(
-            os.path.exists(os.path.join(folder, fn))
-            for fn in (
-                "timings.json",
-                "qtaim.json",
-                "other.json",
-                "fuzzy_full.json",
-                "charge.json",
-            )
-        )
-        """
+        _COMPRESSED_EXTS = (".gbw.zstd0", ".tar.zst", ".tgz")
+        empty_compressed: list = []
+
+        for item in os.listdir(folder_inputs):
+            # skip "density_mat.npz"
+            if item != "density_mat.npz":
+                s = os.path.join(folder_inputs, item)
+                d = os.path.join(folder_outputs, item)
+
+                if os.path.isdir(s):
+                    if not os.path.exists(d):
+                        os.makedirs(d)
+                else:
+                    if any(item.endswith(ext) for ext in _COMPRESSED_EXTS):
+                        try:
+                            src_size = os.path.getsize(s)
+                        except OSError as _e:
+                            logger.error("Could not stat compressed file %s: %s", s, _e)
+                            empty_compressed.append(item)
+                            continue
+                        if src_size == 0:
+                            logger.error(
+                                "Empty compressed file detected: %s (0 bytes) - skipping copy",
+                                s,
+                            )
+                            empty_compressed.append(item)
+                            continue
+
+                    if not os.path.exists(d):
+                        shutil.copy2(s, d)
+                        logger.info(f"Copied {s} to {d}")
+
+        if empty_compressed:
+            result["status"] = "error"
+            result["error"] = f"empty compressed files in source: {empty_compressed}"
+            return result
+
         try:
             tf_validation = validation_checks(
                 folder,
@@ -425,20 +404,18 @@ def process_folder_alcf(
                 logger.info("Skipping %s: already processed and validated", folder)
                 result["status"] = "skipped"
 
-                try: 
-                    # check if there are .out files to zip. If the file out_files.zip already exists, skip
+                try:
                     zip_file_out = os.path.join(folder, "out_files.zip")
                     if not os.path.exists(zip_file_out):
                         with zipfile.ZipFile(zip_file_out, "w") as zipf:
                             for file in os.listdir(folder):
-                                # skip orca.out 
+                                # skip orca.out
                                 if file.endswith(".out") and file != "orca.out":
                                     zipf.write(os.path.join(folder, file), arcname=file)
                                     os.remove(os.path.join(folder, file))
                                     logger.info(f"Zipped and removed {file}")
-                    
+
                     if move_results:
-                        # move the zip file to the results folder
                         results_folder = os.path.join(folder, "generator")
                         if not os.path.exists(results_folder):
                             os.makedirs(results_folder)
@@ -447,35 +424,21 @@ def process_folder_alcf(
 
                 except Exception as e:
                     logger.info(f"Couldn't zip .out files in {folder}: {e}")
-                
-                #results_folder = os.path.join(folder)                
+
                 for fn in files_to_remove:
                     fp = os.path.join(folder, fn)
                     if os.path.exists(fp):
                         os.remove(fp)
-                        # add log
                         logger.info("Removed file %s to save space", fp)
 
                 return result
-            
+
         except Exception as e:
             logger.warning("Validation check failed for %s: %s", folder, str(e))
             # continue processing
 
-        # optional: check mwfn files, multiple mwfn guard
-        """
-        mwfn_files: List[str] = [f for f in os.listdir(folder) if f.endswith(".mwfn")]
-        
-        if len(mwfn_files) > 1 and not overrun_running:
-            logger.info("Skipping %s: multiple mwfn files found", folder)
-            result["status"] = "skipped"
-            return result
-        """
-        # set env
-        # set omp stacksize
-        os.environ["OMP_STACKSIZE"] = omp_stacksize
+        subprocess_env = {**os.environ, "OMP_STACKSIZE": omp_stacksize}
 
-        # call the existing function (pass logger)
         t0: float = time.time()
         gbw_analysis(
             folder=folder,
@@ -497,16 +460,15 @@ def process_folder_alcf(
             wfx=wfx,
             check_orca=check_orca,
             exhaustive_qtaim=exhaustive_qtaim,
+            subprocess_env=subprocess_env,
         )
         t1: float = time.time()
 
-        # remove density_mat.npz, orca.gbw.zstd0, orca.gbw, orca.tar.zst from results folder
-        if clean:    
+        if clean:
             for fn in files_to_remove:
                 fp = os.path.join(folder, fn)
                 if os.path.exists(fp):
                     os.remove(fp)
-                    # add log
                     logger.info("Removed file %s to save space", fp)
 
         result["elapsed"] = t1 - t0
@@ -523,12 +485,7 @@ def process_folder_alcf(
 
     finally:
         release_lock(folder)
-        # restore original working directory
-        try:
-            os.chdir(orig_cwd)
-        except Exception:
-            # best-effort restore; if this fails, log to stderr
-            print(f"Warning: failed to restore cwd to {orig_cwd}")
+        teardown_logger(folder)
 
 
 try:
