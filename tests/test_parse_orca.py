@@ -1104,3 +1104,142 @@ class TestValidationChecksOrcaFlag:
             valid_job_dir, full_set=0, move_results=False, check_orca=False
         )
         assert result is False
+
+
+# ── Quality filter fields ─────────────────────────────────────────────
+# Tests for s_squared, n_alpha/n_beta/n_total, and cosx_warning.
+# These support the OMol25-style quality filters.
+
+UKS_OMOL_DIR = Path(__file__).parent.parent / "data" / "omol_tests" / "orca6_uks"
+_uks_omol_available = (UKS_OMOL_DIR / "orca.out").is_file()
+_skip_no_uks_omol = pytest.mark.skipif(
+    not _uks_omol_available, reason="omol_tests/orca6_uks/orca.out not present"
+)
+
+
+class TestQualityFilterFields:
+    """Parsing of fields needed for OMol25-style quality filtering."""
+
+    def test_s_squared_parsed(self, rks_result):
+        """S^2 line injected into minimal_rks.out should be parsed."""
+        assert "s_squared" in rks_result
+        assert rks_result["s_squared"] == pytest.approx(0.751234, rel=1e-5)
+
+    def test_n_alpha_parsed(self, rks_result):
+        assert "n_alpha" in rks_result
+        assert rks_result["n_alpha"] == pytest.approx(104.999996332583, rel=1e-8)
+
+    def test_n_beta_parsed(self, rks_result):
+        assert "n_beta" in rks_result
+        assert rks_result["n_beta"] == pytest.approx(104.999996332583, rel=1e-8)
+
+    def test_n_total_parsed(self, rks_result):
+        assert "n_total" in rks_result
+        assert rks_result["n_total"] == pytest.approx(209.999992665166, rel=1e-8)
+
+    def test_cosx_warning_absent_when_clean(self, rks_result):
+        """No COSX warning in a normal output."""
+        assert "cosx_warning" not in rks_result
+
+    def test_cosx_warning_detected(self, tmp_job_dir):
+        """Parser sets cosx_warning=True when ORCA prints the exchange deviation warning."""
+        path = os.path.join(tmp_job_dir, "cosx_warn.out")
+        with open(path, "w") as f:
+            f.write("FINAL SINGLE POINT ENERGY -100.0\n")
+            f.write("WARNING: The final exchange deviates considerably from the estimate\n")
+        result = parse_orca_output(path)
+        assert result.get("cosx_warning") is True
+
+    def test_cosx_warning_case_insensitive(self, tmp_job_dir):
+        path = os.path.join(tmp_job_dir, "cosx_lower.out")
+        with open(path, "w") as f:
+            f.write("FINAL SINGLE POINT ENERGY -100.0\n")
+            f.write("Warning: Final exchange deviates considerably from the estimate.\n")
+        result = parse_orca_output(path)
+        assert result.get("cosx_warning") is True
+
+
+class TestWarningsBlock:
+    """WARNINGS header block parsing."""
+
+    def test_no_warnings_absent_key(self, rks_result):
+        """minimal_rks.out has no WARNINGS block - key should be absent."""
+        assert "warnings" not in rks_result
+
+    def test_warnings_detected(self, tmp_job_dir):
+        path = os.path.join(tmp_job_dir, "warn.out")
+        with open(path, "w") as f:
+            f.write("FINAL SINGLE POINT ENERGY -100.0\n")
+            f.write("WARNINGS\n")
+            f.write("Please study these warnings very carefully!\n")
+            f.write("=" * 80 + "\n")
+            f.write("\n")
+            f.write("WARNING: your system is open-shell and RHF/RKS was chosen\n")
+            f.write("  ===> : WILL SWITCH to UHF/UKS\n")
+            f.write("\n")
+            f.write("WARNING: some other issue detected\n")
+            f.write("\n")
+            f.write("=" * 80 + "\n")
+        result = parse_orca_output(path)
+        assert "warnings" in result
+        assert len(result["warnings"]) == 2
+        assert "open-shell" in result["warnings"][0]
+        assert "WILL SWITCH to UHF/UKS" in result["warnings"][0]
+        assert "other issue" in result["warnings"][1]
+
+    def test_cosx_warning_via_warnings_list(self, tmp_job_dir):
+        path = os.path.join(tmp_job_dir, "cosx.out")
+        with open(path, "w") as f:
+            f.write("FINAL SINGLE POINT ENERGY -100.0\n")
+            f.write("WARNINGS\n")
+            f.write("Please study these warnings very carefully!\n")
+            f.write("=" * 80 + "\n")
+            f.write("\n")
+            f.write("WARNING: The final exchange deviates considerably from the estimate\n")
+            f.write("\n")
+            f.write("=" * 80 + "\n")
+        result = parse_orca_output(path)
+        assert any(
+            "final exchange deviates considerably" in w.lower()
+            for w in result.get("warnings", [])
+        )
+
+    def test_non_warning_lines_skipped(self, tmp_job_dir):
+        """INFO and non-prefixed lines should not appear in warnings list."""
+        path = os.path.join(tmp_job_dir, "info.out")
+        with open(path, "w") as f:
+            f.write("WARNINGS\n")
+            f.write("Please study these warnings very carefully!\n")
+            f.write("=" * 80 + "\n")
+            f.write("\n")
+            f.write("INFO   : the flag for use of LIBINT has been found!\n")
+            f.write("\n")
+            f.write("WARNING: only one real warning\n")
+            f.write("\n")
+            f.write("=" * 80 + "\n")
+        result = parse_orca_output(path)
+        assert result.get("warnings") == ["only one real warning"]
+
+
+@_skip_no_uks_omol
+class TestUKSOmolQualityFields:
+    """Value tests for S^2 and integrated electron counts from a real UKS output."""
+
+    @pytest.fixture(scope="class")
+    def uks_omol_result(self):
+        return parse_orca_output(str(UKS_OMOL_DIR / "orca.out"))
+
+    def test_s_squared(self, uks_omol_result):
+        assert uks_omol_result["s_squared"] == pytest.approx(0.784507, rel=1e-5)
+
+    def test_n_alpha(self, uks_omol_result):
+        assert uks_omol_result["n_alpha"] == pytest.approx(301.999955464233, rel=1e-8)
+
+    def test_n_beta(self, uks_omol_result):
+        assert uks_omol_result["n_beta"] == pytest.approx(300.999959243376, rel=1e-8)
+
+    def test_n_total(self, uks_omol_result):
+        assert uks_omol_result["n_total"] == pytest.approx(602.999914707608, rel=1e-8)
+
+    def test_no_cosx_warning(self, uks_omol_result):
+        assert "cosx_warning" not in uks_omol_result

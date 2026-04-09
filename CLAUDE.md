@@ -84,7 +84,7 @@ qtaim_gen/source/
 │   ├── workflow.py      # Parsl task orchestration
 │   ├── parse_qtaim.py   # Critical point parsing from Multiwfn
 │   ├── parse_multiwfn.py# Charge/bond/fuzzy output parsing
-│   ├── parse_orca.py    # ORCA .out file parser (enum state machine, WIP on feat/orca-out-parser)
+│   ├── parse_orca.py    # ORCA .out file parser (single-pass enum state machine → orca.json)
 │   └── parse_json.py    # JSON output merging/validation
 ├── data/                # Multiwfn command helpers (charge_data, bond_order_data, etc.)
 ├── scripts/             # CLI entry points (defined in pyproject.toml)
@@ -152,6 +152,7 @@ Scripts expect a two-level hierarchy: `root_dir/category/subset/job/`. Each job 
 - `input.inp` (ORCA input)
 - `*.wfn`/`*.gbw` (wavefunctions)
 - `charge.json`, `bond.json`, `qtaim.json` (outputs)
+- `orca.json` (ORCA .out parsed properties - energies, orbitals, charges, gradient, quality-filter fields)
 - `timings.json`, `.processing.lock`
 
 ## External Dependencies
@@ -191,7 +192,7 @@ Run tests with `pytest -q` or specific files with `pytest tests/<file>.py -v`.
 |-----------|----------|
 | `test_parse.py` | QTAIM/DFT input parsing, critical point extraction |
 | `test_parse_multiwfn.py` | Multiwfn output parsing (charges, bonds, fuzzy) |
-| `test_parse_orca.py` | ORCA `.out` file parser (WIP) |
+| `test_parse_orca.py` | ORCA `.out` parser - 168 tests across energy, orbital, charges, gradient, quality filters, warnings block |
 | `test_bond_detection.py` | Bond detection from coordinates, ORCA input parsing |
 | `test_lmdb.py` | LMDB read/write, key normalization, serialization roundtrips |
 | `test_parse_json.py` | JSON output parsing and validation |

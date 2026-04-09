@@ -34,6 +34,7 @@ class OrcaParseState(Enum):
     DIPOLE = auto()
     QUADRUPOLE = auto()
     ROTATIONAL_CONSTANTS = auto()
+    WARNINGS_BLOCK = auto()
 
 
 # ── Utilities ──────────────────────────────────────────────────────────
@@ -219,6 +220,10 @@ def parse_orca_output(orca_out_path: str) -> dict:
     # MBIS state tracking
     mbis_header_done = False
 
+    # Warnings block accumulators
+    warnings_list: List[str] = []
+    current_warning: Optional[str] = None
+
     # Section line counters for skipping headers
     section_line_count = 0
 
@@ -328,6 +333,12 @@ def parse_orca_output(orca_out_path: str) -> dict:
                         rotational_lines = []
                         section_line_count = 0
 
+                    elif stripped == "WARNINGS":
+                        state = OrcaParseState.WARNINGS_BLOCK
+                        warnings_list = []
+                        current_warning = None
+                        section_line_count = 0
+
                     # ── Single-line IDLE parsers ──────────────────
 
                     elif "SCF CONVERGED AFTER" in line and "CYCLES" in line:
@@ -349,6 +360,14 @@ def parse_orca_output(orca_out_path: str) -> dict:
 
                     elif "TOTAL RUN TIME:" in line:
                         result["total_run_time_s"] = _parse_run_time(line)
+
+                    elif "Expectation value of <S**2>" in line and ":" in line:
+                        val = parse_orca_float(line.split(":")[1].strip().split()[0])
+                        if val is not None:
+                            result["s_squared"] = val
+
+                    elif "final exchange deviates considerably" in line.lower():
+                        result["cosx_warning"] = True
 
                     continue  # always continue after IDLE processing
 
@@ -378,6 +397,18 @@ def parse_orca_output(orca_out_path: str) -> dict:
                         energy_components["xc_energy_eh"] = parse_orca_float(line.split(":")[1].split()[0])
                     elif "NL Energy" in line or "E(C,NL)" in line:
                         energy_components["nl_energy_eh"] = parse_orca_float(line.split(":")[1].split()[0])
+                    elif line.startswith("N(Alpha)") and ":" in line:
+                        val = parse_orca_float(line.split(":")[1].strip().split()[0])
+                        if val is not None:
+                            result["n_alpha"] = val
+                    elif line.startswith("N(Beta)") and ":" in line:
+                        val = parse_orca_float(line.split(":")[1].strip().split()[0])
+                        if val is not None:
+                            result["n_beta"] = val
+                    elif line.startswith("N(Total)") and ":" in line:
+                        val = parse_orca_float(line.split(":")[1].strip().split()[0])
+                        if val is not None:
+                            result["n_total"] = val
 
                 # ── SCF CONVERGENCE ───────────────────────────────
                 elif state == OrcaParseState.SCF_CONVERGENCE:
@@ -691,11 +722,38 @@ def parse_orca_output(orca_out_path: str) -> dict:
                         continue
                     rotational_lines.append(line)
 
+                # ── WARNINGS BLOCK ─────────────────────────────────
+                elif state == OrcaParseState.WARNINGS_BLOCK:
+                    # Skip "Please study these warnings..." and opening "===" (lines 1-2)
+                    if section_line_count <= 2:
+                        continue
+                    # Closing "===" line terminates the block
+                    if line.startswith("="):
+                        if current_warning is not None:
+                            warnings_list.append(current_warning.strip())
+                        if warnings_list:
+                            result["warnings"] = warnings_list
+                        state = OrcaParseState.IDLE
+                        continue
+                    # New WARNING entry (cclib convention: strip 9-char "WARNING: " prefix)
+                    if line.lower().startswith("warning"):
+                        if current_warning is not None:
+                            warnings_list.append(current_warning.strip())
+                        current_warning = line[9:].strip() if len(line) > 9 else ""
+                    elif current_warning is not None and line.strip():
+                        # Continuation line — same 9-char alignment as cclib
+                        current_warning += " " + (line[9:].strip() if len(line) > 9 else line.strip())
+
     except (OSError, IOError) as e:
         logger.warning(f"Error reading {orca_out_path}: {e}")
 
     # Handle case where file ends without blank line terminators
-    if state == OrcaParseState.DIPOLE and dipole_lines:
+    if state == OrcaParseState.WARNINGS_BLOCK:
+        if current_warning is not None:
+            warnings_list.append(current_warning.strip())
+        if warnings_list:
+            result["warnings"] = warnings_list
+    elif state == OrcaParseState.DIPOLE and dipole_lines:
         _parse_dipole_block(dipole_lines, result)
     elif state == OrcaParseState.QUADRUPOLE and quadrupole_lines:
         _parse_quadrupole_block(quadrupole_lines, result)

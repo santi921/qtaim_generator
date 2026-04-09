@@ -153,6 +153,9 @@ SCF CONVERGENCE
   Last DIIS Error            ...    8.0031e-06  Tolerance :   5.0000e-07
 
 
+Expectation value of <S**2>     :     0.751234
+
+
 ----------------
 ORBITAL ENERGIES
 ----------------
