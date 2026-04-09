@@ -13,6 +13,8 @@
 *ini
 *.lmdb
 *.lmdb-lock
+!tests/test_files/**/*.lmdb
+!tests/test_files/**/*.lmdb-lock
 *-lock
 *log
 *out

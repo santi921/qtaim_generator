@@ -1,6 +1,13 @@
 from qtaim_gen.source.core.parse_qtaim import get_qtaim_descs, merge_qtaim_inds
 
 
+import re
+
+# Regex for splitting Fortran-overflowed numeric tokens like '-990.879181-1009.749968'
+# Matches a float (with optional sign) followed by another float starting with '-'
+_FORTRAN_CONCAT_RE = re.compile(r'(?<=[0-9])(-)')
+
+
 def _extract_au_float(token: str) -> float:
     """Extract float from a token that may have '(a.u.)' or '(a.u.):' prefix glued to it.
 
@@ -14,6 +21,46 @@ def _extract_au_float(token: str) -> float:
             remainder = remainder[1:]
         return float(remainder)
     return float(token)
+
+
+def _split_fortran_floats(tokens: list) -> list:
+    """Split tokens that contain Fortran column-overflow concatenated floats.
+
+    Multiwfn uses fixed-width Fortran formatting. When two consecutive large
+    negative numbers overflow their field widths, they concatenate directly:
+      '-990.879181-1009.749968'  (should be two values: -990.879181 and -1009.749968)
+
+    Also filters out non-numeric tokens like '(a.u.)' or 'a.u.' that may
+    appear when overflow shifts column boundaries.
+
+    This function splits such tokens so downstream float() calls succeed.
+    """
+    result = []
+    for t in tokens:
+        # Skip non-numeric tokens that sometimes appear due to column shifts
+        if t.startswith("(a.u.)") or t == "a.u.":
+            continue
+        # Try direct conversion first (fast path)
+        try:
+            float(t)
+            result.append(t)
+            continue
+        except ValueError:
+            pass
+        # Split on '-' that follows a digit (negative sign glued to previous number)
+        parts = _FORTRAN_CONCAT_RE.split(t)
+        # _FORTRAN_CONCAT_RE.split('-990.879181-1009.749968')
+        # => ['-990.879181', '-', '1009.749968']
+        # _FORTRAN_CONCAT_RE.split('-862.341-1363.724-1008.731')
+        # => ['-862.341', '-', '1363.724', '-', '1008.731']
+        # Reassemble: first part as-is, then each (separator, value) pair.
+        # re.split with a capturing group always produces an odd-length list:
+        # [val0, sep1, val1, sep2, val2, ...]
+        reassembled = [parts[0]]
+        for j in range(1, len(parts), 2):
+            reassembled.append('-' + parts[j + 1])
+        result.extend(reassembled)
+    return result
 
 
 def parse_charge_doc(charge_out_txt):
@@ -99,20 +146,46 @@ def parse_charge_doc(charge_out_txt):
                     atomic_dipole_dict[ind + "_" + element] = [float(i) for i in dipole]
 
             if dipole_cm5_key in line:
-                float_dipole_cm5 = float(line.split()[-2])
-                dipole_info["cm5"]["mag"] = float_dipole_cm5
+                # Handle Fortran overflow where value is glued to key:
+                # 'Total dipole moment from CM5 charges1537.0019201 a.u.'
+                rest = line[line.index(dipole_cm5_key) + len(dipole_cm5_key):]
+                float_dipole_cm5 = float(rest.split()[0])
+                dipole_info.setdefault("cm5", {})["mag"] = float_dipole_cm5
 
             if dipole_cm5_xyz_key in line:
-                str_nums = line.split()[7:-1]
-                float_cm5_xyz = [float(num) for num in str_nums]
-                dipole_info["cm5"]["xyz"] = float_cm5_xyz
+                # Handle Fortran overflow where values are glued to key and/or
+                # a component overflows to '**********':
+                # 'X/Y/Z of dipole moment from CM5 charges-921.45822-657.02420**********'
+                rest = line[line.index(dipole_cm5_xyz_key) + len(dipole_cm5_xyz_key):]
+                tokens = rest.split()
+                if tokens and tokens[-1] in ("a.u.", "(a.u.)"):
+                    tokens = tokens[:-1]
+                tokens = _split_fortran_floats(tokens)
+                # Split tokens that mix a float with trailing asterisks: '-657.02420**...'
+                expanded = []
+                for t in tokens:
+                    m = re.search(r'\*+', t)
+                    if m and m.start() > 0:
+                        expanded.append(t[: m.start()])
+                        expanded.append(t[m.start() :])
+                    else:
+                        expanded.append(t)
+                float_cm5_xyz = [
+                    float("nan") if set(t) == {"*"} else float(t) for t in expanded
+                ]
+                # When multiple trailing components overflow together their
+                # asterisks merge into one token, so fewer than 3 values are
+                # produced.  Pad with NaN so the list always has 3 elements.
+                while len(float_cm5_xyz) < 3:
+                    float_cm5_xyz.append(float("nan"))
+                dipole_info.setdefault("cm5", {})["xyz"] = float_cm5_xyz
 
             if dipole_adch_key in line:
                 float_dipole_adch = _extract_au_float(line.split()[-3])
                 dipole_info["adch"]["mag"] = float_dipole_adch
 
             if dipole_adch_xyz_key in line:
-                str_nums = line.split()[8:]
+                str_nums = _split_fortran_floats(line.split()[8:])
                 float_adch_xyz = [float(num) for num in str_nums]
                 dipole_info["adch"]["xyz"] = float_adch_xyz
 
@@ -121,7 +194,7 @@ def parse_charge_doc(charge_out_txt):
                     float_dipole_temp = float(line.split()[-2])
                     dipole_info[dipole_order[dipole_index]]["mag"] = float_dipole_temp
                 if dipole_xyz_key in line:
-                    str_nums = line.split()[5:-1]
+                    str_nums = _split_fortran_floats(line.split()[5:-1])
                     float_diple_xyz_temp = [float(num) for num in str_nums]
                     dipole_info[dipole_order[dipole_index]][
                         "xyz"
@@ -205,9 +278,13 @@ def parse_charge_base(charge_out_txt, corrected=False, dipole=True):
 
             if dipole_xyz_key in line:
                 if corrected:
-                    str_nums = line.split()[-3:]
+                    # Key = "X/Y/Z of dipole moment from the charge (a.u.)" = 8
+                    # tokens; use index-based slicing so that when all 3 XYZ
+                    # values concatenate into one token (Fortran overflow) we
+                    # don't accidentally pick up 'charge' / '(a.u.)' tokens.
+                    str_nums = _split_fortran_floats(line.split()[8:])
                 else:
-                    str_nums = line.split()[5:-1]
+                    str_nums = _split_fortran_floats(line.split()[5:-1])
                 float_diple_xyz_temp = [float(num) for num in str_nums]
                 dipole_info["xyz"] = float_diple_xyz_temp
 
@@ -403,7 +480,10 @@ def parse_charge_becke(charge_out_txt):
                 dipole_info["mag"] = float_dipole_temp
 
             if dipole_xyz_key in line:
-                str_nums = line.split()[-3:]
+                # Use index-based slicing (key = 8 tokens) to avoid grabbing
+                # 'charge' / '(a.u.)' tokens when all 3 XYZ values are
+                # concatenated into a single token (Fortran column overflow).
+                str_nums = _split_fortran_floats(line.split()[8:])
                 float_diple_xyz_temp = [float(num) for num in str_nums]
                 dipole_info["xyz"] = float_diple_xyz_temp
 
@@ -414,10 +494,6 @@ def parse_charge_becke(charge_out_txt):
             if atomic_dipole_key in line:
                 trigger_dipole = True
                 atomic_dipole_dict = {}
-
-    # print("charge dict overall keys: ", charge_dict_overall.keys())
-    # print("dipole info keys: ", dipole_info.keys())
-    # print("atomic_dipole_dict_overall keys: ", atomic_dipole_dict_overall.keys())
 
     return charge_dict_overall, atomic_dipole_dict_overall, dipole_info
 
@@ -487,7 +563,7 @@ def parse_charge_doc_adch(charge_out_txt):
                 dipole_info["mag"] = float_dipole_adch
 
             if dipole_adch_xyz_key in line:
-                str_nums = line.split()[8:]
+                str_nums = _split_fortran_floats(line.split()[8:])
                 float_adch_xyz = [float(num) for num in str_nums]
                 dipole_info["xyz"] = float_adch_xyz
 

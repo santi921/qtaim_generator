@@ -1,11 +1,11 @@
 import os
 import logging
 import time
-from parsl import python_app
 import zipfile
-from qtaim_gen.source.core.omol import gbw_analysis
 from typing import Optional, Dict, Any, List
 import shutil
+
+from qtaim_gen.source.core.omol import gbw_analysis
 from qtaim_gen.source.utils.validation import validation_checks
 
 
@@ -25,18 +25,49 @@ def setup_logger_for_folder(folder: str, name: str = "gbw_analysis") -> logging.
     return logger
 
 
-def acquire_lock(folder: str) -> bool:
+_LOCK_MAX_AGE_S: float = 28800.0  # 8 hours
+
+
+def acquire_lock(folder: str, max_age_s: float = _LOCK_MAX_AGE_S) -> bool:
+    """Acquire a processing lock on a folder.
+
+    Uses mtime-based stale detection.  If an existing lock's mtime is older
+    than *max_age_s*, it is considered stale and broken.  Atomic
+    ``O_CREAT | O_EXCL`` prevents races between concurrent workers.
+    """
     lockfile: str = os.path.join(folder, ".processing.lock")
+
+    if os.path.exists(lockfile):
+        try:
+            age: float = time.time() - os.path.getmtime(lockfile)
+        except OSError:
+            age = float("inf")  # can't stat → treat as stale
+
+        if age < max_age_s:
+            return False  # not stale, genuinely locked
+
+        # Stale → break it
+        logging.getLogger("lock").warning(
+            "Breaking stale lock in %s (age=%.0fs, threshold=%.0fs)",
+            folder, age, max_age_s,
+        )
+        try:
+            os.remove(lockfile)
+        except FileNotFoundError:
+            pass  # another worker already broke it
+
+    # Atomic create-or-fail
     try:
         fd: int = os.open(lockfile, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-        os.write(fd, str(os.getpid()).encode())
+        os.write(fd, str(os.getpid()).encode())  # PID for debugging only
         os.close(fd)
         return True
     except FileExistsError:
-        return False
+        return False  # lost race to another worker
 
 
 def release_lock(folder: str) -> None:
+    """Release processing lock.  Safe to call even if lock doesn't exist."""
     lockfile: str = os.path.join(folder, ".processing.lock")
     try:
         os.remove(lockfile)
@@ -85,15 +116,22 @@ def process_folder(
     folder = os.path.abspath(folder)
     logger: logging.Logger = setup_logger_for_folder(folder)
 
+    # Acquire lock before any work
+    if not acquire_lock(folder):
+        logger.info("Skipping %s: folder locked by active process", folder)
+        result["status"] = "skipped"
+        result["error"] = "folder locked by active process"
+        return result
+
     # remember current working directory and switch into the folder while processing
     orig_cwd: str = os.getcwd()
 
     try:
         os.chdir(folder)
         if clean_first:
-            # clean everything except gbw_analysis.log
+            # clean everything except gbw_analysis.log and .processing.lock
             for item in os.listdir(folder):
-                if item != "gbw_analysis.log":
+                if item not in ("gbw_analysis.log", ".processing.lock"):
                     item_path = os.path.join(folder, item)
                     try:
                         if os.path.isfile(item_path) or os.path.islink(item_path):
@@ -210,6 +248,7 @@ def process_folder(
         return result
 
     finally:
+        release_lock(folder)
         # restore original working directory
         try:
             os.chdir(orig_cwd)
@@ -289,10 +328,17 @@ def process_folder_alcf(
     folder = os.path.abspath(folder_outputs)
     logger: logging.Logger = setup_logger_for_folder(folder)
 
+    # Acquire lock before any work
+    if not acquire_lock(folder):
+        logger.info("Skipping %s: folder locked by active process", folder)
+        result["status"] = "skipped"
+        result["error"] = "folder locked by active process"
+        return result
+
     if clean_first:
-        # clean everything except gbw_analysis.log
+        # clean everything except gbw_analysis.log and .processing.lock
         for item in os.listdir(folder):
-            if item != "gbw_analysis.log":
+            if item not in ("gbw_analysis.log", ".processing.lock"):
                 item_path = os.path.join(folder, item)
                 try:
                     if os.path.isfile(item_path) or os.path.islink(item_path):
@@ -307,6 +353,9 @@ def process_folder_alcf(
                     logger.error(f"Failed to remove {item_path}. Reason: {e}")
 
 
+    _COMPRESSED_EXTS = (".gbw.zstd0", ".tar.zst", ".tgz")
+    empty_compressed: list = []
+
     for item in os.listdir(folder_inputs):
         # skip "density_mat.npz"
         if item != "density_mat.npz":
@@ -317,9 +366,30 @@ def process_folder_alcf(
                 if not os.path.exists(d):
                     os.makedirs(d)
             else:
+                if any(item.endswith(ext) for ext in _COMPRESSED_EXTS):
+                    try:
+                        src_size = os.path.getsize(s)
+                    except OSError as _e:
+                        logger.error("Could not stat compressed file %s: %s", s, _e)
+                        empty_compressed.append(item)
+                        continue
+                    if src_size == 0:
+                        logger.error(
+                            "Empty compressed file detected: %s (0 bytes) - skipping copy",
+                            s,
+                        )
+                        empty_compressed.append(item)
+                        continue
+
                 if not os.path.exists(d):
                     shutil.copy2(s, d)
                     logger.info(f"Copied {s} to {d}")
+
+    if empty_compressed:
+        result["status"] = "error"
+        result["error"] = f"empty compressed files in source: {empty_compressed}"
+        release_lock(folder)
+        return result
 
     # remember current working directory and switch into the folder while processing
     orig_cwd: str = os.getcwd()
@@ -452,6 +522,7 @@ def process_folder_alcf(
         return result
 
     finally:
+        release_lock(folder)
         # restore original working directory
         try:
             os.chdir(orig_cwd)
@@ -460,39 +531,43 @@ def process_folder_alcf(
             print(f"Warning: failed to restore cwd to {orig_cwd}")
 
 
-@python_app
-def run_folder_task(
-    folder: str,
-    multiwfn_cmd: Optional[str] = None,
-    orca_2mkl_cmd: Optional[str] = None,
-    **kwargs: Any,
-) -> Dict[str, Any]:
-    """Parsl python_app wrapper that runs process_folder on a worker.
-
-    The real processing function is imported inside the app so the worker
-    process imports the correct package layout and environment.
-    """
-    # this runs inside remote worker; import inside to ensure worker env has package
-
-    return process_folder(
-        folder, multiwfn_cmd=multiwfn_cmd, orca_2mkl_cmd=orca_2mkl_cmd, **kwargs
-    )
+try:
+    from parsl import python_app
+except ImportError:
+    # parsl is optional; only needed for HPC batch submission
+    python_app = None
 
 
-@python_app
-def run_folder_task_alcf(
-    folder: str,
-    multiwfn_cmd: Optional[str] = None,
-    orca_2mkl_cmd: Optional[str] = None,
-    **kwargs: Any,
-) -> Dict[str, Any]:
-    """Parsl python_app wrapper that runs process_folder on a worker.
+if python_app is not None:
 
-    The real processing function is imported inside the app so the worker
-    process imports the correct package layout and environment.
-    """
-    # this runs inside remote worker; import inside to ensure worker env has package
+    @python_app
+    def run_folder_task(
+        folder: str,
+        multiwfn_cmd: Optional[str] = None,
+        orca_2mkl_cmd: Optional[str] = None,
+        **kwargs: Any,
+    ) -> Dict[str, Any]:
+        """Parsl python_app wrapper that runs process_folder on a worker.
 
-    return process_folder_alcf(
-        folder, multiwfn_cmd=multiwfn_cmd, orca_2mkl_cmd=orca_2mkl_cmd, **kwargs
-    )
+        The real processing function is imported inside the app so the worker
+        process imports the correct package layout and environment.
+        """
+        return process_folder(
+            folder, multiwfn_cmd=multiwfn_cmd, orca_2mkl_cmd=orca_2mkl_cmd, **kwargs
+        )
+
+    @python_app
+    def run_folder_task_alcf(
+        folder: str,
+        multiwfn_cmd: Optional[str] = None,
+        orca_2mkl_cmd: Optional[str] = None,
+        **kwargs: Any,
+    ) -> Dict[str, Any]:
+        """Parsl python_app wrapper that runs process_folder on a worker.
+
+        The real processing function is imported inside the app so the worker
+        process imports the correct package layout and environment.
+        """
+        return process_folder_alcf(
+            folder, multiwfn_cmd=multiwfn_cmd, orca_2mkl_cmd=orca_2mkl_cmd, **kwargs
+        )

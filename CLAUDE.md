@@ -1,6 +1,47 @@
 # CLAUDE.md
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+## Agent Instructions
+
+- Research the codebase before editing. Never change code you haven't read. Also don't make changes to code without asking first.
+- No sycophantic openers or closing fluff.
+- Do not re-read files already read unless file may have changed.
+- Read the file before modifying it. Never edit blind.
+- No em dashes, smart quotes, or decorative Unicode symbols.
+- Plain hyphens and straight quotes only.
+- User instructions always override this file.
+
+### 
+    Coding
+
+- Test your code before declaring done.
+- Be concise in output but thorough in reasoning.
+- No inline prose. Use comments sparingly - only where logic is unclear.
+- No abstractions for single-use operations.
+- Three similar lines is better than a premature abstraction.
+- No error handling for scenarios that cannot happen.
+- Code output must be copy-paste safe.
+- No compliments on the code before or after the review.
+- State the bug. Show the fix. Stop.
+- Never speculate about a bug without reading the relevant code first.
+- State what you found, where, and the fix. One pass.
+- If bug cause is unclear: say so. Do not guess. We can iterate on finding the right cause.
+
+### 
+    Analysis
+
+* Reporting: Lead with the finding. Context and methodology after.
+* Reporting: Summary first (3 bullets max).
+* Reporting: Supporting data second.
+* Reporting: Caveats and limitations last.
+* Formatting: Safe for copy-paste into spreadsheets and documents.
+* Formatting: Tables use plain pipe characters.
+* Formatting: Numbers must include units. Never ambiguous values.
+* Distinguish clearly between what the data shows and what is inferred.
+* Label inferences explicitly: "Based on the trend..." not stated as fact.
+* Never fabricate data points, statistics, or citations.
+* If confidence is low: state it explicitly with a reason.
+
 
 ## Shared Skills
 
@@ -43,7 +84,7 @@ qtaim_gen/source/
 │   ├── workflow.py      # Parsl task orchestration
 │   ├── parse_qtaim.py   # Critical point parsing from Multiwfn
 │   ├── parse_multiwfn.py# Charge/bond/fuzzy output parsing
-│   ├── parse_orca.py    # ORCA .out file parser (enum state machine, WIP on feat/orca-out-parser)
+│   ├── parse_orca.py    # ORCA .out file parser (single-pass enum state machine → orca.json)
 │   └── parse_json.py    # JSON output merging/validation
 ├── data/                # Multiwfn command helpers (charge_data, bond_order_data, etc.)
 ├── scripts/             # CLI entry points (defined in pyproject.toml)
@@ -111,6 +152,7 @@ Scripts expect a two-level hierarchy: `root_dir/category/subset/job/`. Each job 
 - `input.inp` (ORCA input)
 - `*.wfn`/`*.gbw` (wavefunctions)
 - `charge.json`, `bond.json`, `qtaim.json` (outputs)
+- `orca.json` (ORCA .out parsed properties - energies, orbitals, charges, gradient, quality-filter fields)
 - `timings.json`, `.processing.lock`
 
 ## External Dependencies
@@ -150,7 +192,7 @@ Run tests with `pytest -q` or specific files with `pytest tests/<file>.py -v`.
 |-----------|----------|
 | `test_parse.py` | QTAIM/DFT input parsing, critical point extraction |
 | `test_parse_multiwfn.py` | Multiwfn output parsing (charges, bonds, fuzzy) |
-| `test_parse_orca.py` | ORCA `.out` file parser (WIP) |
+| `test_parse_orca.py` | ORCA `.out` parser - 168 tests across energy, orbital, charges, gradient, quality filters, warnings block |
 | `test_bond_detection.py` | Bond detection from coordinates, ORCA input parsing |
 | `test_lmdb.py` | LMDB read/write, key normalization, serialization roundtrips |
 | `test_parse_json.py` | JSON output parsing and validation |
