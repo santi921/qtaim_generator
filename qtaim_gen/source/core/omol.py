@@ -486,6 +486,7 @@ def run_jobs(
     full_set: int = 0,
     move_results: bool = False,
     clean_jobs_tf: bool = False,
+    subprocess_env: Optional[dict] = None,
 ) -> None:
     """
     Run conversion and multiwfn jobs
@@ -545,7 +546,7 @@ def run_jobs(
 
         # run conversion script using subprocess with explicit cwd
         try:
-            subprocess.run(["bash", conv_file], cwd=folder, check=True)
+            subprocess.run(["bash", conv_file], cwd=folder, check=True, env=subprocess_env)
         except Exception as e:
             logger.error(f"Error running conversion script: {e}")
 
@@ -644,7 +645,7 @@ def run_jobs(
             # to replace
             # run the multiwfn wrapper script with explicit cwd to avoid depending on process CWD
             try:
-                subprocess.run(["bash", mfwn_file], cwd=folder, check=True)
+                subprocess.run(["bash", mfwn_file], cwd=folder, check=True, env=subprocess_env)
             except Exception as e:
                 logger.error(f"Error running {mfwn_file} via subprocess: {e}")
 
@@ -1355,6 +1356,7 @@ def gbw_analysis(
     check_orca: bool = False,
     wfx: bool = False,
     exhaustive_qtaim: bool = False,
+    subprocess_env: Optional[dict] = None,
 ) -> None:
     """
     Run a full analysis on a folder of gbw files
@@ -1652,6 +1654,7 @@ def gbw_analysis(
             full_set=full_set,
             move_results=move_results,
             clean_jobs_tf=clean,
+            subprocess_env=subprocess_env,
         )
 
     print("... Parsing multiwfn output")
