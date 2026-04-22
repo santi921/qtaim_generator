@@ -13,7 +13,11 @@ def get_first_graph(converter):
         cursor = txn.cursor()
         for key, value in cursor:
             try:
-                graph = deepcopy(load_graph_from_serialized(pkl.loads(value)))
+                raw = pkl.loads(value)
+                if isinstance(raw, dict) and "molecule_graph" in raw:
+                    graph = deepcopy(load_graph_from_serialized(raw["molecule_graph"]))
+                else:
+                    graph = deepcopy(load_graph_from_serialized(raw))
                 break
             except Exception:
                 pass

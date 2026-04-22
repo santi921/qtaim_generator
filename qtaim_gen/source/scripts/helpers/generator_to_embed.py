@@ -221,14 +221,16 @@ Converter types:
         )
 
         # Scale using train-only fitting
-        if not args.skip_scaling:
+        skip_scaling = args.skip_scaling or config_dict.get("skip_scaling", False)
+        if not skip_scaling:
             scale_split_lmdbs(converter, split_paths)
         else:
             print("Skipping scaling step")
 
     else:
         # Original behavior: scale the single output LMDB
-        if not args.skip_scaling:
+        skip_scaling = args.skip_scaling or config_dict.get("skip_scaling", False)
+        if not skip_scaling:
             converter.scale_graph_lmdb()
         else:
             print("Skipping scaling step")

@@ -297,7 +297,7 @@ def test_merge_with_scaling(tmp_path):
     with env.begin() as txn:
         cursor = txn.cursor()
         graph_count = 0
-        metadata_keys = {b'scaled', b'scaler_finalized'}
+        metadata_keys = {b'scaled', b'scaler_finalized', b'length', b'processed_source_keys'}
 
         for key, value in cursor:
             # Skip metadata keys
@@ -306,8 +306,11 @@ def test_merge_with_scaling(tmp_path):
 
             # Verify we can deserialize the graph
             try:
-                serialized_bytes = pickle.loads(value)
-                graph = load_graph_from_serialized(serialized_bytes)
+                raw = pickle.loads(value)
+                if isinstance(raw, dict) and "molecule_graph" in raw:
+                    graph = load_graph_from_serialized(raw["molecule_graph"])
+                else:
+                    graph = load_graph_from_serialized(raw)
 
                 # Verify it's a valid PyG HeteroData graph
                 assert hasattr(graph, 'node_types'), f"Key {key} should be a valid PyG HeteroData graph"
