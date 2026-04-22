@@ -58,6 +58,8 @@ def get_val_breakdown_from_folder(
         "val_bond": None,
         "val_fuzzy": None,
         "val_other": None,
+        "has_orca_json": False,
+        "val_orca": None,
     }
 
     # check timings
@@ -117,9 +119,12 @@ def get_val_breakdown_from_folder(
 
     # check orca (optional)
     orca_file = os.path.join(folder, "orca.json")
-    if os.path.exists(orca_file) and os.path.getsize(orca_file) > 0:
-        tf_orca = validate_orca_dict(orca_file, n_atoms=n_atoms, logger=None)
-        info["val_orca"] = tf_orca
+    if os.path.exists(orca_file):
+        info["has_orca_json"] = True
+        if os.path.getsize(orca_file) > 0:
+            info["val_orca"] = validate_orca_dict(orca_file, n_atoms=n_atoms, logger=None)
+        else:
+            info["val_orca"] = False
 
     return info
 
@@ -743,6 +748,8 @@ def get_information_from_job_folder(folder: str, full_set: int) -> dict:
         "val_bond": None,
         "val_fuzzy": None,
         "val_other": None,
+        "has_orca_json": False,
+        "val_orca": None,
         "n_atoms": None,
         "spin": None,
         "charge": None,
