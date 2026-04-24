@@ -47,6 +47,7 @@ from qtaim_gen.source.utils.io import (
     pull_ecp_dict,
     overwrite_molden_w_ecp,
     check_spin,
+    merge_zip_into,
 )
 
 
@@ -1063,15 +1064,13 @@ def clean_jobs(
                 os.remove(os.path.join(folder, file))
                 logger.info(f"Zipped and removed {file}")
         
-        if move_results:
-            results_folder = os.path.join(folder, "generator")
-            if not os.path.exists(results_folder):
-                os.mkdir(results_folder)
-            os.rename(
-                zip_file_out,
-                os.path.join(results_folder, "out_files.zip"),
-            )
-            logger.info(f"Moved zipped out files to results folder")
+    if move_results:
+        results_folder = os.path.join(folder, "generator")
+        merge_zip_into(
+            zip_file_out,
+            os.path.join(results_folder, "out_files.zip"),
+            logger=logger,
+        )
 
 
 def setup_logger(folder: str, name: str = "gbw_analysis") -> logging.Logger:

@@ -416,11 +416,13 @@ def process_folder_alcf(
                                     logger.info(f"Zipped and removed {file}")
 
                     if move_results:
+                        from qtaim_gen.source.utils.io import merge_zip_into
                         results_folder = os.path.join(folder, "generator")
-                        if not os.path.exists(results_folder):
-                            os.makedirs(results_folder)
-                        shutil.move(zip_file_out, os.path.join(results_folder, "out_files.zip"))
-                        logger.info(f"Moved out_files.zip to results folder {results_folder}")
+                        merge_zip_into(
+                            zip_file_out,
+                            os.path.join(results_folder, "out_files.zip"),
+                            logger=logger,
+                        )
 
                 except Exception as e:
                     logger.info(f"Couldn't zip .out files in {folder}: {e}")

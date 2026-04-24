@@ -298,6 +298,93 @@ def check_ecp_for_folder(folder_outputs: str) -> int:
         return ECP_NO_ZIP
 
 
+def merge_zip_into(
+    src_zip: str,
+    dest_zip: str,
+    logger: Optional[Any] = None,
+) -> None:
+    """Move src_zip to dest_zip, merging if dest already exists.
+
+    On filename collision, keeps whichever entry has the larger uncompressed
+    size (preserves the richest available output). On equal size, keeps the
+    existing dest entry. The merge is written to a temp file and atomically
+    replaces dest, so a failure mid-merge cannot corrupt dest. src_zip is
+    removed on success.
+    """
+    import shutil as _shutil
+
+    if not os.path.exists(src_zip):
+        if logger is not None:
+            logger.warning(f"merge_zip_into: source {src_zip} missing, nothing to do")
+        return
+
+    dest_dir = os.path.dirname(dest_zip)
+    if dest_dir:
+        os.makedirs(dest_dir, exist_ok=True)
+
+    if not os.path.exists(dest_zip):
+        _shutil.move(src_zip, dest_zip)
+        if logger is not None:
+            logger.info(f"Moved {src_zip} to {dest_zip}")
+        return
+
+    tmp_dest = dest_zip + ".merge.tmp"
+    if os.path.exists(tmp_dest):
+        try:
+            os.remove(tmp_dest)
+        except OSError:
+            pass
+
+    try:
+        with zipfile.ZipFile(dest_zip, "r") as dest_zf, \
+                zipfile.ZipFile(src_zip, "r") as src_zf:
+            dest_infos = {i.filename: i for i in dest_zf.infolist()}
+            src_infos = {i.filename: i for i in src_zf.infolist()}
+            names = set(dest_infos) | set(src_infos)
+            added: List[str] = []
+            replaced: List[Tuple[str, int, int]] = []
+            kept: List[str] = []
+            with zipfile.ZipFile(tmp_dest, "w", zipfile.ZIP_DEFLATED) as out_zf:
+                for name in sorted(names):
+                    in_dest = name in dest_infos
+                    in_src = name in src_infos
+                    if in_dest and in_src:
+                        d_sz = dest_infos[name].file_size
+                        s_sz = src_infos[name].file_size
+                        if s_sz > d_sz:
+                            out_zf.writestr(src_infos[name], src_zf.read(name))
+                            replaced.append((name, d_sz, s_sz))
+                        else:
+                            out_zf.writestr(dest_infos[name], dest_zf.read(name))
+                            kept.append(name)
+                    elif in_dest:
+                        out_zf.writestr(dest_infos[name], dest_zf.read(name))
+                        kept.append(name)
+                    else:
+                        out_zf.writestr(src_infos[name], src_zf.read(name))
+                        added.append(name)
+        os.replace(tmp_dest, dest_zip)
+        try:
+            os.remove(src_zip)
+        except OSError:
+            pass
+        if logger is not None:
+            logger.info(
+                f"Merged {src_zip} into {dest_zip}: "
+                f"{len(added)} added, {len(replaced)} replaced by larger, "
+                f"{len(kept)} kept from existing"
+            )
+            if replaced:
+                logger.info(f"Replaced (name, dest_size, src_size): {replaced}")
+    except Exception:
+        if os.path.exists(tmp_dest):
+            try:
+                os.remove(tmp_dest)
+            except OSError:
+                pass
+        raise
+
+
 def pull_ecp_dict(orca_out: str) -> Dict[int, Dict[str, Union[str, float]]]:
     """
     Method to pull the ecp dictionary from the orca output file.
