@@ -131,6 +131,7 @@ class Converter:
         self.config_dict = config_dict
         self.config_path = config_path
         self.restart = config_dict["restart"]
+        self._processed_source_keys: set = set()
         
         
         # Setup logging
@@ -169,7 +170,7 @@ class Converter:
         else:
             self.save_scaler = False
 
-        self.skip_keys = config_dict.get("filter_list", ["length", "scaled"])
+        self.skip_keys = list(config_dict.get("filter_list", ["length", "scaled"])) + ["processed_source_keys"]
 
         # Parallelization settings
         self.n_workers = config_dict.get("n_workers", 8)
@@ -249,14 +250,18 @@ class Converter:
         self.logger.info(f"Connected to output LMDB: {self.file}")
 
         if self.restart and os.path.exists(self.file):
-            # get all existing keys from the existing LMDB file and store in self.existing_keys to reference against 
             with self.db.begin(write=False) as txn:
-                self.existing_keys = set()
-
-                cursor = txn.cursor()
-                for key, _ in cursor:
-                    if key.decode("ascii") not in self.skip_keys:
-                        self.existing_keys.add(key.decode("ascii"))
+                # prefer source-key metadata written by new-format converters
+                psk_raw = txn.get(b"processed_source_keys")
+                if psk_raw is not None:
+                    self.existing_keys = pickle.loads(psk_raw)
+                else:
+                    # backward compat: old-format LMDBs stored molecule IDs as keys
+                    self.existing_keys = set()
+                    cursor = txn.cursor()
+                    for key, _ in cursor:
+                        if key.decode("ascii") not in self.skip_keys:
+                            self.existing_keys.add(key.decode("ascii"))
                 
 
                 # handle scaled info
@@ -485,7 +490,11 @@ class Converter:
                 if key_str not in self.config_dict["filter_list"]:
                     # process graph
                     try:
-                        graph = load_graph_from_serialized(pickle.loads(value))
+                        raw = pickle.loads(value)
+                        if isinstance(raw, dict):
+                            graph = load_graph_from_serialized(raw["molecule_graph"])
+                        else:
+                            graph = load_graph_from_serialized(raw)
                     except Exception as e:
                         self.logger.exception(f"Failed to load graph for key {key_str}: {e}")
                         continue
@@ -497,7 +506,7 @@ class Converter:
                     txn.put(
                         f"{key_str}".encode("ascii"),
                         pickle.dumps(
-                            serialize_graph(graph[0], ret=True), protocol=-1
+                            {"molecule_graph": serialize_graph(graph[0], ret=True)}, protocol=-1
                         ),
                     )
                     txn.commit()
@@ -690,9 +699,11 @@ class Converter:
                 f"{lmdb_path}/label_scaler_iterative{shard_suffix}.pt"
             )
         
-        # last info on whether the graphs were scaled or not
+        # write metadata required by qtaim_embed's LMDBBaseDataset
         txn = self.db.begin(write=True)
+        txn.put("length".encode("ascii"), pickle.dumps(processed_count, protocol=-1))
         txn.put("scaled".encode("ascii"), pickle.dumps(False, protocol=-1))
+        txn.put("processed_source_keys".encode("ascii"), pickle.dumps(self._processed_source_keys, protocol=-1))
         txn.commit()
         self.db.close()
 
@@ -852,8 +863,10 @@ class Converter:
             map_async=True
         )
 
-        # Copy all entries from shards
+        # Copy all entries from shards, re-numbering graph keys to avoid collisions
+        _merge_skip = {b"length", b"scaled", b"scaler_finalized", b"processed_source_keys"}
         total_copied = 0
+        global_idx = 0
         with merged_env.begin(write=True) as dst_txn:
             for i, lmdb_path in enumerate(shard_lmdbs):
                 logger.info(f"Copying shard {i+1}/{len(shard_lmdbs)}")
@@ -861,9 +874,14 @@ class Converter:
                 with src_env.begin() as src_txn:
                     cursor = src_txn.cursor()
                     for key, value in cursor:
-                        dst_txn.put(key, value)
+                        if key in _merge_skip:
+                            continue
+                        dst_txn.put(f"{global_idx}".encode("ascii"), value)
+                        global_idx += 1
                         total_copied += 1
                 src_env.close()
+            dst_txn.put(b"length", pickle.dumps(global_idx, protocol=-1))
+            dst_txn.put(b"scaled", pickle.dumps(False, protocol=-1))
 
         merged_env.close()
         logger.info(f"Merged {total_copied} entries")
@@ -919,7 +937,7 @@ class Converter:
             logger.info("Applying merged scalers to LMDB...")
             env = lmdb.open(output_path, subdir=False, map_size=map_size)
             count = 0
-            metadata_keys = {b'scaled', b'scaler_finalized', b'length'}
+            metadata_keys = {b'scaled', b'scaler_finalized', b'length', b'processed_source_keys'}
             with env.begin(write=True) as txn:
                 cursor = txn.cursor()
                 for key, value in cursor:
@@ -928,9 +946,12 @@ class Converter:
                         continue
 
                     try:
-                        # Deserialize: pickle.loads returns bytes, then deserialize to PyG HeteroData
-                        serialized_bytes = pickle.loads(value)
-                        graph = load_graph_from_serialized(serialized_bytes)
+                        # Deserialize: pickle.loads may return dict or raw bytes depending on format
+                        raw = pickle.loads(value)
+                        if isinstance(raw, dict):
+                            graph = load_graph_from_serialized(raw["molecule_graph"])
+                        else:
+                            graph = load_graph_from_serialized(raw)
 
                         # Apply scalers - feature scaler expects a list
                         graph = merged_feature_scaler([graph])
@@ -938,7 +959,7 @@ class Converter:
 
                         # Serialize and write back
                         serialized_bytes = serialize_graph(graph[0], ret=True)
-                        txn.put(key, pickle.dumps(serialized_bytes, protocol=-1))
+                        txn.put(key, pickle.dumps({"molecule_graph": serialized_bytes}, protocol=-1))
                         count += 1
                     except Exception as e:
                         logger.warning(f"Failed to scale graph {key}: {e}")
@@ -1123,9 +1144,10 @@ class BaseConverter(Converter):
                 self.feature_scaler_iterative.update([first_graph])
                 self.label_scaler_iterative.update([first_graph])
                 write_buffer.append((
-                    f"{key_str}".encode("ascii"),
-                    pickle.dumps(serialize_graph(first_graph, ret=True), protocol=-1),
+                    f"{processed_count}".encode("ascii"),
+                    pickle.dumps({"molecule_graph": serialize_graph(first_graph, ret=True)}, protocol=-1),
                 ))
+                self._processed_source_keys.add(key_str)
                 processed_count += 1
                 first_key_idx = idx + 1
                 break
@@ -1162,9 +1184,10 @@ class BaseConverter(Converter):
                         self.label_scaler_iterative.update([graph])
 
                         write_buffer.append((
-                            f"{key_str}".encode("ascii"),
-                            pickle.dumps(serialize_graph(graph, ret=True), protocol=-1),
+                            f"{processed_count}".encode("ascii"),
+                            pickle.dumps({"molecule_graph": serialize_graph(graph, ret=True)}, protocol=-1),
                         ))
+                        self._processed_source_keys.add(key_str)
                         processed_count += 1
 
                         if len(write_buffer) >= self.batch_size:
@@ -1379,9 +1402,10 @@ class QTAIMConverter(Converter):
                 self.feature_scaler_iterative.update([first_graph])
                 self.label_scaler_iterative.update([first_graph])
                 write_buffer.append((
-                    f"{key_str}".encode("ascii"),
-                    pickle.dumps(serialize_graph(first_graph, ret=True), protocol=-1),
+                    f"{processed_count}".encode("ascii"),
+                    pickle.dumps({"molecule_graph": serialize_graph(first_graph, ret=True)}, protocol=-1),
                 ))
+                self._processed_source_keys.add(key_str)
                 processed_count += 1
                 first_key_idx = idx + 1
                 break
@@ -1418,9 +1442,10 @@ class QTAIMConverter(Converter):
                         self.label_scaler_iterative.update([graph])
 
                         write_buffer.append((
-                            f"{key_str}".encode("ascii"),
-                            pickle.dumps(serialize_graph(graph, ret=True), protocol=-1),
+                            f"{processed_count}".encode("ascii"),
+                            pickle.dumps({"molecule_graph": serialize_graph(graph, ret=True)}, protocol=-1),
                         ))
+                        self._processed_source_keys.add(key_str)
                         processed_count += 1
 
                         if len(write_buffer) >= self.batch_size:
@@ -2040,9 +2065,10 @@ class GeneralConverter(Converter):
                     self.feature_scaler_iterative.update([first_graph])
                     self.label_scaler_iterative.update([first_graph])
                     write_buffer.append((
-                        f"{key_str}".encode("ascii"),
-                        pickle.dumps(serialize_graph(first_graph, ret=True), protocol=-1),
+                        f"{processed_count}".encode("ascii"),
+                        pickle.dumps({"molecule_graph": serialize_graph(first_graph, ret=True)}, protocol=-1),
                     ))
+                    self._processed_source_keys.add(key_str)
                     processed_count += 1
                     first_key_idx = idx + 1
                     self.logger.info(f"Successfully initialized grapher with key {key_str}")
@@ -2087,9 +2113,10 @@ class GeneralConverter(Converter):
                         self.label_scaler_iterative.update([graph])
 
                         write_buffer.append((
-                            f"{key_str}".encode("ascii"),
-                            pickle.dumps(serialize_graph(graph, ret=True), protocol=-1),
+                            f"{processed_count}".encode("ascii"),
+                            pickle.dumps({"molecule_graph": serialize_graph(graph, ret=True)}, protocol=-1),
                         ))
+                        self._processed_source_keys.add(key_str)
                         processed_count += 1
 
                         # Batch commit

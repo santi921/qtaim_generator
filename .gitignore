@@ -38,5 +38,21 @@
 *wfx
 *xyz
 
+# working folders for dev
+examples/
+
 # W&B directories
 wandb/
+# ai documents
+docs/
+
+# Always track test fixtures regardless of extension rules above
+!tests/test_files/
+!tests/test_files/*/
+!tests/test_files/**/
+!tests/test_files/**/*.inp
+!tests/test_files/**/*.in
+!tests/test_files/**/*.json
+!tests/test_files/**/*.txt
+!tests/test_files/**/*.lmdb
+!tests/test_files/**/*.lmdb-lock
