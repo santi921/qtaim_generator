@@ -103,6 +103,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
 
     parser.add_argument(
+        "--quiet",
+        action="store_true",
+        help="suppress all log output",
+    )
+
+    parser.add_argument(
         "--check_ecp",
         action="store_true",
         help="filter out jobs where ECP loaded successfully; keep only ECP_FAILED and ECP_NO_ZIP jobs",
@@ -111,8 +117,15 @@ def main(argv: Optional[List[str]] = None) -> int:
     args = parser.parse_args(argv)
 
     log_file: Optional[str] = getattr(args, "log_file", None)
-    handler = logging.FileHandler(log_file) if log_file else logging.StreamHandler()
-    handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
+    quiet: bool = bool(getattr(args, "quiet", False))
+    if quiet:
+        handler = logging.NullHandler()
+    elif log_file:
+        handler = logging.FileHandler(log_file)
+        handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
+    else:
+        handler = logging.StreamHandler()
+        handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
     logging.basicConfig(level=logging.INFO, handlers=[handler])
 
     for key, value in vars(args).items():

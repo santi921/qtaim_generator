@@ -3,7 +3,8 @@
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 ## Agent Instructions
 
-- Research the codebase before editing. Never change code you haven't read. Also don't make changes to code without asking first.
+- Research the codebase before editing. Never change code you haven't read. Also don't make changes to code without asking first. MAKE A PLAN BEFORE CHANGING CODE AT FIRST. 
+- DON'T MAKE CHANGES AFTER REVIEWS AUTOMATICALLY, LETS DISCUSS FIRST
 - No sycophantic openers or closing fluff.
 - Do not re-read files already read unless file may have changed.
 - Read the file before modifying it. Never edit blind.
