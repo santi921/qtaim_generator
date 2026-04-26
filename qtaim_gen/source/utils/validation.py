@@ -197,6 +197,13 @@ def validate_timing_dict(
         full_set=full_set, spin_tf=False
     )
 
+    # Keys recovered by patch_timings_from_log carry a `-1.0` sentinel when
+    # log-scrape couldn't find them. We accept any value (incl. negative) for
+    # those keys here so cleanup can run, while leaving the sentinel visible
+    # to downstream consumers via `_timings_patched`.
+    patched_marker = timing_dict.get("_timings_patched")
+    patched_keys = set(patched_marker.keys()) if isinstance(patched_marker, dict) else set()
+
     for key in expected_keys:
         if key not in timing_dict:
             if key == "other" and "other_alie" not in timing_dict: 
@@ -229,6 +236,13 @@ def validate_timing_dict(
         if timing_dict[key] < 1e-6 and key != "convert":
             if is_small_molecule and key in bond_related_keys:
                 continue  # acceptable for small molecules
+            if key in patched_keys:
+                if logger:
+                    logger.warning(
+                        f"Timing for '{key}' is patched ({timing_dict[key]}); "
+                        "accepting via _timings_patched marker."
+                    )
+                continue
             if logger:
                 logger.error(
                     f"Timing for '{key}' is too small: {timing_dict[key]} seconds."

@@ -216,7 +216,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         action="store_true",
         help=(
             "if timing-validation fails, recover missing timing keys from "
-            "gbw_analysis.log (or stamp 99999 placeholders) and re-validate. "
+            "gbw_analysis.log (or stamp -1.0 sentinels) and re-validate. "
             "Recovers jobs whose data finished but whose timings.json is "
             "incomplete (e.g. orca_parse-overwrite bug)."
         ),

@@ -1118,8 +1118,9 @@ def patch_timings_from_log(
          folder/timings.json.
       2. Parse `Completed <key> in <s> seconds` lines from gbw_analysis.log.
       3. For each expected key for the given full_set/spin_tf, if missing from
-         timings dict, fill with log value if found, otherwise 99999 placeholder
-         so timing-validation passes.
+         timings dict, fill with log value if found, otherwise -1.0 sentinel.
+         Validation accepts -1.0 only for keys listed in `_timings_patched`,
+         so synthetic timings remain loudly flagged in downstream aggregates.
       4. Stamp a `_timings_patched` provenance marker listing patched keys and
          their source (log vs placeholder) so downstream consumers can filter
          out synthetic timings from aggregates.
@@ -1166,8 +1167,8 @@ def patch_timings_from_log(
             timings[write_key] = log_timings[key]
             patched[write_key] = {"source": "log", "value": log_timings[key]}
         else:
-            timings[write_key] = 99999.0
-            patched[write_key] = {"source": "placeholder", "value": 99999.0}
+            timings[write_key] = -1.0
+            patched[write_key] = {"source": "placeholder", "value": -1.0}
 
     if not patched:
         if logger:
@@ -1808,7 +1809,7 @@ def gbw_analysis(
     )
 
     # Optional repair pass: if validation failed and patch_timings is on,
-    # recover missing timing keys from gbw_analysis.log (or stamp 99999
+    # recover missing timing keys from gbw_analysis.log (or stamp -1.0
     # placeholders). patch_timings_from_log only writes positive timing
     # values, so if the only validation failure was missing/zero timing
     # keys, the patch necessarily satisfies validate_timing_dict — skip

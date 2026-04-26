@@ -98,7 +98,7 @@ def main(argv=None):
         action="store_true",
         help=(
             "if timing-validation fails, recover missing timing keys from "
-            "gbw_analysis.log (or stamp 99999 placeholders) and re-validate. "
+            "gbw_analysis.log (or stamp -1.0 sentinels) and re-validate. "
             "Records provenance under '_timings_patched' for downstream filtering."
         ),
     )
