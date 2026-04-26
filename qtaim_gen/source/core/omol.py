@@ -1200,6 +1200,7 @@ def patch_timings_from_log(
     return True
 
 
+
 def setup_logger(folder: str, name: str = "gbw_analysis") -> logging.Logger:
     logger = logging.getLogger(f"{name}-{folder}")
     # Avoid duplicate handlers
