@@ -1469,11 +1469,10 @@ def _wavefunction_present(folder: str) -> bool:
 def _has_usable_step_output(folder: str, order: str) -> bool:
     """Check whether a sub-job appears to have produced usable output on disk.
 
-    Stricter than bare `os.path.exists`: a `.out` file must look substantive
-    (see `_is_substantive_step_out`), and a `.json` per-step file must be
-    non-empty. Used by the restart loop to skip steps that genuinely finished
-    and re-run steps whose `.out` is empty or contains a multiwfn error
-    signature.
+    Primary signal: `.out` file must be substantive (see `_is_substantive_step_out`).
+    Fallback: if `.out` is absent (cleaned up after a prior successful run), a
+    non-empty per-step `.json` is accepted. A bad `.out` (error signature) blocks
+    the `.json` fallback — stale intermediate JSONs must not mask a failed run.
 
     Special case for `convert`: this step has no analytical output — its
     purpose is to produce `orca.wfn`/`orca.wfx` from `orca.molden.input`. Skip
@@ -1487,14 +1486,21 @@ def _has_usable_step_output(folder: str, order: str) -> bool:
         return _wavefunction_present(folder)
 
     for base in (folder, os.path.join(folder, "generator")):
-        if _is_substantive_step_out(os.path.join(base, f"{order}.out")):
-            return True
-        json_path = os.path.join(base, f"{order}.json")
-        try:
-            if os.path.isfile(json_path) and os.path.getsize(json_path) > 0:
+        out_path = os.path.join(base, f"{order}.out")
+        if os.path.isfile(out_path):
+            if _is_substantive_step_out(out_path):
                 return True
-        except OSError:
-            continue
+            # .out present but bad — don't trust stale .json in this location
+        else:
+            # .out absent (cleaned up after a prior successful run) — .json is the only artifact
+            json_path = os.path.join(base, f"{order}.json")
+            try:
+                if os.path.isfile(json_path) and os.path.getsize(json_path) > 0:
+                    with open(json_path, "r") as _f:
+                        if json.load(_f):
+                            return True
+            except (OSError, json.JSONDecodeError):
+                pass
     return False
 
 
