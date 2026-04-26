@@ -1,5 +1,5 @@
 from pathlib import Path
-import os, stat, json, time, logging
+import os, stat, json, time, logging, re
 from typing import Optional, Dict, Any, List
 import subprocess
 
@@ -1073,6 +1073,150 @@ def clean_jobs(
         )
 
 
+_TIMING_LOG_PATTERN = re.compile(
+    r"Completed\s+(?P<key>\S+)\s+in\s+(?P<seconds>[-+]?\d*\.?\d+)\s+seconds"
+)
+
+_TIMING_PLACEHOLDER = 99999.0
+
+
+def _expected_timing_keys(full_set: int, spin_tf: bool) -> list:
+    """Mirror the expected_keys list in validate_timing_dict.
+
+    Kept inline (not imported) to avoid coupling: if validation expectations
+    drift, the patcher can be updated independently.
+    """
+    keys = [
+        "qtaim",
+        "other_alie",  # validate_timing_dict accepts 'other' OR 'other_alie'
+        "hirshfeld",
+        "becke",
+        "adch",
+        "cm5",
+        "fuzzy_bond",
+        "becke_fuzzy_density",
+        "hirsh_fuzzy_density",
+    ]
+    spin_keys = ["hirsh_fuzzy_spin", "becke_fuzzy_spin"]
+    if full_set > 0:
+        keys += [
+            "vdd",
+            "mbis",
+            "chelpg",
+            "ibsi_bond",
+            "elf_fuzzy",
+            "mbis_fuzzy_density",
+        ]
+        spin_keys += ["mbis_fuzzy_spin"]
+    if full_set > 1:
+        keys += [
+            "bader",
+            "laplacian_bond",
+            "grad_norm_rho_fuzzy",
+            "laplacian_rho_fuzzy",
+            "ESP_Volume",
+        ]
+    if spin_tf:
+        keys += spin_keys
+    return keys
+
+
+def _parse_timings_from_log(log_path: str) -> dict:
+    """Extract `Completed <key> in <seconds> seconds` entries from a log file.
+
+    Returns a dict {key: seconds_float}. Last-occurrence wins (most recent run).
+    Missing/unreadable log returns {}.
+    """
+    results: dict = {}
+    if not os.path.isfile(log_path):
+        return results
+    try:
+        with open(log_path, "r") as f:
+            for line in f:
+                m = _TIMING_LOG_PATTERN.search(line)
+                if m:
+                    try:
+                        results[m.group("key")] = float(m.group("seconds"))
+                    except ValueError:
+                        continue
+    except OSError:
+        return {}
+    return results
+
+
+def patch_timings_from_log(
+    folder: str,
+    full_set: int = 0,
+    spin_tf: bool = False,
+    move_results: bool = True,
+    logger: Optional[logging.Logger] = None,
+    placeholder: float = _TIMING_PLACEHOLDER,
+) -> bool:
+    """Fill missing keys in timings.json by recovering values from gbw_analysis.log.
+
+    Strategy:
+      1. Load existing timings from generator/timings.json (if move_results) or
+         folder/timings.json.
+      2. Parse `Completed <key> in <s> seconds` lines from gbw_analysis.log.
+      3. For each expected key for the given full_set/spin_tf, if missing from
+         timings dict, fill with log value if found, otherwise `placeholder`
+         (default 99999) so timing-validation passes.
+      4. Atomic-write back to the same file.
+
+    Returns True if any key was patched, False otherwise (including when file
+    does not exist).
+    """
+    if move_results:
+        timings_path = os.path.join(folder, "generator", "timings.json")
+    else:
+        timings_path = os.path.join(folder, "timings.json")
+
+    if not os.path.isfile(timings_path):
+        if logger:
+            logger.warning("patch_timings: %s not found, skipping", timings_path)
+        return False
+
+    try:
+        with open(timings_path, "r") as f:
+            timings = json.load(f)
+    except (OSError, json.JSONDecodeError) as e:
+        if logger:
+            logger.warning("patch_timings: cannot read %s: %s", timings_path, e)
+        return False
+
+    log_path = os.path.join(folder, "gbw_analysis.log")
+    log_timings = _parse_timings_from_log(log_path)
+
+    expected = _expected_timing_keys(full_set, spin_tf)
+    patched: dict = {}
+    for key in expected:
+        # validate_timing_dict accepts 'other' or 'other_alie'; skip if either present
+        if key == "other_alie" and ("other" in timings or "other_alie" in timings):
+            continue
+        if key in timings and timings[key] > 0:
+            continue
+        if key in log_timings and log_timings[key] > 0:
+            timings[key] = log_timings[key]
+            patched[key] = ("log", log_timings[key])
+        else:
+            timings[key] = placeholder
+            patched[key] = ("placeholder", placeholder)
+
+    if not patched:
+        if logger:
+            logger.info("patch_timings: nothing to patch in %s", timings_path)
+        return False
+
+    atomic_json_write(timings_path, timings)
+    if logger:
+        for key, (src, val) in patched.items():
+            logger.info("patch_timings: %s = %.2f (%s)", key, val, src)
+        logger.info(
+            "patch_timings: wrote %d patched key(s) to %s", len(patched), timings_path
+        )
+    return True
+
+
 def setup_logger(folder: str, name: str = "gbw_analysis") -> logging.Logger:
     logger = logging.getLogger(f"{name}-{folder}")
     # Avoid duplicate handlers
@@ -1253,20 +1397,27 @@ def _run_orca_parse(
         elapsed = round(time.time() - t_start, 2)
         logger.info("Parsed orca.out in %.2f s (%d keys)", elapsed, len(orca_dict))
 
-        # Write orca_parse timing into timings.json (atomic write for crash safety)
-        # Read from wherever timings currently lives, always write to job root
+        # Write orca_parse timing into timings.json (atomic write for crash safety).
+        # Merge generator/ (prior-run keys) with root (current-run keys); root wins
+        # on conflict so a Level 1 restart doesn't lose newly-written L1 sub-job
+        # timings to a stale generator/timings.json.
         gen_timings = os.path.join(folder, "generator", "timings.json")
         root_timings = os.path.join(folder, "timings.json")
+        timings = {}
         if os.path.isfile(gen_timings) and os.path.getsize(gen_timings) > 0:
-            timings_read = gen_timings
-        elif os.path.isfile(root_timings) and os.path.getsize(root_timings) > 0:
-            timings_read = root_timings
-        else:
-            timings_read = None
+            try:
+                with open(gen_timings, "r") as f:
+                    timings.update(json.load(f))
+            except json.JSONDecodeError:
+                pass
+        if os.path.isfile(root_timings) and os.path.getsize(root_timings) > 0:
+            try:
+                with open(root_timings, "r") as f:
+                    timings.update(json.load(f))
+            except json.JSONDecodeError:
+                pass
 
-        if timings_read is not None:
-            with open(timings_read, "r") as f:
-                timings = json.load(f)
+        if timings:
             timings["orca_parse"] = elapsed
             atomic_json_write(root_timings, timings)
 
@@ -1356,6 +1507,7 @@ def gbw_analysis(
     wfx: bool = False,
     exhaustive_qtaim: bool = False,
     subprocess_env: Optional[dict] = None,
+    patch_timings: bool = False,
 ) -> None:
     """
     Run a full analysis on a folder of gbw files
@@ -1678,6 +1830,32 @@ def gbw_analysis(
         logger=logger,
         check_orca=check_orca,
     )
+
+    # Optional repair pass: if validation failed only because timings.json is
+    # missing keys (e.g. earlier orca_parse-overwrite bug), recover them from
+    # gbw_analysis.log or stamp 99999 placeholders, then re-validate.
+    if not tf_validation and patch_timings:
+        dft_dict = get_charge_spin_n_atoms_from_folder(
+            folder, logger=logger, verbose=False
+        )
+        spin_tf = bool(dft_dict and dft_dict.get("spin", 1) != 1)
+        did_patch = patch_timings_from_log(
+            folder,
+            full_set=full_set,
+            spin_tf=spin_tf,
+            move_results=move_results,
+            logger=logger,
+        )
+        if did_patch:
+            tf_validation = validation_checks(
+                folder,
+                full_set=full_set,
+                verbose=True,
+                move_results=move_results,
+                logger=logger,
+                check_orca=check_orca,
+            )
+
     logger.info("gbw_analysis completed in folder: {}".format(folder))
     logger.info("Validation status: {}".format(tf_validation))
     # move log file to results folder

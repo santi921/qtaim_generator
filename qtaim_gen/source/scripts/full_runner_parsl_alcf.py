@@ -211,6 +211,17 @@ def main(argv: Optional[List[str]] = None) -> int:
         help="use exhaustive QTAIM critical point search (spherical search around atoms)",
     )
 
+    parser.add_argument(
+        "--patch_timings",
+        action="store_true",
+        help=(
+            "if timing-validation fails, recover missing timing keys from "
+            "gbw_analysis.log (or stamp 99999 placeholders) and re-validate. "
+            "Recovers jobs whose data finished but whose timings.json is "
+            "incomplete (e.g. orca_parse-overwrite bug)."
+        ),
+    )
+
     args = parser.parse_args(argv)
     # print(args)
     for key, value in vars(args).items():
@@ -241,6 +252,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     check_orca: bool = bool(getattr(args, "check_orca", False))
     check_ecp: bool = bool(getattr(args, "check_ecp", False))
     exhaustive_qtaim: bool = bool(getattr(args, "exhaustive_qtaim", False))
+    patch_timings: bool = bool(getattr(args, "patch_timings", False))
 
     # parsl args
     type_runner: str = str(getattr(args, "type_runner", "local"))
@@ -354,6 +366,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             wfx=wfx,
             check_orca=check_orca,
             exhaustive_qtaim=exhaustive_qtaim,
+            patch_timings=patch_timings,
         )
         for f in folders_run
     ]

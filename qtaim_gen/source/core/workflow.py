@@ -104,6 +104,7 @@ def process_folder(
     wfx: bool = False,
     check_orca: bool = False,
     exhaustive_qtaim: bool = False,
+    patch_timings: bool = False,
 ) -> Dict[str, Any]:
     """Process a single folder and return a small status dict.
 
@@ -215,6 +216,7 @@ def process_folder(
             check_orca=check_orca,
             exhaustive_qtaim=exhaustive_qtaim,
             subprocess_env=subprocess_env,
+            patch_timings=patch_timings,
         )
         t1: float = time.time()
 
@@ -278,6 +280,7 @@ def process_folder_alcf(
     wfx: bool = False,
     check_orca: bool = False,
     exhaustive_qtaim: bool = False,
+    patch_timings: bool = False,
 ) -> Dict[str, Any]:
     """Process a single folder and return a small status dict.
 
@@ -463,6 +466,7 @@ def process_folder_alcf(
             check_orca=check_orca,
             exhaustive_qtaim=exhaustive_qtaim,
             subprocess_env=subprocess_env,
+            patch_timings=patch_timings,
         )
         t1: float = time.time()
 
