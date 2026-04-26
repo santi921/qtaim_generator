@@ -103,16 +103,36 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
 
     parser.add_argument(
+        "--quiet",
+        action="store_true",
+        help="suppress all log output",
+    )
+
+    parser.add_argument(
         "--check_ecp",
         action="store_true",
         help="filter out jobs where ECP loaded successfully; keep only ECP_FAILED and ECP_NO_ZIP jobs",
     )
 
+    parser.add_argument(
+        "--n_workers",
+        type=int,
+        default=8,
+        help="number of parallel workers for pre-validation (default: 8)",
+    )
+
     args = parser.parse_args(argv)
 
     log_file: Optional[str] = getattr(args, "log_file", None)
-    handler = logging.FileHandler(log_file) if log_file else logging.StreamHandler()
-    handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
+    quiet: bool = bool(getattr(args, "quiet", False))
+    if quiet:
+        handler = logging.NullHandler()
+    elif log_file:
+        handler = logging.FileHandler(log_file)
+        handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
+    else:
+        handler = logging.StreamHandler()
+        handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
     logging.basicConfig(level=logging.INFO, handlers=[handler])
 
     for key, value in vars(args).items():
@@ -124,6 +144,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     orphaned_check: bool = bool(getattr(args, "check_orphaned", False))
     check_orca: bool = bool(getattr(args, "check_orca", False))
     check_ecp: bool = bool(getattr(args, "check_ecp", False))
+    n_workers: int = int(getattr(args, "n_workers", 8))
     refined_job_file: str = getattr(args, "refined_job_file", "refined_jobs.txt")
     root_omol_results: Optional[str] = getattr(args, "root_omol_results", None)
     root_omol_inputs: Optional[str] = getattr(args, "root_omol_inputs", None)
@@ -150,6 +171,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         check_orca=check_orca,
         check_ecp=check_ecp,
         logger=logger,
+        max_workers=n_workers,
     )
 
     if not folders_run:

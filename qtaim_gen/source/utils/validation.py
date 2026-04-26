@@ -6,6 +6,13 @@ import numpy as np
 from datetime import datetime
 
 
+# Shared contract between validate_timing_dict (consumer) and
+# patch_timings_from_log in core/omol.py (producer). Keep in sync at one place
+# so a rename of either the marker key or the sentinel is a one-line change.
+TIMINGS_PATCHED_KEY = "_timings_patched"
+TIMING_PLACEHOLDER = -1.0
+
+
 def get_charge_spin_n_atoms_from_folder(
     folder: str, logger=None, verbose=False
 ) -> tuple:
@@ -129,6 +136,55 @@ def get_val_breakdown_from_folder(
     return info
 
 
+def get_expected_timing_keys(full_set: int = 0, spin_tf: bool = False) -> tuple:
+    """Return (expected_keys, expected_spin_keys) for the given analysis level.
+
+    Single source of truth shared by validate_timing_dict (consumer) and
+    patch_timings_from_log (producer-side recovery in omol.py).
+
+    Note: 'other' in expected_keys is satisfied by either 'other' or
+    'other_alie' in the timings dict — see validate_timing_dict for that
+    aliasing logic.
+    """
+    expected_keys = [
+        "qtaim",
+        "other",
+        "hirshfeld",
+        "becke",
+        "adch",
+        "cm5",
+        "fuzzy_bond",
+        "becke_fuzzy_density",
+        "hirsh_fuzzy_density",
+    ]
+    expected_spin_keys = ["hirsh_fuzzy_spin", "becke_fuzzy_spin"]
+
+    if full_set > 0:
+        expected_keys += [
+            "vdd",
+            "mbis",
+            "chelpg",
+            "ibsi_bond",
+            "elf_fuzzy",
+            "mbis_fuzzy_density",
+        ]
+        expected_spin_keys += ["mbis_fuzzy_spin"]
+
+    if full_set > 1:
+        expected_keys += [
+            "bader",
+            "laplacian_bond",
+            "grad_norm_rho_fuzzy",
+            "laplacian_rho_fuzzy",
+            "ESP_Volume",
+        ]
+
+    if spin_tf:
+        expected_keys = expected_keys + expected_spin_keys
+
+    return expected_keys, expected_spin_keys
+
+
 def validate_timing_dict(
     timing_json_loc: str,
     verbose: bool = False,
@@ -144,40 +200,13 @@ def validate_timing_dict(
     with open(timing_json_loc, "r") as f:
         timing_dict = json.load(f)
 
-    expected_keys = [
-        "qtaim",
-        "other",
-        "hirshfeld",
-        "becke",
-        "adch",
-        "cm5",
-        "fuzzy_bond",
-        "becke_fuzzy_density",
-        "hirsh_fuzzy_density",
-    ]
+    expected_keys, excepted_spin_keys = get_expected_timing_keys(
+        full_set=full_set, spin_tf=False
+    )
 
-    excepted_spin_keys = ["hirsh_fuzzy_spin", "becke_fuzzy_spin"]
-
-    if full_set > 0:
-        expected_keys += [
-            "vdd",
-            "mbis",
-            "chelpg",
-            "ibsi_bond",
-            "elf_fuzzy",
-            "mbis_fuzzy_density",
-        ]
-
-        excepted_spin_keys += ["mbis_fuzzy_spin"]
-
-    if full_set > 1:
-        expected_keys += [
-            "bader",
-            "laplacian_bond",
-            "grad_norm_rho_fuzzy",
-            "laplacian_rho_fuzzy",
-            "ESP_Volume",
-        ]
+    # Keys patched by patch_timings_from_log carry a TIMING_PLACEHOLDER (-1.0)
+    # when log-scrape couldn't find them; accept those here so cleanup runs.
+    patched_keys = set((timing_dict.get(TIMINGS_PATCHED_KEY) or {}).keys())
 
     for key in expected_keys:
         if key not in timing_dict:
@@ -211,6 +240,13 @@ def validate_timing_dict(
         if timing_dict[key] < 1e-6 and key != "convert":
             if is_small_molecule and key in bond_related_keys:
                 continue  # acceptable for small molecules
+            if key in patched_keys:
+                if logger:
+                    logger.warning(
+                        f"Timing for '{key}' is patched ({timing_dict[key]}); "
+                        "accepting via _timings_patched marker."
+                    )
+                continue
             if logger:
                 logger.error(
                     f"Timing for '{key}' is too small: {timing_dict[key]} seconds."

@@ -1,5 +1,5 @@
 from pathlib import Path
-import os, stat, json, time, logging
+import os, stat, json, time, logging, re
 from typing import Optional, Dict, Any, List
 import subprocess
 
@@ -9,6 +9,9 @@ from qtaim_gen.source.utils.validation import (
     validation_checks,
     get_val_breakdown_from_folder,
     get_charge_spin_n_atoms_from_folder,
+    get_expected_timing_keys,
+    TIMINGS_PATCHED_KEY,
+    TIMING_PLACEHOLDER,
 )
 
 from qtaim_gen.source.utils.io import check_results_exist
@@ -613,12 +616,7 @@ def run_jobs(
         # is secondary. This handles cases where timings.json was reset/corrupted
         # or a crash occurred between the mfwn script finishing and the timing write.
         if restart:
-            has_files = (
-                os.path.exists(os.path.join(folder, f"{order}.out"))
-                or os.path.exists(os.path.join(folder, "generator", f"{order}.out"))
-                or os.path.exists(os.path.join(folder, f"{order}.json"))
-                or os.path.exists(os.path.join(folder, "generator", f"{order}.json"))
-            )
+            has_files = _has_usable_step_output(folder, order)
             if has_files or _compiled_data_present(folder, order, _compiled_map):
                 _timing_str = (
                     f", timing={timings[order]:.2f}s"
@@ -638,6 +636,15 @@ def run_jobs(
             memory = {}
 
         mfwn_file = os.path.join(folder, "props_{}.mfwn".format(order))
+
+        # Precondition: non-convert multiwfn sub-jobs need a wavefunction file.
+        # Surfacing it here beats a downstream KeyError in parse_multiwfn.
+        if order != "convert" and not _wavefunction_present(folder):
+            logger.error(
+                f"No orca.wfn or orca.wfx in {folder}; cannot run {order}."
+            )
+            timings[order] = -1
+            continue
 
         try:
             logger.info(f"Running {mfwn_file}")
@@ -1073,6 +1080,127 @@ def clean_jobs(
         )
 
 
+# Matches `Completed <key> in <s> seconds` lines emitted by
+# qtaim_gen.source.core.omol.gbw_analysis (see logger.info call there).
+_TIMING_LOG_PATTERN = re.compile(
+    r"Completed\s+(?P<key>[A-Za-z_][A-Za-z0-9_]*)\s+in\s+(?P<seconds>[-+]?\d*\.?\d+)\s+seconds"
+)
+
+
+def _parse_timings_from_log(log_path: str) -> dict:
+    """Extract `Completed <key> in <seconds> seconds` entries from a log file.
+
+    Returns a dict {key: seconds_float}. Last-occurrence wins (most recent run).
+    Missing/unreadable log returns {}.
+    """
+    results: dict = {}
+    if not os.path.isfile(log_path):
+        return results
+    try:
+        with open(log_path, "r") as f:
+            for line in f:
+                m = _TIMING_LOG_PATTERN.search(line)
+                if m:
+                    try:
+                        results[m.group("key")] = float(m.group("seconds"))
+                    except ValueError:
+                        continue
+    except OSError:
+        return {}
+    return results
+
+
+def patch_timings_from_log(
+    folder: str,
+    full_set: int = 0,
+    spin_tf: bool = False,
+    move_results: bool = True,
+    logger: Optional[logging.Logger] = None,
+) -> bool:
+    """Fill missing keys in timings.json by recovering values from gbw_analysis.log.
+
+    Strategy:
+      1. Load existing timings from generator/timings.json (if move_results) or
+         folder/timings.json.
+      2. Parse `Completed <key> in <s> seconds` lines from gbw_analysis.log.
+      3. For each expected key for the given full_set/spin_tf, if missing from
+         timings dict, fill with log value if found, otherwise -1.0 sentinel.
+         Validation accepts -1.0 only for keys listed in `_timings_patched`,
+         so synthetic timings remain loudly flagged in downstream aggregates.
+      4. Stamp a `_timings_patched` provenance marker listing patched keys and
+         their source (log vs placeholder) so downstream consumers can filter
+         out synthetic timings from aggregates.
+      5. Atomic-write back to the same file.
+
+    Returns True if any key was patched, False otherwise (including when file
+    does not exist).
+    """
+    if move_results:
+        timings_path = os.path.join(folder, "generator", "timings.json")
+    else:
+        timings_path = os.path.join(folder, "timings.json")
+
+    if not os.path.isfile(timings_path):
+        if logger:
+            logger.warning("patch_timings: %s not found, skipping", timings_path)
+        return False
+
+    try:
+        with open(timings_path, "r") as f:
+            timings = json.load(f)
+    except (OSError, json.JSONDecodeError) as e:
+        if logger:
+            logger.warning("patch_timings: cannot read %s: %s", timings_path, e)
+        return False
+
+    log_path = os.path.join(folder, "gbw_analysis.log")
+    log_timings = _parse_timings_from_log(log_path)
+
+    expected, _ = get_expected_timing_keys(full_set=full_set, spin_tf=spin_tf)
+    patched: dict = {}
+    for key in expected:
+        # validate_timing_dict accepts 'other' or 'other_alie'; if asked for
+        # 'other' but only 'other_alie' is present (or vice versa), don't patch
+        if key == "other" and ("other" in timings or "other_alie" in timings):
+            continue
+        existing = timings.get(key)
+        if isinstance(existing, (int, float)) and existing > 0:
+            continue
+        # 'other' is the canonical expected name; record it under 'other_alie'
+        # since that's the actual key written by the analysis pipeline
+        write_key = "other_alie" if key == "other" else key
+        if key in log_timings and log_timings[key] > 0:
+            timings[write_key] = log_timings[key]
+            patched[write_key] = {"source": "log", "value": log_timings[key]}
+        else:
+            timings[write_key] = TIMING_PLACEHOLDER
+            patched[write_key] = {"source": "placeholder", "value": TIMING_PLACEHOLDER}
+
+    if not patched:
+        if logger:
+            logger.info("patch_timings: nothing to patch in %s", timings_path)
+        return False
+
+    # Provenance marker so W&B / tracking_db / aggregates can filter synthetic timings
+    existing_marker = timings.get(TIMINGS_PATCHED_KEY) or {}
+    if not isinstance(existing_marker, dict):
+        existing_marker = {}
+    existing_marker.update(patched)
+    timings[TIMINGS_PATCHED_KEY] = existing_marker
+
+    atomic_json_write(timings_path, timings)
+    if logger:
+        for key, info in patched.items():
+            logger.info(
+                "patch_timings: %s = %.2f (%s)", key, info["value"], info["source"]
+            )
+        logger.info(
+            "patch_timings: wrote %d patched key(s) to %s", len(patched), timings_path
+        )
+    return True
+
+
+
 def setup_logger(folder: str, name: str = "gbw_analysis") -> logging.Logger:
     logger = logging.getLogger(f"{name}-{folder}")
     # Avoid duplicate handlers
@@ -1253,20 +1381,27 @@ def _run_orca_parse(
         elapsed = round(time.time() - t_start, 2)
         logger.info("Parsed orca.out in %.2f s (%d keys)", elapsed, len(orca_dict))
 
-        # Write orca_parse timing into timings.json (atomic write for crash safety)
-        # Read from wherever timings currently lives, always write to job root
+        # Write orca_parse timing into timings.json (atomic write for crash safety).
+        # Merge generator/ (prior-run keys) with root (current-run keys); root wins
+        # on conflict so a Level 1 restart doesn't lose newly-written L1 sub-job
+        # timings to a stale generator/timings.json.
         gen_timings = os.path.join(folder, "generator", "timings.json")
         root_timings = os.path.join(folder, "timings.json")
+        timings = {}
         if os.path.isfile(gen_timings) and os.path.getsize(gen_timings) > 0:
-            timings_read = gen_timings
-        elif os.path.isfile(root_timings) and os.path.getsize(root_timings) > 0:
-            timings_read = root_timings
-        else:
-            timings_read = None
+            try:
+                with open(gen_timings, "r") as f:
+                    timings.update(json.load(f))
+            except json.JSONDecodeError:
+                pass
+        if os.path.isfile(root_timings) and os.path.getsize(root_timings) > 0:
+            try:
+                with open(root_timings, "r") as f:
+                    timings.update(json.load(f))
+            except json.JSONDecodeError:
+                pass
 
-        if timings_read is not None:
-            with open(timings_read, "r") as f:
-                timings = json.load(f)
+        if timings:
             timings["orca_parse"] = elapsed
             atomic_json_write(root_timings, timings)
 
@@ -1287,6 +1422,87 @@ def _run_orca_parse(
                 os.remove(orca_out_path)
             except OSError:
                 pass
+
+
+# Multiwfn (v3.8) error signatures we want to catch. If multiwfn upgrades and
+# rephrases these strings, the .out file will start passing the substantive
+# check again — re-pin in tests when we update multiwfn.
+_MULTIWFN_ERROR_SIGNATURES = (
+    "Error:",                         # banner-line errors, e.g. "Error: Unable to find the input file"
+    "cannot be found, input again",   # stuck on interactive prompt loop
+)
+
+
+def _is_substantive_step_out(path: str) -> bool:
+    """True if a multiwfn/orca_2mkl .out file looks like a successful run.
+
+    Rejects empty files and any file whose first 8 KB contains one of the
+    multiwfn error signatures. Both signatures appear early in the file
+    (banner + first prompt loop), so a single bounded read catches them and
+    keeps cost flat on large CPprop outputs.
+    """
+    if not os.path.isfile(path):
+        return False
+    try:
+        size = os.path.getsize(path)
+        if size == 0:
+            return False
+        with open(path, "rb") as f:
+            head = f.read(8192).decode("utf-8", errors="replace")
+    except OSError:
+        return False
+    return not any(sig in head for sig in _MULTIWFN_ERROR_SIGNATURES)
+
+
+def _wavefunction_present(folder: str) -> bool:
+    """True if a non-empty orca.wfn or orca.wfx exists in folder/ or generator/."""
+    for base in (folder, os.path.join(folder, "generator")):
+        for ext in (".wfn", ".wfx"):
+            wf = os.path.join(base, f"orca{ext}")
+            try:
+                if os.path.isfile(wf) and os.path.getsize(wf) > 0:
+                    return True
+            except OSError:
+                continue
+    return False
+
+
+def _has_usable_step_output(folder: str, order: str) -> bool:
+    """Check whether a sub-job appears to have produced usable output on disk.
+
+    Primary signal: `.out` file must be substantive (see `_is_substantive_step_out`).
+    Fallback: if `.out` is absent (cleaned up after a prior successful run), a
+    non-empty per-step `.json` is accepted. A bad `.out` (error signature) blocks
+    the `.json` fallback — stale intermediate JSONs must not mask a failed run.
+
+    Special case for `convert`: this step has no analytical output — its
+    purpose is to produce `orca.wfn`/`orca.wfx` from `orca.molden.input`. Skip
+    only if a non-empty wavefunction file exists; otherwise re-run regardless
+    of whether `convert.out` looks substantive.
+    """
+    # TODO: if more side-effect steps are added (convert is the only one
+    # today), replace this branch with a {step: artifact} registry instead of
+    # accumulating elif's here.
+    if order == "convert":
+        return _wavefunction_present(folder)
+
+    for base in (folder, os.path.join(folder, "generator")):
+        out_path = os.path.join(base, f"{order}.out")
+        if os.path.isfile(out_path):
+            if _is_substantive_step_out(out_path):
+                return True
+            # .out present but bad — don't trust stale .json in this location
+        else:
+            # .out absent (cleaned up after a prior successful run) — .json is the only artifact
+            json_path = os.path.join(base, f"{order}.json")
+            try:
+                if os.path.isfile(json_path) and os.path.getsize(json_path) > 0:
+                    with open(json_path, "r") as _f:
+                        if json.load(_f):
+                            return True
+            except (OSError, json.JSONDecodeError):
+                pass
+    return False
 
 
 def _compiled_data_present(folder: str, order: str, compiled_map: dict) -> bool:
@@ -1356,6 +1572,7 @@ def gbw_analysis(
     wfx: bool = False,
     exhaustive_qtaim: bool = False,
     subprocess_env: Optional[dict] = None,
+    patch_timings: bool = False,
 ) -> None:
     """
     Run a full analysis on a folder of gbw files
@@ -1678,6 +1895,34 @@ def gbw_analysis(
         logger=logger,
         check_orca=check_orca,
     )
+
+    # Optional repair pass: if validation failed and patch_timings is on,
+    # recover missing timing keys from gbw_analysis.log (or stamp -1.0
+    # placeholders). patch_timings_from_log only writes positive timing
+    # values, so if the only validation failure was missing/zero timing
+    # keys, the patch necessarily satisfies validate_timing_dict — skip
+    # the second full validation_checks pass. Other validation failures
+    # (missing JSONs, n_atoms mismatch) are not patched and remain failures.
+    if not tf_validation and patch_timings:
+        dft_dict = get_charge_spin_n_atoms_from_folder(
+            folder, logger=logger, verbose=False
+        )
+        if not dft_dict:
+            logger.warning(
+                "patch_timings: could not read charge/spin/n_atoms; "
+                "skipping spin keys"
+            )
+        spin_tf = bool(dft_dict and dft_dict.get("spin", 1) != 1)
+        did_patch = patch_timings_from_log(
+            folder,
+            full_set=full_set,
+            spin_tf=spin_tf,
+            move_results=move_results,
+            logger=logger,
+        )
+        if did_patch:
+            tf_validation = True
+
     logger.info("gbw_analysis completed in folder: {}".format(folder))
     logger.info("Validation status: {}".format(tf_validation))
     # move log file to results folder

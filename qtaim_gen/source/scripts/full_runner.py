@@ -93,6 +93,16 @@ def main(argv=None):
         help="Use .wfx wavefunction format instead of .wfn (more stable for heavy atoms, Z > 36)",
     )
 
+    parser.add_argument(
+        "--patch_timings",
+        action="store_true",
+        help=(
+            "if timing-validation fails, recover missing timing keys from "
+            "gbw_analysis.log (or stamp -1.0 sentinels) and re-validate. "
+            "Records provenance under '_timings_patched' for downstream filtering."
+        ),
+    )
+
     args = parser.parse_args(argv)
 
     overrun_running = bool(args.overrun_running) if "overrun_running" in args else False
@@ -111,6 +121,7 @@ def main(argv=None):
     overwrite = bool(args.overwrite) if "overwrite" in args else False
     move_results = bool(args.move_results) if "move_results" in args else False
     wfx: bool = bool(getattr(args, "wfx", False))
+    patch_timings: bool = bool(getattr(args, "patch_timings", False))
     job_file = args.job_file
 
     # set env vars
@@ -194,6 +205,7 @@ def main(argv=None):
                     preprocess_compressed=preprocess_compressed,
                     move_results=move_results,
                     wfx=wfx,
+                    patch_timings=patch_timings,
                 )  # works!
             except Exception as e:
                 print(f"Error in gbw_analysis for {run_root}: {e}")
