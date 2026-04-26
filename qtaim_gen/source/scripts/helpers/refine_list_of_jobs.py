@@ -114,6 +114,13 @@ def main(argv: Optional[List[str]] = None) -> int:
         help="filter out jobs where ECP loaded successfully; keep only ECP_FAILED and ECP_NO_ZIP jobs",
     )
 
+    parser.add_argument(
+        "--n_workers",
+        type=int,
+        default=8,
+        help="number of parallel workers for pre-validation (default: 8)",
+    )
+
     args = parser.parse_args(argv)
 
     log_file: Optional[str] = getattr(args, "log_file", None)
@@ -137,6 +144,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     orphaned_check: bool = bool(getattr(args, "check_orphaned", False))
     check_orca: bool = bool(getattr(args, "check_orca", False))
     check_ecp: bool = bool(getattr(args, "check_ecp", False))
+    n_workers: int = int(getattr(args, "n_workers", 8))
     refined_job_file: str = getattr(args, "refined_job_file", "refined_jobs.txt")
     root_omol_results: Optional[str] = getattr(args, "root_omol_results", None)
     root_omol_inputs: Optional[str] = getattr(args, "root_omol_inputs", None)
@@ -163,6 +171,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         check_orca=check_orca,
         check_ecp=check_ecp,
         logger=logger,
+        max_workers=n_workers,
     )
 
     if not folders_run:
