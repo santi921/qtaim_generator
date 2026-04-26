@@ -6,6 +6,13 @@ import numpy as np
 from datetime import datetime
 
 
+# Shared contract between validate_timing_dict (consumer) and
+# patch_timings_from_log in core/omol.py (producer). Keep in sync at one place
+# so a rename of either the marker key or the sentinel is a one-line change.
+TIMINGS_PATCHED_KEY = "_timings_patched"
+TIMING_PLACEHOLDER = -1.0
+
+
 def get_charge_spin_n_atoms_from_folder(
     folder: str, logger=None, verbose=False
 ) -> tuple:
@@ -197,12 +204,9 @@ def validate_timing_dict(
         full_set=full_set, spin_tf=False
     )
 
-    # Keys recovered by patch_timings_from_log carry a `-1.0` sentinel when
-    # log-scrape couldn't find them. We accept any value (incl. negative) for
-    # those keys here so cleanup can run, while leaving the sentinel visible
-    # to downstream consumers via `_timings_patched`.
-    patched_marker = timing_dict.get("_timings_patched")
-    patched_keys = set(patched_marker.keys()) if isinstance(patched_marker, dict) else set()
+    # Keys patched by patch_timings_from_log carry a TIMING_PLACEHOLDER (-1.0)
+    # when log-scrape couldn't find them; accept those here so cleanup runs.
+    patched_keys = set((timing_dict.get(TIMINGS_PATCHED_KEY) or {}).keys())
 
     for key in expected_keys:
         if key not in timing_dict:

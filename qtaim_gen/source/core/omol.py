@@ -10,6 +10,8 @@ from qtaim_gen.source.utils.validation import (
     get_val_breakdown_from_folder,
     get_charge_spin_n_atoms_from_folder,
     get_expected_timing_keys,
+    TIMINGS_PATCHED_KEY,
+    TIMING_PLACEHOLDER,
 )
 
 from qtaim_gen.source.utils.io import check_results_exist
@@ -614,9 +616,6 @@ def run_jobs(
         # is secondary. This handles cases where timings.json was reset/corrupted
         # or a crash occurred between the mfwn script finishing and the timing write.
         if restart:
-            # Substantive-output check: rejects empty / errored multiwfn .out
-            # files (e.g. "Error: Unable to find the input file") that bare
-            # os.path.exists would have falsely accepted as "data verified".
             has_files = _has_usable_step_output(folder, order)
             if has_files or _compiled_data_present(folder, order, _compiled_map):
                 _timing_str = (
@@ -638,25 +637,14 @@ def run_jobs(
 
         mfwn_file = os.path.join(folder, "props_{}.mfwn".format(order))
 
-        # Precondition: every multiwfn sub-job (everything except 'convert')
-        # needs a wavefunction file in the job folder. If 'convert' didn't
-        # produce one, multiwfn will run with no input and emit a stuck-prompt
-        # .out — cleanly visible here is better than a downstream KeyError in
-        # parse_multiwfn when it tries to load the empty json.
-        if order != "convert":
-            wf_present = any(
-                os.path.isfile(os.path.join(folder, f"orca{ext}"))
-                and os.path.getsize(os.path.join(folder, f"orca{ext}")) > 0
-                for ext in (".wfn", ".wfx")
+        # Precondition: non-convert multiwfn sub-jobs need a wavefunction file.
+        # Surfacing it here beats a downstream KeyError in parse_multiwfn.
+        if order != "convert" and not _wavefunction_present(folder):
+            logger.error(
+                f"No orca.wfn or orca.wfx in {folder}; cannot run {order}."
             )
-            if not wf_present:
-                logger.error(
-                    f"No orca.wfn or orca.wfx in {folder}; cannot run {order}. "
-                    "Convert step must have failed — re-run with --restart "
-                    "(now re-runs convert when no .wfn/.wfx is present)."
-                )
-                timings[order] = -1
-                continue
+            timings[order] = -1
+            continue
 
         try:
             logger.info(f"Running {mfwn_file}")
@@ -1185,8 +1173,8 @@ def patch_timings_from_log(
             timings[write_key] = log_timings[key]
             patched[write_key] = {"source": "log", "value": log_timings[key]}
         else:
-            timings[write_key] = -1.0
-            patched[write_key] = {"source": "placeholder", "value": -1.0}
+            timings[write_key] = TIMING_PLACEHOLDER
+            patched[write_key] = {"source": "placeholder", "value": TIMING_PLACEHOLDER}
 
     if not patched:
         if logger:
@@ -1194,11 +1182,11 @@ def patch_timings_from_log(
         return False
 
     # Provenance marker so W&B / tracking_db / aggregates can filter synthetic timings
-    existing_marker = timings.get("_timings_patched", {})
+    existing_marker = timings.get(TIMINGS_PATCHED_KEY) or {}
     if not isinstance(existing_marker, dict):
         existing_marker = {}
     existing_marker.update(patched)
-    timings["_timings_patched"] = existing_marker
+    timings[TIMINGS_PATCHED_KEY] = existing_marker
 
     atomic_json_write(timings_path, timings)
     if logger:
@@ -1435,17 +1423,22 @@ def _run_orca_parse(
                 pass
 
 
+# Multiwfn (v3.8) error signatures we want to catch. If multiwfn upgrades and
+# rephrases these strings, the .out file will start passing the substantive
+# check again — re-pin in tests when we update multiwfn.
+_MULTIWFN_ERROR_SIGNATURES = (
+    "Error:",                         # banner-line errors, e.g. "Error: Unable to find the input file"
+    "cannot be found, input again",   # stuck on interactive prompt loop
+)
+
+
 def _is_substantive_step_out(path: str) -> bool:
     """True if a multiwfn/orca_2mkl .out file looks like a successful run.
 
-    Rejects:
-      - missing or zero-byte files
-      - files starting with "Error:" (e.g. multiwfn "Unable to find the input file")
-      - files containing "cannot be found, input again" (multiwfn stuck on its
-        interactive prompt because the driver script's stdin was malformed)
-
-    Reads at most 4 KB from the head and 4 KB from the tail to bound cost on
-    large .out files (e.g. qtaim CPprop output can be tens of MB).
+    Rejects empty files and any file whose first 8 KB contains one of the
+    multiwfn error signatures. Both signatures appear early in the file
+    (banner + first prompt loop), so a single bounded read catches them and
+    keeps cost flat on large CPprop outputs.
     """
     if not os.path.isfile(path):
         return False
@@ -1454,21 +1447,23 @@ def _is_substantive_step_out(path: str) -> bool:
         if size == 0:
             return False
         with open(path, "rb") as f:
-            if size <= 8192:
-                # small file: read entirely so the middle isn't skipped
-                head = f.read().decode("utf-8", errors="replace")
-                tail = ""
-            else:
-                head = f.read(4096).decode("utf-8", errors="replace")
-                f.seek(size - 4096)
-                tail = f.read().decode("utf-8", errors="replace")
+            head = f.read(8192).decode("utf-8", errors="replace")
     except OSError:
         return False
-    if head.lstrip().startswith("Error:"):
-        return False
-    if "cannot be found, input again" in head or "cannot be found, input again" in tail:
-        return False
-    return True
+    return not any(sig in head for sig in _MULTIWFN_ERROR_SIGNATURES)
+
+
+def _wavefunction_present(folder: str) -> bool:
+    """True if a non-empty orca.wfn or orca.wfx exists in folder/ or generator/."""
+    for base in (folder, os.path.join(folder, "generator")):
+        for ext in (".wfn", ".wfx"):
+            wf = os.path.join(base, f"orca{ext}")
+            try:
+                if os.path.isfile(wf) and os.path.getsize(wf) > 0:
+                    return True
+            except OSError:
+                continue
+    return False
 
 
 def _has_usable_step_output(folder: str, order: str) -> bool:
@@ -1485,16 +1480,11 @@ def _has_usable_step_output(folder: str, order: str) -> bool:
     only if a non-empty wavefunction file exists; otherwise re-run regardless
     of whether `convert.out` looks substantive.
     """
+    # TODO: if more side-effect steps are added (convert is the only one
+    # today), replace this branch with a {step: artifact} registry instead of
+    # accumulating elif's here.
     if order == "convert":
-        for base in (folder, os.path.join(folder, "generator")):
-            for ext in (".wfn", ".wfx"):
-                wf = os.path.join(base, f"orca{ext}")
-                try:
-                    if os.path.isfile(wf) and os.path.getsize(wf) > 0:
-                        return True
-                except OSError:
-                    continue
-        return False
+        return _wavefunction_present(folder)
 
     for base in (folder, os.path.join(folder, "generator")):
         if _is_substantive_step_out(os.path.join(base, f"{order}.out")):
