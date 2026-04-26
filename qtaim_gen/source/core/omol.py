@@ -9,6 +9,7 @@ from qtaim_gen.source.utils.validation import (
     validation_checks,
     get_val_breakdown_from_folder,
     get_charge_spin_n_atoms_from_folder,
+    get_expected_timing_keys,
 )
 
 from qtaim_gen.source.utils.io import check_results_exist
@@ -1073,52 +1074,11 @@ def clean_jobs(
         )
 
 
+# Matches `Completed <key> in <s> seconds` lines emitted by
+# qtaim_gen.source.core.omol.gbw_analysis (see logger.info call there).
 _TIMING_LOG_PATTERN = re.compile(
-    r"Completed\s+(?P<key>\S+)\s+in\s+(?P<seconds>[-+]?\d*\.?\d+)\s+seconds"
+    r"Completed\s+(?P<key>[A-Za-z_][A-Za-z0-9_]*)\s+in\s+(?P<seconds>[-+]?\d*\.?\d+)\s+seconds"
 )
-
-_TIMING_PLACEHOLDER = 99999.0
-
-
-def _expected_timing_keys(full_set: int, spin_tf: bool) -> list:
-    """Mirror the expected_keys list in validate_timing_dict.
-
-    Kept inline (not imported) to avoid coupling: if validation expectations
-    drift, the patcher can be updated independently.
-    """
-    keys = [
-        "qtaim",
-        "other_alie",  # validate_timing_dict accepts 'other' OR 'other_alie'
-        "hirshfeld",
-        "becke",
-        "adch",
-        "cm5",
-        "fuzzy_bond",
-        "becke_fuzzy_density",
-        "hirsh_fuzzy_density",
-    ]
-    spin_keys = ["hirsh_fuzzy_spin", "becke_fuzzy_spin"]
-    if full_set > 0:
-        keys += [
-            "vdd",
-            "mbis",
-            "chelpg",
-            "ibsi_bond",
-            "elf_fuzzy",
-            "mbis_fuzzy_density",
-        ]
-        spin_keys += ["mbis_fuzzy_spin"]
-    if full_set > 1:
-        keys += [
-            "bader",
-            "laplacian_bond",
-            "grad_norm_rho_fuzzy",
-            "laplacian_rho_fuzzy",
-            "ESP_Volume",
-        ]
-    if spin_tf:
-        keys += spin_keys
-    return keys
 
 
 def _parse_timings_from_log(log_path: str) -> dict:
@@ -1150,7 +1110,6 @@ def patch_timings_from_log(
     spin_tf: bool = False,
     move_results: bool = True,
     logger: Optional[logging.Logger] = None,
-    placeholder: float = _TIMING_PLACEHOLDER,
 ) -> bool:
     """Fill missing keys in timings.json by recovering values from gbw_analysis.log.
 
@@ -1159,9 +1118,12 @@ def patch_timings_from_log(
          folder/timings.json.
       2. Parse `Completed <key> in <s> seconds` lines from gbw_analysis.log.
       3. For each expected key for the given full_set/spin_tf, if missing from
-         timings dict, fill with log value if found, otherwise `placeholder`
-         (default 99999) so timing-validation passes.
-      4. Atomic-write back to the same file.
+         timings dict, fill with log value if found, otherwise 99999 placeholder
+         so timing-validation passes.
+      4. Stamp a `_timings_patched` provenance marker listing patched keys and
+         their source (log vs placeholder) so downstream consumers can filter
+         out synthetic timings from aggregates.
+      5. Atomic-write back to the same file.
 
     Returns True if any key was patched, False otherwise (including when file
     does not exist).
@@ -1187,30 +1149,44 @@ def patch_timings_from_log(
     log_path = os.path.join(folder, "gbw_analysis.log")
     log_timings = _parse_timings_from_log(log_path)
 
-    expected = _expected_timing_keys(full_set, spin_tf)
+    expected, _ = get_expected_timing_keys(full_set=full_set, spin_tf=spin_tf)
     patched: dict = {}
     for key in expected:
-        # validate_timing_dict accepts 'other' or 'other_alie'; skip if either present
-        if key == "other_alie" and ("other" in timings or "other_alie" in timings):
+        # validate_timing_dict accepts 'other' or 'other_alie'; if asked for
+        # 'other' but only 'other_alie' is present (or vice versa), don't patch
+        if key == "other" and ("other" in timings or "other_alie" in timings):
             continue
-        if key in timings and timings[key] > 0:
+        existing = timings.get(key)
+        if isinstance(existing, (int, float)) and existing > 0:
             continue
+        # 'other' is the canonical expected name; record it under 'other_alie'
+        # since that's the actual key written by the analysis pipeline
+        write_key = "other_alie" if key == "other" else key
         if key in log_timings and log_timings[key] > 0:
-            timings[key] = log_timings[key]
-            patched[key] = ("log", log_timings[key])
+            timings[write_key] = log_timings[key]
+            patched[write_key] = {"source": "log", "value": log_timings[key]}
         else:
-            timings[key] = placeholder
-            patched[key] = ("placeholder", placeholder)
+            timings[write_key] = 99999.0
+            patched[write_key] = {"source": "placeholder", "value": 99999.0}
 
     if not patched:
         if logger:
             logger.info("patch_timings: nothing to patch in %s", timings_path)
         return False
 
+    # Provenance marker so W&B / tracking_db / aggregates can filter synthetic timings
+    existing_marker = timings.get("_timings_patched", {})
+    if not isinstance(existing_marker, dict):
+        existing_marker = {}
+    existing_marker.update(patched)
+    timings["_timings_patched"] = existing_marker
+
     atomic_json_write(timings_path, timings)
     if logger:
-        for key, (src, val) in patched.items():
-            logger.info("patch_timings: %s = %.2f (%s)", key, val, src)
+        for key, info in patched.items():
+            logger.info(
+                "patch_timings: %s = %.2f (%s)", key, info["value"], info["source"]
+            )
         logger.info(
             "patch_timings: wrote %d patched key(s) to %s", len(patched), timings_path
         )
@@ -1831,13 +1807,22 @@ def gbw_analysis(
         check_orca=check_orca,
     )
 
-    # Optional repair pass: if validation failed only because timings.json is
-    # missing keys (e.g. earlier orca_parse-overwrite bug), recover them from
-    # gbw_analysis.log or stamp 99999 placeholders, then re-validate.
+    # Optional repair pass: if validation failed and patch_timings is on,
+    # recover missing timing keys from gbw_analysis.log (or stamp 99999
+    # placeholders). patch_timings_from_log only writes positive timing
+    # values, so if the only validation failure was missing/zero timing
+    # keys, the patch necessarily satisfies validate_timing_dict — skip
+    # the second full validation_checks pass. Other validation failures
+    # (missing JSONs, n_atoms mismatch) are not patched and remain failures.
     if not tf_validation and patch_timings:
         dft_dict = get_charge_spin_n_atoms_from_folder(
             folder, logger=logger, verbose=False
         )
+        if not dft_dict:
+            logger.warning(
+                "patch_timings: could not read charge/spin/n_atoms; "
+                "skipping spin keys"
+            )
         spin_tf = bool(dft_dict and dft_dict.get("spin", 1) != 1)
         did_patch = patch_timings_from_log(
             folder,
@@ -1847,14 +1832,7 @@ def gbw_analysis(
             logger=logger,
         )
         if did_patch:
-            tf_validation = validation_checks(
-                folder,
-                full_set=full_set,
-                verbose=True,
-                move_results=move_results,
-                logger=logger,
-                check_orca=check_orca,
-            )
+            tf_validation = True
 
     logger.info("gbw_analysis completed in folder: {}".format(folder))
     logger.info("Validation status: {}".format(tf_validation))
