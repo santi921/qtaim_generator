@@ -614,12 +614,10 @@ def run_jobs(
         # is secondary. This handles cases where timings.json was reset/corrupted
         # or a crash occurred between the mfwn script finishing and the timing write.
         if restart:
-            has_files = (
-                os.path.exists(os.path.join(folder, f"{order}.out"))
-                or os.path.exists(os.path.join(folder, "generator", f"{order}.out"))
-                or os.path.exists(os.path.join(folder, f"{order}.json"))
-                or os.path.exists(os.path.join(folder, "generator", f"{order}.json"))
-            )
+            # Substantive-output check: rejects empty / errored multiwfn .out
+            # files (e.g. "Error: Unable to find the input file") that bare
+            # os.path.exists would have falsely accepted as "data verified".
+            has_files = _has_usable_step_output(folder, order)
             if has_files or _compiled_data_present(folder, order, _compiled_map):
                 _timing_str = (
                     f", timing={timings[order]:.2f}s"
@@ -1415,6 +1413,63 @@ def _run_orca_parse(
                 os.remove(orca_out_path)
             except OSError:
                 pass
+
+
+def _is_substantive_step_out(path: str) -> bool:
+    """True if a multiwfn/orca_2mkl .out file looks like a successful run.
+
+    Rejects:
+      - missing or zero-byte files
+      - files starting with "Error:" (e.g. multiwfn "Unable to find the input file")
+      - files containing "cannot be found, input again" (multiwfn stuck on its
+        interactive prompt because the driver script's stdin was malformed)
+
+    Reads at most 4 KB from the head and 4 KB from the tail to bound cost on
+    large .out files (e.g. qtaim CPprop output can be tens of MB).
+    """
+    if not os.path.isfile(path):
+        return False
+    try:
+        size = os.path.getsize(path)
+        if size == 0:
+            return False
+        with open(path, "rb") as f:
+            if size <= 8192:
+                # small file: read entirely so the middle isn't skipped
+                head = f.read().decode("utf-8", errors="replace")
+                tail = ""
+            else:
+                head = f.read(4096).decode("utf-8", errors="replace")
+                f.seek(size - 4096)
+                tail = f.read().decode("utf-8", errors="replace")
+    except OSError:
+        return False
+    if head.lstrip().startswith("Error:"):
+        return False
+    if "cannot be found, input again" in head or "cannot be found, input again" in tail:
+        return False
+    return True
+
+
+def _has_usable_step_output(folder: str, order: str) -> bool:
+    """Check whether a sub-job appears to have produced usable output on disk.
+
+    Stricter than bare `os.path.exists`: a `.out` file must look substantive
+    (see `_is_substantive_step_out`), and a `.json` per-step file must be
+    non-empty. Used by the restart loop to skip steps that genuinely finished
+    and re-run steps whose `.out` is empty or contains a multiwfn error
+    signature.
+    """
+    for base in (folder, os.path.join(folder, "generator")):
+        if _is_substantive_step_out(os.path.join(base, f"{order}.out")):
+            return True
+        json_path = os.path.join(base, f"{order}.json")
+        try:
+            if os.path.isfile(json_path) and os.path.getsize(json_path) > 0:
+                return True
+        except OSError:
+            continue
+    return False
 
 
 def _compiled_data_present(folder: str, order: str, compiled_map: dict) -> bool:
