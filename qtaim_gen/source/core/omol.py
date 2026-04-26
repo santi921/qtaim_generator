@@ -1459,7 +1459,23 @@ def _has_usable_step_output(folder: str, order: str) -> bool:
     non-empty. Used by the restart loop to skip steps that genuinely finished
     and re-run steps whose `.out` is empty or contains a multiwfn error
     signature.
+
+    Special case for `convert`: this step has no analytical output — its
+    purpose is to produce `orca.wfn`/`orca.wfx` from `orca.molden.input`. Skip
+    only if a non-empty wavefunction file exists; otherwise re-run regardless
+    of whether `convert.out` looks substantive.
     """
+    if order == "convert":
+        for base in (folder, os.path.join(folder, "generator")):
+            for ext in (".wfn", ".wfx"):
+                wf = os.path.join(base, f"orca{ext}")
+                try:
+                    if os.path.isfile(wf) and os.path.getsize(wf) > 0:
+                        return True
+                except OSError:
+                    continue
+        return False
+
     for base in (folder, os.path.join(folder, "generator")):
         if _is_substantive_step_out(os.path.join(base, f"{order}.out")):
             return True
