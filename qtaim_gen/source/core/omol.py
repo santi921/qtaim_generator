@@ -638,6 +638,26 @@ def run_jobs(
 
         mfwn_file = os.path.join(folder, "props_{}.mfwn".format(order))
 
+        # Precondition: every multiwfn sub-job (everything except 'convert')
+        # needs a wavefunction file in the job folder. If 'convert' didn't
+        # produce one, multiwfn will run with no input and emit a stuck-prompt
+        # .out — cleanly visible here is better than a downstream KeyError in
+        # parse_multiwfn when it tries to load the empty json.
+        if order != "convert":
+            wf_present = any(
+                os.path.isfile(os.path.join(folder, f"orca{ext}"))
+                and os.path.getsize(os.path.join(folder, f"orca{ext}")) > 0
+                for ext in (".wfn", ".wfx")
+            )
+            if not wf_present:
+                logger.error(
+                    f"No orca.wfn or orca.wfx in {folder}; cannot run {order}. "
+                    "Convert step must have failed — re-run with --restart "
+                    "(now re-runs convert when no .wfn/.wfx is present)."
+                )
+                timings[order] = -1
+                continue
+
         try:
             logger.info(f"Running {mfwn_file}")
             start = time.time()
