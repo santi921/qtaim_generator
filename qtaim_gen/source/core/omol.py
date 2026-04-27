@@ -1058,19 +1058,19 @@ def clean_jobs(
         except Exception as e:
             logger.info(f"Couldn't rm file {file}: {e}")
 
-    # zip all out files
+    # zip all out files - collect first, delete only after zip is safely merged
+    files_to_zip = [
+        f for f in os.listdir(folder)
+        if (f.endswith(".out") and f != "orca.out") or f.endswith("CPprop.txt")
+    ]
     with zipfile.ZipFile(zip_file_out, "w") as zipf:
-        for file in os.listdir(folder):
-            # skip orca.out 
-            if file.endswith(".out") and file != "orca.out":
+        for file in files_to_zip:
+            try:
                 zipf.write(os.path.join(folder, file), arcname=file)
-                os.remove(os.path.join(folder, file))
-                logger.info(f"Zipped and removed {file}")
-            if file.endswith("CPprop.txt"):
-                zipf.write(os.path.join(folder, file), arcname=file)
-                os.remove(os.path.join(folder, file))
-                logger.info(f"Zipped and removed {file}")
-        
+                logger.info(f"Zipped {file}")
+            except Exception as e:
+                logger.info(f"Couldn't zip {file}: {e}")
+
     if move_results:
         results_folder = os.path.join(folder, "generator")
         merge_zip_into(
@@ -1078,6 +1078,16 @@ def clean_jobs(
             os.path.join(results_folder, "out_files.zip"),
             logger=logger,
         )
+
+    # delete originals only after zip is safely in destination
+    for file in files_to_zip:
+        fp = os.path.join(folder, file)
+        if os.path.exists(fp):
+            try:
+                os.remove(fp)
+                logger.info(f"Removed {file} after zip")
+            except Exception as e:
+                logger.info(f"Couldn't remove {file}: {e}")
 
 
 # Matches `Completed <key> in <s> seconds` lines emitted by
@@ -1798,6 +1808,13 @@ def gbw_analysis(
                                 logger.info("Deleted %s after orca-only parse", orca_out_path)
                             except OSError as e:
                                 logger.warning("Could not delete %s: %s", orca_out_path, e)
+                        clean_jobs(
+                            folder,
+                            separate=separate,
+                            logger=logger,
+                            full_set=full_set,
+                            move_results=move_results,
+                        )
                     logger.info("gbw_analysis completed (orca-only) in folder: %s", folder)
                     return
 
