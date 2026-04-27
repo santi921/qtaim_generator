@@ -1063,10 +1063,12 @@ def clean_jobs(
         f for f in os.listdir(folder)
         if (f.endswith(".out") and f != "orca.out") or f.endswith("CPprop.txt")
     ]
+    successfully_zipped = []
     with zipfile.ZipFile(zip_file_out, "w") as zipf:
         for file in files_to_zip:
             try:
                 zipf.write(os.path.join(folder, file), arcname=file)
+                successfully_zipped.append(file)
                 logger.info(f"Zipped {file}")
             except Exception as e:
                 logger.info(f"Couldn't zip {file}: {e}")
@@ -1079,8 +1081,8 @@ def clean_jobs(
             logger=logger,
         )
 
-    # delete originals only after zip is safely in destination
-    for file in files_to_zip:
+    # delete only files that were successfully written to the zip
+    for file in successfully_zipped:
         fp = os.path.join(folder, file)
         if os.path.exists(fp):
             try:
