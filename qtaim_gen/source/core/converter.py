@@ -15,7 +15,6 @@ from glob import glob
 import numpy as np
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from copy import deepcopy
 from typing import Dict, List, Tuple, Union, Any, Optional
 import bisect
 import logging
@@ -29,7 +28,6 @@ from qtaim_embed.data.processing import (
 from qtaim_embed.core.molwrapper import MoleculeWrapper
 from qtaim_embed.utils.grapher import get_grapher
 from qtaim_embed.data.lmdb import serialize_graph, load_graph_from_serialized
-serial_func = serialize_graph
 
 from qtaim_gen.source.utils.lmdbs import (
     get_elements_from_structure_lmdb,
@@ -46,6 +44,8 @@ from qtaim_gen.source.core.qtaim_embed import (
     get_include_exclude_indices,
     build_and_featurize_graph,
 )
+
+serial_func = serialize_graph
 
 
 def clean_id(key: bytes) -> str:
@@ -190,7 +190,7 @@ class Converter:
         if self.total_shards > 1:
             self.logger.info(f"Sharding enabled: shard {self.shard_index + 1} of {self.total_shards}")
             if self.auto_merge and self.shard_index == self.total_shards - 1:
-                self.logger.info(f"Auto-merge enabled: will merge all shards after processing")
+                self.logger.info("Auto-merge enabled: will merge all shards after processing")
 
         ####################### Element Set ########################
         if "element_set" in self.config_dict.keys():
@@ -904,7 +904,7 @@ class Converter:
             merged_feature_scaler = merge_scalers(scalers, features_tf=True, finalize_merged=True)
             feature_out = os.path.join(output_dir, "feature_scaler_iterative.pt")
             merged_feature_scaler.save_scaler(feature_out)
-            logger.info(f"Saved merged feature scaler")
+            logger.info("Saved merged feature scaler")
         else:
             logger.warning("No feature scalers found")
             merged_feature_scaler = None
@@ -927,7 +927,7 @@ class Converter:
             merged_label_scaler = merge_scalers(scalers, features_tf=False, finalize_merged=True)
             label_out = os.path.join(output_dir, "label_scaler_iterative.pt")
             merged_label_scaler.save_scaler(label_out)
-            logger.info(f"Saved merged label scaler")
+            logger.info("Saved merged label scaler")
         else:
             logger.warning("No label scalers found")
             merged_label_scaler = None
@@ -1030,7 +1030,7 @@ class BaseConverter(Converter):
             bonds = value_structure["bonds"]
             bond_list = {tuple(sorted(b)): None for b in bonds if b[0] != b[1]}
             id = clean_id(key) if self.single_lmdb_in else key_str
-        except Exception as e:
+        except Exception:
             failures["structure"].append(key_str)
             return (key_str, None, failures)
 
@@ -1049,7 +1049,7 @@ class BaseConverter(Converter):
                 exclude_locs=index_dict["exclude_locs"],
             )
             return (key_str, graph, failures)
-        except Exception as e:
+        except Exception:
             failures["graph"].append(key_str)
             return (key_str, None, failures)
 
@@ -1265,7 +1265,7 @@ class QTAIMConverter(Converter):
             bond_feats = {}
             atom_feats = {i: {} for i in range(global_feats["n_atoms"])}
             id = clean_id(key) if self.single_lmdb_in else key_str
-        except Exception as e:
+        except Exception:
             failures["structure"].append(key_str)
             return (key_str, None, failures)
 
@@ -1280,7 +1280,7 @@ class QTAIMConverter(Converter):
                 atom_keys=self.keys_data["atom"],
                 bond_keys=self.keys_data["bond"],
             )
-        except Exception as e:
+        except Exception:
             failures["qtaim"].append(key_str)
             return (key_str, None, failures)
 
@@ -1299,7 +1299,7 @@ class QTAIMConverter(Converter):
                 exclude_locs=index_dict["exclude_locs"],
             )
             return (key_str, graph, failures)
-        except Exception as e:
+        except Exception:
             failures["graph"].append(key_str)
             return (key_str, None, failures)
 
