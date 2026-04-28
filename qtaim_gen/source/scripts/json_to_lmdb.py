@@ -116,13 +116,13 @@ class ConversionStats:
             logger.info(f"  LMDB write time: {self.lmdb_write_time_sec:.2f}s ({self.write_rate_files_per_sec:.1f} files/sec)")
 
         if self.missing_keys:
-            logger.warning(f"  Missing keys (top 10):")
+            logger.warning("  Missing keys (top 10):")
             sorted_keys = sorted(self.missing_keys.items(), key=lambda x: -x[1])[:10]
             for key, count in sorted_keys:
                 logger.warning(f"    - '{key}': {count} occurrences")
 
         if self.failed_files and logger.isEnabledFor(logging.DEBUG):
-            logger.debug(f"  Failed files:")
+            logger.debug("  Failed files:")
             for f in self.failed_files[:20]:  # Limit to first 20
                 logger.debug(f"    - {f}")
             if len(self.failed_files) > 20:
@@ -648,7 +648,7 @@ def convert_structure(
     move_files: bool,
 ) -> None:
     """Convert ORCA .inp files to structure LMDB (legacy interface)."""
-    print(f"Converting structure from .inp files...")
+    print("Converting structure from .inp files...")
     inp_files_2_lmdbs(
         root_dir=root_dir,
         out_dir=out_dir,
@@ -924,10 +924,10 @@ def main():
     if total_shards > 1:
         logger.info(f"Sharding:            Shard {shard_index} of {total_shards}")
         if auto_merge and shard_index == total_shards - 1:
-            logger.info(f"Auto-merge:          Enabled (last shard will merge)")
+            logger.info("Auto-merge:          Enabled (last shard will merge)")
         logger.info(f"Assigned folders:    {len(shard_folders) if shard_folders else 0}")
     if args.clean_output:
-        logger.info(f"Clean output:        Yes (removed existing LMDBs)")
+        logger.info("Clean output:        Yes (removed existing LMDBs)")
     if debug_limit:
         logger.info(f"DEBUG MODE:          Limited to {debug_limit} folders")
     logger.info("")

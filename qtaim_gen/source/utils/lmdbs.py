@@ -439,7 +439,6 @@ def parse_config_gen_to_embed(
         Dict[str, Any]]:
             - A dictionary containing the configuration parameters.
     """
-    lmdb_dict = {}
     with open(config_path, "r") as f:
         config_dict = json.load(f)
     config_dict["restart"] = restart

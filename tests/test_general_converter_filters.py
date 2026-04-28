@@ -10,11 +10,8 @@ This test verifies that:
 6. filter_bond_feats utility works correctly
 """
 
-import os
 import pytest
-import json
 from pathlib import Path
-from copy import deepcopy
 
 from qtaim_gen.source.core.converter import GeneralConverter
 from qtaim_gen.source.utils.lmdbs import (

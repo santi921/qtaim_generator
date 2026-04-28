@@ -4,7 +4,6 @@ import os
 import lmdb
 import json
 import pickle as pkl
-import numpy as np
 from copy import deepcopy
 from glob import glob
 from qtaim_gen.source.utils.lmdbs import json_2_lmdbs, inp_files_2_lmdbs, filter_bond_feats
@@ -24,13 +23,11 @@ from qtaim_gen.source.utils.lmdbs import (
 from qtaim_gen.source.scripts.json_to_lmdb import (
     partition_folders_by_shard,
     merge_shards,
-    convert_json_with_stats,
 )
 import logging
 import shutil
 import tempfile
 
-import pytest
 
 
 class TestLMDB:
@@ -830,7 +827,7 @@ class TestConverters:
         filtered_bond_feats_qtaim = _check_filter_bond_feats(connected_bond_paths, normalized_connected_paths)
         filtered_bond_feats_fuzzy = _check_filter_bond_feats(bond_list_fuzzy, normalized_fuzzy)
         filtered_bond_feats_ibsi = _check_filter_bond_feats(bond_list_ibsi, normalized_ibsi)
-        filtered_bond_feats_struct = _check_filter_bond_feats(bond_list, normalized_struct)
+        _check_filter_bond_feats(bond_list, normalized_struct)
 
 
         # check the number of features of each bond that is filtered 
@@ -1122,7 +1119,6 @@ class TestSharding:
         os.makedirs(test_out_dir, exist_ok=True)
 
         # Simulate the naming scheme used in json_to_lmdb.py
-        total_shards = 2
         shard_index = 0
 
         # With sharding, output goes to subdirectory
