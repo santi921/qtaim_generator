@@ -126,7 +126,7 @@ qtaim_gen/source/
 **Full analysis:** `full-runner`, `full-runner-parsl`, `full-runner-parsl-alcf`
 
 **JSON → LMDB → Graphs (ML pipeline):**
-1. `json-to-lmdb` → Convert parsed JSON outputs to typed LMDB files (structure, charge, qtaim, bond, fuzzy)
+1. `json-to-lmdb` → Convert parsed JSON outputs to typed LMDB files (structure, charge, qtaim, bond, fuzzy, orca)
 2. `generator-to-embed` → Run a converter (Base/QTAIM/General) to build DGL graph LMDBs for `qtaim_embed`
 3. `generator-to-embed --split` → Optionally split output into train/val/test LMDBs with train-only scaler fitting
 
@@ -153,7 +153,7 @@ Scripts expect a two-level hierarchy: `root_dir/category/subset/job/`. Each job 
 - `input.inp` (ORCA input)
 - `*.wfn`/`*.gbw` (wavefunctions)
 - `charge.json`, `bond.json`, `qtaim.json` (outputs)
-- `orca.json` (ORCA .out parsed properties - energies, orbitals, charges, gradient, quality-filter fields)
+- `orca.json` (ORCA .out parsed properties - energies, orbitals, charges, gradient, quality-filter fields). Converted to `orca.lmdb` by `json-to-lmdb` and consumed by `GeneralConverter` via `orca_lmdb` (data_input `"orca"`, optional `orca_filter`). See `parse_orca_data` in `utils/lmdbs.py` and `DEFAULT_ORCA_FILTER` for the conservative globals-only default.
 - `timings.json`, `.processing.lock`
 
 ## External Dependencies

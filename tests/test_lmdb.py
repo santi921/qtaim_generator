@@ -18,6 +18,8 @@ from qtaim_gen.source.utils.lmdbs import (
     parse_qtaim_data,
     parse_bond_data,
     parse_fuzzy_data,
+    parse_orca_data,
+    DEFAULT_ORCA_FILTER,
     gather_structure_info
 )
 from qtaim_gen.source.scripts.json_to_lmdb import (
@@ -1137,6 +1139,253 @@ class TestSharding:
         # These should not conflict
         assert os.path.dirname(chunk1_path) == os.path.dirname(merged_path)
         assert os.path.basename(chunk1_path) != os.path.basename(merged_path)
+
+
+class TestParseOrcaData:
+    """Unit tests for parse_orca_data covering full schema, RKS, filtering, and double-dip."""
+
+    from pathlib import Path
+    base = Path(__file__).parent / "test_files" / "lmdb_tests"
+
+    @classmethod
+    def setup_class(cls):
+        with open(cls.base / "orca5" / "orca.json") as f:
+            cls.orca_uks_with_spins = json.load(f)
+        with open(cls.base / "orca5_rks" / "orca.json") as f:
+            cls.orca_rks = json.load(f)
+        with open(cls.base / "orca6_rks" / "orca.json") as f:
+            cls.orca_v6 = json.load(f)
+
+    def test_default_filter_globals_only(self):
+        atom, bond, glob = parse_orca_data(self.orca_v6, n_atoms=53)
+        assert all(not v for v in atom.values()), "default filter must not surface per-atom features"
+        assert len(bond) == 0, "default filter must not surface per-bond features"
+        # RKS fixtures have s_squared=None (skipped); use UKS for that one
+        for k in ("orca_final_energy_eh", "orca_homo_eh", "orca_lumo_eh", "orca_homo_lumo_gap_eh", "orca_dipole_magnitude_au", "orca_gradient_rms"):
+            assert k in glob, f"missing default global key: {k}"
+        for vec_key in ("orca_dipole_au_x", "orca_dipole_au_y", "orca_dipole_au_z"):
+            assert vec_key in glob
+        for rot in ("orca_rotational_constants_cm1_a", "orca_rotational_constants_cm1_b", "orca_rotational_constants_cm1_c"):
+            assert rot in glob
+        for q in ("orca_quadrupole_au_xx", "orca_quadrupole_au_yy", "orca_quadrupole_au_zz", "orca_quadrupole_au_xy", "orca_quadrupole_au_xz", "orca_quadrupole_au_yz"):
+            assert q in glob
+        assert any(k.startswith("orca_energy_") for k in glob), "energy_components should flatten"
+        # excluded by default
+        assert "orca_scf_cycles" not in glob
+        assert not any(k.startswith("orca_scf_") for k in glob), "scf_convergence excluded by default"
+        assert "orca_gradient_norm" not in glob
+        assert "orca_gradient_max" not in glob
+
+    def test_opt_in_per_atom_and_per_bond(self):
+        n_atoms = 53
+        atom, bond, glob = parse_orca_data(
+            self.orca_v6, n_atoms=n_atoms,
+            orca_filter=["mulliken_charges", "mayer_population", "loewdin_bond_orders", "gradient"],
+        )
+        assert atom[0].get("orca_charge_mulliken") is not None
+        assert atom[0].get("orca_population_mayer_va") is not None
+        for axis in ("orca_gradient_x", "orca_gradient_y", "orca_gradient_z"):
+            assert axis in atom[0]
+        assert len(bond) > 0
+        sample = next(iter(bond.values()))
+        assert "orca_bond_order_loewdin" in sample
+        # globals are excluded since the filter doesn't include them
+        assert glob == {}
+
+    def test_rks_skips_empty_spin_dicts(self):
+        # RKS calc: mulliken_spins / loewdin_spins are empty
+        atom, _, _ = parse_orca_data(
+            self.orca_rks, n_atoms=61,
+            orca_filter=["mulliken_charges", "mulliken_spins", "loewdin_charges", "loewdin_spins"],
+        )
+        # charges present on at least one atom
+        assert any("orca_charge_mulliken" in a for a in atom.values())
+        # spins not surfaced anywhere (empty dict was skipped)
+        assert not any("orca_spin_mulliken" in a or "orca_spin_loewdin" in a for a in atom.values())
+
+    def test_uks_with_spins(self):
+        atom, _, _ = parse_orca_data(
+            self.orca_uks_with_spins, n_atoms=118,
+            orca_filter=["mulliken_spins"],
+        )
+        # UKS fixture has 118 mulliken_spins entries
+        n_with_spin = sum("orca_spin_mulliken" in a for a in atom.values())
+        assert n_with_spin == 118
+
+    def test_uks_default_filter_includes_s_squared(self):
+        # s_squared is null in RKS calcs; use UKS to verify default filter surfaces it
+        _, _, glob = parse_orca_data(self.orca_uks_with_spins, n_atoms=118)
+        assert "orca_s_squared" in glob
+
+    def test_mayer_population_flattens_to_va_and_bva(self):
+        atom, _, _ = parse_orca_data(
+            self.orca_v6, n_atoms=53,
+            orca_filter=["mayer_population"],
+        )
+        # mayer_population is per-atom dict-of-dicts {atom_id: {"va": float, "bva": float}}
+        for axis in ("orca_population_mayer_va", "orca_population_mayer_bva"):
+            assert axis in atom[0], f"missing flattened sub-feature: {axis}"
+
+    def test_bond_keys_are_canonical_sorted_tuples(self):
+        _, bond, _ = parse_orca_data(
+            self.orca_v6, n_atoms=53, orca_filter=["loewdin_bond_orders"],
+        )
+        for k in bond:
+            assert isinstance(k, tuple) and len(k) == 2
+            assert k[0] < k[1], f"bond key {k} not sorted (i<j)"
+            assert 0 <= k[0] and k[1] < 53
+
+    def test_clean_handles_nan_inf(self):
+        nan_doc = {
+            "final_energy_eh": float("nan"),
+            "homo_eh": float("inf"),
+            "dipole_au": [1.0, float("nan"), 3.0],
+        }
+        _, _, glob = parse_orca_data(
+            nan_doc, n_atoms=1,
+            orca_filter=["final_energy_eh", "homo_eh", "dipole_au"],
+            clean=True,
+        )
+        assert glob["orca_final_energy_eh"] == 0.0
+        assert glob["orca_homo_eh"] == 0.0
+        assert glob["orca_dipole_au_x"] == 1.0
+        assert glob["orca_dipole_au_y"] == 0.0
+        assert glob["orca_dipole_au_z"] == 3.0
+
+    def test_default_filter_contents(self):
+        # guard against silent regressions on the default
+        assert "final_energy_eh" in DEFAULT_ORCA_FILTER
+        assert "energy_components" in DEFAULT_ORCA_FILTER
+        assert "quadrupole_au" in DEFAULT_ORCA_FILTER
+        # excluded by design
+        for excluded in ("mulliken_charges", "loewdin_bond_orders", "scf_convergence", "scf_cycles", "gradient", "gradient_norm", "gradient_max"):
+            assert excluded not in DEFAULT_ORCA_FILTER, f"{excluded} must not be in default filter"
+
+
+class TestJsonToLmdbOrca:
+    """Smoke test: json_2_lmdbs produces orca.lmdb keyed by folder name."""
+
+    from pathlib import Path
+    src_root = Path(__file__).parent / "test_files" / "lmdb_tests"
+
+    def test_json_2_lmdbs_orca_smoke(self, tmp_path):
+        # Stage two job folders that contain orca.json
+        staging = tmp_path / "jobs"
+        staging.mkdir()
+        for name in ("orca5_rks", "orca6_rks"):
+            dst = staging / name
+            dst.mkdir()
+            shutil.copy(self.src_root / name / "orca.json", dst / "orca.json")
+
+        out_dir = tmp_path / "out"
+        out_dir.mkdir()
+
+        json_2_lmdbs(
+            root_dir=str(staging) + os.sep,
+            out_dir=str(out_dir) + os.sep,
+            data_type="orca",
+            out_lmdb="orca.lmdb",
+            chunk_size=10,
+            clean=True,
+            merge=True,
+            move_files=False,
+        )
+
+        lmdb_path = out_dir / "orca.lmdb"
+        assert lmdb_path.exists(), "orca.lmdb was not produced"
+        env = lmdb.open(str(lmdb_path), subdir=False, readonly=True, lock=False)
+        with env.begin() as txn:
+            keys = sorted(k.decode() for k, _ in txn.cursor() if k.decode() != "length")
+            assert keys == ["orca5_rks", "orca6_rks"], f"unexpected keys: {keys}"
+            sample = pkl.loads(txn.get(b"orca5_rks"))
+            assert "final_energy_eh" in sample
+        env.close()
+
+
+class TestOrcaDoubleDipWarning:
+    """Ensure GeneralConverter warns when both charge_filter and orca_filter are set."""
+
+    from pathlib import Path
+    base = Path(__file__).parent / "test_files" / "lmdb_tests"
+    merged = base / "generator_lmdbs_merged"
+
+    @classmethod
+    def _stage_lmdbs(cls, dst_dir):
+        """Copy the merged geom+charge fixtures and build a real orca.lmdb keyed identically."""
+        dst_dir.mkdir(parents=True, exist_ok=True)
+        # Copy geom and charge merged LMDBs (and their lock files) so converter init succeeds.
+        for fname in ("merged_geom.lmdb", "merged_charge.lmdb"):
+            shutil.copy(cls.merged / fname, dst_dir / fname)
+        # Build a tiny orca.lmdb with the same job folder keys as the merged fixtures
+        # by staging orca.json files into a synthetic root and running json_2_lmdbs.
+        # The merged fixtures use orca5/orca5_rks/orca5_uks/orca6_rks as keys.
+        staging = dst_dir / "_orca_staging"
+        staging.mkdir()
+        for name in ("orca5", "orca5_rks", "orca5_uks", "orca6_rks"):
+            sub = staging / name
+            sub.mkdir()
+            shutil.copy(cls.base / name / "orca.json", sub / "orca.json")
+        json_2_lmdbs(
+            root_dir=str(staging) + os.sep,
+            out_dir=str(dst_dir) + os.sep,
+            data_type="orca",
+            out_lmdb="orca.lmdb",
+            chunk_size=10,
+            clean=True,
+            merge=True,
+            move_files=False,
+        )
+
+    def _base_config(self, lmdb_dir, lmdb_path, with_charge_filter, with_orca_filter):
+        cfg = {
+            "chunk": -1,
+            "filter_list": ["length", "scaled"],
+            "restart": False,
+            "allowed_ring_size": [3, 4, 5, 6, 7, 8],
+            "allowed_charges": None,
+            "allowed_spins": None,
+            "keys_target": {"atom": [], "bond": [], "global": ["n_atoms"]},
+            "keys_data": {"atom": [], "bond": [], "global": ["n_atoms"]},
+            "lmdb_path": str(lmdb_path),
+            "lmdb_name": "graphs.lmdb",
+            "lmdb_locations": {
+                "geom_lmdb": str(lmdb_dir),
+                "charge_lmdb": str(lmdb_dir),
+                "orca_lmdb": str(lmdb_dir),
+            },
+            "data_inputs": ["geom", "charge", "orca"],
+            "missing_data_strategy": "skip",
+            "n_workers": 1,
+            "batch_size": 1,
+            "bonding_scheme": "structural",
+        }
+        if with_charge_filter:
+            cfg["charge_filter"] = ["hirshfeld"]
+        if with_orca_filter:
+            cfg["orca_filter"] = ["final_energy_eh"]
+        return cfg
+
+    def test_warning_fires_when_both_filters_set(self, tmp_path, caplog):
+        lmdb_dir = tmp_path / "lmdbs"
+        self._stage_lmdbs(lmdb_dir)
+        cfg = self._base_config(lmdb_dir, tmp_path / "out_both", True, True)
+        with caplog.at_level(logging.WARNING):
+            GeneralConverter(cfg)
+        assert any(
+            "Both charge_filter and orca_filter are set" in rec.getMessage()
+            for rec in caplog.records
+        ), "double-dip warning was not emitted"
+
+    def test_warning_silent_when_only_one_set(self, tmp_path, caplog):
+        lmdb_dir = tmp_path / "lmdbs"
+        self._stage_lmdbs(lmdb_dir)
+        cfg = self._base_config(lmdb_dir, tmp_path / "out_one", True, False)
+        with caplog.at_level(logging.WARNING):
+            GeneralConverter(cfg)
+        assert not any(
+            "Both charge_filter and orca_filter are set" in rec.getMessage()
+            for rec in caplog.records
+        )
 
 
 # create dummy to just run test_parsers and setups

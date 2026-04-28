@@ -10,6 +10,7 @@ This test verifies that:
 6. filter_bond_feats utility works correctly
 """
 
+import os
 import pytest
 from pathlib import Path
 
@@ -22,7 +23,9 @@ from qtaim_gen.source.utils.lmdbs import (
     parse_qtaim_data,
     filter_bond_feats,
     gather_structure_info,
+    json_2_lmdbs,
 )
+import shutil
 
 
 # ============================================================================
@@ -719,3 +722,59 @@ class TestGeneralConverterIntegration:
 
         # Should NOT have charge_bader (filtered out)
         assert "charge_bader" not in discovered_atom
+
+
+# ============================================================================
+# Test orca data integration
+# ============================================================================
+
+@pytest.fixture(scope="module")
+def orca_lmdb_dir(tmp_path_factory, test_paths):
+    """Build an orca.lmdb keyed by the same job folder names as the merged fixtures."""
+    out_dir = tmp_path_factory.mktemp("orca_lmdb_for_tests")
+    staging = out_dir / "_staging"
+    staging.mkdir()
+    base = test_paths["base"]
+    for name in ("orca5", "orca5_rks", "orca5_uks", "orca6_rks"):
+        dst = staging / name
+        dst.mkdir()
+        shutil.copy(base / name / "orca.json", dst / "orca.json")
+    json_2_lmdbs(
+        root_dir=str(staging) + os.sep,
+        out_dir=str(out_dir) + os.sep,
+        data_type="orca",
+        out_lmdb="orca.lmdb",
+        chunk_size=10,
+        clean=True,
+        merge=True,
+        move_files=False,
+    )
+    shutil.rmtree(staging)
+    return out_dir
+
+
+class TestOrcaDataIntegration:
+    """Integration test: GeneralConverter with orca data input and orca_filter."""
+
+    def test_orca_features_appear_in_auto_discovered_keys(self, tmp_path, test_paths, orca_lmdb_dir):
+        config = _base_config(tmp_path, test_paths)
+        config["lmdb_locations"]["orca_lmdb"] = str(orca_lmdb_dir / "orca.lmdb")
+        config["data_inputs"] = ["geom", "charge", "orca"]
+        config["charge_filter"] = ["mbis"]
+        # Explicit narrow orca_filter — opts in to globals + per-atom mulliken
+        config["orca_filter"] = ["final_energy_eh", "homo_eh", "mulliken_charges"]
+
+        converter = GeneralConverter(config)
+        converter.process(return_info=True)
+
+        discovered_atom = config["keys_data"]["atom"]
+        discovered_global = config["keys_data"]["global"]
+
+        # Globals from orca surfaced
+        assert "orca_final_energy_eh" in discovered_global
+        assert "orca_homo_eh" in discovered_global
+        # Per-atom mulliken charge from orca surfaced
+        assert "orca_charge_mulliken" in discovered_atom
+        # Default-excluded keys NOT surfaced
+        assert "orca_lumo_eh" not in discovered_global
+        assert "orca_charge_loewdin" not in discovered_atom

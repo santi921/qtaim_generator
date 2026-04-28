@@ -842,6 +842,215 @@ def parse_bond_data(
     return bond_feats, bond_list
 
 
+_ORCA_PER_ATOM_NAME_MAP = {
+    "mulliken_charges":  "orca_charge_mulliken",
+    "mulliken_spins":    "orca_spin_mulliken",
+    "loewdin_charges":   "orca_charge_loewdin",
+    "loewdin_spins":     "orca_spin_loewdin",
+    "mayer_charges":     "orca_charge_mayer",
+}
+# Per-atom keys whose values are nested dicts of named sub-features
+# (e.g. mayer_population emits {"va": ..., "bva": ...} per atom).
+_ORCA_PER_ATOM_NESTED = {
+    "mayer_population": ("orca_population_mayer", ("va", "bva")),
+}
+_ORCA_PER_BOND_NAME_MAP = {
+    "loewdin_bond_orders": "orca_bond_order_loewdin",
+    "mayer_bond_orders":   "orca_bond_order_mayer",
+}
+_ORCA_GLOBAL_SCALAR_KEYS = (
+    "scf_cycles", "n_alpha", "n_beta", "n_total", "n_electrons", "n_orbitals",
+    "s_squared", "final_energy_eh",
+    "homo_eh", "homo_ev", "lumo_eh", "lumo_ev", "homo_lumo_gap_eh",
+    "gradient_norm", "gradient_rms", "gradient_max", "dipole_magnitude_au",
+)
+_ORCA_GLOBAL_DICT_PREFIX = {
+    "energy_components": "energy",
+    "scf_convergence":   "scf",
+}
+_ORCA_GLOBAL_VECTOR_SUFFIXES = {
+    "dipole_au":                ("x", "y", "z"),
+    "rotational_constants_cm1": ("a", "b", "c"),
+    "quadrupole_au":            ("xx", "yy", "zz", "xy", "xz", "yz"),
+}
+
+DEFAULT_ORCA_FILTER = [
+    "final_energy_eh",
+    "homo_eh", "homo_ev", "lumo_eh", "lumo_ev", "homo_lumo_gap_eh",
+    "s_squared",
+    "dipole_magnitude_au",
+    "gradient_rms",
+    "energy_components",
+    "dipole_au",
+    "rotational_constants_cm1",
+    "quadrupole_au",
+]
+
+
+def _orca_clean_scalar(v, clean: bool = True) -> Optional[float]:
+    if v is None:
+        return None
+    try:
+        fv = float(v)
+    except (TypeError, ValueError):
+        return None
+    if clean and (np.isnan(fv) or np.isinf(fv)):
+        return 0.0
+    return fv
+
+
+def parse_orca_data(
+    dict_orca: dict,
+    n_atoms: int,
+    orca_filter: Optional[List[str]] = None,
+    clean: bool = True,
+) -> Tuple[
+    Dict[int, Dict[str, Any]],
+    Dict[Tuple[int, int], Dict[str, Any]],
+    Dict[str, float],
+]:
+    """
+    Parse orca.json into atom/bond/global feature dicts.
+
+    Takes:
+        dict_orca (dict): Parsed orca.json content.
+        n_atoms (int): Number of atoms in the structure.
+        orca_filter (Optional[List[str]]): Inclusive list of top-level orca.json
+            keys to surface. None falls back to DEFAULT_ORCA_FILTER (chemistry
+            globals only — per-atom and per-bond data are opt-in).
+        clean (bool): Coerce NaN/inf scalars to 0.0.
+
+    Returns:
+        atom_feats (Dict[int, Dict[str, Any]]): {atom_idx: {feat_name: value}}
+        bond_feats (Dict[Tuple[int, int], Dict[str, Any]]): {(i,j) sorted: {feat_name: value}}
+        global_feats (Dict[str, float]): {feat_name: value}
+    """
+    if orca_filter is None:
+        orca_filter = DEFAULT_ORCA_FILTER
+
+    atom_feats: Dict[int, Dict[str, Any]] = {i: {} for i in range(n_atoms)}
+    bond_feats: Dict[Tuple[int, int], Dict[str, Any]] = {}
+    global_feats: Dict[str, float] = {}
+
+    allowed = set(orca_filter)
+
+    # global scalars
+    for k in _ORCA_GLOBAL_SCALAR_KEYS:
+        if k not in allowed:
+            continue
+        if dict_orca.get(k) is None:
+            continue
+        cv = _orca_clean_scalar(dict_orca[k], clean=clean)
+        if cv is not None:
+            global_feats[f"orca_{k}"] = cv
+
+    # global nested dicts (energy_components -> orca_energy_*; scf_convergence -> orca_scf_*)
+    for top, prefix in _ORCA_GLOBAL_DICT_PREFIX.items():
+        if top not in allowed:
+            continue
+        sub = dict_orca.get(top)
+        if not isinstance(sub, dict):
+            continue
+        for sk, sv in sub.items():
+            cv = _orca_clean_scalar(sv, clean=clean)
+            if cv is not None:
+                global_feats[f"orca_{prefix}_{sk}"] = cv
+
+    # global vector lists
+    for top, suffixes in _ORCA_GLOBAL_VECTOR_SUFFIXES.items():
+        if top not in allowed:
+            continue
+        vec = dict_orca.get(top)
+        if not isinstance(vec, list) or len(vec) != len(suffixes):
+            continue
+        for s, v in zip(suffixes, vec):
+            cv = _orca_clean_scalar(v, clean=clean)
+            if cv is not None:
+                global_feats[f"orca_{top}_{s}"] = cv
+
+    # per-atom scalars
+    for top, feat_name in _ORCA_PER_ATOM_NAME_MAP.items():
+        if top not in allowed:
+            continue
+        d = dict_orca.get(top)
+        if not isinstance(d, dict) or not d:
+            continue  # skip empty (e.g. RKS spin dicts)
+        for k, v in d.items():
+            try:
+                idx = int(k.split("_")[0]) - 1
+            except (ValueError, IndexError, AttributeError):
+                continue
+            if 0 <= idx < n_atoms:
+                cv = _orca_clean_scalar(v, clean=clean)
+                if cv is not None:
+                    atom_feats[idx][feat_name] = cv
+
+    # per-atom nested dict (e.g. mayer_population -> {va, bva})
+    for top, (prefix, subkeys) in _ORCA_PER_ATOM_NESTED.items():
+        if top not in allowed:
+            continue
+        d = dict_orca.get(top)
+        if not isinstance(d, dict) or not d:
+            continue
+        for k, v in d.items():
+            try:
+                idx = int(k.split("_")[0]) - 1
+            except (ValueError, IndexError, AttributeError):
+                continue
+            if not (0 <= idx < n_atoms) or not isinstance(v, dict):
+                continue
+            for sk in subkeys:
+                if sk not in v:
+                    continue
+                cv = _orca_clean_scalar(v[sk], clean=clean)
+                if cv is not None:
+                    atom_feats[idx][f"{prefix}_{sk}"] = cv
+
+    # per-atom vector (gradient -> orca_gradient_x/y/z per atom)
+    if "gradient" in allowed:
+        d = dict_orca.get("gradient")
+        if isinstance(d, dict):
+            for k, v in d.items():
+                try:
+                    idx = int(k.split("_")[0]) - 1
+                except (ValueError, IndexError, AttributeError):
+                    continue
+                if not (0 <= idx < n_atoms):
+                    continue
+                if not isinstance(v, list) or len(v) != 3:
+                    continue
+                cleaned = [_orca_clean_scalar(c, clean=clean) for c in v]
+                if any(c is None for c in cleaned):
+                    continue
+                atom_feats[idx]["orca_gradient_x"] = cleaned[0]
+                atom_feats[idx]["orca_gradient_y"] = cleaned[1]
+                atom_feats[idx]["orca_gradient_z"] = cleaned[2]
+
+    # per-bond scalars
+    for top, feat_name in _ORCA_PER_BOND_NAME_MAP.items():
+        if top not in allowed:
+            continue
+        d = dict_orca.get(top)
+        if not isinstance(d, dict):
+            continue
+        for k, v in d.items():
+            try:
+                a_str, b_str = k.split("_to_")
+                a = int(a_str.split("_")[0]) - 1
+                b = int(b_str.split("_")[0]) - 1
+            except (ValueError, IndexError, AttributeError):
+                continue
+            if a == b or a < 0 or b < 0 or a >= n_atoms or b >= n_atoms:
+                continue
+            cv = _orca_clean_scalar(v, clean=clean)
+            if cv is None:
+                continue
+            key_conv = tuple(sorted([a, b]))
+            bond_feats.setdefault(key_conv, {})[feat_name] = cv
+
+    return atom_feats, bond_feats, global_feats
+
+
 def filter_bond_feats(
         bond_feats: Dict[Tuple[int, int], Dict[str, Any]], 
         bond_list: Union[List[Tuple[int, int]], Dict[Tuple[int, int], Any]]

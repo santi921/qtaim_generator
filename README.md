@@ -140,14 +140,15 @@ Configs are JSON files. See `qtaim_gen/source/scripts/helpers/configs_converter/
 
 | Key | Description |
 |-----|-------------|
-| `lmdb_locations` | Dict mapping LMDB type keys to file paths (e.g. `"geom_lmdb"`, `"charge_lmdb"`, `"qtaim_lmdb"`, `"bonds_lmdb"`, `"fuzzy_lmdb"` or `"fuzzy_full_lmdb"`, `"other_lmdb"`) |
-| `data_inputs` | List of data sources to use: `["geom", "qtaim", "charge", "fuzzy", "bond", "other"]`. If omitted, auto-detected from `lmdb_locations`. |
+| `lmdb_locations` | Dict mapping LMDB type keys to file paths (e.g. `"geom_lmdb"`, `"charge_lmdb"`, `"qtaim_lmdb"`, `"bonds_lmdb"`, `"fuzzy_lmdb"` or `"fuzzy_full_lmdb"`, `"other_lmdb"`, `"orca_lmdb"`) |
+| `data_inputs` | List of data sources to use: `["geom", "qtaim", "charge", "fuzzy", "bond", "other", "orca"]`. If omitted, auto-detected from `lmdb_locations`. |
 | `bonding_scheme` | How bonds are defined: `"structural"` (coordinate-based), `"bonding"` (bond orders), or `"qtaim"` (bond paths) |
 | `bond_list_definition` | Which bond order type defines the bond list: `"fuzzy"`, `"ibsi"`, `"laplacian"` |
 | `bond_cutoff` | Minimum bond order to count as a bond (e.g. `0.3`) |
 | `bond_filter` | Bond features to include: `["fuzzy"]`, `["ibsi"]`, `["fuzzy", "ibsi"]` |
 | `charge_filter` | Charge schemes to include: `["hirshfeld", "adch", "cm5", "becke"]` |
 | `fuzzy_filter` | Fuzzy density features: `["becke_fuzzy_density", "hirsh_fuzzy_density"]` |
+| `orca_filter` | Top-level keys from `orca.json` to surface as features. `null` (default) uses `DEFAULT_ORCA_FILTER` (chemistry globals only); pass an explicit list to opt in to per-atom (e.g. `"mulliken_charges"`, `"gradient"`) or per-bond (e.g. `"mayer_bond_orders"`) data. |
 | `keys_data` | Feature keys for atom/bond/global node types |
 | `keys_target` | Target keys for training labels |
 | `allowed_ring_size` | Filter molecules by ring sizes |
@@ -186,6 +187,22 @@ Configs are JSON files. See `qtaim_gen/source/scripts/helpers/configs_converter/
   "batch_size": 500
 }
 ```
+
+### ORCA features in the converter
+
+`orca.json` (parsed from `orca.out`) is converted by `json-to-lmdb` to `orca.lmdb` and consumed by `GeneralConverter` when `orca_lmdb` is in `lmdb_locations`. Features are emitted under the `orca_*` prefix using a scheme-as-suffix convention that mirrors `charge_<scheme>` (e.g. `orca_charge_mulliken`, `orca_spin_loewdin`, `orca_population_mayer`, `orca_bond_order_mayer`).
+
+The `orca_filter` config key controls which `orca.json` top-level keys are surfaced. `null` falls back to `DEFAULT_ORCA_FILTER` (chemistry globals only):
+
+| Granularity | Surfaced by default | Opt-in (explicit `orca_filter`) |
+|---|---|---|
+| Global scalar | `final_energy_eh`, `homo_eh`/`homo_ev`, `lumo_eh`/`lumo_ev`, `homo_lumo_gap_eh`, `s_squared`, `dipole_magnitude_au`, `gradient_rms` | `scf_cycles`, `n_alpha`/`n_beta`/`n_total`/`n_electrons`/`n_orbitals`, `gradient_norm`, `gradient_max` |
+| Global nested dict | `energy_components` (flattens to `orca_energy_*`) | `scf_convergence` (flattens to `orca_scf_*`) |
+| Global vector | `dipole_au` (`_x/_y/_z`), `rotational_constants_cm1` (`_a/_b/_c`), `quadrupole_au` (`_xx/_yy/_zz/_xy/_xz/_yz`) | — |
+| Per-atom | — | `mulliken_charges`, `mulliken_spins`, `loewdin_charges`, `loewdin_spins`, `mayer_charges`, `mayer_population`, `gradient` (`_x/_y/_z`) |
+| Per-bond | — | `loewdin_bond_orders`, `mayer_bond_orders` |
+
+**Double-dip note:** `parse_orca.merge_orca_into_charge_json` already copies Mulliken/Loewdin/Mayer charges from `orca.out` into `charge.json`, so combining a non-empty `charge_filter` with a non-`null` `orca_filter` may produce duplicate features (`charge_mulliken_*` and `orca_charge_mulliken`). `GeneralConverter` emits a one-line warning when both are set; pick one source per scheme.
 
 ## Output Graph Structure
 

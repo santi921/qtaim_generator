@@ -1040,6 +1040,12 @@ def valid_job_dir(tmp_path):
     import shutil
     dest = tmp_path / "job"
     shutil.copytree(str(LMDB_TEST_FOLDER), str(dest))
+    # Tests in TestValidationChecksOrcaFlag start from a "no orca.json present"
+    # baseline; delete the fixture's orca.json so the without/with permutations
+    # are controlled per-test.
+    orca_default = dest / "orca.json"
+    if orca_default.exists():
+        orca_default.unlink()
     # Patch timings.json to include all keys that validate_timing_dict expects
     # for full_set=0 (the test folder's timings.json predates some newer keys)
     timings_path = dest / "timings.json"

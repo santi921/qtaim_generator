@@ -160,7 +160,7 @@ def setup_logging(verbose: bool = False, log_file: Optional[str] = None) -> logg
 
 
 # Valid data types for JSON conversion
-JSON_DATA_TYPES = ["charge", "qtaim", "bond", "fuzzy_full", "other"]
+JSON_DATA_TYPES = ["charge", "qtaim", "bond", "fuzzy_full", "other", "orca"]
 
 # Default output LMDB names
 DEFAULT_LMDB_NAMES = {
@@ -170,6 +170,7 @@ DEFAULT_LMDB_NAMES = {
     "bond": "bond.lmdb",
     "fuzzy_full": "fuzzy.lmdb",
     "other": "other.lmdb",
+    "orca": "orca.lmdb",
 }
 
 
@@ -698,6 +699,7 @@ def main():
             bond        Convert bond.json files
             fuzzy_full  Convert fuzzy_full.json files
             other       Convert other.json files
+            orca        Convert orca.json files (parsed ORCA .out properties)
 
             Examples:
             # Convert all data types with defaults
@@ -740,7 +742,7 @@ def main():
         "--types",
         type=str,
         nargs="+",
-        choices=["structure", "charge", "qtaim", "bond", "fuzzy_full", "other"],
+        choices=["structure", "charge", "qtaim", "bond", "fuzzy_full", "other", "orca"],
         help="Data types to convert (use --all for all types)",
     )
 
