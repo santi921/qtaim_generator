@@ -17,13 +17,34 @@ from typing import Dict, Iterator, List, Optional, Tuple
 import pyarrow as pa
 import pyarrow.parquet as pq
 
+try:
+    from tqdm.auto import tqdm
+except ImportError:  # tqdm is optional
+    def tqdm(it, **_kwargs):
+        return it
+
+from qtaim_gen.source.core.parse_qtaim import dft_inp_to_dict
 from qtaim_gen.source.utils.element_classes import (
     ACTINIDES,
     LANTHANIDES,
     SYMBOL_TO_Z,
     TRANSITION_METALS,
 )
-from qtaim_gen.source.utils.io import parse_orca_inp_to_molecule_data
+
+
+def _parse_inp(orca_path: str):
+    """Lightweight wrapper around dft_inp_to_dict. Returns (species, charge, mult).
+
+    Avoids `qtaim_gen.source.utils.io` so the manifest builder does not need
+    RDKit importable. Some HPC nodes' system libstdc++ shadows conda-forge's,
+    causing rdkit's CXXABI symbols to fail to resolve at import time.
+    """
+    mol_dict = dft_inp_to_dict(orca_path, parse_charge_spin=True)
+    species = [atom["element"] for atom in mol_dict["mol"].values()]
+    for atom in mol_dict["mol"].values():
+        if len(atom["pos"]) != 3:
+            raise ValueError(f"atom row missing coordinates: {atom}")
+    return species, int(mol_dict["charge"]), int(mol_dict["spin"])
 
 
 INP_NAME = "orca.inp"
@@ -103,7 +124,7 @@ def process_job(target: JobTarget) -> Tuple[Dict, Optional[str]]:
         return _empty_row(target, "missing_inp"), "missing_inp"
 
     try:
-        species, _coords, charge, mult = parse_orca_inp_to_molecule_data(inp_path)
+        species, charge, mult = _parse_inp(inp_path)
     except (KeyError, ValueError, IndexError, UnboundLocalError) as e:
         return _empty_row(target, "corrupt_inp"), f"corrupt_inp: {e!r}"
     except Exception as e:
@@ -178,6 +199,7 @@ def build_vertical(
     limit: Optional[int] = None,
     chunk_size: int = 5000,
     overwrite: bool = False,
+    progress: bool = False,
 ) -> Dict[str, int]:
     """Process one vertical and write manifest_<vertical>.parquet + failures CSV.
 
@@ -206,15 +228,31 @@ def build_vertical(
     buffer: List[Dict] = []
     failures: List[Tuple[str, str]] = []
 
+    bar = (
+        tqdm(total=len(targets), desc=vertical, unit="job", smoothing=0.05)
+        if progress
+        else None
+    )
+
+    def _record(row, err):
+        counts[row["read_status"]] += 1
+        buffer.append(row)
+        if err and row["read_status"] != "ok":
+            failures.append((row["rel_path"], err))
+        if bar is not None:
+            bar.update(1)
+            if counts.get("ok") is not None:
+                bar.set_postfix(
+                    ok=counts["ok"],
+                    bad=counts["corrupt_inp"] + counts["missing_inp"] + counts["parse_error"],
+                )
+
     writer = pq.ParquetWriter(out_path, SCHEMA, compression="snappy")
     try:
         if workers <= 1:
-            iterator = (process_job(t) for t in targets)
-            for row, err in iterator:
-                counts[row["read_status"]] += 1
-                buffer.append(row)
-                if err and row["read_status"] != "ok":
-                    failures.append((row["rel_path"], err))
+            for t in targets:
+                row, err = process_job(t)
+                _record(row, err)
                 if len(buffer) >= chunk_size:
                     writer.write_table(_rows_to_table(buffer))
                     buffer.clear()
@@ -223,10 +261,7 @@ def build_vertical(
                 futures = [ex.submit(process_job, t) for t in targets]
                 for fut in as_completed(futures):
                     row, err = fut.result()
-                    counts[row["read_status"]] += 1
-                    buffer.append(row)
-                    if err and row["read_status"] != "ok":
-                        failures.append((row["rel_path"], err))
+                    _record(row, err)
                     if len(buffer) >= chunk_size:
                         writer.write_table(_rows_to_table(buffer))
                         buffer.clear()

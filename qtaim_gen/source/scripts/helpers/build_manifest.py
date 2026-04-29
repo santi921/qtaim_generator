@@ -45,6 +45,7 @@ def main() -> int:
     p.add_argument("--limit", type=int, default=None, help="Cap jobs per vertical (smoke test).")
     p.add_argument("--chunk-size", type=int, default=5000, help="Rows per Parquet write batch.")
     p.add_argument("--overwrite", action="store_true", help="Overwrite existing manifest_*.parquet.")
+    p.add_argument("--progress", action="store_true", help="Show a tqdm progress bar per vertical.")
     p.add_argument(
         "--merge",
         action="store_true",
@@ -77,6 +78,7 @@ def main() -> int:
             limit=args.limit,
             chunk_size=args.chunk_size,
             overwrite=args.overwrite,
+            progress=args.progress,
         )
         for k in totals:
             totals[k] += summary.get(k, 0)
