@@ -1302,6 +1302,48 @@ class TestJsonToLmdbOrca:
         env.close()
 
 
+class TestJsonToLmdbTimings:
+    """Smoke test: json_2_lmdbs produces timings.lmdb keyed by folder name with raw dicts."""
+
+    from pathlib import Path
+    src_root = Path(__file__).parent / "test_files" / "lmdb_tests"
+
+    def test_json_2_lmdbs_timings_smoke(self, tmp_path):
+        staging = tmp_path / "jobs"
+        staging.mkdir()
+        for name in ("orca5_rks", "orca6_rks"):
+            dst = staging / name
+            dst.mkdir()
+            shutil.copy(self.src_root / name / "timings.json", dst / "timings.json")
+
+        out_dir = tmp_path / "out"
+        out_dir.mkdir()
+
+        json_2_lmdbs(
+            root_dir=str(staging) + os.sep,
+            out_dir=str(out_dir) + os.sep,
+            data_type="timings",
+            out_lmdb="timings.lmdb",
+            chunk_size=10,
+            clean=True,
+            merge=True,
+            move_files=False,
+        )
+
+        lmdb_path = out_dir / "timings.lmdb"
+        assert lmdb_path.exists(), "timings.lmdb was not produced"
+        env = lmdb.open(str(lmdb_path), subdir=False, readonly=True, lock=False)
+        with env.begin() as txn:
+            keys = sorted(k.decode() for k, _ in txn.cursor() if k.decode() != "length")
+            assert keys == ["orca5_rks", "orca6_rks"], f"unexpected keys: {keys}"
+            sample = pkl.loads(txn.get(b"orca5_rks"))
+            assert isinstance(sample, dict), f"expected dict payload, got {type(sample)}"
+            assert "qtaim" in sample, f"expected 'qtaim' key in timings dict, got {list(sample.keys())}"
+            assert isinstance(sample["qtaim"], (int, float)), \
+                f"expected numeric value for 'qtaim', got {type(sample['qtaim'])}"
+        env.close()
+
+
 class TestOrcaDoubleDipWarning:
     """Ensure GeneralConverter warns when both charge_filter and orca_filter are set."""
 
