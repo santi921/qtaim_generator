@@ -1430,6 +1430,119 @@ class TestOrcaDoubleDipWarning:
         )
 
 
+class TestFolderListMode:
+    """folder_paths mode: jagged hierarchies, __-joined relpath keys."""
+
+    from pathlib import Path
+    src_root = Path(__file__).parent / "test_files" / "lmdb_tests"
+
+    @staticmethod
+    def _build_jagged_tree(root):
+        """Create 4 job folders at mixed depths under root, each with timings.json + orca.inp."""
+        layout = [
+            ("metal_organics/restart5to6/job_aaa",),
+            ("solvated_protein/outputs_240923/spf_111/step0",),
+            ("solvated_protein/outputs_240923/spf_111/step1",),
+            ("electrolytes/md_based/outputs_241029/sample_xyz/step2",),
+        ]
+        folders = []
+        for (relpath,) in layout:
+            d = root / relpath
+            d.mkdir(parents=True)
+            (d / "timings.json").write_text(json.dumps({"qtaim": 1.5, "other": 2.5}))
+            shutil.copy(
+                TestFolderListMode.src_root / "orca5_rks" / "orca.inp",
+                d / "orca.inp",
+            )
+            folders.append(str(d))
+        return folders
+
+    def test_json_2_lmdbs_with_folder_paths_jagged(self, tmp_path):
+        root = tmp_path / "root"
+        root.mkdir()
+        folders = self._build_jagged_tree(root)
+        out_dir = tmp_path / "out"
+        out_dir.mkdir()
+
+        json_2_lmdbs(
+            root_dir=str(root) + os.sep,
+            out_dir=str(out_dir) + os.sep,
+            data_type="timings",
+            out_lmdb="timings.lmdb",
+            chunk_size=10,
+            clean=True,
+            merge=True,
+            move_files=False,
+            folder_paths=folders,
+        )
+
+        lmdb_path = out_dir / "timings.lmdb"
+        assert lmdb_path.exists()
+        env = lmdb.open(str(lmdb_path), subdir=False, readonly=True, lock=False)
+        with env.begin() as txn:
+            keys = sorted(k.decode() for k, _ in txn.cursor() if k.decode() != "length")
+        env.close()
+
+        expected = sorted([
+            "metal_organics__restart5to6__job_aaa",
+            "solvated_protein__outputs_240923__spf_111__step0",
+            "solvated_protein__outputs_240923__spf_111__step1",
+            "electrolytes__md_based__outputs_241029__sample_xyz__step2",
+        ])
+        assert keys == expected, f"unexpected keys: {keys}"
+
+    def test_inp_files_2_lmdbs_with_folder_paths_jagged(self, tmp_path):
+        root = tmp_path / "root"
+        root.mkdir()
+        folders = self._build_jagged_tree(root)
+        out_dir = tmp_path / "out"
+        out_dir.mkdir()
+
+        inp_files_2_lmdbs(
+            root_dir=str(root) + os.sep,
+            out_dir=str(out_dir) + os.sep,
+            out_lmdb="structure.lmdb",
+            chunk_size=10,
+            clean=True,
+            merge=True,
+            folder_paths=folders,
+        )
+
+        lmdb_path = out_dir / "structure.lmdb"
+        assert lmdb_path.exists()
+        env = lmdb.open(str(lmdb_path), subdir=False, readonly=True, lock=False)
+        with env.begin() as txn:
+            keys = sorted(k.decode() for k, _ in txn.cursor() if k.decode() != "length")
+            sample = pkl.loads(txn.get(b"metal_organics__restart5to6__job_aaa"))
+        env.close()
+
+        assert "metal_organics__restart5to6__job_aaa" in keys
+        assert "solvated_protein__outputs_240923__spf_111__step0" in keys
+        assert "solvated_protein__outputs_240923__spf_111__step1" in keys
+        assert "molecule" in sample
+        assert sample["ids"] == "metal_organics__restart5to6__job_aaa"
+
+    def test_derive_lmdb_key_handles_path_outside_root(self):
+        from qtaim_gen.source.utils.lmdbs import _derive_lmdb_key
+
+        key = _derive_lmdb_key("/abs/elsewhere/job", "/different/root")
+        assert "__" in key
+        assert "elsewhere" in key
+        assert "job" in key
+
+    def test_folder_paths_and_shard_folders_mutually_exclusive(self, tmp_path):
+        with pytest.raises(ValueError, match="mutually exclusive"):
+            json_2_lmdbs(
+                root_dir=str(tmp_path) + os.sep,
+                out_dir=str(tmp_path) + os.sep,
+                data_type="timings",
+                out_lmdb="x.lmdb",
+                chunk_size=10,
+                folder_paths=["/a"],
+                shard_folders=["b"],
+            )
+
+
 # create dummy to just run test_parsers and setups
 
 if __name__ == "__main__":

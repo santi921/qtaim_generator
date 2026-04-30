@@ -53,6 +53,7 @@ from glob import glob
 from typing import Dict, List, Optional, Set, Tuple
 
 from qtaim_gen.source.utils.lmdbs import json_2_lmdbs, inp_files_2_lmdbs
+from qtaim_gen.source.utils.io import sanitize_folders
 
 
 @dataclass
@@ -173,6 +174,42 @@ DEFAULT_LMDB_NAMES = {
     "orca": "orca.lmdb",
     "timings": "timings.lmdb",
 }
+
+
+def read_folder_list(path: str, logger: logging.Logger) -> List[str]:
+    """Read a list of job-folder absolute paths from a text file.
+
+    One path per line. Blank lines and lines starting with '#' are skipped.
+    Existing-directory validation is performed via sanitize_folders.
+    """
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"--folder_list file not found: {path}")
+    with open(path, "r") as f:
+        raw = [line.strip() for line in f]
+    candidates = [line for line in raw if line and not line.startswith("#")]
+    if not candidates:
+        raise ValueError(f"--folder_list file contained no usable paths: {path}")
+    folders = sanitize_folders(candidates)
+    if not folders:
+        raise ValueError(f"No valid (existing) folders found in {path}")
+    logger.info(f"Read {len(folders)} folder paths from {path}")
+    if len(folders) >= 1:
+        logger.debug(f"  first: {folders[0]}")
+        logger.debug(f"  last:  {folders[-1]}")
+    return folders
+
+
+def partition_list_by_shard(items: List[str], shard_index: int, total_shards: int, logger: logging.Logger) -> List[str]:
+    """Partition a precomputed list across shards by index modulo total_shards.
+
+    No filesystem walk; deterministic and idempotent.
+    """
+    if total_shards <= 1:
+        return list(items)
+    partitioned = [item for i, item in enumerate(items) if i % total_shards == shard_index]
+    logger.info(f"Shard {shard_index}: assigned {len(partitioned)} items (of {len(items)} total)")
+    logger.debug(f"First 5 items in shard {shard_index}: {partitioned[:5]}")
+    return partitioned
 
 
 def partition_folders_by_shard(root_dir: str, shard_index: int, total_shards: int, logger: logging.Logger) -> List[str]:
@@ -422,6 +459,7 @@ def convert_json_with_stats(
     shard_index: int = 0,
     total_shards: int = 1,
     shard_folders: Optional[List[str]] = None,
+    folder_paths: Optional[List[str]] = None,
 ) -> ConversionStats:
     """Convert JSON files with detailed statistics tracking."""
     stats = ConversionStats(data_type=data_type)
@@ -433,8 +471,19 @@ def convert_json_with_stats(
         out_lmdb = f"{base_name}_shard_{shard_index}.lmdb"
         logger.info(f"Sharding enabled: output will be {out_lmdb}")
 
-    # Find files - filter by shard assignment if sharding is enabled
-    if total_shards > 1 and shard_folders:
+    # Find files - folder_paths (jagged) > shard_folders (legacy flat) > full glob
+    if folder_paths is not None:
+        files = []
+        for folder in folder_paths:
+            if move_files:
+                candidate = os.path.join(folder, "generator", f"{data_type}.json")
+            else:
+                candidate = os.path.join(folder, f"{data_type}.json")
+            if os.path.exists(candidate):
+                files.append(candidate)
+        pattern = f"<folder_list>/{data_type}.json"
+        logger.debug(f"Shard {shard_index}: found {len(files)} {data_type}.json files across {len(folder_paths)} folder_list paths")
+    elif total_shards > 1 and shard_folders:
         # Build patterns for assigned folders only
         files = []
         for folder in shard_folders:
@@ -524,7 +573,8 @@ def convert_json_with_stats(
         merge=merge,
         move_files=move_files,
         limit=limit,
-        shard_folders=shard_folders,
+        shard_folders=shard_folders if folder_paths is None else None,
+        folder_paths=folder_paths,
     )
     stats.lmdb_write_time_sec = time.time() - write_start
 
@@ -548,6 +598,7 @@ def convert_structure_with_stats(
     shard_index: int = 0,
     total_shards: int = 1,
     shard_folders: Optional[List[str]] = None,
+    folder_paths: Optional[List[str]] = None,
 ) -> ConversionStats:
     """Convert ORCA .inp files to structure LMDB with statistics."""
     stats = ConversionStats(data_type="structure")
@@ -558,8 +609,15 @@ def convert_structure_with_stats(
         out_lmdb = f"{base_name}_shard_{shard_index}.lmdb"
         logger.info(f"Sharding enabled: output will be {out_lmdb}")
 
-    # Find files - filter by shard assignment if sharding is enabled
-    if total_shards > 1 and shard_folders:
+    # Find files - folder_paths (jagged) > shard_folders (legacy flat) > full glob
+    if folder_paths is not None:
+        files = []
+        for folder in folder_paths:
+            files.extend(glob(os.path.join(folder, "*.inp")))
+        total_found = len(files)
+        pattern = "<folder_list>/*.inp"
+        logger.debug(f"Shard {shard_index}: found {total_found} .inp files across {len(folder_paths)} folder_list paths")
+    elif total_shards > 1 and shard_folders:
         # Build patterns for assigned folders only
         files = []
         for folder in shard_folders:
@@ -628,7 +686,8 @@ def convert_structure_with_stats(
         clean=clean,
         merge=merge,
         limit=limit,
-        shard_folders=shard_folders,
+        shard_folders=shard_folders if folder_paths is None else None,
+        folder_paths=folder_paths,
     )
     stats.lmdb_write_time_sec = time.time() - write_start
 
@@ -838,6 +897,18 @@ def main():
     )
 
     parser.add_argument(
+        "--folder_list",
+        type=str,
+        default=None,
+        help=(
+            "Path to a text file with one absolute job-folder path per line "
+            "(blanks and '#' comments skipped). Required for jagged hierarchies "
+            "(e.g. OMol4M). LMDB keys are derived from each folder's relpath under "
+            "--root_dir, with os.sep replaced by '__'."
+        ),
+    )
+
+    parser.add_argument(
         "--auto_merge",
         action="store_true",
         default=False,
@@ -909,9 +980,13 @@ def main():
         os.makedirs(out_dir, exist_ok=True)
         logger.info(f"Sharding: Creating output subdirectory {out_dir}")
 
-    # Compute shard folder assignments
+    # Compute shard folder assignments. Folder-list mode wins over flat-glob.
     shard_folders = None
-    if total_shards > 1:
+    folder_paths = None
+    if args.folder_list:
+        all_paths = read_folder_list(args.folder_list, logger)
+        folder_paths = partition_list_by_shard(all_paths, shard_index, total_shards, logger)
+    elif total_shards > 1:
         shard_folders = partition_folders_by_shard(root_dir, shard_index, total_shards, logger)
 
     logger.info("=" * 60)
@@ -925,11 +1000,14 @@ def main():
     logger.info(f"Clean intermediate:  {clean}")
     logger.info(f"Generator subfolders: {move_files}")
     logger.info(f"Validation level:    {full_set} ({'baseline' if full_set == 0 else 'extended' if full_set == 1 else 'full'})")
+    if args.folder_list:
+        logger.info(f"Folder list:         {args.folder_list} ({len(folder_paths)} paths assigned to this shard)")
     if total_shards > 1:
         logger.info(f"Sharding:            Shard {shard_index} of {total_shards}")
         if auto_merge and shard_index == total_shards - 1:
             logger.info("Auto-merge:          Enabled (last shard will merge)")
-        logger.info(f"Assigned folders:    {len(shard_folders) if shard_folders else 0}")
+        if shard_folders is not None:
+            logger.info(f"Assigned folders:    {len(shard_folders) if shard_folders else 0}")
     if args.clean_output:
         logger.info("Clean output:        Yes (removed existing LMDBs)")
     if debug_limit:
@@ -959,6 +1037,7 @@ def main():
                     shard_index=shard_index,
                     total_shards=total_shards,
                     shard_folders=shard_folders,
+                    folder_paths=folder_paths,
                 )
             else:
                 stats = convert_json_with_stats(
@@ -976,6 +1055,7 @@ def main():
                     shard_index=shard_index,
                     total_shards=total_shards,
                     shard_folders=shard_folders,
+                    folder_paths=folder_paths,
                 )
 
             all_stats.append(stats)
