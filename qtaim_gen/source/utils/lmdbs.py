@@ -1,13 +1,16 @@
 import os
 import lmdb
 import json
+import logging
 import pickle
 from typing import Dict, List, Tuple, Any, Optional, Union
 from glob import glob
 from dataclasses import dataclass
-import numpy as np 
+import numpy as np
 from pymatgen.core import Molecule
 from pymatgen.analysis.graphs import MoleculeGraph
+
+logger = logging.getLogger(__name__)
 
 from qtaim_gen.source.utils.io import (
     get_bonds_from_coords,
@@ -33,10 +36,11 @@ def _derive_lmdb_key(folder_path: str, root_dir: str) -> str:
     norm_root = os.path.normpath(root_dir)
     norm_folder = os.path.normpath(folder_path)
     rel = os.path.relpath(norm_folder, norm_root)
-    if rel.startswith(".."):
-        print(
-            f"Warning: folder '{folder_path}' is not under root_dir '{root_dir}'; "
-            f"using absolute-path key fallback."
+    if rel == ".." or rel.startswith(".." + os.sep):
+        logger.warning(
+            "folder '%s' is not under root_dir '%s'; using absolute-path key fallback.",
+            folder_path,
+            root_dir,
         )
         rel = norm_folder.lstrip(os.sep)
     return rel.replace(os.sep, "__")

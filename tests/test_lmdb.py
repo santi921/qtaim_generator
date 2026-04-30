@@ -1542,6 +1542,108 @@ class TestFolderListMode:
                 shard_folders=["b"],
             )
 
+    def test_inp_files_mutual_exclusion(self, tmp_path):
+        with pytest.raises(ValueError, match="mutually exclusive"):
+            inp_files_2_lmdbs(
+                root_dir=str(tmp_path) + os.sep,
+                out_dir=str(tmp_path) + os.sep,
+                out_lmdb="x.lmdb",
+                chunk_size=10,
+                folder_paths=["/a"],
+                shard_folders=["b"],
+            )
+
+    def test_json_2_lmdbs_with_folder_paths_move_files(self, tmp_path):
+        """folder_paths + move_files=True: timings.json lives under <folder>/generator/."""
+        root = tmp_path / "root"
+        root.mkdir()
+        layout = [
+            "metal_organics/restart5to6/job_aaa",
+            "solvated_protein/outputs_240923/spf_111/step0",
+        ]
+        folders = []
+        for relpath in layout:
+            d = root / relpath
+            (d / "generator").mkdir(parents=True)
+            (d / "generator" / "timings.json").write_text(
+                json.dumps({"qtaim": 1.0, "other": 2.0})
+            )
+            folders.append(str(d))
+
+        out_dir = tmp_path / "out"
+        out_dir.mkdir()
+
+        json_2_lmdbs(
+            root_dir=str(root) + os.sep,
+            out_dir=str(out_dir) + os.sep,
+            data_type="timings",
+            out_lmdb="timings.lmdb",
+            chunk_size=10,
+            clean=True,
+            merge=True,
+            move_files=True,
+            folder_paths=folders,
+        )
+
+        env = lmdb.open(str(out_dir / "timings.lmdb"), subdir=False, readonly=True, lock=False)
+        with env.begin() as txn:
+            keys = sorted(k.decode() for k, _ in txn.cursor() if k.decode() != "length")
+            sample = pkl.loads(txn.get(b"metal_organics__restart5to6__job_aaa"))
+        env.close()
+
+        assert keys == sorted([
+            "metal_organics__restart5to6__job_aaa",
+            "solvated_protein__outputs_240923__spf_111__step0",
+        ])
+        assert sample == {"qtaim": 1.0, "other": 2.0}
+
+
+class TestReadFolderList:
+    """read_folder_list: file-format edge cases."""
+
+    @classmethod
+    def setup_class(cls):
+        cls.logger = logging.getLogger("test_read_folder_list")
+        cls.logger.setLevel(logging.WARNING)
+
+    def test_skips_blanks_and_comments(self, tmp_path):
+        from qtaim_gen.source.scripts.json_to_lmdb import read_folder_list
+
+        d1 = tmp_path / "a"
+        d2 = tmp_path / "b"
+        d1.mkdir()
+        d2.mkdir()
+        list_file = tmp_path / "jobs.txt"
+        list_file.write_text(
+            f"# header comment\n\n{d1}\n   \n# another comment\n{d2}\n\n"
+        )
+        out = read_folder_list(str(list_file), self.logger)
+        assert sorted(out) == sorted([str(d1), str(d2)])
+
+    def test_missing_file_raises(self, tmp_path):
+        from qtaim_gen.source.scripts.json_to_lmdb import read_folder_list
+
+        with pytest.raises(FileNotFoundError):
+            read_folder_list(str(tmp_path / "nope.txt"), self.logger)
+
+    def test_all_blank_or_comments_raises(self, tmp_path):
+        from qtaim_gen.source.scripts.json_to_lmdb import read_folder_list
+
+        list_file = tmp_path / "jobs.txt"
+        list_file.write_text("# only comments\n\n\n# more\n")
+        with pytest.raises(ValueError, match="no usable paths"):
+            read_folder_list(str(list_file), self.logger)
+
+    def test_all_paths_missing_raises(self, tmp_path):
+        from qtaim_gen.source.scripts.json_to_lmdb import read_folder_list
+
+        list_file = tmp_path / "jobs.txt"
+        list_file.write_text(
+            f"{tmp_path}/does_not_exist_1\n{tmp_path}/does_not_exist_2\n"
+        )
+        with pytest.raises(ValueError, match="No valid"):
+            read_folder_list(str(list_file), self.logger)
+
 
 # create dummy to just run test_parsers and setups
 
