@@ -1,6 +1,6 @@
 # Generator
 
-<img src="https://github.com/santi921/qtaim_generator/blob/main/qtaim_gen/notebooks/TOC.png" width=50% height=50%>
+<img src="https://github.com/santi921/qtaim_generator/blob/main/qtaim_gen/assets/TOC.png" width=50% height=50%>
 
 A package to perform post-processing on molecules, reactions, and (soon) periodic systems. It's a wrapper around Multiwfn that handles high-throughput workflows and can compute a rich set of descriptors including QTAIM, partial charges, several bonding schemes, etc. I am currently overhauling the package away from being QTAIM-first and instead integrating many descriptors in tandem. I will be sticking with the JSON file format for QTAIM and the "full" feature implementations so running calculations will remain the same, gathering and parsing utilities for ML, however, will change. Here's a quick status about what is available for QTAIM/full at the moment:
 
@@ -15,8 +15,7 @@ A package to perform post-processing on molecules, reactions, and (soon) periodi
 - [ ] Reaction-level feature generation and processing
 - [x] High-throughput runners using python MP
 - [x] High-throughput runners using parsl 
-- [ ] Post-processing to LMDBs for ML (ongoing)
-- [ ] Quacc integration (ongoing)
+- [x] Post-processing to LMDBs for ML (ongoing)
 
 
 Simply install this package by cloning the repo and running: 
@@ -94,6 +93,17 @@ json-to-lmdb --file jobs.pkl --root /path/to/job_folders --out /path/to/lmdbs --
 ```
 
 See `docs/SHARDING_GUIDE.md` for details on sharded conversion and merging.
+
+For datasets with jagged hierarchies (job folders at variable depths, e.g. OMol4M), pass a list of absolute job-folder paths via `--folder_list`. LMDB keys are derived from each folder's relpath under `--root_dir` with `os.sep` replaced by `__` (e.g. `solvated_protein__outputs_240923__spf_1195777_0_1__step0`). Internal sharding partitions the list by line index:
+
+```bash
+# One shard per submission (last shard auto-merges):
+json-to-lmdb --root_dir /p/lustre5/.../omol/ --out_dir /p/lustre5/.../converters/omol/ \
+             --folder_list /path/to/job_paths.txt \
+             --all --move_files \
+             --shard_index 0 --total_shards 6
+# ...repeat for shard_index 1..5; add --auto_merge to the last one.
+```
 
 ### Step 2: LMDB → PyG Heterographs
 Run a converter to build graph LMDBs from the typed LMDBs:
