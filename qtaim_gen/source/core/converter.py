@@ -37,6 +37,7 @@ from qtaim_gen.source.utils.lmdbs import (
     parse_fuzzy_data,
     parse_other_data,
     parse_bond_data,
+    parse_orca_data,
     gather_structure_info
 )
 from qtaim_gen.source.core.qtaim_embed import (
@@ -1488,9 +1489,10 @@ class GeneralConverter(Converter):
             "scaler": [],
             "qtaim": [], # possible set of dicts to draw from
             "charge": [],
-            "fuzzy_full": [], 
-            "bonds": [], 
-            "other": []
+            "fuzzy_full": [],
+            "bonds": [],
+            "other": [],
+            "orca": [],
         }
 
         self.bonding_scheme = self.config_dict.get("bonding_scheme", "structural")
@@ -1507,6 +1509,7 @@ class GeneralConverter(Converter):
             "other_lmdb": "other",
             "bond_lmdb": "bond",
             "bonds_lmdb": "bond",
+            "orca_lmdb": "orca",
         }
         if "data_inputs" in self.config_dict:
             self.data_inputs = self.config_dict["data_inputs"]
@@ -1524,6 +1527,21 @@ class GeneralConverter(Converter):
         # Optional filters for fuzzy and other data
         self.fuzzy_filter = config_dict.get("fuzzy_filter", None)
         self.other_filter = config_dict.get("other_filter", None)
+        # orca_filter=None falls back to DEFAULT_ORCA_FILTER inside parse_orca_data.
+        self.orca_filter = config_dict.get("orca_filter", None)
+
+        # Double-dip warning: parse_orca.merge_orca_into_charge_json copies
+        # mulliken/loewdin/mayer charges from orca.out into charge.json, so
+        # surfacing both via charge.lmdb and orca.lmdb produces duplicate features.
+        if (
+            config_dict.get("charge_filter") is not None
+            and config_dict.get("orca_filter") is not None
+        ):
+            self.logger.warning(
+                "Both charge_filter and orca_filter are set. orca.out partial charges "
+                "are merged into charge.json by parse_orca.py, so you may end up with "
+                "duplicate Mulliken/Loewdin/Mayer features. Pick one source per scheme."
+            )
 
         # Bond parsing options (for bonding_scheme="bonding")
         self.bond_filter = config_dict.get("bond_filter", None)  # e.g., ["fuzzy", "ibsi"]
@@ -1672,6 +1690,29 @@ class GeneralConverter(Converter):
             except Exception as e:
                 logging.error(f"Error parsing other data for key {key_str}: {e}")
                 failures["other"].append(key_str)
+                if self.missing_data_strategy == "skip":
+                    return (key_str, None, failures)
+
+        # Orca data
+        if "orca" in self.data_inputs:
+            try:
+                dict_orca_raw = self.__getitem__(self._data_input_to_lmdb_key["orca"], key)
+                if dict_orca_raw is not None:
+                    orca_atom_feats, orca_bond_feats, global_orca_feats = parse_orca_data(
+                        dict_orca_raw, global_feats["n_atoms"], self.orca_filter
+                    )
+                    global_feats.update(global_orca_feats)
+                    for atom_idx, of in orca_atom_feats.items():
+                        atom_feats.setdefault(atom_idx, {}).update(of)
+                    for bond_key, bf in orca_bond_feats.items():
+                        bond_feats.setdefault(bond_key, {}).update(bf)
+                else:
+                    failures["orca"].append(key_str)
+                    if self.missing_data_strategy == "skip":
+                        return (key_str, None, failures)
+            except Exception as e:
+                logging.error(f"Error parsing orca data for key {key_str}: {e}")
+                failures["orca"].append(key_str)
                 if self.missing_data_strategy == "skip":
                     return (key_str, None, failures)
 
@@ -1936,6 +1977,39 @@ class GeneralConverter(Converter):
                             continue
                     except Exception as e:
                         self.logger.warning(f"Key {key_str}: Failed to parse other data: {e}", exc_info=True)
+                        first_key_idx = idx + 1
+                        continue
+
+
+                # Step 6b: Orca data
+                if "orca" in self._data_input_to_lmdb_key:
+                    try:
+                        dict_orca_raw = self.__getitem__(self._data_input_to_lmdb_key["orca"], key)
+                        if dict_orca_raw is not None:
+                            orca_atom_feats, orca_bond_feats, global_orca_feats = parse_orca_data(
+                                dict_orca_raw, global_feats["n_atoms"], self.orca_filter
+                            )
+                            for feat_key in orca_atom_feats.get(0, {}).keys():
+                                if feat_key not in self.keys_data["atom"]:
+                                    self.keys_data["atom"].append(feat_key)
+                            sample_orca_bond = next(iter(orca_bond_feats.values()), {})
+                            for feat_key in sample_orca_bond.keys():
+                                if feat_key not in self.keys_data["bond"]:
+                                    self.keys_data["bond"].append(feat_key)
+                            for feat_key in global_orca_feats.keys():
+                                if feat_key not in self.keys_data["global"]:
+                                    self.keys_data["global"].append(feat_key)
+                            global_feats.update(global_orca_feats)
+                            for atom_idx, of in orca_atom_feats.items():
+                                atom_feats.setdefault(atom_idx, {}).update(of)
+                            for bond_key, bf in orca_bond_feats.items():
+                                bond_feats.setdefault(bond_key, {}).update(bf)
+                        elif self.missing_data_strategy == "skip":
+                            self.logger.debug(f"Key {key_str}: orca data missing in LMDB, skipping")
+                            first_key_idx = idx + 1
+                            continue
+                    except Exception as e:
+                        self.logger.warning(f"Key {key_str}: Failed to parse orca data: {e}", exc_info=True)
                         first_key_idx = idx + 1
                         continue
 

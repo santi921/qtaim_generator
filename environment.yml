@@ -9,6 +9,8 @@ dependencies:
   - pip
   - pytest
   - numpy==2.3.4 # might need to install this after b/c of install order issues
+  - pyarrow
+  - tqdm
 
   - pip:
       - bson
