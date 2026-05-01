@@ -54,6 +54,11 @@ from typing import Dict, List, Optional, Set, Tuple
 
 from qtaim_gen.source.utils.lmdbs import json_2_lmdbs, inp_files_2_lmdbs
 from qtaim_gen.source.utils.io import sanitize_folders
+from qtaim_gen.source.utils.lmdb_audit import (
+    audit_lmdb_paths,
+    render_summary_line,
+    write_audit_report,
+)
 
 
 @dataclass
@@ -747,6 +752,73 @@ def convert_json_type(
     print(f"  -> {os.path.join(out_dir, out_lmdb)}")
 
 
+def _audit_data_type_for(json_data_type: str) -> str:
+    """Map json_to_lmdb data_type to the audit data_type.
+
+    json_to_lmdb uses 'fuzzy_full' as the JSON type but writes 'fuzzy.lmdb';
+    the audit module's data_type is 'fuzzy'. For all other types they match.
+    """
+    return DEFAULT_LMDB_NAMES[json_data_type].replace(".lmdb", "")
+
+
+def _build_validate_paths(
+    target_dir: str,
+    types: List[str],
+    prefix: str,
+    name_suffix: str = "",
+) -> Dict[str, str]:
+    """Build {audit_data_type: lmdb_path} for a directory of LMDBs.
+
+    name_suffix is appended before .lmdb (e.g. '_shard_0' for per-shard mode).
+    """
+    paths: Dict[str, str] = {}
+    for t in types:
+        base = f"{prefix}{DEFAULT_LMDB_NAMES[t]}"
+        if name_suffix:
+            base = base.replace(".lmdb", f"{name_suffix}.lmdb")
+        paths[_audit_data_type_for(t)] = os.path.join(target_dir, base)
+    return paths
+
+
+def _run_post_write_validation(
+    target_dir: str,
+    types: List[str],
+    prefix: str,
+    name_suffix: str,
+    workers: int,
+    sample_failed: int,
+    label: str,
+    logger: logging.Logger,
+) -> None:
+    """Reopen LMDBs in target_dir, scan every record, write audit report.
+
+    Safe to run repeatedly: each call writes <label>.md, <label>.json, and
+    <label>_failed_keys/ next to the LMDBs. LMDB reads use lock=False so
+    parallel workers don't contend.
+    """
+    paths = _build_validate_paths(target_dir, types, prefix, name_suffix)
+    n_types = len(paths)
+    eff_workers = workers if workers > 0 else min(os.cpu_count() or 1, n_types)
+    logger.info("=" * 60)
+    logger.info(f"POST-WRITE VALIDATION ({label}): {n_types} LMDBs, {eff_workers} worker(s)")
+    logger.info("=" * 60)
+    for dt, p in paths.items():
+        logger.debug(f"  {dt}: {p}")
+    report = audit_lmdb_paths(
+        paths,
+        sample_failed=sample_failed,
+        limit=None,
+        workers=eff_workers,
+    )
+    audit_dts = list(paths.keys())
+    written = write_audit_report(report, target_dir, audit_dts, label=label)
+    logger.info(f"Validation summary: {render_summary_line(report, audit_dts)}")
+    logger.info(f"Validation elapsed: {report['elapsed_sec']:.1f}s")
+    for k, v in written.items():
+        logger.info(f"  -> {k}: {v}")
+    logger.info("=" * 60)
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Convert generator JSON/inp files to LMDB databases",
@@ -915,6 +987,34 @@ def main():
         help="Automatically merge shards after last shard completes (only applies to last shard)",
     )
 
+    parser.add_argument(
+        "--validate",
+        action="store_true",
+        default=False,
+        help="After writing, reopen each LMDB and validate every record "
+             "(opt-in). Catches silent write failures (e.g. empty fuzzy_bond {}, "
+             "pickle-time module errors) that write-time JSON stats miss. "
+             "Writes validate.md / validate.json / validate_failed_keys/ "
+             "alongside the LMDBs. For sharded runs, validates each shard's own "
+             "subdir; with --auto_merge, also validates the merged dir.",
+    )
+
+    parser.add_argument(
+        "--validate_workers",
+        type=int,
+        default=0,
+        help="Parallel workers for post-write validation (default: "
+             "min(cpu_count, n_data_types); 1 disables).",
+    )
+
+    parser.add_argument(
+        "--validate_sample_failed",
+        type=int,
+        default=200,
+        help="Max sample keys to retain per failure category in the validation "
+             "report (default: 200).",
+    )
+
     args = parser.parse_args()
 
     # Validate arguments
@@ -969,6 +1069,9 @@ def main():
     shard_index = args.shard_index
     total_shards = args.total_shards
     auto_merge = args.auto_merge
+    validate = args.validate
+    validate_workers = args.validate_workers
+    validate_sample_failed = args.validate_sample_failed
 
     # Setup logging
     logger = setup_logging(verbose=args.verbose, log_file=args.log_file)
@@ -1125,6 +1228,28 @@ def main():
             f.write(f"data types: {', '.join(converted)}\n")
         logger.info(f"Wrote sentinel file: {sentinel_path}")
 
+    # Opt-in post-write validation. Runs on this run's own output dir
+    # (non-sharded: out_dir; sharded: out_dir/shard_N). Auto-merge runs
+    # a separate validation pass on merged/ below.
+    if validate and converted:
+        try:
+            suffix = f"_shard_{shard_index}" if total_shards > 1 else ""
+            label = f"validate_shard_{shard_index}" if total_shards > 1 else "validate"
+            _run_post_write_validation(
+                target_dir=out_dir,
+                types=converted,
+                prefix=prefix,
+                name_suffix=suffix,
+                workers=validate_workers,
+                sample_failed=validate_sample_failed,
+                label=label,
+                logger=logger,
+            )
+        except Exception as e:
+            logger.error(f"Post-write validation failed: {e}")
+            import traceback
+            logger.debug(traceback.format_exc())
+
     # Auto-merge shards if this is the last shard
     if auto_merge and total_shards > 1 and shard_index == total_shards - 1:
         logger.info("")
@@ -1232,6 +1357,24 @@ def main():
         logger.info("=" * 60)
         logger.info(f"AUTO-MERGE COMPLETE: Merged LMDBs in {merged_dir}")
         logger.info("=" * 60)
+
+        # Opt-in validation of the merged dir (separate report from per-shard).
+        if validate and converted:
+            try:
+                _run_post_write_validation(
+                    target_dir=merged_dir,
+                    types=converted,
+                    prefix=prefix,
+                    name_suffix="",
+                    workers=validate_workers,
+                    sample_failed=validate_sample_failed,
+                    label="validate_merged",
+                    logger=logger,
+                )
+            except Exception as e:
+                logger.error(f"Post-merge validation failed: {e}")
+                import traceback
+                logger.debug(traceback.format_exc())
 
 
 if __name__ == "__main__":

@@ -31,6 +31,7 @@ json-to-lmdb = "qtaim_gen.source.scripts.json_to_lmdb:main"
 generator-to-embed = "qtaim_gen.source.scripts.helpers.generator_to_embed:main"
 multi-vertical-merge = "qtaim_gen.source.scripts.helpers.multi_vertical_merge:main"
 build-manifest = "qtaim_gen.source.scripts.helpers.build_manifest:main"
+lmdb-status-audit = "qtaim_gen.source.scripts.helpers.lmdb_status_audit:main"
 
 # QTAIM - only
 create-files = "qtaim_gen.source.scripts.create_files:main"
