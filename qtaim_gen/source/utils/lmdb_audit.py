@@ -40,7 +40,16 @@ DEFAULT_DATA_TYPES: List[str] = [
 # get_expected_json_keys() in scripts/json_to_lmdb.py. Tier 0 / 1 / 2 keys
 # are all listed; validate_record returns "ok" if at least one is populated.
 EXPECTED_METHODS: Dict[str, List[str]] = {
-    "charge": ["hirshfeld", "adch", "cm5", "becke", "mbis", "chelpg", "vdd", "bader"],
+    # Multiwfn-derived charge methods (tier 0 / 1 / 2 from get_expected_json_keys)
+    # plus the five ORCA-derived charge tables that get copied into charge.json
+    # by merge_orca_into_charge_json. The _orca-suffixed entries are stored as
+    # {"charge": {...}, optional "spin": {...}, optional "population": {...}};
+    # validate_record's inner-charge check picks them up the same way it does
+    # the Multiwfn entries.
+    "charge": [
+        "hirshfeld", "adch", "cm5", "becke", "mbis", "chelpg", "vdd", "bader",
+        "mulliken_orca", "loewdin_orca", "hirshfeld_orca", "mayer_orca", "mbis_orca",
+    ],
     # Tier 0 / 1 / 2 Multiwfn-derived bond schemes plus the two ORCA-derived
     # bond-order tables (Mayer + Loewdin) that get copied into bond.json from
     # orca.out. ORCA bond orders are valid bond evidence and count toward "ok".
