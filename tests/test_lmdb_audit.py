@@ -199,16 +199,27 @@ class TestValidateRecord:
         assert "hirshfeld" in present
         assert "cm5" in present
 
-    def test_charge_outer_dict_with_empty_inner_still_counted(self):
-        # Documents current behavior: validate_record treats a charge method as
-        # populated whenever its outer dict is non-empty, even if the inner
-        # per-atom 'charge' dict is {}. A method that wrote only metadata
-        # (e.g. dipole) without any per-atom charges still counts as ok.
-        # This is a known gap; tighten if/when we want stricter validation.
+    def test_charge_outer_dict_with_empty_inner_returns_missing_critical(self):
+        # A charge method with metadata only (e.g. dipole) but empty per-atom
+        # 'charge' dict is a real silent failure mode (the method ran but
+        # produced no per-atom values). Tightened validator surfaces this.
         rec = {"adch": {"charge": {}, "dipole": {"mag": 0.5}}}
         status, present = validate_record("charge", rec)
+        assert status == "missing_critical"
+        assert "adch" not in present
+
+    def test_charge_only_dipole_no_charge_key_returns_missing_critical(self):
+        # Even more degenerate: outer dict has only metadata keys, no 'charge'
+        # or 'spin' inner dict at all.
+        rec = {"hirshfeld": {"dipole": {"mag": 0.7}}}
+        assert validate_record("charge", rec)[0] == "missing_critical"
+
+    def test_charge_inner_spin_only_returns_ok(self):
+        # Open-shell systems may report only spin densities for some methods.
+        rec = {"hirshfeld": {"spin": {"1_C": 0.1}, "charge": {}}}
+        status, present = validate_record("charge", rec)
         assert status == "ok"
-        assert "adch" in present
+        assert "hirshfeld" in present
 
 
 # ---- TestScanLmdb ---------------------------------------------------------
@@ -369,6 +380,21 @@ class TestAuditLmdbPaths:
         _write_synthetic_lmdb(path, {"a": _ok_charge_record()})
         report = audit_lmdb_paths({"charge": str(path)})
         assert report["cross_drop_vs_structure"] == {}
+
+    def test_missing_structure_lmdb_logs_warning(self, tmp_path, caplog):
+        # structure.lmdb in the audit set but file does not exist: should
+        # warn loudly so the empty cross_drop doesn't silently mask a broken
+        # conversion.
+        charge_path = tmp_path / "charge.lmdb"
+        _write_synthetic_lmdb(charge_path, {"a": _ok_charge_record()})
+        paths = {
+            "structure": str(tmp_path / "structure.lmdb"),  # does not exist
+            "charge": str(charge_path),
+        }
+        with caplog.at_level("WARNING", logger="qtaim_gen.source.utils.lmdb_audit"):
+            report = audit_lmdb_paths(paths)
+        assert report["cross_drop_vs_structure"] == {}
+        assert any("structure.lmdb missing" in m for m in caplog.messages)
 
 
 # ---- TestWriteAuditReport -------------------------------------------------

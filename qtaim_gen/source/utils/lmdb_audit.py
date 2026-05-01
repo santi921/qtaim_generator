@@ -5,13 +5,15 @@ Used by:
   - scripts/json_to_lmdb.py (opt-in post-write validation)
 
 Per-record validation is shallow: each LMDB type has a `validate_record`
-classifier that returns one of {"ok", "empty", "malformed", "missing_critical"}
+classifier that returns one of
+{"ok", "empty", "malformed", "missing_critical", "no_bonds"}
 plus the list of expected methods that are populated. "ok" means at least
 one expected method is present and non-empty (so the validator stays correct
-across mixed full_set tiers).
+across mixed full_set tiers). "no_bonds" is bond-only (see validate_record).
 """
 
 import json
+import logging
 import os
 import pickle
 import time
@@ -19,6 +21,8 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from typing import Any, Dict, List, Optional, Tuple
 
 import lmdb
+
+logger = logging.getLogger(__name__)
 
 
 DEFAULT_DATA_TYPES: List[str] = [
@@ -137,14 +141,23 @@ def validate_record(data_type: str, value: Any) -> Tuple[str, List[str]]:
                 if candidate not in value:
                     continue
                 sub = value[candidate]
-                if isinstance(sub, dict) and not _is_empty(sub):
-                    present.append(method)
-                    break
-                if data_type == "charge" and isinstance(sub, dict):
+                if not isinstance(sub, dict) or _is_empty(sub):
+                    continue
+                if data_type == "charge":
+                    # Stricter charge check: a method counts as populated only
+                    # if its inner per-atom 'charge' (or 'spin') dict is non-empty.
+                    # A method that wrote only metadata (e.g. dipole) without
+                    # any per-atom charges should NOT pass — that is a real
+                    # silent failure mode worth surfacing.
                     inner = sub.get("charge") or sub.get("spin")
                     if isinstance(inner, dict) and not _is_empty(inner):
                         present.append(method)
                         break
+                    # Outer dict non-empty but no per-atom payload: skip.
+                    continue
+                # Non-charge types: outer dict non-empty is sufficient.
+                present.append(method)
+                break
         if not present:
             # bond is the only type where "no methods populated" is plausibly
             # legitimate (atomic systems, noble gases, upstream fuzzy_bond
@@ -285,7 +298,29 @@ def audit_lmdb_paths(
                 per_type[dt] = fut.result()
 
     cross_drop: Dict[str, Dict[str, Any]] = {}
-    structure_keys = per_type.get("structure", {}).get("all_keys", set())
+    structure_info = per_type.get("structure", {})
+    structure_keys = structure_info.get("all_keys", set())
+    descriptor_types = [dt for dt in lmdb_paths if dt != "structure"]
+    if not structure_keys and descriptor_types:
+        # Without a structure.lmdb (or with an empty one) we cannot compute
+        # cross-LMDB drop. Warn rather than fail silently — a missing
+        # structure.lmdb is itself a strong signal that the conversion is
+        # broken or that the wrong target_dir was passed in.
+        if "structure" in lmdb_paths and not structure_info.get("exists", False):
+            logger.warning(
+                "structure.lmdb missing at %s; cross-LMDB drop check skipped.",
+                lmdb_paths["structure"],
+            )
+        elif "structure" in lmdb_paths and structure_info.get("entries", 0) == 0:
+            logger.warning(
+                "structure.lmdb at %s contains no records; "
+                "cross-LMDB drop check skipped.",
+                lmdb_paths["structure"],
+            )
+        elif "structure" not in lmdb_paths:
+            logger.info(
+                "No structure.lmdb in audit set; cross-LMDB drop check skipped."
+            )
     if structure_keys:
         for dt in lmdb_paths:
             if dt == "structure":
