@@ -12,6 +12,11 @@ LMDB (silent cross-drops) are also excluded via --exclude-cross-drop.
 If >50 %% of records would be excluded the script aborts unless --force is
 given.  Use --dry-run to preview what would be removed without writing.
 
+Pass --from-audit DIR to skip scanning entirely and load bad keys from a
+prior lmdb-status-audit run (reads failed_keys/ txt files + checks
+by_vertical/ JSON for sample completeness). Falls back to full scan for any
+type whose audit sample was truncated.
+
 Outputs (written to --output dir):
   filter_report.json    machine-readable: every dropped key, per-type status
   filter_report.md      human-readable summary table + dropped key list
@@ -20,6 +25,12 @@ Example:
     lmdb-filter-vertical \\
         --input  data/OMol4M_lmdbs/electrolytes_reactivity/ \\
         --output data/OMol4M_lmdbs/electrolytes_reactivity_filtered/
+
+    # skip re-scan using a prior audit:
+    lmdb-filter-vertical \\
+        --input      data/OMol4M_lmdbs/electrolytes_reactivity/ \\
+        --output     data/OMol4M_lmdbs/electrolytes_reactivity_filtered/ \\
+        --from-audit data/audit_reports/omol4m/
 """
 
 import argparse
@@ -260,6 +271,26 @@ def main(argv=None):
         action="store_true",
         help="Write output even if >50%% of records would be excluded.",
     )
+    p.add_argument(
+        "--from-audit",
+        metavar="DIR",
+        default=None,
+        help=(
+            "Skip scanning: load bad keys from a prior lmdb-status-audit output dir. "
+            "Reads failed_keys/<vertical>__<dt>__<status>.txt files. "
+            "Falls back to full scan for any type whose audit sample was truncated."
+        ),
+    )
+    p.add_argument(
+        "--vertical-name",
+        metavar="NAME",
+        default=None,
+        help=(
+            "Vertical name used to find audit files (default: basename of --input). "
+            "Only needed with --from-audit when the input dir name differs from the "
+            "audit vertical name."
+        ),
+    )
     args = p.parse_args(argv)
 
     input_dir = os.path.abspath(args.input)
@@ -286,23 +317,37 @@ def main(argv=None):
         if os.path.exists(os.path.join(input_dir, f"{dt}.lmdb"))
     ]
 
-    # Scan for bad keys
+    # Collect bad keys - either from a prior audit or by scanning
     bad_by_type: Dict[str, Dict[str, str]] = {}
-    workers = min(args.workers, len(type_paths)) if args.workers > 1 else 1
+    needs_rescan: Set[str] = set(data_types)  # default: scan everything
 
-    if workers <= 1:
-        for path, dt, excl in type_paths:
-            print(f"  scanning {dt}...", file=sys.stderr)
-            bad_by_type[dt] = collect_bad_keys(path, dt, excl)
-            print(f"    {len(bad_by_type[dt])} bad keys", file=sys.stderr)
-    else:
-        with ProcessPoolExecutor(max_workers=workers) as pool:
-            futs = {pool.submit(_collect_bad_for_type, t): t[1] for t in type_paths}
-            for fut in as_completed(futs):
-                dt = futs[fut]
-                result_dt, bad = fut.result()
-                bad_by_type[result_dt] = bad
-                print(f"  {result_dt}: {len(bad)} bad keys", file=sys.stderr)
+    if args.from_audit:
+        audit_dir = os.path.abspath(args.from_audit)
+        vertical_name = args.vertical_name or os.path.basename(os.path.normpath(input_dir))
+        print(f"Loading bad keys from audit: {audit_dir} (vertical={vertical_name})", file=sys.stderr)
+        bad_by_type, needs_rescan = load_bad_keys_from_audit(
+            audit_dir, vertical_name, data_types, exclude_statuses
+        )
+        for dt in data_types:
+            if dt not in needs_rescan:
+                print(f"  {dt}: {len(bad_by_type.get(dt, {}))} bad keys (from audit)", file=sys.stderr)
+
+    types_to_scan = [t for t in type_paths if t[1] in needs_rescan]
+    if types_to_scan:
+        workers = min(args.workers, len(types_to_scan)) if args.workers > 1 else 1
+        if workers <= 1:
+            for path, dt, excl in types_to_scan:
+                print(f"  scanning {dt}...", file=sys.stderr)
+                bad_by_type[dt] = collect_bad_keys(path, dt, excl)
+                print(f"    {len(bad_by_type[dt])} bad keys", file=sys.stderr)
+        else:
+            with ProcessPoolExecutor(max_workers=workers) as pool:
+                futs = {pool.submit(_collect_bad_for_type, t): t[1] for t in types_to_scan}
+                for fut in as_completed(futs):
+                    dt = futs[fut]
+                    result_dt, bad = fut.result()
+                    bad_by_type[result_dt] = bad
+                    print(f"  {result_dt}: {len(bad)} bad keys", file=sys.stderr)
 
     cross_drop_keys: Set[str] = set()
     if args.exclude_cross_drop:
@@ -381,6 +426,69 @@ def _print_per_type_summary(
         n = len(bad_by_type.get(dt, {}))
         pct = f"{100 * n / total_ref:.1f}%" if total_ref > 0 else "n/a"
         print(f"  {dt}: {n:,} ({pct})", file=sys.stderr)
+
+
+def load_bad_keys_from_audit(
+    audit_dir: str,
+    vertical_name: str,
+    data_types: List[str],
+    exclude_statuses: Set[str],
+) -> Tuple[Dict[str, Dict[str, str]], Set[str]]:
+    """Load pre-computed bad keys from a prior lmdb-status-audit output dir.
+
+    Reads  <audit_dir>/failed_keys/<vertical>__<dt>__<status>.txt  for each
+    (dt, status) combination. Also checks <audit_dir>/by_vertical/<vertical>.json
+    to detect truncated samples (audit default is 200 per status per type).
+
+    Returns:
+        bad_by_type  - {dt: {key: status}} loaded from files
+        needs_rescan - set of data_type names whose audit sample was truncated
+                       (caller should fall back to full scan for those types)
+    """
+    failed_dir = os.path.join(audit_dir, "failed_keys")
+    detail_path = os.path.join(audit_dir, "by_vertical", f"{vertical_name}.json")
+
+    # Load counts from the detail JSON to check for truncated samples
+    audit_counts: Dict[str, Dict[str, int]] = {}  # {dt: {status: count}}
+    if os.path.exists(detail_path):
+        try:
+            with open(detail_path) as f:
+                detail = json.load(f)
+            for dt, info in detail.get("per_type", {}).items():
+                audit_counts[dt] = {
+                    s: info.get(s, 0)
+                    for s in ("empty", "malformed", "missing_critical", "no_bonds", "unpickle_error")
+                }
+        except Exception as e:
+            print(f"  WARNING: could not read audit detail {detail_path}: {e}", file=sys.stderr)
+
+    bad_by_type: Dict[str, Dict[str, str]] = {}
+    needs_rescan: Set[str] = set()
+
+    for dt in data_types:
+        keys_for_type: Dict[str, str] = {}
+        for status in exclude_statuses:
+            txt = os.path.join(failed_dir, f"{vertical_name}__{dt}__{status}.txt")
+            if not os.path.exists(txt):
+                continue
+            with open(txt) as f:
+                file_keys = [ln.strip() for ln in f if ln.strip()]
+            for k in file_keys:
+                keys_for_type[k] = status
+
+            # Check if the sample was truncated
+            expected = audit_counts.get(dt, {}).get(status, 0)
+            if expected > len(file_keys):
+                print(
+                    f"  WARNING: {dt}/{status} audit sample truncated "
+                    f"({len(file_keys)} in file, {expected} total) - will rescan {dt}",
+                    file=sys.stderr,
+                )
+                needs_rescan.add(dt)
+
+        bad_by_type[dt] = keys_for_type
+
+    return bad_by_type, needs_rescan
 
 
 if __name__ == "__main__":
