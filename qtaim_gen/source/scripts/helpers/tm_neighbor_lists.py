@@ -5,16 +5,20 @@ extracts every bond involving a transition metal atom (Sc-Zn, Y-Cd, Hf-Hg),
 and writes per-row neighbor records plus aggregated TM-partner pair counts.
 Verticals with no TM-bearing rows are skipped.
 
+No pandas/numpy dependency - uses stdlib csv/json only.
+
 Output layout under --output_dir:
-    {vertical}/tm_neighbors.parquet   one row per (rel_path, TM atom, partner atom)
-    {vertical}/tm_pair_counts.csv     (tm_symbol, partner_symbol) -> count, n_rows
-    summary.json                      {vertical: {n_rows_total, n_rows_with_tm, n_bond_records}}
+    {vertical}/tm_neighbors.csv    one row per (rel_path, TM atom, partner atom)
+    {vertical}/tm_pair_counts.csv  (tm_symbol, partner_symbol) -> count, n_rows
+    summary.json                   {vertical: {n_rows_total, n_rows_with_tm, n_bond_records}}
 """
 
 from __future__ import annotations
 
 import argparse
+import csv
 import json
+import math
 import os
 import pickle
 import sys
@@ -22,8 +26,6 @@ from collections import Counter, defaultdict
 from typing import Iterable, List, Optional, Tuple
 
 import lmdb
-import numpy as np
-import pandas as pd
 
 from qtaim_gen.source.utils.element_classes import (
     SYMBOL_TO_Z,
@@ -35,8 +37,8 @@ def find_bond_lmdbs(root: str) -> List[Tuple[str, str]]:
     """Locate bond.lmdb files under root.
 
     Returns list of (vertical_name, lmdb_path). vertical_name is the
-    directory holding bond.lmdb expressed as a path relative to root,
-    with separators replaced by underscores for use as an output dirname.
+    directory holding bond.lmdb expressed relative to root, with os.sep
+    replaced by '__'.
     """
     pairs: List[Tuple[str, str]] = []
     for dirpath, _dirnames, filenames in os.walk(root):
@@ -67,9 +69,9 @@ def parse_bond_key(s: str) -> Optional[Tuple[int, str, int, str]]:
 
 
 def select_bond_field(bond_dict: dict, candidates: Iterable[str]) -> Optional[str]:
-    """Pick the first present field name from candidates.
+    """Return the first field from candidates present in bond_dict.
 
-    Each candidate is matched both as-is and with a `_bond` suffix variant.
+    Each candidate is matched both as-is and with a '_bond' suffix variant.
     """
     keys = set(bond_dict.keys())
     for cand in candidates:
@@ -81,132 +83,146 @@ def select_bond_field(bond_dict: dict, candidates: Iterable[str]) -> Optional[st
     return None
 
 
+_NEIGHBORS_FIELDS = [
+    "rel_path", "tm_atom_idx", "tm_symbol", "tm_z",
+    "partner_atom_idx", "partner_symbol", "partner_z",
+    "bond_order", "bond_field",
+]
+_PAIR_FIELDS = ["tm_symbol", "partner_symbol", "count", "n_rows"]
+
+
 def process_vertical(
     lmdb_path: str,
     bond_keys: List[str],
     cutoff: float,
-) -> Tuple[List[dict], dict]:
-    """Walk one bond.lmdb and emit per-bond TM records.
+    out_dir: str,
+) -> dict:
+    """Walk one bond.lmdb and write per-bond TM records as CSV.
 
-    Returns (records, stats). stats: n_rows_total, n_rows_with_tm,
-    n_bond_records, n_rows_no_bond_field, field_usage Counter (as dict).
+    Returns stats dict.
     """
-    records: List[dict] = []
     n_rows_total = 0
     n_rows_with_tm = 0
     n_rows_no_bond_field = 0
+    n_bond_records = 0
     field_usage: Counter = Counter()
 
-    env = lmdb.open(lmdb_path, readonly=True, lock=False, subdir=False, max_readers=1024)
-    try:
-        with env.begin() as txn:
-            for raw_key, raw_val in txn.cursor():
-                key_str = raw_key.decode("utf-8", errors="replace")
-                if key_str == "length":
-                    continue
-                n_rows_total += 1
-                try:
-                    bond_dict = pickle.loads(raw_val)
-                except Exception:
-                    continue
-                if not isinstance(bond_dict, dict):
-                    continue
+    # pair -> (total_bond_count, set_of_rel_paths)
+    pair_counts: dict = defaultdict(lambda: [0, set()])
 
-                field = select_bond_field(bond_dict, bond_keys)
-                if field is None:
-                    n_rows_no_bond_field += 1
-                    continue
-                field_usage[field] += 1
+    os.makedirs(out_dir, exist_ok=True)
+    neighbors_path = os.path.join(out_dir, "tm_neighbors.csv")
 
-                row_has_tm = False
-                inner = bond_dict[field]
-                if not isinstance(inner, dict):
-                    continue
-                for bk, bv in inner.items():
-                    parsed = parse_bond_key(bk)
-                    if parsed is None:
+    with open(neighbors_path, "w", newline="") as fout:
+        writer = csv.DictWriter(fout, fieldnames=_NEIGHBORS_FIELDS)
+        writer.writeheader()
+
+        env = lmdb.open(lmdb_path, readonly=True, lock=False, subdir=False, max_readers=1024)
+        try:
+            with env.begin() as txn:
+                for raw_key, raw_val in txn.cursor():
+                    key_str = raw_key.decode("utf-8", errors="replace")
+                    if key_str == "length":
                         continue
-                    idx_a, sym_a, idx_b, sym_b = parsed
-                    z_a = SYMBOL_TO_Z.get(sym_a)
-                    z_b = SYMBOL_TO_Z.get(sym_b)
-                    if z_a is None or z_b is None:
-                        continue
-                    a_is_tm = z_a in TRANSITION_METALS
-                    b_is_tm = z_b in TRANSITION_METALS
-                    if not (a_is_tm or b_is_tm):
-                        continue
+                    n_rows_total += 1
                     try:
-                        val = float(bv)
-                    except (TypeError, ValueError):
+                        bond_dict = pickle.loads(raw_val)
+                    except Exception:
                         continue
-                    if not np.isfinite(val) or val < cutoff:
+                    if not isinstance(bond_dict, dict):
                         continue
 
-                    # Emit one row per (TM_atom, partner_atom). When both atoms
-                    # are TM (rare; metal-metal bond), emit twice so each TM
-                    # sees the partner.
-                    if a_is_tm:
-                        records.append({
-                            "rel_path": key_str,
-                            "tm_atom_idx": idx_a,
-                            "tm_symbol": sym_a,
-                            "tm_z": z_a,
-                            "partner_atom_idx": idx_b,
-                            "partner_symbol": sym_b,
-                            "partner_z": z_b,
-                            "bond_order": val,
-                            "bond_field": field,
-                        })
-                        row_has_tm = True
-                    if b_is_tm:
-                        records.append({
-                            "rel_path": key_str,
-                            "tm_atom_idx": idx_b,
-                            "tm_symbol": sym_b,
-                            "tm_z": z_b,
-                            "partner_atom_idx": idx_a,
-                            "partner_symbol": sym_a,
-                            "partner_z": z_a,
-                            "bond_order": val,
-                            "bond_field": field,
-                        })
-                        row_has_tm = True
-                if row_has_tm:
-                    n_rows_with_tm += 1
-    finally:
-        env.close()
+                    field = select_bond_field(bond_dict, bond_keys)
+                    if field is None:
+                        n_rows_no_bond_field += 1
+                        continue
+                    field_usage[field] += 1
 
-    stats = {
+                    row_has_tm = False
+                    inner = bond_dict[field]
+                    if not isinstance(inner, dict):
+                        continue
+                    for bk, bv in inner.items():
+                        parsed = parse_bond_key(bk)
+                        if parsed is None:
+                            continue
+                        idx_a, sym_a, idx_b, sym_b = parsed
+                        z_a = SYMBOL_TO_Z.get(sym_a)
+                        z_b = SYMBOL_TO_Z.get(sym_b)
+                        if z_a is None or z_b is None:
+                            continue
+                        a_is_tm = z_a in TRANSITION_METALS
+                        b_is_tm = z_b in TRANSITION_METALS
+                        if not (a_is_tm or b_is_tm):
+                            continue
+                        try:
+                            val = float(bv)
+                        except (TypeError, ValueError):
+                            continue
+                        if not math.isfinite(val) or val < cutoff:
+                            continue
+
+                        if a_is_tm:
+                            writer.writerow({
+                                "rel_path": key_str,
+                                "tm_atom_idx": idx_a,
+                                "tm_symbol": sym_a,
+                                "tm_z": z_a,
+                                "partner_atom_idx": idx_b,
+                                "partner_symbol": sym_b,
+                                "partner_z": z_b,
+                                "bond_order": val,
+                                "bond_field": field,
+                            })
+                            pair = (sym_a, sym_b)
+                            pair_counts[pair][0] += 1
+                            pair_counts[pair][1].add(key_str)
+                            n_bond_records += 1
+                            row_has_tm = True
+                        if b_is_tm:
+                            writer.writerow({
+                                "rel_path": key_str,
+                                "tm_atom_idx": idx_b,
+                                "tm_symbol": sym_b,
+                                "tm_z": z_b,
+                                "partner_atom_idx": idx_a,
+                                "partner_symbol": sym_a,
+                                "partner_z": z_a,
+                                "bond_order": val,
+                                "bond_field": field,
+                            })
+                            pair = (sym_b, sym_a)
+                            pair_counts[pair][0] += 1
+                            pair_counts[pair][1].add(key_str)
+                            n_bond_records += 1
+                            row_has_tm = True
+                    if row_has_tm:
+                        n_rows_with_tm += 1
+        finally:
+            env.close()
+
+    if n_bond_records == 0:
+        os.remove(neighbors_path)
+
+    # write pair counts
+    if pair_counts:
+        pair_path = os.path.join(out_dir, "tm_pair_counts.csv")
+        rows = sorted(
+            [(tm, partner, cnt, len(relpaths)) for (tm, partner), (cnt, relpaths) in pair_counts.items()],
+            key=lambda r: (-r[2], r[0], r[1]),
+        )
+        with open(pair_path, "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(_PAIR_FIELDS)
+            writer.writerows(rows)
+
+    return {
         "n_rows_total": n_rows_total,
         "n_rows_with_tm": n_rows_with_tm,
-        "n_bond_records": len(records),
+        "n_bond_records": n_bond_records,
         "n_rows_no_bond_field": n_rows_no_bond_field,
         "field_usage": dict(field_usage),
     }
-    return records, stats
-
-
-def write_outputs(out_dir: str, records: List[dict]) -> None:
-    os.makedirs(out_dir, exist_ok=True)
-    df = pd.DataFrame.from_records(records)
-    df.to_parquet(os.path.join(out_dir, "tm_neighbors.parquet"), index=False)
-
-    # Pair counts: total bond records and unique rows per (tm_symbol, partner_symbol)
-    pair_total = (
-        df.groupby(["tm_symbol", "partner_symbol"], sort=True)
-          .size()
-          .rename("count")
-          .reset_index()
-    )
-    pair_rows = (
-        df.drop_duplicates(["rel_path", "tm_symbol", "partner_symbol"])
-          .groupby(["tm_symbol", "partner_symbol"], sort=True)
-          .size()
-          .rename("n_rows")
-          .reset_index()
-    )
-    summary = pair_total.merge(pair_rows, on=["tm_symbol", "partner_symbol"], how="left")
-    summary.to_csv(os.path.join(out_dir, "tm_pair_counts.csv"), index=False)
 
 
 def main(argv: Optional[List[str]] = None) -> int:
@@ -217,14 +233,21 @@ def main(argv: Optional[List[str]] = None) -> int:
         "--bond_keys",
         nargs="+",
         default=["mayer_orca", "fuzzy_bond"],
-        help="Bond-order fields to try in order. The first present in a row is used. "
+        help="Bond-order fields to try in order. First present in a row is used. "
              "Each is also matched with a '_bond' suffix variant.",
     )
-    p.add_argument("--cutoff", type=float, default=0.3, help="Minimum bond order to keep a bond. Default 0.3.")
+    p.add_argument("--cutoff", type=float, default=0.3, help="Minimum bond order to keep. Default 0.3.")
+    p.add_argument(
+        "--include_verticals",
+        nargs="+",
+        default=None,
+        metavar="V",
+        help="If set, process only these vertical names (matched against the discovered vertical name).",
+    )
     p.add_argument(
         "--include_empty",
         action="store_true",
-        help="Also write outputs for verticals that produced zero TM records (default skips).",
+        help="Write outputs even for verticals with zero TM records.",
     )
     args = p.parse_args(argv)
 
@@ -237,34 +260,45 @@ def main(argv: Optional[List[str]] = None) -> int:
     if not pairs:
         print(f"no bond.lmdb files found under {args.root}", file=sys.stderr)
         return 1
-    print(f"found {len(pairs)} bond.lmdb file(s) under {args.root}")
+
+    if args.include_verticals:
+        allowed = set(args.include_verticals)
+        pairs = [(v, p) for v, p in pairs if v in allowed]
+        if not pairs:
+            print(f"error: none of the requested verticals found under {args.root}", file=sys.stderr)
+            return 1
+
+    print(f"found {len(pairs)} bond.lmdb file(s) to process")
 
     summary: dict = {}
     for vertical, lmdb_path in pairs:
-        print(f"  processing {vertical}: {lmdb_path}")
-        records, stats = process_vertical(lmdb_path, args.bond_keys, args.cutoff)
+        print(f"  {vertical}: {lmdb_path}")
+        out_dir = os.path.join(args.output_dir, vertical)
+        stats = process_vertical(lmdb_path, args.bond_keys, args.cutoff, out_dir)
         stats["lmdb_path"] = lmdb_path
-        summary[vertical] = stats
 
-        if not records and not args.include_empty:
+        if stats["n_bond_records"] == 0 and not args.include_empty:
+            stats["skipped"] = True
             print(
-                f"    skipped (no TM records). rows_total={stats['n_rows_total']} "
+                f"    skipped (no TM records)  rows_total={stats['n_rows_total']} "
                 f"no_bond_field={stats['n_rows_no_bond_field']}"
             )
-            stats["skipped"] = True
-            continue
-        stats["skipped"] = False
-
-        out_dir = os.path.join(args.output_dir, vertical)
-        write_outputs(out_dir, records)
-        print(
-            f"    wrote {len(records)} bond records covering "
-            f"{stats['n_rows_with_tm']} / {stats['n_rows_total']} rows -> {out_dir}"
-        )
+            try:
+                os.rmdir(out_dir)
+            except OSError:
+                pass
+        else:
+            stats["skipped"] = False
+            print(
+                f"    {stats['n_bond_records']} bond records / "
+                f"{stats['n_rows_with_tm']} TM rows / "
+                f"{stats['n_rows_total']} total"
+            )
+        summary[vertical] = stats
 
     with open(os.path.join(args.output_dir, "summary.json"), "w") as f:
         json.dump(summary, f, indent=2, sort_keys=True)
-    print(f"summary written to {os.path.join(args.output_dir, 'summary.json')}")
+    print(f"summary -> {os.path.join(args.output_dir, 'summary.json')}")
     return 0
 
 
