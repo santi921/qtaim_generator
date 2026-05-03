@@ -89,7 +89,10 @@ def filter_one_lmdb(
     Returns (kept, excluded) counts.
     """
     env_in = lmdb.open(input_path, readonly=True, lock=False, subdir=False, readahead=False, meminit=False)
-    map_size = env_in.info()["map_size"]
+    # Use 2x the source map_size: the source may be nearly full and a fresh
+    # LMDB needs extra overhead pages. LMDB sparse-allocates so disk usage
+    # only grows to match actual data written.
+    map_size = env_in.info()["map_size"] * 2
     env_out = lmdb.open(output_path, map_size=map_size, subdir=False, meminit=False)
 
     kept = 0
