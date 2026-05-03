@@ -88,8 +88,8 @@ def filter_one_lmdb(
 
     Returns (kept, excluded) counts.
     """
-    map_size = max(os.path.getsize(input_path), 1) + 4 * 1024 * 1024
     env_in = lmdb.open(input_path, readonly=True, lock=False, subdir=False, readahead=False, meminit=False)
+    map_size = env_in.info()["map_size"]
     env_out = lmdb.open(output_path, map_size=map_size, subdir=False, meminit=False)
 
     kept = 0
