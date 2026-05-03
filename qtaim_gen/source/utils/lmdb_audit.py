@@ -18,7 +18,7 @@ import os
 import pickle
 import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, FrozenSet, List, Optional, Set, Tuple
 
 import lmdb
 
@@ -273,6 +273,77 @@ def scan_lmdb(
     env.close()
     result["method_counts"] = method_counts
     return result
+
+
+#: Default statuses treated as failures for filtering purposes.
+DEFAULT_EXCLUDE_STATUSES: FrozenSet[str] = frozenset(
+    {"unpickle_error", "missing_critical", "empty", "malformed"}
+)
+
+
+def collect_bad_keys(
+    lmdb_path: str,
+    data_type: str,
+    exclude_statuses: Optional[Set[str]] = None,
+    limit: Optional[int] = None,
+) -> Dict[str, str]:
+    """Scan lmdb_path and return {key: status} for every key whose status is in exclude_statuses.
+
+    Unlike scan_lmdb, no sampling: every failing key is returned.
+    exclude_statuses defaults to DEFAULT_EXCLUDE_STATUSES.
+    """
+    if exclude_statuses is None:
+        exclude_statuses = set(DEFAULT_EXCLUDE_STATUSES)
+
+    bad: Dict[str, str] = {}
+    if not os.path.exists(lmdb_path):
+        return bad
+
+    try:
+        env = lmdb.open(
+            lmdb_path,
+            readonly=True,
+            lock=False,
+            subdir=False,
+            readahead=False,
+            meminit=False,
+        )
+    except lmdb.Error as e:
+        logger.warning("collect_bad_keys: cannot open %s: %s", lmdb_path, e)
+        return bad
+
+    with env.begin() as txn:
+        cursor = txn.cursor()
+        seen = 0
+        for key_bytes, value in cursor:
+            try:
+                key_str = key_bytes.decode("ascii", errors="replace")
+            except Exception:
+                key_str = repr(key_bytes)
+
+            if key_str == "length":
+                continue
+
+            seen += 1
+
+            try:
+                obj = pickle.loads(value)
+            except Exception:
+                if "unpickle_error" in exclude_statuses:
+                    bad[key_str] = "unpickle_error"
+                if limit is not None and seen >= limit:
+                    break
+                continue
+
+            status, _ = validate_record(data_type, obj)
+            if status in exclude_statuses:
+                bad[key_str] = status
+
+            if limit is not None and seen >= limit:
+                break
+
+    env.close()
+    return bad
 
 
 def audit_lmdb_paths(

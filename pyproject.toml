@@ -32,6 +32,7 @@ generator-to-embed = "qtaim_gen.source.scripts.helpers.generator_to_embed:main"
 multi-vertical-merge = "qtaim_gen.source.scripts.helpers.multi_vertical_merge:main"
 build-manifest = "qtaim_gen.source.scripts.helpers.build_manifest:main"
 lmdb-status-audit = "qtaim_gen.source.scripts.helpers.lmdb_status_audit:main"
+lmdb-filter-vertical = "qtaim_gen.source.scripts.helpers.filter_lmdb_vertical:main"
 backfill-orca-into-json = "qtaim_gen.source.scripts.helpers.backfill_orca_into_json:main"
 
 # QTAIM - only
