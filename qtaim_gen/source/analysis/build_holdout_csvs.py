@@ -1,4 +1,4 @@
-"""Rebuild the H1/H3/H7/H8 evaluation holdout filter CSVs.
+"""Rebuild the H1/H3/H6/H7/H8 evaluation holdout filter CSVs.
 
 Reference script for the OMol4M descriptor-dataset paper. Each invocation
 writes per-holdout CSVs to `--output_dir` (default
@@ -8,8 +8,8 @@ into any of the per-vertical descriptor LMDBs.
 
 Holdout definitions (see paper outline section 8.3.1 for rationale):
 
-  H1  Metal-ligand pairs.
-      17-pair stratified sample across log-spaced (TM, partner) bond
+  H1  Metal-ligand (TM) pairs.
+      11-pair stratified sample across log-spaced (TM, partner) bond
       frequency bands. Bond data is read from the per-vertical
       `tm_neighbors.{csv,parquet}` files produced by
       `qtaim_gen.source.scripts.helpers.tm_neighbor_lists`.
@@ -22,6 +22,15 @@ Holdout definitions (see paper outline section 8.3.1 for rationale):
       target sizes are hashed by `formula_hill` to keep the sample
       deterministic and composition-coherent (no formula split between
       held-out and training). Default targets sum to ~12.5k structures.
+
+  H6  Lanthanide-ligand pairs.
+      Same procedure as H1, applied to (Ln, partner) bonds extracted
+      with `tm_neighbor_lists --element_class ln`. Bond data is read
+      from `ln_neighbors.{csv,parquet}` under
+      `data/OMol4M_lmdbs/ln_bond_lists/`. Ln has only four populated
+      frequency bands (B5 is empty, max pair size = 4,439). Default
+      shape (3, 2, 2, 1, 0) with seed 190 lands at ~2.6k structures
+      (3.88% of Ln-bonded, 0.065% of dataset).
 
   H7  Large systems.
       Structures with `n_atoms > 250`, ~18k structures (0.46% of dataset).
@@ -39,7 +48,8 @@ release.
 Usage:
     python -m qtaim_gen.source.analysis.build_holdout_csvs \\
         --manifest_dir data/omol_manifest \\
-        --bond_root data/OMol4M_lmdbs/tm_bond_lists \\
+        --tm_bond_root data/OMol4M_lmdbs/tm_bond_lists \\
+        --ln_bond_root data/OMol4M_lmdbs/ln_bond_lists \\
         --output_dir data/OMol4M_lmdbs/filter_csv_for_holdouts
 """
 from __future__ import annotations
@@ -60,8 +70,11 @@ import pyarrow.parquet as pq
 DEFAULT_MANIFEST_DIR = Path(
     "/home/santiagovargas/dev/qtaim_generator/data/omol_manifest"
 )
-DEFAULT_BOND_ROOT = Path(
+DEFAULT_TM_BOND_ROOT = Path(
     "/home/santiagovargas/dev/qtaim_generator/data/OMol4M_lmdbs/tm_bond_lists"
+)
+DEFAULT_LN_BOND_ROOT = Path(
+    "/home/santiagovargas/dev/qtaim_generator/data/OMol4M_lmdbs/ln_bond_lists"
 )
 DEFAULT_OUT_DIR = Path(
     "/home/santiagovargas/dev/qtaim_generator/data/OMol4M_lmdbs/filter_csv_for_holdouts"
@@ -79,6 +92,11 @@ H3_TARGETS = {
     "pmechdb": 2500,
 }
 H3_SEED = 87
+
+# H6 Ln stratified sampling (same edges as H1; B5 is empty for Ln)
+H6_BAND_EDGES = (1, 10, 100, 1000, 10000, 100000)
+H6_SHAPE = (3, 2, 2, 1, 0)
+H6_SEED = 190
 
 # H7 / H8 thresholds (strict)
 H7_NATOMS_THRESHOLD = 250
@@ -98,14 +116,20 @@ def load_manifest(manifest_dir: Path) -> pd.DataFrame:
     return df[df["read_status"] == "ok"].copy()
 
 
-def load_tm_neighbors(bond_root: Path) -> pd.DataFrame:
-    cols = ["rel_path", "tm_symbol", "partner_symbol"]
+def load_metal_neighbors(bond_root: Path, prefix: str) -> pd.DataFrame:
+    """Load per-vertical {prefix}_neighbors files (prefix in {'tm','ln','an'}).
+
+    The metal-side column is renamed to a uniform 'metal_symbol' so
+    downstream pair construction is the same for any class.
+    """
+    metal_col = f"{prefix}_symbol"
+    cols = ["rel_path", metal_col, "partner_symbol"]
     frames: List[pd.DataFrame] = []
     for v in sorted(d.name for d in bond_root.iterdir() if d.is_dir()):
         found = None
         for sub in ("merged", "root"):
             for ext in ("csv", "parquet"):
-                cand = bond_root / v / sub / f"tm_neighbors.{ext}"
+                cand = bond_root / v / sub / f"{prefix}_neighbors.{ext}"
                 if cand.exists():
                     found = cand
                     break
@@ -118,10 +142,19 @@ def load_tm_neighbors(bond_root: Path) -> pd.DataFrame:
         sd["vertical"] = v
         frames.append(sd)
     if not frames:
-        raise FileNotFoundError(f"no tm_neighbors.* files found under {bond_root}")
+        raise FileNotFoundError(
+            f"no {prefix}_neighbors.* files found under {bond_root}"
+        )
     df = pd.concat(frames, ignore_index=True)
-    df["pair"] = df["tm_symbol"] + "-" + df["partner_symbol"]
+    df = df.rename(columns={metal_col: "metal_symbol"})
+    df["pair"] = df["metal_symbol"] + "-" + df["partner_symbol"]
     return df
+
+
+# Legacy alias used by the original build_h1 caller.
+def load_tm_neighbors(bond_root: Path) -> pd.DataFrame:
+    df = load_metal_neighbors(bond_root, "tm")
+    return df.rename(columns={"metal_symbol": "tm_symbol"})
 
 
 def formula_rank(formula: str, salt: int) -> int:
@@ -190,6 +223,79 @@ def build_h1(
 
     print(f"  shape={tuple(shape)} seed={seed} -> {len(agg):,} structures "
           f"({100*len(agg)/n_tm_struct:.2f}% TM-bonded)")
+    for band in band_labels:
+        sub = defs_df[defs_df["band"] == band]
+        if len(sub):
+            print(f"    {band}: {sub['pair'].tolist()}")
+    return agg
+
+
+# --------------------------------------------------------------------------- H6
+def build_h6(
+    bond_df: pd.DataFrame,
+    out_dir: Path,
+    shape: Iterable[int] = H6_SHAPE,
+    seed: int = H6_SEED,
+    edges: Iterable[int] = H6_BAND_EDGES,
+) -> pd.DataFrame:
+    """H6 lanthanide-ligand pair holdout. Mirrors H1 with Ln class.
+
+    `bond_df` must have columns vertical, rel_path, metal_symbol,
+    partner_symbol, pair (as produced by load_metal_neighbors with
+    prefix='ln').
+    """
+    sp = bond_df[["vertical", "rel_path", "pair"]].drop_duplicates()
+    n_ln_struct = sp[["vertical", "rel_path"]].drop_duplicates().shape[0]
+    pair_struct = sp.groupby("pair").apply(
+        lambda g: set(zip(g["vertical"], g["rel_path"])), include_groups=False
+    )
+    pair_size = pair_struct.map(len)
+
+    edges = list(edges)
+    band_pairs = [
+        sorted(pair_size[(pair_size >= lo) & (pair_size < hi)].index.tolist())
+        for lo, hi in zip(edges[:-1], edges[1:])
+    ]
+    band_labels = [f"B{i+1}_[{edges[i]},{edges[i+1]})"
+                   for i in range(len(edges) - 1)]
+
+    rng = np.random.default_rng(seed)
+    selected: List[dict] = []
+    for lbl, ps, n in zip(band_labels, band_pairs, shape):
+        k = min(n, len(ps))
+        if k == 0:
+            continue
+        for pair in rng.choice(ps, size=k, replace=False).tolist():
+            ln_sym, partner_sym = pair.split("-", 1)
+            selected.append({
+                "holdout_id": "H6", "pair": pair,
+                "ln_symbol": ln_sym, "partner_symbol": partner_sym,
+                "n_structures_in_pair": int(pair_size[pair]),
+                "band": lbl, "shape": str(list(shape)), "seed": seed,
+            })
+
+    defs_df = pd.DataFrame(selected).sort_values(
+        ["band", "n_structures_in_pair"]
+    ).reset_index(drop=True)
+    defs_df.to_csv(
+        out_dir / "h6_lanthanide_ligand_pair_definitions.csv", index=False
+    )
+
+    membership = sp[sp["pair"].isin(set(defs_df["pair"]))].copy()
+    agg = (
+        membership.groupby(["vertical", "rel_path"])["pair"]
+        .apply(lambda s: ",".join(sorted(set(s))))
+        .reset_index().rename(columns={"pair": "matched_pairs"})
+    )
+    agg["holdout_id"] = "H6"
+    agg["n_matched_pairs"] = agg["matched_pairs"].str.count(",") + 1
+    agg = (agg[["holdout_id", "vertical", "rel_path",
+                 "matched_pairs", "n_matched_pairs"]]
+           .sort_values(["vertical", "rel_path"]).reset_index(drop=True))
+    agg.to_csv(out_dir / "h6_lanthanide_ligand_pairs.csv", index=False)
+
+    print(f"  shape={tuple(shape)} seed={seed} -> {len(agg):,} structures "
+          f"({100*len(agg)/n_ln_struct:.2f}% Ln-bonded)")
     for band in band_labels:
         sub = defs_df[defs_df["band"] == band]
         if len(sub):
@@ -269,20 +375,23 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
     p.add_argument("--manifest_dir", type=Path, default=DEFAULT_MANIFEST_DIR,
                    help=f"Per-vertical manifest parquet root. Default: {DEFAULT_MANIFEST_DIR}")
-    p.add_argument("--bond_root", type=Path, default=DEFAULT_BOND_ROOT,
-                   help=f"tm_neighbors extraction root. Default: {DEFAULT_BOND_ROOT}")
+    p.add_argument("--tm_bond_root", type=Path, default=DEFAULT_TM_BOND_ROOT,
+                   help=f"tm_neighbors extraction root for H1. Default: {DEFAULT_TM_BOND_ROOT}")
+    p.add_argument("--ln_bond_root", type=Path, default=DEFAULT_LN_BOND_ROOT,
+                   help=f"ln_neighbors extraction root for H6. Default: {DEFAULT_LN_BOND_ROOT}")
     p.add_argument("--output_dir", type=Path, default=DEFAULT_OUT_DIR,
                    help=f"Where to write the holdout CSVs. Default: {DEFAULT_OUT_DIR}")
-    p.add_argument("--skip", nargs="*", choices=["h1", "h3", "h7", "h8"],
-                   default=[], help="Skip these holdouts (e.g. --skip h1)")
+    p.add_argument("--skip", nargs="*", choices=["h1", "h3", "h6", "h7", "h8"],
+                   default=[], help="Skip these holdouts (e.g. --skip h6)")
     args = p.parse_args(argv)
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
-    print(f"manifest_dir: {args.manifest_dir}")
-    print(f"bond_root:    {args.bond_root}")
-    print(f"output_dir:   {args.output_dir}")
-    print(f"skipping:     {args.skip or '(none)'}")
+    print(f"manifest_dir:  {args.manifest_dir}")
+    print(f"tm_bond_root:  {args.tm_bond_root}")
+    print(f"ln_bond_root:  {args.ln_bond_root}")
+    print(f"output_dir:    {args.output_dir}")
+    print(f"skipping:      {args.skip or '(none)'}")
 
     ok = load_manifest(args.manifest_dir)
     n_dataset = ok.shape[0]  # equals total ok manifest rows
@@ -292,7 +401,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     if "h1" not in args.skip:
         print("\n=== H1: TM bond pairs (stratified) ===")
-        bond_df = load_tm_neighbors(args.bond_root)
+        bond_df = load_tm_neighbors(args.tm_bond_root)
         agg_h1 = build_h1(bond_df, args.output_dir)
         summary_rows.append(("H1", "h1_metal_ligand_pairs.csv", len(agg_h1),
                              f"Metal-ligand pairs (stratified shape "
@@ -304,6 +413,14 @@ def main(argv: Optional[List[str]] = None) -> int:
         summary_rows.append(("H3", "h3_reactivity.csv", len(h3_df),
                              "Reactivity, composition-stratified subsample "
                              "(tm_react=5k + electrolytes_reactivity=5k + pmechdb=2.5k)"))
+
+    if "h6" not in args.skip:
+        print("\n=== H6: Ln bond pairs (stratified) ===")
+        ln_bond_df = load_metal_neighbors(args.ln_bond_root, prefix="ln")
+        agg_h6 = build_h6(ln_bond_df, args.output_dir)
+        summary_rows.append(("H6", "h6_lanthanide_ligand_pairs.csv", len(agg_h6),
+                             f"Lanthanide-ligand pairs (stratified shape "
+                             f"{list(H6_SHAPE)}, seed {H6_SEED}; see 8.3.1)"))
 
     if "h7" not in args.skip:
         print(f"\n=== H7: n_atoms > {H7_NATOMS_THRESHOLD} ===")
