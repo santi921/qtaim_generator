@@ -37,6 +37,7 @@ backfill-orca-into-json = "qtaim_gen.source.scripts.helpers.backfill_orca_into_j
 
 # Analysis (paper Stream G: comparator embedding)
 analysis-soap-featurize = "qtaim_gen.source.analysis.comparator_embedding.cli:main"
+analysis-soap-umap = "qtaim_gen.source.analysis.comparator_embedding.umap_cli:main"
 
 # QTAIM - only
 create-files = "qtaim_gen.source.scripts.create_files:main"
