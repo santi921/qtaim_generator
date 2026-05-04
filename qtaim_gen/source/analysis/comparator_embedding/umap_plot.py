@@ -75,21 +75,74 @@ def _read_metadata_species(p: Path) -> tuple[str, int]:
     return species, dim
 
 
+def _sample_indices(n_total: int, n_keep: int, rng: np.random.Generator) -> np.ndarray:
+    if n_keep >= n_total:
+        return np.arange(n_total, dtype=np.int64)
+    return np.sort(rng.choice(n_total, size=n_keep, replace=False)).astype(np.int64)
+
+
+def _read_parquet_sampled(
+    path: Path,
+    keep_indices: np.ndarray,
+    dim: int,
+    batch_size: int = 2048,
+) -> tuple[np.ndarray, list[str]]:
+    """Stream a parquet in row-batches and pull rows whose original index is
+    in ``keep_indices``. Peak memory ~ ``batch_size * dim * 4`` bytes.
+    """
+    out_X = np.empty((len(keep_indices), dim), dtype=np.float32)
+    out_ids: list[str] = [""] * len(keep_indices)
+    keep_arr = np.asarray(keep_indices, dtype=np.int64)
+    keep_pos = 0
+    row_offset = 0
+
+    pf = pq.ParquetFile(str(path))
+    for batch in pf.iter_batches(batch_size=batch_size, columns=["structure_id", "soap"]):
+        n = batch.num_rows
+        if keep_pos >= len(keep_arr):
+            break
+        # local indices into this batch
+        upper = row_offset + n
+        local_mask_start = keep_pos
+        while keep_pos < len(keep_arr) and keep_arr[keep_pos] < upper:
+            keep_pos += 1
+        if keep_pos > local_mask_start:
+            wanted = keep_arr[local_mask_start:keep_pos] - row_offset
+            soap_arr = np.asarray(batch.column("soap").values).reshape(n, dim)
+            ids_arr = batch.column("structure_id").to_pylist()
+            for offset, li in enumerate(wanted):
+                out_X[local_mask_start + offset] = soap_arr[li]
+                out_ids[local_mask_start + offset] = ids_arr[li]
+        row_offset = upper
+    return out_X, out_ids
+
+
 def load_and_stack(
-    specs: Iterable[ParquetSpec],
+    specs: list[ParquetSpec],
+    n_per_class: Optional[int] = None,
+    label_by: str = "source",
+    seed: int = 42,
+    batch_size: int = 2048,
 ) -> tuple[np.ndarray, list[str], list[str], list[str]]:
-    """Load all parquets in order, concatenate SOAP vectors.
+    """Load all parquets, with optional per-class sampling at read time.
+
+    When ``n_per_class`` is given, the per-parquet quota is
+    ``ceil(n_per_class / parquets_in_same_class)``. Sampling happens *before*
+    SOAP arrays land in memory (row-batch streaming via pyarrow), so peak
+    memory is independent of the largest parquet's size.
 
     Returns (X, ids, sources, verticals). All parquets must share the same
     species_z and dim; we abort otherwise.
     """
+    if not specs:
+        raise RuntimeError("no parquets to load")
+
+    rng = np.random.default_rng(seed)
+
+    # validate schema first, decide per-parquet quotas
     ref_species: Optional[str] = None
     ref_dim: Optional[int] = None
-    Xs: list[np.ndarray] = []
-    ids: list[str] = []
-    sources: list[str] = []
-    verticals: list[str] = []
-
+    parquets_in_class: dict[str, int] = {}
     for s in specs:
         species, dim = _read_metadata_species(s.path)
         if ref_species is None:
@@ -99,18 +152,48 @@ def load_and_stack(
                 f"parquet schema mismatch: {s.path} has species={species!r} dim={dim} "
                 f"but reference is species={ref_species!r} dim={ref_dim}"
             )
-        tbl = pq.read_table(str(s.path), columns=["structure_id", "soap"])
-        n = tbl.num_rows
-        if n == 0:
+        key = s.vertical if label_by == "vertical" else s.source
+        parquets_in_class[key] = parquets_in_class.get(key, 0) + 1
+
+    Xs: list[np.ndarray] = []
+    ids: list[str] = []
+    sources: list[str] = []
+    verticals: list[str] = []
+
+    for s in specs:
+        n_total = pq.read_metadata(str(s.path)).num_rows
+        if n_total == 0:
             logger.warning("empty parquet, skipping: %s", s.path)
             continue
-        # SOAP column is fixed-size list<float32>. Convert via numpy view.
-        soap_np = np.asarray(tbl["soap"].combine_chunks().values).reshape(n, ref_dim)
+
+        if n_per_class is None:
+            quota = n_total
+        else:
+            key = s.vertical if label_by == "vertical" else s.source
+            n_par = parquets_in_class[key]
+            # ceil-divide so the class total is at least n_per_class when each
+            # parquet has enough rows; oversample is trimmed at the end.
+            quota = (n_per_class + n_par - 1) // n_par
+
+        keep_idx = _sample_indices(n_total, quota, rng)
+        if len(keep_idx) == 0:
+            continue
+
+        soap_np, batch_ids = _read_parquet_sampled(
+            s.path, keep_idx, ref_dim, batch_size=batch_size
+        )
         Xs.append(soap_np)
-        ids.extend(tbl["structure_id"].to_pylist())
-        sources.extend([s.source] * n)
-        verticals.extend([s.vertical] * n)
-        logger.info("loaded %d records from %s (%s/%s)", n, s.path.name, s.source, s.vertical)
+        ids.extend(batch_ids)
+        sources.extend([s.source] * len(batch_ids))
+        verticals.extend([s.vertical] * len(batch_ids))
+        logger.info(
+            "loaded %d/%d records from %s (%s/%s)",
+            len(batch_ids),
+            n_total,
+            s.path.name,
+            s.source,
+            s.vertical,
+        )
 
     if not Xs:
         raise RuntimeError("no SOAP records loaded")
@@ -210,9 +293,26 @@ def plot_2d(
     import matplotlib.pyplot as plt
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    fig, ax = plt.subplots(figsize=(10, 8), dpi=150)
     unique_labels = sorted(set(labels))
-    cmap = plt.get_cmap("tab20" if len(unique_labels) > 10 else "tab10")
+    n_lab = len(unique_labels)
+    # Wider canvas + side legend when many classes (e.g. 33 OMol verticals).
+    if n_lab > 20:
+        fig, ax = plt.subplots(figsize=(13, 8), dpi=150)
+    else:
+        fig, ax = plt.subplots(figsize=(10, 8), dpi=150)
+
+    if n_lab <= 10:
+        colors = [plt.get_cmap("tab10")(i) for i in range(n_lab)]
+    elif n_lab <= 20:
+        colors = [plt.get_cmap("tab20")(i) for i in range(n_lab)]
+    else:
+        # Concat tab20 + tab20b + tab20c for up to 60 distinct hues.
+        seq = []
+        for cm_name in ("tab20", "tab20b", "tab20c"):
+            cm = plt.get_cmap(cm_name)
+            seq.extend([cm(i) for i in range(cm.N)])
+        colors = [seq[i % len(seq)] for i in range(n_lab)]
+
     for i, lab in enumerate(unique_labels):
         mask = np.asarray([l_ == lab for l_ in labels])
         ax.scatter(
@@ -220,14 +320,17 @@ def plot_2d(
             Y[mask, 1],
             s=point_size,
             alpha=alpha,
-            color=cmap(i % cmap.N),
+            color=colors[i],
             label=f"{lab} (n={int(mask.sum())})",
             linewidths=0,
         )
     ax.set_xlabel("UMAP-1")
     ax.set_ylabel("UMAP-2")
     ax.set_title(title)
-    ax.legend(markerscale=3, loc="best", fontsize=8, framealpha=0.7)
+    if n_lab > 20:
+        ax.legend(markerscale=3, loc="center left", bbox_to_anchor=(1.02, 0.5), fontsize=7, framealpha=0.7, ncol=2)
+    else:
+        ax.legend(markerscale=3, loc="best", fontsize=8, framealpha=0.7)
     fig.tight_layout()
     fig.savefig(output_path)
     plt.close(fig)

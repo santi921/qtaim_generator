@@ -75,17 +75,27 @@ def main(argv: list[str] | None = None) -> int:
     for s in specs:
         print(f"  {s.path}  (source={s.source}, vertical={s.vertical})")
 
-    X, ids, sources, verticals = load_and_stack(specs)
-    print(f"loaded {len(ids):,} records, dim={X.shape[1]}")
+    # Sample at load time so peak memory is bounded by batch_size * dim, not
+    # by the largest parquet's full SOAP column.
+    X_ds, ids_ds, sources_ds, verticals_ds = load_and_stack(
+        specs,
+        n_per_class=args.n_per_class,
+        label_by=label_by,
+        seed=args.seed,
+    )
+    labels_ds = verticals_ds if label_by == "vertical" else sources_ds
 
-    labels = verticals if label_by == "vertical" else sources
-    keep = balanced_downsample(len(ids), labels, args.n_per_class, args.seed)
-    X_ds = X[keep]
-    ids_ds = [ids[i] for i in keep]
-    sources_ds = [sources[i] for i in keep]
-    verticals_ds = [verticals[i] for i in keep]
-    labels_ds = [labels[i] for i in keep]
-    print(f"downsampled to {len(ids_ds):,} records ({args.n_per_class}/class, {len(set(labels_ds))} classes)")
+    # Final balanced trim in case quota * n_parquets > n_per_class.
+    keep = balanced_downsample(len(ids_ds), labels_ds, args.n_per_class, args.seed)
+    X_ds = X_ds[keep]
+    ids_ds = [ids_ds[i] for i in keep]
+    sources_ds = [sources_ds[i] for i in keep]
+    verticals_ds = [verticals_ds[i] for i in keep]
+    labels_ds = [labels_ds[i] for i in keep]
+    print(
+        f"loaded + downsampled to {len(ids_ds):,} records "
+        f"({args.n_per_class}/class, {len(set(labels_ds))} classes, dim={X_ds.shape[1]})"
+    )
 
     reducer, Y = fit_umap(
         X_ds,
