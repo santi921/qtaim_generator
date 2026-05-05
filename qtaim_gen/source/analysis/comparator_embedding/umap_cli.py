@@ -64,6 +64,16 @@ def main(argv: list[str] | None = None) -> int:
         help="With --n-components 3, also write an interactive plotly HTML.",
     )
     p.add_argument(
+        "--no-save-reducer",
+        action="store_true",
+        help=(
+            "Skip writing the fitted reducer to <prefix>.umap.joblib. The "
+            "embedding parquet is enough for plotting; the joblib only matters "
+            "if you want reducer.transform() of new vectors later. Reducers "
+            "for big fits can be 6+ GB so you usually don't want them."
+        ),
+    )
+    p.add_argument(
         "--transform-rest",
         action="store_true",
         help=(
@@ -204,12 +214,13 @@ def main(argv: list[str] | None = None) -> int:
             Path(f"{out}.3d.html"),
             title=f"SOAP UMAP 3D ({args.mode}, label_by={label_by})",
         )
-    save_reducer(reducer, Path(f"{out}.umap.joblib"))
+    if not args.no_save_reducer:
+        save_reducer(reducer, Path(f"{out}.umap.joblib"))
 
-    print(
-        f"done. outputs: {out}.embedding.parquet ({len(ids_all):,} rows), "
-        f"{out}.png, {out}.umap.joblib"
-    )
+    written = [f"{out}.embedding.parquet ({len(ids_all):,} rows)", f"{out}.png"]
+    if not args.no_save_reducer:
+        written.append(f"{out}.umap.joblib")
+    print("done. outputs: " + ", ".join(written))
     return 0
 
 
