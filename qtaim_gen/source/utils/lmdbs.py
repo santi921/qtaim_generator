@@ -1,13 +1,16 @@
 import os
 import lmdb
 import json
+import logging
 import pickle
 from typing import Dict, List, Tuple, Any, Optional, Union
 from glob import glob
 from dataclasses import dataclass
-import numpy as np 
+import numpy as np
 from pymatgen.core import Molecule
 from pymatgen.analysis.graphs import MoleculeGraph
+
+logger = logging.getLogger(__name__)
 
 from qtaim_gen.source.utils.io import (
     get_bonds_from_coords,
@@ -17,6 +20,30 @@ from qtaim_gen.source.core.parse_qtaim import (
     get_spin_charge_from_orca_inp,
     orca_inp_to_dict,
 )
+
+
+def _derive_lmdb_key(folder_path: str, root_dir: str) -> str:
+    """Derive a deterministic LMDB key from a job folder path.
+
+    For folder-list mode: key = relpath(folder, root_dir) with os.sep replaced by '__'.
+    Falls back to the absolute path (encoded the same way, leading sep stripped) when
+    the folder is not under root_dir.
+
+    Examples:
+        root='/data/omol/', folder='/data/omol/sub/job/step0' -> 'sub__job__step0'
+        root='/data/foo/',  folder='/elsewhere/job'           -> 'elsewhere__job' (warns)
+    """
+    norm_root = os.path.normpath(root_dir)
+    norm_folder = os.path.normpath(folder_path)
+    rel = os.path.relpath(norm_folder, norm_root)
+    if rel == ".." or rel.startswith(".." + os.sep):
+        logger.warning(
+            "folder '%s' is not under root_dir '%s'; using absolute-path key fallback.",
+            folder_path,
+            root_dir,
+        )
+        rel = norm_folder.lstrip(os.sep)
+    return rel.replace(os.sep, "__")
 
 
 def convert_inp_to_xyz(orca_path, output_path):
@@ -214,10 +241,12 @@ def json_2_lmdbs(
     move_files: Optional[bool] = False,
     limit: Optional[int] = None,
     shard_folders: Optional[List[str]] = None,
+    folder_paths: Optional[List[str]] = None,
 ):
     """Converts folders of output json files to lmdb files.
     Args:
-        root_dir (str): Root directory containing the json files.
+        root_dir (str): Root directory containing the json files (also used as the
+            relpath prefix for key derivation in folder_paths mode).
         out_dir (str): Output directory for the lmdb files.
         data_type (str): Data type to convert. Options are "charge", "bond", "other", "qtaim".
         out_lmdb (str): Output lmdb file.
@@ -225,10 +254,25 @@ def json_2_lmdbs(
         clean (Optional[bool], optional): If True, delete the json files. Defaults to False.
         move_files (Optional[bool], optional): If files were moved into separate ./generator/ folders in each job
         limit (Optional[int], optional): Limit number of files to process (for debugging).
-        shard_folders (Optional[List[str]], optional): If set, only process these folder names (for sharding).
+        shard_folders (Optional[List[str]], optional): If set, only process these folder names (legacy flat-glob mode).
+        folder_paths (Optional[List[str]], optional): If set, iterate this explicit list of job folder
+            paths instead of globbing. LMDB keys are derived from each folder's relpath under root_dir
+            (os.sep replaced by '__'). Use this for jagged hierarchies. Mutually exclusive with shard_folders.
     """
+    if folder_paths is not None and shard_folders is not None:
+        raise ValueError("folder_paths and shard_folders are mutually exclusive")
+
     chunk_ind = 1
-    if shard_folders is not None:
+    if folder_paths is not None:
+        files_target = []
+        for folder in folder_paths:
+            if move_files:
+                candidate = os.path.join(folder, "generator", f"{data_type}.json")
+            else:
+                candidate = os.path.join(folder, f"{data_type}.json")
+            if os.path.exists(candidate):
+                files_target.append(candidate)
+    elif shard_folders is not None:
         # Only glob files from the assigned shard folders
         files_target = []
         for folder in shard_folders:
@@ -253,9 +297,15 @@ def json_2_lmdbs(
         for file in chunk:
             with open(file, "r") as f:
                 data = json.load(f)
-                # When move_files=True, path is root/job/generator/file.json -> use [-3]
-                # When move_files=False, path is root/job/file.json -> use [-2]
-                name = file.split("/")[-3] if move_files else file.split("/")[-2]
+                if folder_paths is not None:
+                    # Folder-list mode: key from full job-folder relpath under root_dir
+                    job_folder = os.path.dirname(os.path.dirname(file)) if move_files else os.path.dirname(file)
+                    name = _derive_lmdb_key(job_folder, root_dir)
+                else:
+                    # Legacy mode: leaf folder name
+                    # When move_files=True, path is root/job/generator/file.json -> use [-3]
+                    # When move_files=False, path is root/job/file.json -> use [-2]
+                    name = file.split("/")[-3] if move_files else file.split("/")[-2]
                 data_dict[name] = data
 
         write_lmdb(data_dict, out_dir, f"{data_type}_{chunk_ind}.lmdb")
@@ -287,20 +337,32 @@ def inp_files_2_lmdbs(
     merge: Optional[bool] = True,
     limit: Optional[int] = None,
     shard_folders: Optional[List[str]] = None,
+    folder_paths: Optional[List[str]] = None,
 ):
     """
     Converts orca inp files into lmdbs at scale.
     Args:
-        root_dir (str): Root directory containing the input files.
+        root_dir (str): Root directory containing the input files (also used as the
+            relpath prefix for key derivation in folder_paths mode).
         out_dir (str): Output directory for the lmdb files.
         out_lmdb (str): Output lmdb file.
         chunk_size (int): Size of the chunks to split the data into.
         clean (Optional[bool], optional): If True, delete the input files. Defaults to False.
         limit (Optional[int], optional): Limit number of files to process (for debugging).
         merge (Optional[bool], optional): If True, merge the lmdb files after creation. Defaults to True.
-        shard_folders (Optional[List[str]], optional): If set, only process these folder names (for sharding).
+        shard_folders (Optional[List[str]], optional): If set, only process these folder names (legacy flat-glob mode).
+        folder_paths (Optional[List[str]], optional): If set, iterate this explicit list of job folder
+            paths instead of globbing. LMDB keys are derived from each folder's relpath under root_dir.
+            Mutually exclusive with shard_folders.
     """
-    if shard_folders is not None:
+    if folder_paths is not None and shard_folders is not None:
+        raise ValueError("folder_paths and shard_folders are mutually exclusive")
+
+    if folder_paths is not None:
+        files = []
+        for folder in folder_paths:
+            files.extend(glob(os.path.join(folder, "*.inp")))
+    elif shard_folders is not None:
         files = []
         for folder in shard_folders:
             files.extend(glob(os.path.join(root_dir, folder, "*.inp")))
@@ -331,7 +393,10 @@ def inp_files_2_lmdbs(
 
             molecule_graph = MoleculeGraph.with_empty_graph(molecule)
 
-            identifier = file.split("/")[-2]
+            if folder_paths is not None:
+                identifier = _derive_lmdb_key(os.path.dirname(file), root_dir)
+            else:
+                identifier = file.split("/")[-2]
 
             # Get bonds directly from coords (no xyz file needed)
             bonds = get_bonds_from_coords(species, coords)
