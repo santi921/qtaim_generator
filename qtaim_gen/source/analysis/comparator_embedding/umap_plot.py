@@ -123,7 +123,8 @@ def load_and_stack(
     label_by: str = "source",
     seed: int = 42,
     batch_size: int = 2048,
-) -> tuple[np.ndarray, list[str], list[str], list[str]]:
+    return_indices: bool = False,
+):
     """Load all parquets, with optional per-class sampling at read time.
 
     When ``n_per_class`` is given, the per-parquet quota is
@@ -133,6 +134,10 @@ def load_and_stack(
 
     Returns (X, ids, sources, verticals). All parquets must share the same
     species_z and dim; we abort otherwise.
+
+    If ``return_indices`` is True, also returns ``picked_indices`` -- a dict
+    mapping ParquetSpec.path -> np.ndarray of row indices kept from that
+    parquet. Useful for the transform-rest pass that needs the complement.
     """
     if not specs:
         raise RuntimeError("no parquets to load")
@@ -159,11 +164,13 @@ def load_and_stack(
     ids: list[str] = []
     sources: list[str] = []
     verticals: list[str] = []
+    picked: dict[Path, np.ndarray] = {}
 
     for s in specs:
         n_total = pq.read_metadata(str(s.path)).num_rows
         if n_total == 0:
             logger.warning("empty parquet, skipping: %s", s.path)
+            picked[s.path] = np.empty(0, dtype=np.int64)
             continue
 
         if n_per_class is None:
@@ -176,6 +183,7 @@ def load_and_stack(
             quota = (n_per_class + n_par - 1) // n_par
 
         keep_idx = _sample_indices(n_total, quota, rng)
+        picked[s.path] = keep_idx
         if len(keep_idx) == 0:
             continue
 
@@ -199,7 +207,82 @@ def load_and_stack(
         raise RuntimeError("no SOAP records loaded")
 
     X = np.vstack(Xs).astype(np.float32, copy=False)
+    if return_indices:
+        return X, ids, sources, verticals, picked
     return X, ids, sources, verticals
+
+
+def transform_rest(
+    reducer,
+    specs: list[ParquetSpec],
+    picked_indices: dict[Path, np.ndarray],
+    dim: int,
+    batch_size: int = 2048,
+    fraction: float = 1.0,
+    seed: int = 42,
+):
+    """For each parquet, transform rows that were NOT in the fit set.
+
+    When ``fraction < 1.0``, each parquet's rest-set is uniformly subsampled
+    (deterministic via ``seed``) before transform. Useful when a full pass
+    is too slow but a denser overlay than the fit set is desired.
+
+    Memory peak per call: ``batch_size * dim * 4`` bytes for X plus the
+    reducer's internal kNN graph (~1-2 GB for a 16k-point fit).
+    """
+    if not (0.0 < fraction <= 1.0):
+        raise ValueError(f"fraction must be in (0, 1]; got {fraction}")
+    rng = np.random.default_rng(seed)
+
+    Y_chunks: list[np.ndarray] = []
+    ids_out: list[str] = []
+    sources_out: list[str] = []
+    verticals_out: list[str] = []
+
+    for s in specs:
+        n_total = pq.read_metadata(str(s.path)).num_rows
+        if n_total == 0:
+            continue
+        used = set(int(i) for i in picked_indices.get(s.path, np.empty(0, dtype=np.int64)))
+        rest_full = np.array([i for i in range(n_total) if i not in used], dtype=np.int64)
+        n_full = len(rest_full)
+        if n_full == 0:
+            continue
+        if fraction < 1.0:
+            n_keep = max(1, int(round(n_full * fraction)))
+            if n_keep < n_full:
+                rest = np.sort(rng.choice(rest_full, size=n_keep, replace=False))
+            else:
+                rest = rest_full
+        else:
+            rest = rest_full
+        n_rest = len(rest)
+        logger.info(
+            "transform-rest: %s -> %d / %d points (fraction=%.2f)",
+            s.path.name,
+            n_rest,
+            n_full,
+            fraction,
+        )
+
+        # Stream load + transform in batches to keep memory bounded.
+        for start in range(0, n_rest, batch_size):
+            chunk = rest[start : start + batch_size]
+            X_chunk, batch_ids = _read_parquet_sampled(s.path, chunk, dim, batch_size=batch_size)
+            Y_chunk = reducer.transform(X_chunk)
+            Y_chunks.append(np.asarray(Y_chunk, dtype=np.float32))
+            ids_out.extend(batch_ids)
+            sources_out.extend([s.source] * len(batch_ids))
+            verticals_out.extend([s.vertical] * len(batch_ids))
+
+    if not Y_chunks:
+        return (
+            np.empty((0, reducer.n_components), dtype=np.float32),
+            [],
+            [],
+            [],
+        )
+    return np.vstack(Y_chunks), ids_out, sources_out, verticals_out
 
 
 def balanced_downsample(
@@ -257,6 +340,7 @@ def write_embedding_parquet(
     verticals: list[str],
     species_z: str,
     n_components: int,
+    in_fit: Optional[list[bool]] = None,
 ) -> None:
     import pyarrow as pa
 
@@ -269,6 +353,8 @@ def write_embedding_parquet(
     }
     if n_components >= 3:
         cols["umap_z"] = Y[:, 2].tolist()
+    if in_fit is not None:
+        cols["in_fit_set"] = list(in_fit)
     schema_metadata = {
         b"species_z": species_z.encode("ascii"),
         b"n_components": str(n_components).encode("ascii"),

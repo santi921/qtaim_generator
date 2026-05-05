@@ -11,6 +11,8 @@ import argparse
 import logging
 from pathlib import Path
 
+import numpy as np
+
 from qtaim_gen.source.analysis.comparator_embedding.umap_plot import (
     balanced_downsample,
     discover_parquets,
@@ -19,6 +21,7 @@ from qtaim_gen.source.analysis.comparator_embedding.umap_plot import (
     plot_2d,
     plot_3d_html,
     save_reducer,
+    transform_rest,
     write_embedding_parquet,
 )
 
@@ -60,6 +63,32 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="With --n-components 3, also write an interactive plotly HTML.",
     )
+    p.add_argument(
+        "--transform-rest",
+        action="store_true",
+        help=(
+            "After fitting on the n_per_class subset, stream-load every "
+            "remaining row from each parquet and project it via "
+            "reducer.transform(). Output embedding contains all rows with "
+            "an in_fit_set bool column. Memory bounded by batch_size."
+        ),
+    )
+    p.add_argument(
+        "--transform-batch-size",
+        type=int,
+        default=2048,
+        help="Batch size for the transform-rest streaming pass.",
+    )
+    p.add_argument(
+        "--transform-fraction",
+        type=float,
+        default=1.0,
+        help=(
+            "Fraction of the non-fit rows to transform (0 < x <= 1). "
+            "Lower means a sparser overlay but proportionally faster wall time. "
+            "Default 1.0 = transform everything."
+        ),
+    )
     p.add_argument("--log-level", default="INFO")
     args = p.parse_args(argv)
 
@@ -77,15 +106,19 @@ def main(argv: list[str] | None = None) -> int:
 
     # Sample at load time so peak memory is bounded by batch_size * dim, not
     # by the largest parquet's full SOAP column.
-    X_ds, ids_ds, sources_ds, verticals_ds = load_and_stack(
+    X_ds, ids_ds, sources_ds, verticals_ds, picked_idx = load_and_stack(
         specs,
         n_per_class=args.n_per_class,
         label_by=label_by,
         seed=args.seed,
+        return_indices=True,
     )
     labels_ds = verticals_ds if label_by == "vertical" else sources_ds
 
-    # Final balanced trim in case quota * n_parquets > n_per_class.
+    # Final balanced trim in case quota * n_parquets > n_per_class. Note: the
+    # trim happens *after* picked_idx is recorded, so transform-rest uses the
+    # untrimmed picked set as the "in fit" definition. That's correct: any
+    # row we read but didn't fit on still gets projected via .transform().
     keep = balanced_downsample(len(ids_ds), labels_ds, args.n_per_class, args.seed)
     X_ds = X_ds[keep]
     ids_ds = [ids_ds[i] for i in keep]
@@ -97,7 +130,7 @@ def main(argv: list[str] | None = None) -> int:
         f"({args.n_per_class}/class, {len(set(labels_ds))} classes, dim={X_ds.shape[1]})"
     )
 
-    reducer, Y = fit_umap(
+    reducer, Y_fit = fit_umap(
         X_ds,
         n_components=args.n_components,
         n_neighbors=args.n_neighbors,
@@ -106,40 +139,77 @@ def main(argv: list[str] | None = None) -> int:
         seed=args.seed,
     )
 
-    # Recover species_z from any one parquet metadata (already validated identical).
+    # Recover species_z + dim from any one parquet metadata (already validated identical).
     import pyarrow.parquet as pq
 
-    species_z = (pq.read_schema(str(specs[0].path)).metadata or {}).get(
-        b"species_z", b""
-    ).decode()
+    schema0 = pq.read_schema(str(specs[0].path))
+    species_z = (schema0.metadata or {}).get(b"species_z", b"").decode()
+    dim = int(schema0.field("soap").type.list_size)
+
+    if args.transform_rest:
+        print(
+            f"transform-rest: streaming complement of fit set "
+            f"(fraction={args.transform_fraction})..."
+        )
+        Y_rest, ids_rest, sources_rest, verticals_rest = transform_rest(
+            reducer,
+            specs,
+            picked_idx,
+            dim=dim,
+            batch_size=args.transform_batch_size,
+            fraction=args.transform_fraction,
+            seed=args.seed,
+        )
+        print(f"  transformed {len(ids_rest):,} additional records")
+        Y_all = np.vstack([Y_fit, Y_rest]) if len(ids_rest) else Y_fit
+        ids_all = ids_ds + ids_rest
+        sources_all = sources_ds + sources_rest
+        verticals_all = verticals_ds + verticals_rest
+        labels_all = (
+            verticals_all if label_by == "vertical" else sources_all
+        )
+        in_fit = [True] * len(ids_ds) + [False] * len(ids_rest)
+    else:
+        Y_all, ids_all, sources_all, verticals_all = (
+            Y_fit,
+            ids_ds,
+            sources_ds,
+            verticals_ds,
+        )
+        labels_all = labels_ds
+        in_fit = [True] * len(ids_ds)
 
     out = args.output_prefix
     write_embedding_parquet(
         Path(f"{out}.embedding.parquet"),
-        Y,
-        ids_ds,
-        sources_ds,
-        verticals_ds,
+        np.asarray(Y_all),
+        ids_all,
+        sources_all,
+        verticals_all,
         species_z,
         args.n_components,
+        in_fit=in_fit,
     )
     plot_2d(
-        Y if args.n_components == 2 else Y[:, :2],
-        labels_ds,
+        Y_all if args.n_components == 2 else Y_all[:, :2],
+        labels_all,
         Path(f"{out}.png"),
-        title=f"SOAP UMAP ({args.mode}, label_by={label_by})",
+        title=f"SOAP UMAP ({args.mode}, label_by={label_by}, n={len(ids_all):,})",
     )
     if args.n_components == 3 and args.plot_3d_html:
         plot_3d_html(
-            Y,
-            labels_ds,
-            ids_ds,
+            Y_all,
+            labels_all,
+            ids_all,
             Path(f"{out}.3d.html"),
             title=f"SOAP UMAP 3D ({args.mode}, label_by={label_by})",
         )
     save_reducer(reducer, Path(f"{out}.umap.joblib"))
 
-    print(f"done. outputs: {out}.embedding.parquet, {out}.png, {out}.umap.joblib")
+    print(
+        f"done. outputs: {out}.embedding.parquet ({len(ids_all):,} rows), "
+        f"{out}.png, {out}.umap.joblib"
+    )
     return 0
 
 
