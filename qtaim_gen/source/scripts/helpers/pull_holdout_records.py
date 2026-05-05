@@ -346,12 +346,19 @@ def merge_shards(input_dirs: List[Path], output_dir: Path) -> int:
             env_out.close()
             print(f"  {desc:<10}: {n_records:>7,} records merged")
 
-    # Aggregate per-shard summaries.
+    # Aggregate per-shard summaries. Tolerate empty / malformed CSVs that
+    # an earlier shard may have produced before the header-on-empty fix.
     summary_dfs = []
     for shard in input_dirs:
         sp = shard / "pull_summary.csv"
-        if sp.exists():
+        if not sp.exists():
+            continue
+        try:
             summary_dfs.append(pd.read_csv(sp))
+        except pd.errors.EmptyDataError:
+            print(f"  WARN: {sp} is empty, skipping", file=sys.stderr)
+        except Exception as e:
+            print(f"  WARN: failed to read {sp}: {e}", file=sys.stderr)
     if summary_dfs:
         merged_sum = (
             pd.concat(summary_dfs)
@@ -468,7 +475,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         all_summary.extend(summary_rows)
         all_manifest.extend(manifest_rows)
 
-    summary_df = pd.DataFrame(all_summary)
+    # Always write a header even when empty so a sibling merge step does
+    # not break on a zero-byte CSV.
+    summary_cols = ["holdout_id", "descriptor", "requested", "found",
+                    "missing_record", "missing_due_to_absent_lmdb"]
+    summary_df = (pd.DataFrame(all_summary, columns=summary_cols)
+                  if all_summary else pd.DataFrame(columns=summary_cols))
     summary_df.to_csv(args.output_dir / "pull_summary.csv", index=False)
     print(f"\nwrote pull_summary.csv ({len(summary_df)} rows)")
 
