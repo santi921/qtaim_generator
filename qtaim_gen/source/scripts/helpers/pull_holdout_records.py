@@ -260,11 +260,15 @@ def pull_one(
 
     manifest_rows: List[dict] = []
     for (v, rp), descs in found_per_record.items():
+        # 'key' must match the LMDB key written above (vertical-prefixed,
+        # post-normalization) so downstream consumers can use it directly
+        # without re-deriving the lmdb-key transform.
+        lmdb_key = manifest_rel_path_to_lmdb_key(v, rp)
         manifest_rows.append({
             "holdout_id": holdout_id,
             "vertical": v,
             "rel_path": rp,
-            "key": f"{v}__{rp}",
+            "key": f"{v}__{lmdb_key}",
             "descriptors_found": ",".join(sorted(descs)),
             "n_descriptors_found": len(descs),
         })
