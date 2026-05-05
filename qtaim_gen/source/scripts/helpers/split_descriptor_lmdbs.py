@@ -21,13 +21,23 @@ Output layout (one block per vertical):
   <output_dir>/<vertical>/train/<descriptor>.lmdb
   <output_dir>/<vertical>/val/<descriptor>.lmdb
   <output_dir>/<vertical>/test/<descriptor>.lmdb
-  <output_dir>/<vertical>/split_assignment.json   # per-key split decision
-  <output_dir>/split_plan.json                    # global summary
+  <output_dir>/<vertical>/split_assignment.json   # ratios, seed, n_total,
+                                                  # n_excluded, per_split_counts,
+                                                  # per-descriptor write counts,
+                                                  # per-key split decision
 
 The per-split sub-directories mirror the original per-vertical layout
 (<vertical>/<descriptor>.lmdb), so downstream tools that already accept
 a per-vertical descriptor root can be pointed at e.g.
 <output_dir>/<vertical>/train/ without modification.
+
+No global plan file is written. Each shard owns its own <vertical>/
+directory, so parallel xargs runs are race-free. Aggregate at the end
+manually if you want a single summary, e.g.:
+  python -c "import json, glob; \\
+    d = {p.split('/')[-2]: json.load(open(p)) \\
+         for p in glob.glob('<output_dir>/*/split_assignment.json')}; \\
+    print(json.dumps(d, indent=2))" > split_plan.json
 
 Sharded usage (mirror of pull_holdout_records):
   printf '%s\\n' "${VERTICALS[@]}" | xargs -P 8 -I {} \\
@@ -153,18 +163,8 @@ def split_one_vertical(
     print(f"[{vertical}]   excluded={n_excluded:,}  assigned={n_assigned:,}  "
           + " ".join(f"{s}={len(per_split_keys[s]):,}" for s in SPLIT_NAMES))
 
-    # Persist per-key assignment for audit.
-    assignment_path = out_v / "split_assignment.json"
-    with open(assignment_path, "w") as f:
-        json.dump({
-            "vertical": vertical,
-            "ratios": list(ratios),
-            "seed": seed,
-            "n_total": n_total,
-            "n_excluded": n_excluded,
-            "per_split_counts": {s: len(per_split_keys[s]) for s in SPLIT_NAMES},
-            "assignment": assignment,
-        }, f)
+    # split_assignment.json is written after the descriptor copy loop
+    # so its 'descriptors' field reflects what actually got written.
 
     # Copy records per descriptor.
     desc_summary: List[dict] = []
@@ -235,6 +235,20 @@ def split_one_vertical(
             "per_split_written": per_split_written,
             "per_split_missing": per_split_missing,
         })
+
+    # Persist everything per vertical: split assignment + descriptor counts.
+    assignment_path = out_v / "split_assignment.json"
+    with open(assignment_path, "w") as f:
+        json.dump({
+            "vertical": vertical,
+            "ratios": list(ratios),
+            "seed": seed,
+            "n_total": n_total,
+            "n_excluded": n_excluded,
+            "per_split_counts": {s: len(per_split_keys[s]) for s in SPLIT_NAMES},
+            "descriptors": desc_summary,
+            "assignment": assignment,
+        }, f)
 
     return {
         "vertical": vertical,
@@ -327,28 +341,13 @@ def main(argv: Optional[List[str]] = None) -> int:
         )
         summaries.append(summary)
 
-    # Global summary.
-    plan_path = args.output_dir / "split_plan.json"
-    # Merge into existing plan if present (sharded runs).
-    existing = {}
-    if plan_path.exists():
-        try:
-            existing = json.loads(plan_path.read_text())
-        except Exception:
-            existing = {}
-    plan_data = {
-        "lmdb_root": str(args.lmdb_root),
-        "holdout_parquet": str(args.holdout_parquet),
-        "ratios": list(ratios),
-        "seed": args.seed,
-        "descriptors": list(args.descriptors),
-        "verticals": existing.get("verticals", {}),
-    }
-    for s in summaries:
-        plan_data["verticals"][s["vertical"]] = s
-    with open(plan_path, "w") as f:
-        json.dump(plan_data, f, indent=2)
-    print(f"\nwrote split_plan.json -> {plan_path}")
+    # Per-vertical state lives in <output_dir>/<vertical>/split_assignment.json.
+    # No global plan is written here - that would race under parallel xargs runs.
+    # Aggregate manually after all shards finish:
+    #   python -c "import json,glob; \
+    #     d={p.split('/')[-2]: json.load(open(p)) \
+    #        for p in glob.glob('<output_dir>/*/split_assignment.json')}; \
+    #     print(json.dumps(d, indent=2))" > split_plan.json
 
     # Aggregate counts across this run only.
     run_total = sum(s.get("n_total", 0) for s in summaries)
