@@ -18,11 +18,16 @@ Pipeline per vertical:
      each record into the LMDB matching its assigned split
 
 Output layout (one block per vertical):
-  <output_dir>/<vertical>/<descriptor>_train.lmdb
-  <output_dir>/<vertical>/<descriptor>_val.lmdb
-  <output_dir>/<vertical>/<descriptor>_test.lmdb
+  <output_dir>/<vertical>/train/<descriptor>.lmdb
+  <output_dir>/<vertical>/val/<descriptor>.lmdb
+  <output_dir>/<vertical>/test/<descriptor>.lmdb
   <output_dir>/<vertical>/split_assignment.json   # per-key split decision
   <output_dir>/split_plan.json                    # global summary
+
+The per-split sub-directories mirror the original per-vertical layout
+(<vertical>/<descriptor>.lmdb), so downstream tools that already accept
+a per-vertical descriptor root can be pointed at e.g.
+<output_dir>/<vertical>/train/ without modification.
 
 Sharded usage (mirror of pull_holdout_records):
   printf '%s\\n' "${VERTICALS[@]}" | xargs -P 8 -I {} \\
@@ -180,7 +185,9 @@ def split_one_vertical(
         )
         envs_out = {}
         for s in SPLIT_NAMES:
-            out_path = out_v / f"{descriptor}_{s}.lmdb"
+            split_dir = out_v / s
+            split_dir.mkdir(parents=True, exist_ok=True)
+            out_path = split_dir / f"{descriptor}.lmdb"
             for ext in ("", "-lock"):
                 p = Path(str(out_path) + ext)
                 if p.exists():
