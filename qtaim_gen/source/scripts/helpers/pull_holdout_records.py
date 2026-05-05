@@ -35,7 +35,7 @@ convention in `qtaim_gen.source.utils.lmdbs`.
 Holdout overlap is allowed: a structure that appears in both H1 and H7
 will be written to both H1/*.lmdb and H7/*.lmdb (no dedup across holdouts).
 
-Usage:
+Single-host usage:
     python -m qtaim_gen.source.scripts.helpers.pull_holdout_records \\
         --holdout_dir data/OMol4M_lmdbs/filter_csv_for_holdouts \\
         --lmdb_root   data/OMol4M_lmdbs \\
@@ -44,6 +44,21 @@ Usage:
 Verticals named in a holdout CSV but absent under --lmdb_root are
 reported and skipped, not an error: this lets the script run on a dev
 machine with a partial LMDB checkout.
+
+Sharded parallel usage (per-vertical-subset jobs, then a merge step):
+    # job A
+    pull_holdout_records --include_verticals omol tm_react --output_dir $OUT/shard_a
+    # job B
+    pull_holdout_records --include_verticals ml_mo low_spin_23 --output_dir $OUT/shard_b
+    # ...
+    # final merge (after rsync if shards ran on different hosts)
+    pull_holdout_records --merge_from $OUT/shard_a $OUT/shard_b ... --output_dir $OUT
+
+Each shard writes its own H{N}/*.lmdb, pull_summary.csv, and
+manifest_holdout.parquet. The merge step concatenates them into a single
+output dir. Keys are vertical-prefixed so shards must use disjoint
+vertical lists (the script does not check this; collisions silently
+overwrite during merge).
 """
 from __future__ import annotations
 
@@ -257,6 +272,117 @@ def pull_one(
     return summary_rows, manifest_rows
 
 
+def merge_shards(input_dirs: List[Path], output_dir: Path) -> int:
+    """Concatenate sharded pull outputs into a single output dir.
+
+    For each H{N}/<descriptor>.lmdb across input shards, copy all keys
+    into a merged output LMDB. Keys are vertical-prefixed by the pull
+    step so collisions across disjoint shards do not occur in practice;
+    if they do (overlapping vertical lists), later shards silently
+    overwrite earlier values. Aggregates pull_summary.csv (sum across
+    shards) and manifest_holdout.parquet (concat).
+    """
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Discover holdout dirs (e.g. H1, H3, H6, H7, H8) across all shards.
+    holdout_ids = sorted({
+        d.name for shard in input_dirs
+        if shard.is_dir()
+        for d in shard.iterdir()
+        if d.is_dir() and d.name.startswith("H")
+    })
+    if not holdout_ids:
+        print("merge_from: no H{N}/ subdirs found in input shards", file=sys.stderr)
+        return 1
+
+    print(f"merging shards: {[str(d) for d in input_dirs]}")
+    print(f"holdouts: {holdout_ids}")
+    print(f"output:   {output_dir}")
+
+    for hid in holdout_ids:
+        out_holdout = output_dir / hid
+        out_holdout.mkdir(parents=True, exist_ok=True)
+
+        descriptors = sorted({
+            f.stem for shard in input_dirs
+            if (shard / hid).is_dir()
+            for f in (shard / hid).glob("*.lmdb")
+        })
+        print(f"\n=== {hid}: {len(descriptors)} descriptors ===")
+
+        for desc in descriptors:
+            out_path = out_holdout / f"{desc}.lmdb"
+            for ext in ("", "-lock"):
+                p = Path(str(out_path) + ext)
+                if p.exists():
+                    p.unlink()
+
+            env_out = lmdb.open(
+                str(out_path),
+                map_size=LMDB_MAP_SIZE,
+                subdir=False,
+                meminit=False,
+                map_async=True,
+            )
+            n_records = 0
+            for shard in input_dirs:
+                src = shard / hid / f"{desc}.lmdb"
+                if not src.exists():
+                    continue
+                env_in = lmdb.open(
+                    str(src), subdir=False, readonly=True, lock=False,
+                    readahead=True, meminit=False,
+                )
+                with env_in.begin() as txn_in, env_out.begin(write=True) as txn_out:
+                    for k, v in txn_in.cursor():
+                        if k == b"length":
+                            continue
+                        txn_out.put(k, v)
+                        n_records += 1
+                env_in.close()
+            with env_out.begin(write=True) as txn_out:
+                txn_out.put(b"length", pickle.dumps(n_records, protocol=-1))
+            env_out.sync()
+            env_out.close()
+            print(f"  {desc:<10}: {n_records:>7,} records merged")
+
+    # Aggregate per-shard summaries.
+    summary_dfs = []
+    for shard in input_dirs:
+        sp = shard / "pull_summary.csv"
+        if sp.exists():
+            summary_dfs.append(pd.read_csv(sp))
+    if summary_dfs:
+        merged_sum = (
+            pd.concat(summary_dfs)
+            .groupby(["holdout_id", "descriptor"], as_index=False)
+            .agg({
+                "requested": "sum",
+                "found": "sum",
+                "missing_record": "sum",
+                "missing_due_to_absent_lmdb": "sum",
+            })
+            .sort_values(["holdout_id", "descriptor"])
+            .reset_index(drop=True)
+        )
+        merged_sum.to_csv(output_dir / "pull_summary.csv", index=False)
+        print(f"\nwrote pull_summary.csv ({len(merged_sum)} rows, summed across shards)")
+
+    manifest_dfs = []
+    for shard in input_dirs:
+        mp = shard / "manifest_holdout.parquet"
+        if mp.exists():
+            manifest_dfs.append(pd.read_parquet(mp))
+    if manifest_dfs:
+        merged_man = pd.concat(manifest_dfs).sort_values(
+            ["holdout_id", "vertical", "rel_path"]
+        ).drop_duplicates(["holdout_id", "vertical", "rel_path"]).reset_index(drop=True)
+        merged_man.to_parquet(output_dir / "manifest_holdout.parquet", index=False)
+        print(f"wrote manifest_holdout.parquet ({len(merged_man):,} rows)")
+
+    return 0
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     p = argparse.ArgumentParser(
         description=__doc__,
@@ -275,17 +401,41 @@ def main(argv: Optional[List[str]] = None) -> int:
                         f"{' '.join(DEFAULT_DESCRIPTORS)}")
     p.add_argument("--only", nargs="*", default=None,
                    help="Only pull these holdout IDs (e.g. --only H1 H6)")
+    p.add_argument("--include_verticals", nargs="*", default=None, metavar="V",
+                   help="Process only these source verticals (use to shard by "
+                        "vertical for parallel execution; pair with a unique "
+                        "--output_dir per shard then run --merge_from to "
+                        "consolidate).")
+    p.add_argument("--merge_from", nargs="*", type=Path, default=None,
+                   metavar="SHARD_DIR",
+                   help="Merge mode: read these shard output dirs and write a "
+                        "consolidated output to --output_dir. When set, all "
+                        "pull-mode flags are ignored.")
     args = p.parse_args(argv)
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
+
+    if args.merge_from:
+        return merge_shards(list(args.merge_from), args.output_dir)
 
     print(f"holdout_dir: {args.holdout_dir}")
     print(f"lmdb_root:   {args.lmdb_root}")
     print(f"output_dir:  {args.output_dir}")
     print(f"descriptors: {args.descriptors}")
+    if args.include_verticals:
+        print(f"include_verticals: {args.include_verticals}")
 
     available = discover_verticals(args.lmdb_root)
-    print(f"\nverticals on disk: {len(available)}")
+    if args.include_verticals:
+        # Limit "available" to the requested subset that actually exists on disk.
+        requested_set = set(args.include_verticals)
+        unknown = sorted(requested_set - set(available))
+        if unknown:
+            print(f"WARN: --include_verticals contains {len(unknown)} verticals "
+                  f"not under --lmdb_root: {unknown}", file=sys.stderr)
+        available = [v for v in available if v in requested_set]
+
+    print(f"\nverticals to process: {len(available)}")
     for v in available:
         print(f"  {v}")
 
@@ -294,10 +444,24 @@ def main(argv: Optional[List[str]] = None) -> int:
         keep = set(args.only)
         holdouts = {k: v for k, v in holdouts.items() if k in keep}
 
+    # Filter each holdout_df to the shard's verticals so requested counts and
+    # manifest output are shard-local. The pull_one function further skips
+    # verticals not on disk, but pre-filtering keeps the requested totals
+    # correct under shard aggregation.
+    if args.include_verticals:
+        avail_set = set(available)
+        holdouts = {
+            hid: df[df["vertical"].isin(avail_set)].reset_index(drop=True)
+            for hid, df in holdouts.items()
+        }
+
     all_summary: List[dict] = []
     all_manifest: List[dict] = []
     for hid, hdf in holdouts.items():
         print(f"\n=== {hid}: requested {len(hdf):,} records ===")
+        if len(hdf) == 0:
+            print("  (no records for this shard, skipping)")
+            continue
         summary_rows, manifest_rows = pull_one(
             hid, hdf, args.lmdb_root, args.descriptors, args.output_dir,
         )
