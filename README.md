@@ -25,88 +25,15 @@ pip install -e ".[dev]"     # pytest, ruff
 
 The package has two main workflows:
 
-**QTAIM-only (3-step):** Generate ORCA inputs, run DFT + QTAIM analysis, parse outputs to JSON.
+**QTAIM-only:** `create-files` -> `run-qtaim-gen` -> `parse-data`. Generates ORCA inputs, runs DFT + QTAIM analysis, parses outputs to JSON.
 
-**Full pipeline:** Run all descriptors (charges, bond orders, fuzzy densities, QTAIM), convert to typed LMDBs, build graph LMDBs for ML.
+**Full pipeline:** `json-to-lmdb` -> `generator-to-embed`. Converts parsed JSON to typed LMDBs, then builds graph LMDBs for ML training with `qtaim_embed`.
 
----
-
-## QTAIM Workflow
-
-### Step 1: Generate input files
-
-```bash
-create-files \
-  -file dataset.pkl \
-  -root /path/to/jobs \
-  -options_qm_file options_qm.json \
-  -parser Multiwfn
-```
-
-Key flags: `-reaction` for reaction datasets, `--molden_sub` for ECP jobs (converts `.gbw` to `.molden.input` before Multiwfn).
-
-See `qtaim_gen/source/scripts/options_qm.json` for all QM options.
-
-### Step 2: Run jobs
-
-```bash
-run-qtaim-gen \
-  -dir_active /path/to/jobs \
-  -orca_path /path/to/orca \
-  -num_threads 8 \
-  -folders_to_crawl 1000
-```
-
-Key flags: `-redo_qtaim` to clear and rerun QTAIM results, `-just_dft` to skip QTAIM.
-
-### Step 3: Parse outputs
-
-```bash
-parse-data \
-  --root /path/to/jobs \
-  --file_in dataset.pkl \
-  --file_out results.pkl
-```
-
-Key flags: `--impute` to fill missing values with mean, `--reaction` for reaction datasets, `--update_bonds_w_qtaim` to override bond definitions with QTAIM bond paths.
+For large datasets (e.g. OMol4M) with variable-depth job folder hierarchies, pass a flat list of absolute job paths to `json-to-lmdb --folder_list`. See `docs/SHARDING_GUIDE.md` for sharded conversion and `docs/JSON_TO_LMDB_SHARDING.md` for parallel shard processing.
 
 ---
 
-## Full Pipeline: JSON -> Typed LMDBs -> Graph LMDBs
-
-### Step 1: Convert job outputs to typed LMDBs
-
-```bash
-json-to-lmdb --file jobs.pkl --root /path/to/job_folders --out /path/to/lmdbs
-```
-
-Produces one LMDB per data type: `structure.lmdb`, `charge.lmdb`, `qtaim.lmdb`, `bond.lmdb`, `fuzzy.lmdb`, `other.lmdb`, `orca.lmdb`.
-
-For large datasets with variable-depth job folder hierarchies (e.g. OMol4M), pass a flat list of absolute job paths:
-
-```bash
-json-to-lmdb \
-  --root_dir /path/to/root \
-  --out_dir /path/to/lmdbs \
-  --folder_list /path/to/job_paths.txt \
-  --all --shard_index 0 --total_shards 6
-```
-
-LMDB keys are derived from each folder's relpath under `--root_dir` with path separators replaced by `__`. See `docs/SHARDING_GUIDE.md` for sharded conversion details.
-
-### Step 2: Build graph LMDBs
-
-```bash
-generator-to-embed --config /path/to/converter_config.json
-```
-
-Reads typed LMDBs and writes serialized graph objects (DGL or PyG `HeteroData`) for direct use with `qtaim_embed`.
-
-Add `--split` to produce train/val/test LMDBs with train-only scaler fitting:
-
-```bash
-generator-to-embed --config config.json --split
-```
+## Graph LMDBs
 
 ### Converter types
 
