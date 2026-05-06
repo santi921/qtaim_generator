@@ -12,15 +12,16 @@ NeurIPS 2026 Evaluations and Datasets track. Submission window ~8 days from 2026
 
 ## Three lead claims (abstract + intro)
 
-1. **Scale**: ~4M structures with multi-method post-DFT descriptors (5+ partial-charge methods, 4+ bond-order methods, full QTAIM topology, fuzzy descriptors, ORCA-derived properties), one to three orders of magnitude beyond prior published descriptor datasets.
+1. **Scale**: ~4M structures with multi-method post-DFT descriptors (6 partial-charge schemes: Hirshfeld, CM5, ADCH, Becke, Mulliken-ORCA, Loewdin-ORCA; 4+ bond-order methods; full QTAIM topology; fuzzy descriptors; ORCA-derived properties), one to three orders of magnitude beyond prior published descriptor datasets.
+    (Note: mayer_orca was initially counted but is excluded - it duplicates mulliken_orca. The "5+" count from early drafts referred to the wrong number; correct count is 6 independent schemes.)
 2. **Reusable infrastructure**: open HPC pipeline (qtaim_generator) with measured throughput on ALCF and NERSC, sharded LMDB output, end-to-end reproducible from ORCA inputs to graph-ready datasets.
 3. **Evaluation protocol with explicit claims**: canonical tasks, composition-ordered splits, 6+ independent held-out chemistry stress tests inheriting OMol25's hardest axes, plus quantified per-descriptor noise floors from cross-method comparison.
 
 ## Working title
 
-"OMol-Descriptors-4M: A Multi-Method Post-DFT Descriptor Dataset and Open HPC Pipeline for Reproducible Chemistry ML Evaluation"
+"Beyond Energies and Forces: OMol-Descriptors-4M, an Open Post-DFT Pipeline and Benchmark for Chemistry ML"
 
-(Title can iterate. Lead with descriptors, not QTAIM, since charges, bond orders, and fuzzy descriptors are equal contributions.)
+(Locked 2026-05-04. Earlier working title: "OMol-Descriptors-4M: A Multi-Method Post-DFT Descriptor Dataset and Open HPC Pipeline for Reproducible Chemistry ML Evaluation". Title can still iterate; lead with descriptors, not QTAIM, since charges, bond orders, and fuzzy descriptors are equal contributions.)
 
 ## Three writing conventions to adopt now
 
@@ -65,12 +66,14 @@ NeurIPS 2026 Evaluations and Datasets track. Submission window ~8 days from 2026
 
 - 3.1 Provenance: 34 verticals totaling ~3.99M structures, derived from OMol25's public 4M release. License inheritance.
 - 3.2 Descriptor families:
-  - Partial charges: Lowdin, MBIS, Hirshfeld, CM5, ADCH, Mayer
-  - Bond orders: Mayer, Wiberg, fuzzy, Laplacian-bond-order
+  - Partial charges: Lowdin (ORCA), Mulliken (ORCA), Hirshfeld, CM5, ADCH, Becke
+    (Note: "Mayer charges" from ORCA's Mayer population output are identical to Mulliken charges - ORCA labels the QA column as "Mulliken gross atomic charge". mayer_orca is excluded from all charge-agreement analyses.)
+  - Bond orders: Mayer (ORCA), Loewdin (ORCA), fuzzy (Multiwfn), IBSI (Multiwfn, Tier 1), Laplacian (Multiwfn, Tier 2)
+    (Note: "Wiberg" is not a scheme name in the data. ORCA provides Mayer and Loewdin bond orders. There is no Wiberg key in bond.lmdb.)
   - QTAIM topology: BCPs (rho, Laplacian, ellipticity, energy density), ring/cage CPs, non-nuclear attractors, atomic basins
   - Fuzzy / integration-based: atomic volumes, ESP-derived
   - ORCA-derived globals: energies, orbital energies, dipole, gradient, SCF metadata
-- 3.3 Per-vertical breakdown (Table T1). Columns: `n_structures`, `n_unique_formulas`, `n_partial_charge_records` (sum across charge schemes; not every job carries every scheme), `n_bcps` (QTAIM bond critical points), `n_bonds_total` (across Mayer / Wiberg / fuzzy / LBO), `n_atom_records` (per-atom charge / fuzzy targets), corrupt-folder rate. Counts are read directly off the per-type LMDBs, not extrapolated from the manifest, so a reader can verify e.g. that "5+ partial charge methods on 4M structures" actually means ~20M charge records and not fewer.
+- 3.3 Per-vertical breakdown (Table T1). Columns: `n_structures`, `n_unique_formulas`, `n_partial_charge_records` (sum across charge schemes; not every job carries every scheme), `n_bcps` (QTAIM bond critical points), `n_bonds_total` (across Mayer-ORCA / Loewdin-ORCA / fuzzy / IBSI), `n_atom_records` (per-atom charge / fuzzy targets), corrupt-folder rate. Counts are read directly off the per-type LMDBs, not extrapolated from the manifest, so a reader can verify e.g. that "5+ partial charge methods on 4M structures" actually means ~20M charge records and not fewer.
 - 3.4 Storage: per vertical, eight LMDBs (`structure`, `charge`, `qtaim`, `bond`, `fuzzy`, `other`, `orca`, `timings`) sharing a common key derived from job folder relpath. One sentence per LMDB on which descriptors live there and which converter consumes it (`timings.lmdb` is provenance-only, no converter consumes it). Sharding details forward-reference F4.
 - 3.5 One-line on corrupt-folder rate (C1').
 
@@ -116,12 +119,12 @@ Tables: T3 per-comparator structural-overlap and descriptor-breadth row.
 The longest analytical section. Core of the model-free narrative.
 
 - 6.1 Methodology: same structures, multiple methods, residual distributions and rank correlations. Define "noise floor" precisely.
-- 6.2 B1 charge-method comparison: per-element residual distributions across Lowdin / MBIS / Hirshfeld / CM5 / ADCH.
-- 6.3 B2 bond-order comparison: Mayer / Wiberg / fuzzy / LBO / QTAIM disagreement statistics.
+- 6.2 B1 charge-method comparison: per-element residual distributions across Lowdin / MBIS / Hirshfeld / CM5 / ADCH. **ECP outlier note**: ADCH and Becke real-space integration assumes all electrons are present in the wavefunction; ECPs remove core electrons from ECP-treated heavy metals (Ca2+, Cu2+, Ba2+, Mo, etc.), producing pathological basin-integration values (observed range: -28 e to +18 e on neighboring N/S atoms in 5A_elytes and mo_hydrides). Hirshfeld is ECP-resistant because it uses atomic density ratios that partially cancel. Three options for the paper (reader's call): (a) report the outlier fraction per element and vertical and winsorize at +/-5 e for the noise floor table, disclosing the clipping threshold; (b) include an ECP-affected flag column in the per-atom parquet so downstream users can filter themselves; (c) regress outlier count on ECP-element prevalence per vertical as a quantitative artifact characterization. Recommend (a) + (b): simple, transparent, and gives downstream users the unclipped data.
+- 6.3 B2 bond-order comparison: Mayer-ORCA / Loewdin-ORCA / fuzzy-Multiwfn disagreement statistics (universal coverage across all verticals). IBSI and Laplacian included where present (Tier 1/2 only).
 - 6.4 B3 QTAIM internal redundancy: rho-BCP, delocalization index, ellipticity correlations.
 - 6.5 B4 per-vertical noise floors: a published table that future ML work should not claim to beat.
 - 6.6 B5 high-disagreement chemistry: where methods disagree most, with chemical interpretation.
-- 6.7 B6 dipole alignment across schemes. Five Multiwfn partial-charge schemes (CM5, ADCH, Becke, Hirshfeld, VDD) emit a charge-derived dipole per job (`dipole_info["mag"]` / `["xyz"]` in `parse_multiwfn.py`), and ORCA emits the DFT dipole (`dipole_au`, `dipole_magnitude_au`, both in `DEFAULT_ORCA_FILTER`). All six are present per job for the full ~4M corpus. We compare magnitude and direction of the charge-derived dipoles against the ORCA reference and against each other, broken down by element composition and net charge. Reportable: (a) which charge scheme tracks the ORCA dipole most closely on real molecules, (b) chemistries where charge-only dipoles diverge from the DFT reference. The analysis is a single streaming pass joining `charge.lmdb` and `orca.lmdb` per vertical, so it is cheap and reuses the streaming aggregator. Page-budget impact: small; B6 piggybacks on F5 as an extra row, no new figure.
+- 6.7 B6 pairwise dipole agreement across reported methods. **CM5 dipole dropped**: confirmed Multiwfn artifact - the CM5 section in the combined Multiwfn output file prints the Hirshfeld promolecular dipole byte-for-byte (verified against `tests/test_files/multiwfn/charge.out`: CM5 mag = 1.825152 a.u. = Hirshfeld mag; VDD and Becke differ). CM5 charges are valid; CM5 dipoles are not usable. Analysis uses four independent Multiwfn dipoles (ADCH, Becke, Hirshfeld; VDD if present) plus the ORCA SCF dipole, treating all as peer estimates with no privileged reference. The headline output is a pairwise agreement matrix (Pearson r over magnitudes, cosine similarity over vectors) pooled across all 32 verticals. Reportable: (a) which method pairs agree most tightly on real molecules, (b) chemistries where any method drifts from the rest. Single streaming pass joining `charge.lmdb` + `orca.lmdb`; reuses the streaming aggregator.
 
 Figures: F5 noise floor matrix (descriptor by element, dipole alignment row appended for B6), F6 high-disagreement exemplars.
 Tables: T4 noise floors (dipole alignment row included).
@@ -143,7 +146,7 @@ T1 Per-atom partial charge regression. Multi-target: predict ADCH, Lowdin, Mulli
 
 T2 BCP property regression. Targets: rho, Laplacian, ellipticity at every QTAIM bond critical point. Headline metric: per-element-pair MAE on rho; Pearson r per pair; stratified by bond type (single, double, aromatic, metal-ligand) inferred from QTAIM topology.
 
-T3 Bond classification. Binary: does a QTAIM BCP exist between an atom pair within 2x sum-of-covalent-radii. Compared against Mayer / Wiberg / fuzzy agreement. Report macro-F1 plus per-element-pair confusion stats.
+T3 Bond classification. Binary: does a QTAIM BCP exist between an atom pair within 2x sum-of-covalent-radii. Compared against Mayer-ORCA / Loewdin-ORCA / fuzzy agreement. Report macro-F1 plus per-element-pair confusion stats.
 
 TODO (T3 sharpening): bond classification correlates strongly with naive distance cutoffs in the bulk. After bond.lmdb / qtaim.lmdb are populated, mine the disagreement set (QTAIM says bonded but distance does not, or vice versa). The disagreement subset is the discriminating evaluation slice for T3.
 
@@ -276,7 +279,7 @@ Tables: T5 tasks-by-splits-by-metrics.
 - Inherited OMol25 biases: chemistry coverage, geometry sampling.
 - **PDB-TM transfer is not evaluable on this release.** OMol25 deliberately holds metal-containing protein structures out of the public 4M training split, with the explicit goal of letting users test learning transfer from metal-complex and electrolyte data into protein metal sites. Because we inherit that split, our manifest contains zero `has_tm=True` rows in any PDB-family vertical (`protein_*`, `pdb_pockets_*`, `pdb_fragments_*`, `ml_protein_interface`), which is why we omit a PDB-TM held-out (H2) from §8.3. PDB-TM transfer becomes evaluable only against the full OMol25 release; v2 of this dataset will incorporate PDB-TM structures and add H2 as a held-out set.
 - Out of scope for v1: force and energy prediction (OMol25 publishes both on the same structure keys; v2 will release a merged forces+energies+descriptors variant and benchmark the OMol25 model ecosystem on it). Also out of scope for v1: MD, conformational sampling, time-dependent properties.
-- Descriptor-method-specific limitations: ECP-related artifacts, basis-set sensitivity.
+- Descriptor-method-specific limitations: ECP-related artifacts in ADCH and Becke charges (real-space basin integration breaks when core electrons are replaced by ECPs; observed outlier range -28 e to +18 e on atoms near Ca2+, Cu2+, Ba2+, Mo; Hirshfeld is unaffected). Basis-set sensitivity not characterized here. CM5 dipole is not usable (Multiwfn reports the Hirshfeld promolecular dipole in the CM5 output section; CM5 atomic charges are unaffected).
 - Rare chemistry counts: lanthanide, actinide totals from manifest, with honest call-out if small.
 
 ### 10. Broader Impact

@@ -53,21 +53,25 @@ def enumerate_candidate_pairs(
 ) -> list[tuple[int, int, float, float]]:
     """Return (i, j, distance, r_cov_sum) for pairs within pool_multiplier * r_cov_sum.
 
-    i, j are 0-indexed with i < j. Brute-force O(n^2); fine up to ~200 atoms.
+    i, j are 0-indexed with i < j. Vectorized via numpy broadcasting.
     """
     mol = structure_record["molecule"]
-    coords = mol.cart_coords
+    coords = mol.cart_coords                              # (n, 3)
     syms = _symbols(mol)
-    radii = [_rcov(s) for s in syms]
-    n = len(syms)
-    pairs: list[tuple[int, int, float, float]] = []
-    for i in range(n):
-        for j in range(i + 1, n):
-            r_cov_sum = radii[i] + radii[j]
-            d = float(np.linalg.norm(coords[i] - coords[j]))
-            if d <= pool_multiplier * r_cov_sum:
-                pairs.append((i, j, d, r_cov_sum))
-    return pairs
+    radii = np.array([_rcov(s) for s in syms])           # (n,)
+
+    diff = coords[:, None, :] - coords[None, :, :]       # (n, n, 3)
+    dists = np.sqrt((diff ** 2).sum(axis=-1))             # (n, n)
+    rcov_sum = radii[:, None] + radii[None, :]            # (n, n)
+
+    mask = np.triu(dists <= pool_multiplier * rcov_sum, k=1)
+    i_idx, j_idx = np.where(mask)
+    return list(zip(
+        i_idx.tolist(),
+        j_idx.tolist(),
+        dists[i_idx, j_idx].tolist(),
+        rcov_sum[i_idx, j_idx].tolist(),
+    ))
 
 
 def classify_geom_bonded(distance: float, r_cov_sum: float, k: float = 1.3) -> bool:

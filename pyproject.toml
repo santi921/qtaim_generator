@@ -46,6 +46,8 @@ analysis-dipole-alignment = "qtaim_gen.source.scripts.analysis_dipole_alignment:
 analysis-charge-alignment = "qtaim_gen.source.scripts.analysis_charge_alignment:main"
 # Analysis (paper Stream D: cross-vertical bond agreement)
 analysis-bond-agreement = "qtaim_gen.source.scripts.analysis_bond_agreement:main"
+# Analysis (paper Stream F: cross-method noise floors)
+analysis-noise-floors = "qtaim_gen.source.scripts.analysis_noise_floors:main"
 
 # QTAIM - only
 create-files = "qtaim_gen.source.scripts.create_files:main"
