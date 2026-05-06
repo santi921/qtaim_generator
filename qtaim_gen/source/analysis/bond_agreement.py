@@ -47,31 +47,37 @@ def _symbols(mol) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
+_PAIR_CHUNK = 256  # rows of i per block; peak RAM ~chunk * n_atoms * 40 bytes
+
+
 def enumerate_candidate_pairs(
     structure_record: dict,
     pool_multiplier: float = 1.4,
 ) -> list[tuple[int, int, float, float]]:
     """Return (i, j, distance, r_cov_sum) for pairs within pool_multiplier * r_cov_sum.
 
-    i, j are 0-indexed with i < j. Vectorized via numpy broadcasting.
+    i, j are 0-indexed with i < j. Processes i-rows in blocks of _PAIR_CHUNK to
+    avoid allocating the full O(n^2) distance matrix for large molecules.
     """
     mol = structure_record["molecule"]
     coords = mol.cart_coords                              # (n, 3)
     syms = _symbols(mol)
     radii = np.array([_rcov(s) for s in syms])           # (n,)
+    n = len(radii)
 
-    diff = coords[:, None, :] - coords[None, :, :]       # (n, n, 3)
-    dists = np.sqrt((diff ** 2).sum(axis=-1))             # (n, n)
-    rcov_sum = radii[:, None] + radii[None, :]            # (n, n)
-
-    mask = np.triu(dists <= pool_multiplier * rcov_sum, k=1)
-    i_idx, j_idx = np.where(mask)
-    return list(zip(
-        i_idx.tolist(),
-        j_idx.tolist(),
-        dists[i_idx, j_idx].tolist(),
-        rcov_sum[i_idx, j_idx].tolist(),
-    ))
+    pairs: list[tuple[int, int, float, float]] = []
+    for i0 in range(0, n, _PAIR_CHUNK):
+        i1 = min(i0 + _PAIR_CHUNK, n)
+        diff  = coords[i0:i1, None, :] - coords[None, :, :]  # (chunk, n, 3)
+        dists = np.sqrt((diff ** 2).sum(axis=-1))              # (chunk, n)
+        rcov  = radii[i0:i1, None] + radii[None, :]           # (chunk, n)
+        cand  = dists <= pool_multiplier * rcov                # (chunk, n)
+        for di in range(i1 - i0):
+            cand[di, : i0 + di + 1] = False                   # enforce i < j
+        ri, rj = np.where(cand)
+        for di, j in zip(ri.tolist(), rj.tolist()):
+            pairs.append((i0 + di, int(j), float(dists[di, j]), float(rcov[di, j])))
+    return pairs
 
 
 def classify_geom_bonded(distance: float, r_cov_sum: float, k: float = 1.3) -> bool:
