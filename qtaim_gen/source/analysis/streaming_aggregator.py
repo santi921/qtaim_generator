@@ -49,6 +49,7 @@ def _open(root: Path, lmdb_type: str) -> lmdb.Environment:
         lock=False,
         readahead=False,
         meminit=False,
+        map_size=int(1099511627776 * 2),
     )
 
 
