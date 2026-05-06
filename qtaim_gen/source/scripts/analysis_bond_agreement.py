@@ -185,12 +185,15 @@ def main():
     parser = argparse.ArgumentParser(
         description="Stream D: bond agreement analysis (single vertical or corpus).",
     )
-    parser.add_argument("--root", type=Path, required=True,
+    parser.add_argument("--root", type=Path, default=None,
                         help="Vertical root (has structure.lmdb) or corpus root "
-                             "(subdirs are verticals). Auto-detected.")
+                             "(subdirs are verticals). Required unless --merge_from is set.")
     parser.add_argument("--output", type=Path, required=True,
                         help="Single-vertical: per-pair parquet path. "
-                             "Corpus: output directory.")
+                             "Corpus / merge: output directory.")
+    parser.add_argument("--merge_from", nargs="+", type=Path, default=None,
+                        help="Merge existing per-vertical *_ba.parquet shards "
+                             "(reads sibling *_agg.parquet files). Skips re-computation.")
     parser.add_argument("--geom-k", type=float, default=1.3)
     parser.add_argument("--bo-threshold", type=float, default=0.5)
     parser.add_argument("--pool-multiplier", type=float, default=1.4)
@@ -202,6 +205,21 @@ def main():
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s",
                         stream=sys.stderr)
+
+    # --- merge-only mode ---
+    if args.merge_from is not None:
+        out_dir = args.output
+        out_dir.mkdir(parents=True, exist_ok=True)
+        vertical_outputs: list[tuple[str, Path]] = []
+        for p in sorted(args.merge_from):
+            p = Path(p)
+            name = p.stem[:-3] if p.stem.endswith("_ba") else p.stem
+            vertical_outputs.append((name, p))
+        _write_combined(vertical_outputs, out_dir)
+        return
+
+    if args.root is None:
+        parser.error("--root is required unless --merge_from is set")
 
     verticals = discover_verticals(args.root)
     if not verticals:
@@ -215,7 +233,7 @@ def main():
     if corpus_mode:
         out_dir = args.output
         out_dir.mkdir(parents=True, exist_ok=True)
-        vertical_outputs: list[tuple[str, Path]] = []
+        v_outputs: list[tuple[str, Path]] = []
         for name, lmdb_root in verticals:
             out_path = out_dir / f"{name}_ba.parquet"
             dis_path = (
@@ -233,8 +251,8 @@ def main():
                 progress=not args.no_progress,
                 emit_disagreements=dis_path,
             )
-            vertical_outputs.append((name, out_path))
-        _write_combined(vertical_outputs, out_dir)
+            v_outputs.append((name, out_path))
+        _write_combined(v_outputs, out_dir)
     else:
         name, lmdb_root = verticals[0]
         _run_vertical(
