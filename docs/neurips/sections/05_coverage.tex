@@ -1,0 +1,26 @@
+\section{Coverage vs Prior Descriptor Datasets}
+\label{sec:coverage}
+
+\subsection{Framing}
+% Comparison against prior descriptor releases only.
+% Geometry datasets inside our data are sources, not comparators.
+
+\subsection{Method}
+% Project prior descriptor datasets into our descriptor space.
+% Coverage metric: fraction of B's distribution within D's support.
+
+\subsection{Results}
+% Table T3, Figure F4.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=\textwidth]{figures/umap/umap_all_paper.pdf}
+\caption{SOAP-UMAP embedding of OMol-Descriptors-4M against four structural
+comparator datasets. Each point is a molecule projected via UMAP fitted on a
+500-molecule-per-source balanced subsample (2,500 anchor points total).
+SOAP descriptors use a 12-element species set
+(H, B, C, N, O, F, Si, P, S, Cl, Br, I) common to all five sources.
+OMol-Descriptors-4M (gray) is rendered as a background haze to expose the
+relative positions of PCQM4Mv2, QMugs, QM7-X, and SchNet4AIM.}
+\label{fig:umap_coverage}
+\end{figure}

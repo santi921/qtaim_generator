@@ -1,0 +1,65 @@
+\section{Census}
+\label{sec:census}
+
+OMol-Descriptors-4M comprises 3{,}985{,}130 structures across 34 chemical
+verticals, indexing 1{,}302{,}074 unique alphabetical formulas. At the
+descriptor level the corpus carries 218{,}519{,}775 atom-level records,
+30{,}203{,}025 charge-scheme records (per-job, per-method), 253{,}974{,}706
+QTAIM bond critical points, and 1.58 billion bond-order records spanning
+the three universal schemes. All counts in this section are corpus-level
+totals prior to the train/val/test partition introduced in
+Sec.~\ref{sec:eval-pipeline}.
+
+\subsection{Bond records per vertical}
+\label{sec:census-bonds}
+
+Figure~\ref{fig:bond_scheme_breakdown} shows the per-vertical bond record
+count, decomposed by scheme. Three bond-order schemes are reported on every
+structure: Mayer (ORCA), L\"owdin (ORCA), and fuzzy bond order (Multiwfn).
+At the corpus level L\"owdin contributes the largest share at
+688{,}904{,}594 records (43.6\%), followed by fuzzy at 491{,}385{,}480
+(31.1\%) and Mayer at 401{,}137{,}813 (25.4\%). Each row in the stacked
+bar therefore corresponds to three independent estimates of the same
+underlying bond, not three distinct bonds; cross-scheme agreement on those
+shared bonds is treated separately in Sec.~\ref{sec:noise}.
+
+The vertical-level distribution is heavy-tailed. The omol vertical alone
+accounts for 680{,}873{,}135 records (43\% of the bond corpus); the two
+\texttt{pdb\_fragments} verticals together contribute 159{,}038{,}457; the
+DFT-relaxed \texttt{geom\_orca6} subset adds 76{,}494{,}584. The lower
+end is set by \texttt{noble\_gas\_compounds} (1{,}404 records, 18
+structures), which we retain as a stress case for sparse-bonding regimes.
+Scheme mix is also non-uniform across verticals.
+\texttt{electrolytes\_scaled\_sep} is Mayer-heavy (46\% of its bond
+records), reflecting the polar bond profile of the scaled-separation
+geometries; \texttt{rgd\_uks} is L\"owdin-dominant (44\%).
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=\textwidth]{figures/census/bond_scheme_breakdown.pdf}
+\caption{Per-vertical bond-order record counts, stacked by scheme
+(Mayer, L\"owdin, fuzzy) on a log axis. Verticals are sorted by total
+bond-record count. The three schemes report on the same set of bonds, so
+counts represent records, not unique bond instances. Corpus total across
+the three schemes is 1.58~billion records.}
+\label{fig:bond_scheme_breakdown}
+\end{figure}
+
+\subsection{Charge-scheme records per vertical}
+\label{sec:census-charges}
+
+Charge-scheme records track how many partial-charge methods executed
+successfully on each structure. The corpus carries 30{,}203{,}025 records
+across 3{,}985{,}130 structures, an average of 7.58 schemes per structure,
+consistent with the six independent methods documented in
+Sec.~\ref{sec:dataset} plus the ORCA-side Mulliken cross-check. Per-vertical
+totals span four orders of magnitude, from \texttt{rmechdb}
+(28{,}024 records over 2{,}803 structures) to omol (9{,}997{,}947
+over 1{,}428{,}279). The full per-vertical breakdown is given in
+Table~\ref{tab:t1_census} in the appendix.
+
+Per-element-pair bond-order distributions and pairwise cross-method
+agreement (charges, dipoles, bond orders) are reported in
+Sec.~\ref{sec:noise}; the formula-hashed train/val/test
+partition built from these counts is described in
+Sec.~\ref{sec:eval}.
