@@ -1,7 +1,18 @@
-\section{Pipeline as Contribution}\label{sec:pipeline}
+\section{Pipeline}\label{sec:pipeline}
 
 \subsection{Architecture}
-% Figure F1: pipeline diagram.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\linewidth]{figures/pipeline_diagram.png}
+  \caption{Overview of the \texttt{qtaim\_gen} post-processing pipeline. Starting from an
+    OMol25 \texttt{.gbw} wavefunction, the pipeline converts to Molden format (with EDF
+    loading for ECP correctness), runs one of three calculation tiers through Multiwfn, and
+    emits seven per-folder JSON outputs. These are converted to typed LMDBs sharing a common
+    key, which can be consumed directly by graph-based frameworks or converted to DGL
+    heterographs via \texttt{qtaim\_embed}.}
+  \label{fig:pipeline}
+\end{figure}
 
 The workflow pipeline is an orchestration layer over two external binaries,
 ORCA's \texttt{orca\_2mkl}~\cite{ORCA} and Multiwfn~\cite{multiwfn}. The
@@ -40,7 +51,7 @@ choice of how much compute they want to invest in the post-processing step, whil
 Table~\ref{tab:tiers} summarizes the per-family contents of each tier; the QTAIM critical-point
 search is run at every tier and the ORCA-derived globals are always parsed.
 
-\begin{table}[h]
+\begin{table}[H]
 \centering
 \small
 \caption{Per-family contents of each calculation tier (\texttt{full\_set}). Tiers are
@@ -98,39 +109,36 @@ is retained specifically for QTAIM-only graphs, where bond edges are defined by 
 critical points rather than by structural cutoffs. The resulting graphs expose 
 atom-level, bond-level, and global-level targets simultaneously.
 
-\paragraph{Foundation for downstream ML work.} This pipeline is intented to provide not just 
-a means to automate high-throughput DFT analysis, but also to be a stable foundation for 
-scalable downstream ML work. LMDBs were used throughout, with matching keys across all descriptor
-families, to provide a rapid source for data factories in ML models. Researchers can leverage this 
-breathe of available information to train models for partial charges, bond orders, teacher-student 
-models for downstream tasks, foundational models, etc. With the converters for \texttt{qtaim\_embed}, 
-we also provide a working method for training graph neural networks (GNNs) \textcolor{red}{TODO: cite}
-including a diverse set of message-passing and global-readout layers, more detail on that in Sec.~\ref{sec:ml_postprocessing}. 
-
-\paragraph{Figure F1 prompt (for image generation).}
-The following prompt can be passed to a vector-capable image generator (Nano Banana,
-Claude, or similar) to render Figure F1:
-\begin{quote}\small
-\textit{Generate a clean horizontal SVG flow diagram of a quantum chemistry post-processing
-pipeline. Left to right, four stages connected by labeled arrows.
-Stage 1 (input): a single block labeled ``OMol25 \texttt{.gbw}'' with a small sub-arrow into
-``\texttt{orca\_2mkl} $\rightarrow$ Molden + EDF''.
-Stage 2 (compute, drawn as a stack of three escalating boxes labeled
-``Tier 0: 4 charges, fuzzy bond, QTAIM, baseline fuzzy density'',
-``Tier 1: +VDD, +MBIS, +CHELPG, +IBSI, +ELF/MBIS fuzzy'',
-``Tier 2: +Bader, +Laplacian bond, +Laplacian/$\nabla\rho$ fuzzy, ESP geometry''),
-with two side annotations: a small lock icon labeled
-``\texttt{.processing.lock} (distributed safety)'' and a zip icon labeled
-``\texttt{out\_files.zip} (reparse without recompute)''.
-Stage 3 (per-folder JSON outputs): seven small file icons in a row labeled
-\texttt{charge.json}, \texttt{bond.json}, \texttt{qtaim.json}, \texttt{fuzzy\_full.json},
-\texttt{other.json}, \texttt{orca.json}, \texttt{timings.json}.
-Stage 4 (LMDB + graphs): a database cylinder labeled ``Typed LMDBs (one per family,
-shared keys)'' followed by two output branches, one labeled ``Portable: Chemprop / custom
-PyG'' and one labeled ``\texttt{qtaim\_embed} $\rightarrow$ DGL heterographs (atom / bond /
-global tasks)''. Use a muted blue and gray palette, sans-serif labels, no decorative icons
-beyond the stated ones.}
-\end{quote}
+%\paragraph{Foundation for downstream ML work.} This pipeline is intented to provide not just
+%\subsection{ML-Ready Post-Processing}\label{sec:ml_postprocessing}
+%
+%The LMDB stage is the boundary between the pipeline and downstream machine-learning use.
+%Three features sit on top of that boundary and are intended to make benchmark construction
+%turnkey rather than reinventable.
+%
+%The first is \emph{merging}: after a sharded run, the per-shard LMDBs across all descriptor
+%families are merged into one LMDB per family with a single pass that reads each shard, copies
+%records, and verifies key uniqueness. Merge is the operation that produces the artifact a
+%benchmark consumer actually reads.
+%
+%The second is \emph{multi-vertical splitting}. The \texttt{multi-vertical-merge} entrypoint
+%takes a pipeline JSON config that lists multiple verticals (e.g.\ SPICE, QM9, RMechDB,
+%OMol25 subsets) and produces per-vertical train/val/test graph LMDBs whose splits are
+%globally consistent: a molecular formula that appears in two verticals is assigned to the
+%same split partition in both, so a held-out composition is held out everywhere. The
+%implementation lives in \texttt{qtaim\_gen/source/utils/multi\_vertical.py} and runs in
+%three phases (Plan, Build, Scale).
+%
+%The third is \emph{train-only scaler fitting}. Feature scalers (atomic, bond, and global)
+%are fit on the train split only and applied to validation and test, eliminating the
+%quiet-but-common leakage path where a scaler fit on the full pool implicitly tells the
+%model the test-set mean. When \texttt{multi-vertical-merge} is used, the scaler is fit on
+%the union of all train splits across verticals and then applied per-vertical, which is the
+%right behavior when the downstream model is trained on the full mixture.
+%
+%Together these three features turn a raw LMDB dump into something a benchmarking team can
+%load directly: composition-consistent splits, per-vertical files, leakage-safe scalers, and
+%deterministic keys.
 
 \paragraph{Features flagged for trimming before camera-ready.} While auditing the codebase
 to write this section, two threads of dead or near-dead capability surfaced. First,
@@ -164,35 +172,35 @@ consolidated LMDB per family. The same shard/merge pattern is implemented at the
 stage in \texttt{converter.py}, so graph construction can also be parallelized and joined
 into one final per-vertical graph LMDB.
 
-\subsection{ML-Ready Post-Processing}\label{sec:ml_postprocessing}
-
-The LMDB stage is the boundary between the pipeline and downstream machine-learning use.
-Three features sit on top of that boundary and are intended to make benchmark construction
-turnkey rather than reinventable.
-
-The first is \emph{merging}: after a sharded run, the per-shard LMDBs across all descriptor
-families are merged into one LMDB per family with a single pass that reads each shard, copies
-records, and verifies key uniqueness. Merge is the operation that produces the artifact a
-benchmark consumer actually reads.
-
-The second is \emph{multi-vertical splitting}. The \texttt{multi-vertical-merge} entrypoint
-takes a pipeline JSON config that lists multiple verticals (e.g.\ SPICE, QM9, RMechDB,
-OMol25 subsets) and produces per-vertical train/val/test graph LMDBs whose splits are
-globally consistent: a molecular formula that appears in two verticals is assigned to the
-same split partition in both, so a held-out composition is held out everywhere. The
-implementation lives in \texttt{qtaim\_gen/source/utils/multi\_vertical.py} and runs in
-three phases (Plan, Build, Scale).
-
-The third is \emph{train-only scaler fitting}. Feature scalers (atomic, bond, and global)
-are fit on the train split only and applied to validation and test, eliminating the
-quiet-but-common leakage path where a scaler fit on the full pool implicitly tells the
-model the test-set mean. When \texttt{multi-vertical-merge} is used, the scaler is fit on
-the union of all train splits across verticals and then applied per-vertical, which is the
-right behavior when the downstream model is trained on the full mixture.
-
-Together these three features turn a raw LMDB dump into something a benchmarking team can
-load directly: composition-consistent splits, per-vertical files, leakage-safe scalers, and
-deterministic keys.
+%\subsection{ML-Ready Post-Processing}\label{sec:ml_postprocessing}
+%
+%The LMDB stage is the boundary between the pipeline and downstream machine-learning use.
+%Three features sit on top of that boundary and are intended to make benchmark construction
+%turnkey rather than reinventable.
+%
+%The first is \emph{merging}: after a sharded run, the per-shard LMDBs across all descriptor
+%families are merged into one LMDB per family with a single pass that reads each shard, copies
+%records, and verifies key uniqueness. Merge is the operation that produces the artifact a
+%benchmark consumer actually reads.
+%
+%The second is \emph{multi-vertical splitting}. The \texttt{multi-vertical-merge} entrypoint
+%takes a pipeline JSON config that lists multiple verticals (e.g.\ SPICE, QM9, RMechDB,
+%OMol25 subsets) and produces per-vertical train/val/test graph LMDBs whose splits are
+%globally consistent: a molecular formula that appears in two verticals is assigned to the
+%same split partition in both, so a held-out composition is held out everywhere. The
+%implementation lives in \texttt{qtaim\_gen/source/utils/multi\_vertical.py} and runs in
+%three phases (Plan, Build, Scale).
+%
+%The third is \emph{train-only scaler fitting}. Feature scalers (atomic, bond, and global)
+%are fit on the train split only and applied to validation and test, eliminating the
+%quiet-but-common leakage path where a scaler fit on the full pool implicitly tells the
+%model the test-set mean. When \texttt{multi-vertical-merge} is used, the scaler is fit on
+%the union of all train splits across verticals and then applied per-vertical, which is the
+%right behavior when the downstream model is trained on the full mixture.
+%
+%Together these three features turn a raw LMDB dump into something a benchmarking team can
+%load directly: composition-consistent splits, per-vertical files, leakage-safe scalers, and
+%deterministic keys.
 
 \subsection{HPC Portability}
 % ALCF, NERSC, single-node configs. One paragraph each.
@@ -220,44 +228,13 @@ The submission scripts and Parsl configs for all three centers are checked in un
 fallback are all minimal edits of the same template. Reproducing a run on a new center is
 expected to require swapping the provider class and the queue/account fields, nothing more.
 
-\subsection{Throughput and Parallel Scaling}
-% Figure F3: throughput and scaling curves.
-
-Here we report a local scaling experiment where we intent to show the concurrency performance 
-of Multiwfn on our routines. The local sweep is run on 16 copies of a moderately-sized structure drawn from
-the dataset (from the droplet vertical here). It contains 36 atoms where we ran the three levels 
-of calculations in triplicate with Multiwfn 3.8. We sweep the number of concurrent job-folder 
-workers $\in \{1, 2, 4, 16\}$ at a fixed budget of cores (16) running to unearth how concurrency impacts wallclock. 
-The configurations are W16T1 (16 workers $\times$ 1 thread/job), W4T4 (4 workers $\times$ 4 threads/job), W2T8 
-(2 workers $\times$ 8 threads/job), and W1T16 (1 worker $\times$ 16 threads/job). Here we see that single-threaded 
-jobs yield the best performance with lower wallclock times across all three calculation levels. Thus, we 
-recommend users to prioritize more workers with fewer threads per job assuming that you do not run into memory bottlenecks 
-on larger systems with more memory-intensive routines.
-
-\begin{figure}[h]
-\centering
-\includegraphics[width=0.75\textwidth]{figures/profiling_study/throughput_curves.pdf}
-\caption{Multiwfn QTAIM post-processing wallclock as a function of intra-node concurrency
-configuration. Each configuration processes 16 homogeneous copies of \texttt{droplet\_test}
-(36 atoms, def2-TZVPD) under cascade-restart tiers. Configurations saturate a 16-thread
-budget differently: W16T1 (16 workers $\times$ 1 thread), W4T4 (4 workers $\times$ 4 threads),
-W2T8 (2 workers $\times$ 8 threads), W1T16 (1 worker $\times$ 16 threads). Each curve represents
-a calculation tier (\texttt{full\_set} 0=baseline, 1=middle, 2=full). Tiers 1 and 2 use
-\texttt{--restart} from the prior tier, so per-tier totals are cumulative phase wallclocks.
-Markers show medians across 3 replicates with min/max whisker error bars. Y-axis is logarithmic
-to visualize the ~75$\times$ range spanning W16T1 tier 0 (fastest) to W1T16 tier 2 (slowest).
-Hardware: AMD 7950X (16c/32t). ORCA 6.0.1 (\texttt{shared\_openmpi416}) with system OpenMPI
-4.1.2; Multiwfn 3.8 (Oct 2024 dev). ORCA SCF is precomputed; this measures post-processing only.}
-\label{fig:throughput_scaling}
-\end{figure}
-
 \subsection{Reproducibility}
 % ORCA + Multiwfn version pinning, deterministic conventions,
 % end-to-end smoke test (F6).
 
 The pipeline pins no specific version of ORCA or Multiwfn at runtime; some compatibility 
 across versions of either is expected though we have not exhaustively tested versions of each.
-For example, we also tested Orca5\textcolor{red}{TODO: cite} wfn conversion where our code handles 
+For example, we also tested Orca5\cite{orca5} wfn conversion where our code handles 
 its treatment of ECPs and as well as Orca 6.0 and 6.1. In the case of Multiwfn, any version that 
 follows the same menu structure should work though we only tested 3.9 and 3.8.
 The dataset reported here was produced with ORCA 6.0.0, the same release used for OMol25 and Multiwfn 3.8. 
