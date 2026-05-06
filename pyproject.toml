@@ -57,13 +57,19 @@ parse-data = "qtaim_gen.source.scripts.parse_data:main"
 run-qtaim-gen = "qtaim_gen.source.scripts.run:main"
 # QTAIM - only
 clean-failed-files = "qtaim_gen.source.scripts.helpers.clean_failed_files:main"
+# Dataset split and evaluation pipeline
+split-descriptor-lmdbs = "qtaim_gen.source.scripts.helpers.split_descriptor_lmdbs:main"
+merge-split-descriptors = "qtaim_gen.source.scripts.helpers.merge_split_descriptors:main"
+audit-splits = "qtaim_gen.source.scripts.helpers.audit_splits:main"
+tm-neighbor-lists = "qtaim_gen.source.scripts.helpers.tm_neighbor_lists:main"
+build-holdout-csvs = "qtaim_gen.source.analysis.build_holdout_csvs:main"
+pull-holdout-records = "qtaim_gen.source.scripts.helpers.pull_holdout_records:main"
+find-bad-json = "qtaim_gen.source.scripts.helpers.find_bad_json:main"
+
 # Full analysis
 full-runner = "qtaim_gen.source.scripts.full_runner:main"
 full-runner-parsl = "qtaim_gen.source.scripts.full_runner_parsl:main"
 full-runner-parsl-alcf = "qtaim_gen.source.scripts.full_runner_parsl_alcf:main"
-full-runner-parsl-nersc = "qtaim_gen.source.scripts.full_runner_parsl_nersc:main"
-
-generator-single-runner = "qtaim_gen.source.scripts.generator_run:main"
 
 find-empty-compressed = "qtaim_gen.source.scripts.helpers.find_empty_compressed:main"
 count-orca-json = "qtaim_gen.source.scripts.helpers.count_orca_json:main"
