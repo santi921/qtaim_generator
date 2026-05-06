@@ -337,6 +337,35 @@ def _top_keys(keys_arr: np.ndarray, residuals: np.ndarray, topk: int) -> str:
     return json.dumps(list(seen)[:topk])
 
 
+def _top_keys_from_mask(
+    keys: pd.Series, mask: np.ndarray, residuals: np.ndarray, topk: int,
+) -> str:
+    """Top-k keys without materializing a string array of all keys.
+
+    `residuals` is aligned to `keys[mask]`; `mask` is a boolean array over `keys`.
+    For a vertical with hundreds of millions of long string keys, calling
+    `keys.to_numpy(dtype=str)` blows up memory (U91 dtype -> 29+ GB just for the
+    array, and another copy for the masked slice). Only `topk` keys are ever used
+    in the output, so we use argpartition on the small residuals array and look
+    up only those k keys.
+    """
+    n = residuals.size
+    if n == 0:
+        return "[]"
+    n_take = min(topk, n)
+    if n_take < n:
+        part = np.argpartition(residuals, n - n_take)[-n_take:]
+        order = part[np.argsort(residuals[part])[::-1]]
+    else:
+        order = np.argsort(residuals)[::-1]
+    masked_idx = np.flatnonzero(mask)
+    orig_idx = masked_idx[order]
+    seen: dict[str, None] = {}
+    for k in keys.iloc[orig_idx].astype(str):
+        seen[k] = None
+    return json.dumps(list(seen)[:topk])
+
+
 def _empty_nf() -> pd.DataFrame:
     return pd.DataFrame(columns=_NF_COLUMNS)
 
@@ -359,7 +388,7 @@ def aggregate_charge_noise_floor(
         return _empty_nf()
 
     rows: list[dict[str, Any]] = []
-    keys_arr = df["key"].to_numpy(dtype=str)
+    keys = df["key"]
 
     for sa, sb in combinations(CHARGE_SCHEMES, 2):
         ca, cb = f"charge_{sa}", f"charge_{sb}"
@@ -372,14 +401,14 @@ def aggregate_charge_noise_floor(
         if not mask.any():
             continue
         res = np.abs(va[mask] - vb[mask])
-        ks = keys_arr[mask]
 
         mar, iqr = _mar_iqr(res)
         rows.append({
             "vertical": vertical, "analysis": "charge",
             "descriptor": desc, "element": None, "element_pair": None,
             "mar": mar, "iqr": iqr, "n_obs": int(mask.sum()),
-            "pearson_r": math.nan, "top_keys": _top_keys(ks, res, topk),
+            "pearson_r": math.nan,
+            "top_keys": _top_keys_from_mask(keys, mask, res, topk),
         })
 
         for elem, grp in df.groupby("element"):
@@ -389,13 +418,13 @@ def aggregate_charge_noise_floor(
             if not m.any():
                 continue
             res_e = np.abs(va_e[m] - vb_e[m])
-            ks_e = grp["key"].to_numpy(dtype=str)[m]
             mar_e, iqr_e = _mar_iqr(res_e)
             rows.append({
                 "vertical": vertical, "analysis": "charge",
                 "descriptor": desc, "element": elem, "element_pair": None,
                 "mar": mar_e, "iqr": iqr_e, "n_obs": int(m.sum()),
-                "pearson_r": math.nan, "top_keys": _top_keys(ks_e, res_e, topk),
+                "pearson_r": math.nan,
+                "top_keys": _top_keys_from_mask(grp["key"].reset_index(drop=True), m, res_e, topk),
             })
 
     return pd.DataFrame(rows) if rows else _empty_nf()
@@ -416,7 +445,7 @@ def aggregate_bond_noise_floor(
         return _empty_nf()
 
     rows: list[dict[str, Any]] = []
-    keys_arr = df["key"].to_numpy(dtype=str)
+    keys = df["key"]
 
     for sa, sb in combinations(BOND_SCHEMES, 2):
         ca, cb = f"bo_{sa}", f"bo_{sb}"
@@ -429,14 +458,14 @@ def aggregate_bond_noise_floor(
         if not mask.any():
             continue
         res = np.abs(va[mask] - vb[mask])
-        ks = keys_arr[mask]
 
         mar, iqr = _mar_iqr(res)
         rows.append({
             "vertical": vertical, "analysis": "bond_order",
             "descriptor": desc, "element": None, "element_pair": None,
             "mar": mar, "iqr": iqr, "n_obs": int(mask.sum()),
-            "pearson_r": math.nan, "top_keys": _top_keys(ks, res, topk),
+            "pearson_r": math.nan,
+            "top_keys": _top_keys_from_mask(keys, mask, res, topk),
         })
 
         for ep, grp in df.groupby("element_pair"):
@@ -446,13 +475,13 @@ def aggregate_bond_noise_floor(
             if not m.any():
                 continue
             res_e = np.abs(va_e[m] - vb_e[m])
-            ks_e = grp["key"].to_numpy(dtype=str)[m]
             mar_e, iqr_e = _mar_iqr(res_e)
             rows.append({
                 "vertical": vertical, "analysis": "bond_order",
                 "descriptor": desc, "element": None, "element_pair": ep,
                 "mar": mar_e, "iqr": iqr_e, "n_obs": int(m.sum()),
-                "pearson_r": math.nan, "top_keys": _top_keys(ks_e, res_e, topk),
+                "pearson_r": math.nan,
+                "top_keys": _top_keys_from_mask(grp["key"].reset_index(drop=True), m, res_e, topk),
             })
 
     return pd.DataFrame(rows) if rows else _empty_nf()
