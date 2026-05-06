@@ -17,6 +17,10 @@
 
 set -euo pipefail
 
+# Ensure the installed entrypoint reflects the current source.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+pip install -e "$SCRIPT_DIR" -q
+
 ROOT=${ROOT:-/p/lustre5/vargas58/converters/converters_final}
 SHARDS=${SHARDS:-$(dirname "$ROOT")/ba_shards}
 FINAL=${FINAL:-$(dirname "$ROOT")/ba_final}
