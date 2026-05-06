@@ -2,25 +2,42 @@
 \label{sec:noise}
 
 \subsection{Methodology}
-% Same structures, multiple methods. Define "quantified noise floor" precisely.
-% Residual distributions and rank correlations.
+% Same structures, multiple methods. "Quantified noise floor" = median absolute
+% residual (MAR) between every pair of schemes evaluated on identical atoms /
+% atom pairs. MAR is robust to outliers and stays in physical units (electrons
+% for charges, bond-order units for bond orders).
 
 \subsection{Charge-Method Comparison}
-% B1: per-element residual distributions across 6 schemes:
-% Hirshfeld / CM5 / ADCH / Becke (Multiwfn) + Mulliken-ORCA / Loewdin-ORCA (ORCA).
-% mayer_orca excluded (= Mulliken duplicate). MBIS excluded (sparse coverage).
+\label{sec:noise-charge}
+% B1: 6 schemes (Hirshfeld, CM5, ADCH, Becke from Multiwfn; Mulliken-ORCA,
+% Loewdin-ORCA from ORCA). mayer_orca excluded (= Mulliken duplicate).
+% MBIS excluded (sparse coverage, Tier 1 only).
+%
+% Figures:
+%   F5a -- per (vertical x scheme-pair) MAR heatmap (15 scheme-pair columns).
+%   F6a -- per (element x scheme-pair) MAR heatmap (top 12 elements by atom count).
+%   F6b -- ECP outlier diagnostic: charge distributions on TM atoms per scheme,
+%          motivating the +/- 5 e winsorization on ADCH / Becke.
 
 \subsection{Bond-Order Comparison}
-% B2: Mayer (ORCA) / Loewdin (ORCA) / fuzzy (Multiwfn) disagreement statistics.
-% Note: "Wiberg" is not a key in bond.lmdb. ORCA provides Mayer and Loewdin bond orders.
-
-\subsection{QTAIM Internal Redundancy}
-% B3: rho-BCP, delocalization index, ellipticity correlations.
+\label{sec:noise-bond}
+% B2: 3 universal schemes -- Mayer-ORCA, Loewdin-ORCA, fuzzy-Multiwfn.
+% IBSI (Tier 1) and Laplacian (Tier 2) included where present.
+% "Wiberg" is not a key in bond.lmdb -- ORCA provides Mayer and Loewdin.
+%
+% Figures:
+%   F5b -- per (vertical x scheme-pair) MAR heatmap (3 scheme-pair columns).
 
 \subsection{Per-Vertical Noise Floors}
-% B4: published table future ML work should not claim to beat.
-% Table T4.
+\label{sec:noise-floor}
+% B4: Table T4 -- one row per vertical with the median MAR across all
+% charge scheme-pairs and bond-order scheme-pairs. Source parquet:
+% docs/neurips/figures/noise/T4_per_vertical_floor.parquet
+% (no figure -- redundant with row-medians of F5a / F5b).
 
 \subsection{High-Disagreement Chemistry}
-% B5: where methods disagree most, with chemical interpretation.
-% Figure F6.
+\label{sec:noise-exemplars}
+% B5: top-100 highest-spread atoms (charge) and atom pairs (bond order)
+% per descriptor, drawn from docs/neurips/figures/noise/top_exemplars.parquet.
+% Manual case studies of the 5--10 representative exemplars; no headline figure
+% (the published parquet is the deliverable).
