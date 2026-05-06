@@ -40,6 +40,12 @@ analysis-soap-featurize = "qtaim_gen.source.analysis.comparator_embedding.cli:ma
 analysis-soap-umap = "qtaim_gen.source.analysis.comparator_embedding.umap_cli:main"
 # Analysis (paper Stream C: per-vertical census / T1)
 analysis-census = "qtaim_gen.source.scripts.analysis_census:main"
+# Analysis (paper Stream E2: pairwise dipole agreement / section 6.7)
+analysis-dipole-alignment = "qtaim_gen.source.scripts.analysis_dipole_alignment:main"
+# Analysis (paper section 6.2 / B1: atom-level partial-charge agreement)
+analysis-charge-alignment = "qtaim_gen.source.scripts.analysis_charge_alignment:main"
+# Analysis (paper Stream D: cross-vertical bond agreement)
+analysis-bond-agreement = "qtaim_gen.source.scripts.analysis_bond_agreement:main"
 
 # QTAIM - only
 create-files = "qtaim_gen.source.scripts.create_files:main"
