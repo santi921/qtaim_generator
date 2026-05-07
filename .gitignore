@@ -22,6 +22,7 @@
 *mfwn
 *out
 *png
+!assets/*.png
 *pkl
 *PKG-INFO*
 *pt 
