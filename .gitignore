@@ -43,8 +43,10 @@ examples/
 
 # W&B directories
 wandb/
-# ai documents
-docs/
+# internal planning/ai documents (not public)
+docs/plans/
+docs/solutions/
+docs/brainstorms/
 
 # Always track test fixtures regardless of extension rules above
 !tests/test_files/
@@ -56,3 +58,5 @@ docs/
 !tests/test_files/**/*.txt
 !tests/test_files/**/*.lmdb
 !tests/test_files/**/*.lmdb-lock
+data/profiling_study/runs/
+data/profiling_study/logs/

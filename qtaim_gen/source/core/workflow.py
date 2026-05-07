@@ -410,13 +410,16 @@ def process_folder_alcf(
                 try:
                     zip_file_out = os.path.join(folder, "out_files.zip")
                     if not os.path.exists(zip_file_out):
+                        files_to_zip = [
+                            f for f in os.listdir(folder)
+                            if f.endswith(".out") and f != "orca.out"
+                        ]
                         with zipfile.ZipFile(zip_file_out, "w") as zipf:
-                            for file in os.listdir(folder):
-                                # skip orca.out
-                                if file.endswith(".out") and file != "orca.out":
-                                    zipf.write(os.path.join(folder, file), arcname=file)
-                                    os.remove(os.path.join(folder, file))
-                                    logger.info(f"Zipped and removed {file}")
+                            for file in files_to_zip:
+                                zipf.write(os.path.join(folder, file), arcname=file)
+                                logger.info(f"Zipped {file}")
+                    else:
+                        files_to_zip = []
 
                     if move_results:
                         from qtaim_gen.source.utils.io import merge_zip_into
@@ -426,6 +429,12 @@ def process_folder_alcf(
                             os.path.join(results_folder, "out_files.zip"),
                             logger=logger,
                         )
+
+                    for file in files_to_zip:
+                        fp = os.path.join(folder, file)
+                        if os.path.exists(fp):
+                            os.remove(fp)
+                            logger.info(f"Removed {file} after zip")
 
                 except Exception as e:
                     logger.info(f"Couldn't zip .out files in {folder}: {e}")

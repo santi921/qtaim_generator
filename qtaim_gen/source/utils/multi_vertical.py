@@ -47,6 +47,7 @@ class MultiVerticalPipelineConfig:
     verticals: tuple[VerticalConfig, ...]
     split_config: SplitConfig
     n_shards_per_split: int = 1
+    exclude_keys_path: str = ""  # optional manifest_holdout.parquet path
 
     def __post_init__(self):
         if len(self.verticals) == 0:
@@ -56,6 +57,10 @@ class MultiVerticalPipelineConfig:
             raise ValueError(f"Vertical names must be unique, got {names}")
         if self.n_shards_per_split < 1:
             raise ValueError(f"n_shards_per_split must be >= 1, got {self.n_shards_per_split}")
+        if self.exclude_keys_path and not os.path.isfile(self.exclude_keys_path):
+            raise FileNotFoundError(
+                f"exclude_keys_path is set but file not found: {self.exclude_keys_path}"
+            )
 
 
 def load_pipeline_config(config_path: str) -> MultiVerticalPipelineConfig:
@@ -77,7 +82,58 @@ def load_pipeline_config(config_path: str) -> MultiVerticalPipelineConfig:
         verticals=verticals,
         split_config=split_config,
         n_shards_per_split=raw.get("n_shards_per_split", 1),
+        exclude_keys_path=raw.get("exclude_keys_path", ""),
     )
+
+
+def _manifest_rel_path_to_lmdb_key(vertical: str, rel_path: str) -> str:
+    """Mirror of pull_holdout_records.manifest_rel_path_to_lmdb_key.
+
+    Manifest rel_path is `<vertical>/<path with / separators>`; LMDB keys
+    use the jagged-hierarchy convention with `__` separators after a
+    per-vertical root strip. Strip a leading `<vertical>/` if present,
+    then replace remaining `/` with `__`.
+
+    Duplicated here (rather than imported from scripts.helpers) because
+    utils should not depend on scripts. The two definitions must stay in
+    sync.
+    """
+    prefix = f"{vertical}/"
+    if rel_path.startswith(prefix):
+        rel_path = rel_path[len(prefix):]
+    return rel_path.replace("/", "__")
+
+
+def load_exclusion_set(parquet_path: str) -> dict[str, set[str]]:
+    """Load `manifest_holdout.parquet` into a per-vertical set of LMDB keys.
+
+    Reads the 'vertical' and 'rel_path' columns and re-derives the LMDB
+    key per row (the same transformation pull_holdout_records uses to
+    look up records during the pull). The parquet's 'key' column stores
+    the cross-vertical merged form `{vertical}__{rel_path}` and is NOT
+    suitable as a direct LMDB lookup key for some verticals (manifest
+    rel_paths can include `/` separators that get converted to `__` in
+    the LMDB key).
+
+    Returns `{vertical: set(lmdb_key)}` keyed by source vertical name.
+    """
+    # Local import: pandas is heavy and only needed when exclusion is requested.
+    import pandas as pd
+
+    df = pd.read_parquet(parquet_path)
+    required = {"vertical", "rel_path"}
+    missing = required - set(df.columns)
+    if missing:
+        raise ValueError(
+            f"exclude_keys_path {parquet_path} missing columns {missing}; "
+            f"got {list(df.columns)}"
+        )
+
+    by_vert: dict[str, set[str]] = {}
+    for v, rp in zip(df["vertical"], df["rel_path"]):
+        lmdb_key = _manifest_rel_path_to_lmdb_key(v, rp)
+        by_vert.setdefault(v, set()).add(lmdb_key)
+    return by_vert
 
 
 # ---------- Plan phase types ----------
@@ -187,21 +243,49 @@ def plan_phase(config: MultiVerticalPipelineConfig) -> SplitPlan:
     global_element_set = sorted(set().union(*all_element_sets))
     print(f"Global element set ({len(global_element_set)} elements): {global_element_set}")
 
+    # 2b. Optional: load exclusion set (held-out keys to skip from train/val/test).
+    exclusion: dict[str, set[str]] = {}
+    if config.exclude_keys_path:
+        print(f"\nLoading exclusion set from {config.exclude_keys_path}...")
+        exclusion = load_exclusion_set(config.exclude_keys_path)
+        total_excl_requested = sum(len(s) for s in exclusion.values())
+        print(f"  exclusion set: {total_excl_requested:,} keys across "
+              f"{len(exclusion)} verticals")
+        # Warn about exclusion-vertical names not present in this run.
+        unknown_verts = sorted(
+            set(exclusion) - {v.name for v in config.verticals}
+        )
+        if unknown_verts:
+            print(f"  WARNING: exclusion lists {len(unknown_verts)} vertical(s) "
+                  f"not in this pipeline: {unknown_verts}")
+
     # 3. Split assignment
     assignment: SplitAssignment = {}
     total_per_split: dict[str, int] = {s: 0 for s in SPLIT_NAMES}
+    excluded_per_vertical: dict[str, int] = {}
+    exclusion_misses_per_vertical: dict[str, int] = {}
 
     for vert in config.verticals:
         fmap = all_formula_maps[vert.name]
         vert_assignment: dict[str, list[str]] = {s: [] for s in SPLIT_NAMES}
 
+        excl = exclusion.get(vert.name, set())
+        n_excluded = 0
         for key, formula in fmap.items():
+            if key in excl:
+                n_excluded += 1
+                continue
             split = assign_formula_to_split(
                 formula, config.split_config.ratios, config.split_config.seed
             )
             vert_assignment[split].append(key)
 
         assignment[vert.name] = vert_assignment
+        excluded_per_vertical[vert.name] = n_excluded
+        # Exclusion keys requested for this vertical but not present in
+        # structure.lmdb. Surface so misalignments between
+        # manifest_holdout.parquet and the per-vertical LMDBs are visible.
+        exclusion_misses_per_vertical[vert.name] = max(0, len(excl) - n_excluded)
         for s in SPLIT_NAMES:
             total_per_split[s] += len(vert_assignment[s])
 
@@ -221,6 +305,9 @@ def plan_phase(config: MultiVerticalPipelineConfig) -> SplitPlan:
     for vert_name, vert_assign in assignment.items():
         per_vertical_counts[vert_name] = {s: len(vert_assign[s]) for s in SPLIT_NAMES}
 
+    n_excluded_total = sum(excluded_per_vertical.values())
+    n_exclusion_misses = sum(exclusion_misses_per_vertical.values())
+
     summary = {
         "total_keys": total_keys,
         "per_split_counts": total_per_split,
@@ -231,17 +318,30 @@ def plan_phase(config: MultiVerticalPipelineConfig) -> SplitPlan:
         "global_element_set": global_element_set,
         "split_method": config.split_config.method,
         "split_seed": config.split_config.seed,
+        "exclude_keys_path": config.exclude_keys_path,
+        "n_excluded_total": n_excluded_total,
+        "n_excluded_per_vertical": excluded_per_vertical,
+        "n_exclusion_misses_total": n_exclusion_misses,
+        "n_exclusion_misses_per_vertical": exclusion_misses_per_vertical,
     }
 
     # Print summary
     print(f"\nSplit assignment ({config.split_config.method}, seed={config.split_config.seed}):")
+    if n_excluded_total:
+        print(f"  excluded {n_excluded_total:,} keys via exclude_keys_path")
+        if n_exclusion_misses:
+            print(f"  WARNING: {n_exclusion_misses:,} exclusion keys not "
+                  f"found in any structure.lmdb (per-vertical: "
+                  f"{ {k: v for k, v in exclusion_misses_per_vertical.items() if v} })")
     for s in SPLIT_NAMES:
         pct = actual_ratios[s] * 100
         dev = deviations[s] * 100
         warn = " WARNING: >5pp deviation!" if dev > 5.0 else ""
         print(f"  {s}: {total_per_split[s]} ({pct:.1f}%){warn}")
     for vert_name, counts in per_vertical_counts.items():
-        print(f"  {vert_name}: {counts}")
+        excl_note = (f"  excluded={excluded_per_vertical[vert_name]}"
+                     if excluded_per_vertical[vert_name] else "")
+        print(f"  {vert_name}: {counts}{excl_note}")
 
     # Write split_plan.json
     os.makedirs(config.output_dir, exist_ok=True)

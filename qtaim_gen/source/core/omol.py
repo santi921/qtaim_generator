@@ -1058,19 +1058,21 @@ def clean_jobs(
         except Exception as e:
             logger.info(f"Couldn't rm file {file}: {e}")
 
-    # zip all out files
+    # zip all out files - collect first, delete only after zip is safely merged
+    files_to_zip = [
+        f for f in os.listdir(folder)
+        if (f.endswith(".out") and f != "orca.out") or f.endswith("CPprop.txt")
+    ]
+    successfully_zipped = []
     with zipfile.ZipFile(zip_file_out, "w") as zipf:
-        for file in os.listdir(folder):
-            # skip orca.out 
-            if file.endswith(".out") and file != "orca.out":
+        for file in files_to_zip:
+            try:
                 zipf.write(os.path.join(folder, file), arcname=file)
-                os.remove(os.path.join(folder, file))
-                logger.info(f"Zipped and removed {file}")
-            if file.endswith("CPprop.txt"):
-                zipf.write(os.path.join(folder, file), arcname=file)
-                os.remove(os.path.join(folder, file))
-                logger.info(f"Zipped and removed {file}")
-        
+                successfully_zipped.append(file)
+                logger.info(f"Zipped {file}")
+            except Exception as e:
+                logger.info(f"Couldn't zip {file}: {e}")
+
     if move_results:
         results_folder = os.path.join(folder, "generator")
         merge_zip_into(
@@ -1078,6 +1080,16 @@ def clean_jobs(
             os.path.join(results_folder, "out_files.zip"),
             logger=logger,
         )
+
+    # delete only files that were successfully written to the zip
+    for file in successfully_zipped:
+        fp = os.path.join(folder, file)
+        if os.path.exists(fp):
+            try:
+                os.remove(fp)
+                logger.info(f"Removed {file} after zip")
+            except Exception as e:
+                logger.info(f"Couldn't remove {file}: {e}")
 
 
 # Matches `Completed <key> in <s> seconds` lines emitted by
@@ -1283,11 +1295,17 @@ def _validate_parse_completeness(orca_dict: dict) -> bool:
 def _extract_orca_out_from_archive(folder: str, logger: logging.Logger) -> bool:
     """Try to extract just orca.out from orca.tar.zst in *folder*.
 
+    Tries `tar --zstd` first; on hosts whose tar lacks zstd support
+    (e.g. some HPC login nodes), falls back to two-step
+    `unzstd -k` + `tar -xf`. Leaves orca.tar.zst in place on success.
+
     Returns True if orca.out was successfully extracted.
     """
     tar_zst = os.path.join(folder, "orca.tar.zst")
     if not os.path.isfile(tar_zst):
         return False
+
+    out_path = os.path.join(folder, "orca.out")
 
     try:
         subprocess.run(
@@ -1296,13 +1314,71 @@ def _extract_orca_out_from_archive(folder: str, logger: logging.Logger) -> bool:
             check=True,
             capture_output=True,
         )
-        extracted = os.path.isfile(os.path.join(folder, "orca.out"))
-        if extracted:
+        if os.path.isfile(out_path):
             logger.info("Extracted orca.out from orca.tar.zst")
+            return True
+        # tar exited 0 but orca.out is not on disk: member missing from archive,
+        # not a tar capability problem. Don't try the fallback.
+        logger.warning(
+            "tar --zstd succeeded but orca.out not present in %s",
+            tar_zst,
+        )
+        return False
+    except FileNotFoundError as e:
+        logger.warning("tar not available: %s", e)
+        return False
+    except subprocess.CalledProcessError as e:
+        stderr_snip = (e.stderr or b"").decode(errors="replace")[:500]
+        logger.info(
+            "tar --zstd failed (exit %s): %s; falling back to unzstd+tar",
+            e.returncode,
+            stderr_snip.strip(),
+        )
+
+    tar_path = os.path.join(folder, "orca.tar")
+    if os.path.isfile(tar_path):
+        # Pre-existing orca.tar would be silently clobbered by `unzstd -k -f`.
+        # Refuse rather than risk overwriting unrelated user data.
+        logger.warning(
+            "Refusing fallback: %s already exists; not overwriting", tar_path
+        )
+        return False
+
+    created_tar = False
+    try:
+        subprocess.run(
+            ["unzstd", "-k", "-f", "orca.tar.zst"],
+            cwd=folder,
+            check=True,
+            capture_output=True,
+        )
+        created_tar = os.path.isfile(tar_path)
+        subprocess.run(
+            ["tar", "-xf", "orca.tar", "orca.out"],
+            cwd=folder,
+            check=True,
+            capture_output=True,
+        )
+        extracted = os.path.isfile(out_path)
+        if extracted:
+            logger.info("Extracted orca.out via unzstd+tar fallback")
         return extracted
     except (subprocess.CalledProcessError, FileNotFoundError) as e:
-        logger.warning("Could not extract orca.out from archive: %s", e)
+        stderr_snip = ""
+        if isinstance(e, subprocess.CalledProcessError):
+            stderr_snip = (e.stderr or b"").decode(errors="replace")[:500].strip()
+        logger.warning(
+            "Could not extract orca.out from archive (fallback failed): %s %s",
+            e,
+            stderr_snip,
+        )
         return False
+    finally:
+        if created_tar and os.path.isfile(tar_path):
+            try:
+                os.remove(tar_path)
+            except OSError as e:
+                logger.warning("Could not remove intermediate orca.tar: %s", e)
 
 
 def _run_orca_parse(
@@ -1705,15 +1781,32 @@ def gbw_analysis(
                     except Exception as e:
                         logger.error(f"Error running unzstd for gbw {zstd_file}: {e}")
 
+            # Legacy orca5.* files are only safe to drop when the canonical
+            # orca.gbw is present (produced from orca.gbw.zstd0 above). If the
+            # folder only has orca5.gbw, removing it would strip the sole
+            # wavefunction source and brick downstream orca_2mkl/Multiwfn.
+            canonical_gbw_path = os.path.join(folder, "orca.gbw")
+            canonical_gbw_present = (
+                os.path.isfile(canonical_gbw_path)
+                and os.path.getsize(canonical_gbw_path) > 0
+            )
+            always_intermediate = [".tar", ".tar.zst", ".tgz", ".gbw.zstd0", ".zstd", ".npz"]
+            legacy_orca5 = ["orca5.gbw", "orca5.wfn", "orca5.wfx"]
             for file in os.listdir(folder):
-                # clean files ending in .tar, .tar.zst, .tgz, .gbw.zstd0, .zstd, .npz
-                check_list = [".tar", ".tar.zst", ".tgz", ".gbw.zstd0", ".zstd", ".npz", "orca5.gbw"]
-                if any(file.endswith(ext) for ext in check_list):
+                is_intermediate = any(file.endswith(ext) for ext in always_intermediate)
+                is_legacy_orca5 = file in legacy_orca5
+                if is_intermediate or (is_legacy_orca5 and canonical_gbw_present):
                     try:
                         os.remove(os.path.join(folder, file))
                         logger.info(f"Removed intermediate file: {file}")
                     except Exception as e:
                         logger.error(f"Error removing intermediate file {file}: {e}")
+                elif is_legacy_orca5 and not canonical_gbw_present:
+                    logger.warning(
+                        "Keeping legacy %s -- no canonical orca.gbw present in %s",
+                        file,
+                        folder,
+                    )
 
     if restart:
         # Check both locations: generator/ (previous completed run) and
@@ -1798,6 +1891,13 @@ def gbw_analysis(
                                 logger.info("Deleted %s after orca-only parse", orca_out_path)
                             except OSError as e:
                                 logger.warning("Could not delete %s: %s", orca_out_path, e)
+                        clean_jobs(
+                            folder,
+                            separate=separate,
+                            logger=logger,
+                            full_set=full_set,
+                            move_results=move_results,
+                        )
                     logger.info("gbw_analysis completed (orca-only) in folder: %s", folder)
                     return
 

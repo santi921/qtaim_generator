@@ -214,9 +214,9 @@ class TestEdgeCases:
 # ── Empty bond section edge cases ─────────────────────────────────────
 
 
-EDGE_CASE_DIR = Path(__file__).parent.parent / "data" / "buggy_qtaim" / "edge_cases" / "orca_Outs"
-FIXTURE_EMPTY_BONDS_LI2 = str(EDGE_CASE_DIR / "orca.out")
-FIXTURE_EMPTY_BONDS_NALI = str(EDGE_CASE_DIR / "orca_2.out")
+EDGE_CASE_DIR = Path(__file__).parent / "test_files" / "edge_cases" / "empty_bonds"
+FIXTURE_EMPTY_BONDS_LI2 = str(EDGE_CASE_DIR / "li2.out")
+FIXTURE_EMPTY_BONDS_NALI = str(EDGE_CASE_DIR / "nali.out")
 
 
 class TestEmptyBondSections:

@@ -31,6 +31,23 @@ json-to-lmdb = "qtaim_gen.source.scripts.json_to_lmdb:main"
 generator-to-embed = "qtaim_gen.source.scripts.helpers.generator_to_embed:main"
 multi-vertical-merge = "qtaim_gen.source.scripts.helpers.multi_vertical_merge:main"
 build-manifest = "qtaim_gen.source.scripts.helpers.build_manifest:main"
+lmdb-status-audit = "qtaim_gen.source.scripts.helpers.lmdb_status_audit:main"
+lmdb-filter-vertical = "qtaim_gen.source.scripts.helpers.filter_lmdb_vertical:main"
+backfill-orca-into-json = "qtaim_gen.source.scripts.helpers.backfill_orca_into_json:main"
+
+# Analysis (paper Stream G: comparator embedding)
+analysis-soap-featurize = "qtaim_gen.source.analysis.comparator_embedding.cli:main"
+analysis-soap-umap = "qtaim_gen.source.analysis.comparator_embedding.umap_cli:main"
+# Analysis (paper Stream C: per-vertical census / T1)
+analysis-census = "qtaim_gen.source.scripts.analysis_census:main"
+# Analysis (paper Stream E2: pairwise dipole agreement / section 6.7)
+analysis-dipole-alignment = "qtaim_gen.source.scripts.analysis_dipole_alignment:main"
+# Analysis (paper section 6.2 / B1: atom-level partial-charge agreement)
+analysis-charge-alignment = "qtaim_gen.source.scripts.analysis_charge_alignment:main"
+# Analysis (paper Stream D: cross-vertical bond agreement)
+analysis-bond-agreement = "qtaim_gen.source.scripts.analysis_bond_agreement:main"
+# Analysis (paper Stream F: cross-method noise floors)
+analysis-noise-floors = "qtaim_gen.source.scripts.analysis_noise_floors:main"
 
 # QTAIM - only
 create-files = "qtaim_gen.source.scripts.create_files:main"
@@ -40,13 +57,19 @@ parse-data = "qtaim_gen.source.scripts.parse_data:main"
 run-qtaim-gen = "qtaim_gen.source.scripts.run:main"
 # QTAIM - only
 clean-failed-files = "qtaim_gen.source.scripts.helpers.clean_failed_files:main"
+# Dataset split and evaluation pipeline
+split-descriptor-lmdbs = "qtaim_gen.source.scripts.helpers.split_descriptor_lmdbs:main"
+merge-split-descriptors = "qtaim_gen.source.scripts.helpers.merge_split_descriptors:main"
+audit-splits = "qtaim_gen.source.scripts.helpers.audit_splits:main"
+tm-neighbor-lists = "qtaim_gen.source.scripts.helpers.tm_neighbor_lists:main"
+build-holdout-csvs = "qtaim_gen.source.analysis.build_holdout_csvs:main"
+pull-holdout-records = "qtaim_gen.source.scripts.helpers.pull_holdout_records:main"
+find-bad-json = "qtaim_gen.source.scripts.helpers.find_bad_json:main"
+
 # Full analysis
 full-runner = "qtaim_gen.source.scripts.full_runner:main"
 full-runner-parsl = "qtaim_gen.source.scripts.full_runner_parsl:main"
 full-runner-parsl-alcf = "qtaim_gen.source.scripts.full_runner_parsl_alcf:main"
-full-runner-parsl-nersc = "qtaim_gen.source.scripts.full_runner_parsl_nersc:main"
-
-generator-single-runner = "qtaim_gen.source.scripts.generator_run:main"
 
 find-empty-compressed = "qtaim_gen.source.scripts.helpers.find_empty_compressed:main"
 count-orca-json = "qtaim_gen.source.scripts.helpers.count_orca_json:main"

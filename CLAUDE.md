@@ -130,6 +130,8 @@ qtaim_gen/source/
 2. `generator-to-embed` → Run a converter (Base/QTAIM/General) to build DGL graph LMDBs for `qtaim_embed`
 3. `generator-to-embed --split` → Optionally split output into train/val/test LMDBs with train-only scaler fitting
 
+**Jagged hierarchies (e.g. OMol4M):** datasets where job folders sit at variable depth under root must use `json-to-lmdb --folder_list FILE`, where FILE is one absolute job-folder path per line (blanks and `#` comments skipped). LMDB keys become `relpath(folder, root_dir).replace(os.sep, "__")` — e.g. `solvated_protein__outputs_240923__spf_1195777_0_1__step0`. Same key formula across every data type, so downstream LMDBs always join. Internal sharding by `--shard_index/--total_shards` partitions the list by line index modulo total — no external `split` needed. Mutually exclusive with the legacy flat-glob discovery.
+
 ## Converter System
 
 The converter classes in `core/converter.py` transform raw LMDB data into DGL heterographs:

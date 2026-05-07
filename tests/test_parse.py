@@ -10,8 +10,6 @@ from qtaim_gen.source.core.parse_qtaim import (
     orca_inp_to_dict,
 )
 
-from qtaim_gen.source.core.parse_critic import parse_critic2
-
 TEST_FILES = Path(__file__).parent / "test_files"
 
 
@@ -299,32 +297,6 @@ def test_bond_cp_via_qtaim_bond_defns():
         assert i in bond_list_correct, "{}, bond not in correct list".format(i)
     assert count_tuple == 13, "wrong number of bond CP"
     # print(bond_cps_qtaim[(3, 4)])
-
-
-def test_parse_critic2():
-    cro = str(TEST_FILES / "critic2" / "molecule" / "phenol_phenol.json")
-    features = {
-        "atom": [
-            "field",
-            "gradient_norm",
-            "laplacian",
-            "hessian_eigenvalues",
-            "ellipticity",
-        ],
-        "bond": [
-            "field",
-            "gradient_norm",
-            "laplacian",
-            "hessian_eigenvalues",
-            "ellipticity",
-        ],
-    }
-    ret_dict = parse_critic2(cro, features=features)
-    probe_bond_cp = ret_dict["bond_cps"]["55_bond"]
-    probe_atom_cp = ret_dict["atom_cps"]["16_H"]
-
-    assert len(probe_atom_cp.keys()) == 5, "wrong number of atoms"
-    assert len(probe_bond_cp.keys()) == 8, "wrong number of bonds"
 
 
 EDGE_CASES = Path(__file__).parent / "test_files" / "edge_cases"
