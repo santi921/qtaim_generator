@@ -1,6 +1,6 @@
 # qtaim_generator
 
-<img src="qtaim_gen/assets/TOC.png" width=50% height=50%>
+<img src="assets/TOC.png" width=50% height=50%>
 
 A high-throughput post-processing package for quantum chemistry calculations. It wraps Multiwfn and ORCA to compute a rich set of descriptors - QTAIM critical points, partial charges (Hirshfeld, ADCH, CM5, Becke, Mulliken, Loewdin, Mayer), bond orders (fuzzy, IBSI, Laplacian, Mayer), and fuzzy atomic densities - and converts them into graph-based LMDB datasets for ML training with [qtaim_embed](https://github.com/santi921/qtaim_embed).
 
@@ -30,6 +30,95 @@ The package has two main workflows:
 **Full pipeline:** `json-to-lmdb` -> `generator-to-embed`. Converts parsed JSON to typed LMDBs, then builds graph LMDBs for ML training with `qtaim_embed`.
 
 For large datasets (e.g. OMol4M) with variable-depth job folder hierarchies, pass a flat list of absolute job paths to `json-to-lmdb --folder_list`. See `docs/SHARDING_GUIDE.md` for sharded conversion and `docs/JSON_TO_LMDB_SHARDING.md` for parallel shard processing.
+
+---
+
+## Running at Scale
+
+### HPC job execution (Parsl)
+
+For millions of structures on a cluster, use the Parsl-based runner. It manages job submission, restarts, and result collection across nodes.
+
+```bash
+# ALCF Polaris - 8 nodes, 220 threads, processing 15,000 folders per batch
+full-runner-parsl-alcf \
+  --num_folders 15000 \
+  --orca_2mkl_cmd $HOME/orca_6_0_0/orca_2mkl \
+  --multiwfn_cmd $HOME/Multiwfn_3_8/Multiwfn_noGUI \
+  --n_threads 220 --n_threads_per_job 1 --safety_factor 1.0 \
+  --timeout_hr 6 --queue workq-route \
+  --n_nodes 8 --type_runner hpc \
+  --job_file /path/to/job_list.txt \
+  --preprocess_compressed \
+  --root_omol_results /path/to/results/ \
+  --root_omol_inputs /path/to/inputs/ \
+  --restart --clean --move_results
+```
+
+Key flags:
+
+| Flag | Description |
+|------|-------------|
+| `--type_runner` | `local`, `hpc` (PBS/ALCF), or `flux` |
+| `--n_nodes` | Number of compute nodes to request |
+| `--n_threads` | Total worker threads across all nodes |
+| `--n_threads_per_job` | Threads per ORCA job (typically 1 for QTAIM-only) |
+| `--restart` | Resume a previously interrupted run |
+| `--num_folders` | Folders to process per batch (tune to walltime) |
+| `--job_file` | Flat list of absolute job folder paths, one per line |
+| `--preprocess_compressed` | Decompress `.zip` archives before processing |
+
+### Sharded JSON-to-LMDB conversion
+
+For datasets too large to convert in a single process, shard across SLURM array jobs:
+
+```bash
+#!/bin/bash
+#SBATCH --array=0-7
+#SBATCH --cpus-per-task=2
+#SBATCH --mem=16GB
+#SBATCH --time=04:00:00
+
+SHARD=$SLURM_ARRAY_TASK_ID
+TOTAL=8
+[ $SHARD -eq $((TOTAL - 1)) ] && MERGE="--auto_merge" || MERGE=""
+
+json-to-lmdb \
+  --folder_list /path/to/job_list.txt \
+  --out_dir /path/to/lmdbs/ \
+  --all \
+  --shard_index $SHARD \
+  --total_shards $TOTAL \
+  $MERGE
+```
+
+The last shard triggers an automatic merge into `lmdbs/merged/<type>.lmdb`. See `docs/JSON_TO_LMDB_SHARDING.md` for the full output layout and merge behavior.
+
+### Sharded graph conversion
+
+Once descriptor LMDBs are built, shard the graph converter similarly:
+
+```bash
+# Run N shards in parallel, each writing to its own output dir
+generator-to-embed --config shard_0.json   # shard_index=0, total_shards=N
+generator-to-embed --config shard_N-1.json  # auto_merge=true on last shard
+```
+
+Set `"shard_index"`, `"total_shards"`, and `"skip_scaling": true` in all but the last shard config. See `docs/SHARDING_GUIDE.md` for the full config reference.
+
+### Variable-depth folder hierarchies
+
+Datasets like OMol25 have job folders at irregular depths. Pass a flat job list instead of a root directory:
+
+```bash
+# Build the job list (one absolute path per line)
+find /path/to/omol25 -name "charge.json" -printf "%h\n" | sort > job_list.txt
+
+# Convert - keys become path-derived: parent__subdir__jobname
+json-to-lmdb --folder_list job_list.txt --out_dir ./lmdbs/ --all
+```
+
+LMDB keys are derived as `relpath(folder, root).replace("/", "__")`, so all descriptor types for the same job share an identical key for downstream joining.
 
 ---
 
@@ -217,22 +306,3 @@ folder-orca-inp-to-pkl     Convert a folder of ORCA inputs to a dataset PKL
 - **orca_2mkl**: Required for ECP jobs (converts `.gbw` to `.molden.input`)
 - **RDKit**: Install from conda-forge
 - **qtaim_embed**: Required for graph LMDB construction
-
----
-
-## Citation
-
-If you use this package, please cite:
-
-```bibtex
-@Article{D4DD00057A,
-  author  = {Vargas, Santiago and Gee, Winston and Alexandrova, Anastassia},
-  title   = {High-throughput quantum theory of atoms in molecules (QTAIM) for geometric deep learning of molecular and reaction properties},
-  journal = {Digital Discovery},
-  year    = {2024},
-  volume  = {3},
-  issue   = {5},
-  pages   = {987--998},
-  doi     = {10.1039/D4DD00057A}
-}
-```
