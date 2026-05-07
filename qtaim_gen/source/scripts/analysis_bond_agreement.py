@@ -54,6 +54,7 @@ def _run_vertical(
     pool_multiplier: float,
     progress: bool,
     emit_disagreements: Path | None,
+    workers: int = 1,
 ) -> None:
     """Stream one vertical to parquet and write aggregation files."""
     def fn(key, structure, qtaim, bond):
@@ -71,6 +72,8 @@ def _run_vertical(
         per_record_fn=fn,
         output_path=output_path,
         progress=progress,
+        desc=f"stream ({vertical})",
+        workers=workers,
     )
 
     # Load one vertical at a time for aggregation, then release.
@@ -201,6 +204,9 @@ def main():
                         help="Write disagreement rows here. Corpus mode: "
                              "<output>/<vertical>_dis.parquet per vertical.")
     parser.add_argument("--no-progress", action="store_true")
+    parser.add_argument("--workers", type=int, default=1,
+                        help="Threads for LMDB fetch + classification within each vertical "
+                             "(default 1). LMDB read transactions are thread-safe.")
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s",
@@ -234,24 +240,38 @@ def main():
         out_dir = args.output
         out_dir.mkdir(parents=True, exist_ok=True)
         v_outputs: list[tuple[str, Path]] = []
-        for name, lmdb_root in verticals:
-            out_path = out_dir / f"{name}_ba.parquet"
-            dis_path = (
-                out_dir / f"{name}_dis.parquet"
-                if args.emit_disagreements is not None
-                else None
-            )
-            _run_vertical(
-                vertical=name,
-                root=lmdb_root,
-                output_path=out_path,
-                geom_k=args.geom_k,
-                bo_threshold=args.bo_threshold,
-                pool_multiplier=args.pool_multiplier,
-                progress=not args.no_progress,
-                emit_disagreements=dis_path,
-            )
-            v_outputs.append((name, out_path))
+        try:
+            from tqdm import tqdm as _tqdm
+            v_bar = _tqdm(total=len(verticals), desc="corpus", unit="v", position=0)
+        except ImportError:
+            v_bar = None
+        try:
+            for name, lmdb_root in verticals:
+                if v_bar is not None:
+                    v_bar.set_description(f"corpus [{name}]")
+                out_path = out_dir / f"{name}_ba.parquet"
+                dis_path = (
+                    out_dir / f"{name}_dis.parquet"
+                    if args.emit_disagreements is not None
+                    else None
+                )
+                _run_vertical(
+                    vertical=name,
+                    root=lmdb_root,
+                    output_path=out_path,
+                    geom_k=args.geom_k,
+                    bo_threshold=args.bo_threshold,
+                    pool_multiplier=args.pool_multiplier,
+                    progress=not args.no_progress,
+                    emit_disagreements=dis_path,
+                    workers=args.workers,
+                )
+                v_outputs.append((name, out_path))
+                if v_bar is not None:
+                    v_bar.update(1)
+        finally:
+            if v_bar is not None:
+                v_bar.close()
         _write_combined(v_outputs, out_dir)
     else:
         name, lmdb_root = verticals[0]
@@ -264,6 +284,7 @@ def main():
             pool_multiplier=args.pool_multiplier,
             progress=not args.no_progress,
             emit_disagreements=args.emit_disagreements,
+            workers=args.workers,
         )
         df = pd.read_parquet(args.output)
         if not df.empty:

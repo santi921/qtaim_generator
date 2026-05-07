@@ -179,11 +179,17 @@ def stream_to_parquet(
     keys: Iterable[str] | None = None,
     progress: bool = True,
     chunk_size: int = 10_000,
+    desc: str = "stream",
+    workers: int = 1,
 ) -> Path:
     """Same as `stream()` but writes results incrementally to parquet.
 
     Rows are flushed to disk every `chunk_size` rows so very large verticals
     do not require holding the full DataFrame in memory.
+
+    When `workers > 1`, LMDB fetch + per_record_fn calls run in a thread
+    pool. LMDB read transactions are thread-safe with lock=False, and
+    per_record_fn must be stateless (bond_agreement satisfies this).
     """
     if chunk_size <= 0:
         raise ValueError("chunk_size must be positive")
@@ -199,7 +205,13 @@ def stream_to_parquet(
     dropped: list[str] = []
     try:
         cand_keys, key_sets = _resolve_keys(envs, lmdb_types, keys)
-        iterator = _maybe_progress(cand_keys, len(cand_keys), progress, desc="stream_to_parquet")
+
+        def _task(k: str) -> tuple[list[dict], str | None]:
+            """Returns (rows, None) on success or ([], dropped_key) if key missing."""
+            if not all(k in key_sets[t] for t in lmdb_types):
+                return [], k
+            values = [_fetch(envs[t], k) for t in lmdb_types]
+            return _normalize_result(k, per_record_fn(k, *values)), None
 
         def _flush():
             nonlocal writer
@@ -211,14 +223,31 @@ def stream_to_parquet(
             writer.write_table(table)
             buffer.clear()
 
-        for k in iterator:
-            if not all(k in key_sets[t] for t in lmdb_types):
-                dropped.append(k)
-                continue
-            values = [_fetch(envs[t], k) for t in lmdb_types]
-            buffer.extend(_normalize_result(k, per_record_fn(k, *values)))
-            if len(buffer) >= chunk_size:
-                _flush()
+        if workers > 1:
+            from concurrent.futures import ThreadPoolExecutor
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                result_iter = pool.map(_task, cand_keys)
+                for rows, dropped_key in _maybe_progress(
+                    result_iter, len(cand_keys), progress, desc
+                ):
+                    if dropped_key is not None:
+                        dropped.append(dropped_key)
+                    else:
+                        buffer.extend(rows)
+                        if len(buffer) >= chunk_size:
+                            _flush()
+        else:
+            result_iter = (_task(k) for k in cand_keys)
+            for rows, dropped_key in _maybe_progress(
+                result_iter, len(cand_keys), progress, desc
+            ):
+                if dropped_key is not None:
+                    dropped.append(dropped_key)
+                else:
+                    buffer.extend(rows)
+                    if len(buffer) >= chunk_size:
+                        _flush()
+
         _flush()
         if writer is None:
             # No rows produced; emit an empty parquet with a single null-typed column.
