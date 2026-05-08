@@ -86,7 +86,9 @@ qtaim_gen/source/
 │   ├── parse_qtaim.py   # Critical point parsing from Multiwfn
 │   ├── parse_multiwfn.py# Charge/bond/fuzzy output parsing
 │   ├── parse_orca.py    # ORCA .out file parser (single-pass enum state machine → orca.json)
-│   └── parse_json.py    # JSON output merging/validation
+│   ├── parse_json.py    # JSON output merging/validation
+│   ├── lmdb_analysis.py # LMDB descriptor analysis utilities (iter_lmdb, compute_stats, flatten_entry, etc.)
+│   └── lmdb_plots.py    # Plotting functions for lmdb_analysis (separated to allow headless import)
 ├── data/                # Multiwfn command helpers (charge_data, bond_order_data, etc.)
 ├── scripts/             # CLI entry points (defined in pyproject.toml)
 │   ├── create_files.py  # create-files: generate DFT/QTAIM inputs
@@ -103,7 +105,6 @@ qtaim_gen/source/
 │   │   ├── refine_list_of_jobs.py # Filter/refine job lists for reprocessing
 │   │   ├── configs_converter/     # Validated JSON configs for different converter types
 │   │   └── ...                    # Other helpers (check_res_*, folder_*_to_pkl, etc.)
-│   └── old/             # Deprecated/archived scripts
 └── utils/               # Utilities
     ├── validation.py    # Job completeness validation
     ├── lmdbs.py         # LMDB read/write utilities (json_2_lmdbs, sharded writes, merge)

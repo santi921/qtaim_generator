@@ -326,6 +326,58 @@ def iter_schnet4aim(
         yield x
 
 
+# ---------------- tmqmplus ---------------- #
+
+
+def iter_tmqmplus(
+    root: Path,
+    max_n: Optional[int] = None,
+    seed: int = 42,
+) -> Iterator[tuple[str, Atoms]]:
+    """Yield (id, ase.Atoms) over tmQM+ pickled DataFrames.
+
+    The figshare deposit ships pickle files that contain pandas DataFrames
+    with a ``molecule`` column (pymatgen Molecule) and an ``ids`` column
+    (CSD-style 6-letter codes). All ``*.pkl`` files under ``root`` are
+    concatenated; deduplicated on ``ids`` so train/test/cross-LOT files do
+    not double-count the same complex.
+
+    Sampling is reservoir-style across the full concat'd record list.
+    """
+    import pandas as pd
+
+    pkl_paths = sorted(root.glob("*.pkl"))
+    if not pkl_paths:
+        raise FileNotFoundError(f"no tmQM+ pickle files under {root}")
+
+    seen_ids: set[str] = set()
+    items: list[tuple[str, Atoms]] = []
+    for pkl in pkl_paths:
+        with open(pkl, "rb") as fh:
+            df = pickle.load(fh)
+        if not isinstance(df, pd.DataFrame):
+            raise RuntimeError(f"{pkl} did not unpickle to a DataFrame")
+        if "molecule" not in df.columns or "ids" not in df.columns:
+            raise RuntimeError(f"{pkl} missing molecule/ids columns")
+        for mol, raw_id in zip(df["molecule"].values, df["ids"].values):
+            ident = str(raw_id)
+            if ident in seen_ids:
+                continue
+            seen_ids.add(ident)
+            zs = [site.species.elements[0].Z for site in mol]
+            atoms = _atoms_from_zs_pos(zs, mol.cart_coords)
+            items.append((f"tmqmplus_{ident}", atoms))
+
+    if max_n is None or max_n >= len(items):
+        for x in items:
+            yield x
+        return
+
+    rng = random.Random(seed)
+    for x in rng.sample(items, max_n):
+        yield x
+
+
 # ---------------- registry ---------------- #
 
 
@@ -359,5 +411,11 @@ LOADERS: dict[str, SourceSpec] = {
         iterate=iter_schnet4aim,
         default_root=Path("data/comparators/schnet4aim/raw"),
         description="SchNet4AIM electronic + energetic JSONs + 3 extrapolation XYZ.",
+    ),
+    "tmqmplus": SourceSpec(
+        name="tmqmplus",
+        iterate=iter_tmqmplus,
+        default_root=Path("data/comparators/tmqmplus/raw"),
+        description="tmQM+ DataFrame pickles (pymatgen Molecule + CSD ids).",
     ),
 }

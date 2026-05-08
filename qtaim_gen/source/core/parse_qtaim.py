@@ -240,7 +240,7 @@ def orca_inp_to_dict(dft_inp_file: str) -> dict:
         # strip tabs
         lines = [line.strip() for line in lines]
 
-    # find line starting with "* xyz"
+    # find line starting with "* xyz" or "*xyz" (ORCA accepts both)
     start_block = False
     for ind, line in enumerate(lines):
         if start_block:
@@ -248,7 +248,7 @@ def orca_inp_to_dict(dft_inp_file: str) -> dict:
                 end_block = ind
                 break
 
-        if "*xyz" in line:
+        if "*xyz" in line or "* xyz" in line:
             xyz_ind = ind
             start_block = True
 
