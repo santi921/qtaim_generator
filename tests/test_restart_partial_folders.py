@@ -247,13 +247,30 @@ class TestValidationChecksMissingFiles:
         )
 
     def test_empty_charge_json(self):
-        """Empty charge.json causes JSONDecodeError in validation_checks.
-        This documents a real bug: validation_checks doesn't handle
-        corrupted/empty JSON files gracefully."""
+        """Empty charge.json returns False from validation_checks, not raises."""
         (self.folder / "charge.json").write_text("")
-        # Currently raises JSONDecodeError — should return False instead
-        with pytest.raises(json.JSONDecodeError):
-            validation_checks(str(self.folder), full_set=0, move_results=False)
+        assert not validation_checks(
+            str(self.folder), full_set=0, move_results=False
+        )
+
+    def test_malformed_charge_json(self):
+        """Trailing-comma charge.json (legacy corruption) returns False, not raises."""
+        (self.folder / "charge.json").write_text('{"adch": {"charge": {}},}')
+        assert not validation_checks(
+            str(self.folder), full_set=0, move_results=False
+        )
+
+    def test_malformed_timings_json(self):
+        (self.folder / "timings.json").write_text("{not json")
+        assert not validation_checks(
+            str(self.folder), full_set=0, move_results=False
+        )
+
+    def test_malformed_bond_json(self):
+        (self.folder / "bond.json").write_text("{,}")
+        assert not validation_checks(
+            str(self.folder), full_set=0, move_results=False
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -892,6 +909,413 @@ class TestPerSubJobRestart:
         timings = {"hirshfeld": 0.0}
         # Zero timing → not > 0 → should re-run
         assert not (timings["hirshfeld"] > 0)
+
+
+# ---------------------------------------------------------------------------
+# Tests: _compiled_data_present length-awareness (partial-data loop fix)
+# ---------------------------------------------------------------------------
+
+
+# Reusable compiled_map matching what run_jobs builds.
+_COMPILED_MAP_CHARGE = {
+    "chelpg": ("charge.json", "chelpg", "charge"),
+    "hirshfeld": ("charge.json", "hirshfeld", "charge"),
+}
+_COMPILED_MAP_FUZZY = {
+    "elf_fuzzy": ("fuzzy_full.json", "elf_fuzzy"),
+}
+
+
+class TestCompiledDataPresentLengthAware:
+    """`_compiled_data_present` must treat partial charge / fuzzy entries as
+    missing when n_atoms is known. Otherwise a chelpg killed mid-table writes
+    e.g. 30 of 142 atoms, restart skips it, validator fails, folder loops."""
+
+    def test_partial_charge_treated_as_missing(self, tmp_path):
+        from qtaim_gen.source.core.omol import _compiled_data_present
+
+        folder = tmp_path / "job"
+        folder.mkdir()
+        # 1 of 10 atoms — clearly partial.
+        _write_json(folder / "charge.json", {
+            "chelpg": {"charge": {"1_C": 0.1}},
+            "hirshfeld": {"charge": {f"{i+1}_X": 0.0 for i in range(10)}},
+        })
+
+        # Without n_atoms: legacy behavior, bool check passes both.
+        assert _compiled_data_present(str(folder), "chelpg", _COMPILED_MAP_CHARGE)
+        assert _compiled_data_present(str(folder), "hirshfeld", _COMPILED_MAP_CHARGE)
+
+        # With n_atoms=10: partial chelpg rejected, complete hirshfeld accepted.
+        assert not _compiled_data_present(
+            str(folder), "chelpg", _COMPILED_MAP_CHARGE, n_atoms=10
+        )
+        assert _compiled_data_present(
+            str(folder), "hirshfeld", _COMPILED_MAP_CHARGE, n_atoms=10
+        )
+
+    def test_empty_charge_dict_still_rejected(self, tmp_path):
+        """Backward-compat: pre-existing empty-dict path still works without n_atoms."""
+        from qtaim_gen.source.core.omol import _compiled_data_present
+
+        folder = tmp_path / "job"
+        folder.mkdir()
+        _write_json(folder / "charge.json", {"chelpg": {"charge": {}}})
+        assert not _compiled_data_present(
+            str(folder), "chelpg", _COMPILED_MAP_CHARGE
+        )
+        assert not _compiled_data_present(
+            str(folder), "chelpg", _COMPILED_MAP_CHARGE, n_atoms=10
+        )
+
+    def test_excess_charge_count_rejected(self, tmp_path):
+        """Validator demands exact n_atoms match; skip-path should too."""
+        from qtaim_gen.source.core.omol import _compiled_data_present
+
+        folder = tmp_path / "job"
+        folder.mkdir()
+        # 12 entries when n_atoms=10 — leftover from a previous bigger system.
+        _write_json(folder / "charge.json", {
+            "hirshfeld": {"charge": {f"{i+1}_X": 0.0 for i in range(12)}},
+        })
+        assert not _compiled_data_present(
+            str(folder), "hirshfeld", _COMPILED_MAP_CHARGE, n_atoms=10
+        )
+
+    def test_partial_fuzzy_treated_as_missing(self, tmp_path):
+        """Fuzzy entries must equal n_atoms + 2 (n atoms + sum + abs_sum)."""
+        from qtaim_gen.source.core.omol import _compiled_data_present
+
+        folder = tmp_path / "job"
+        folder.mkdir()
+        # n_atoms=5 expects 7 entries; we write 4 (partial).
+        _write_json(folder / "fuzzy_full.json", {
+            "elf_fuzzy": {f"{i+1}_X": 0.1 for i in range(4)},
+        })
+        assert not _compiled_data_present(
+            str(folder),
+            "elf_fuzzy",
+            _COMPILED_MAP_FUZZY,
+            n_atoms=5,
+            fuzzy_routines={"elf_fuzzy"},
+        )
+
+    def test_complete_fuzzy_accepted(self, tmp_path):
+        from qtaim_gen.source.core.omol import _compiled_data_present
+
+        folder = tmp_path / "job"
+        folder.mkdir()
+        n_atoms = 5
+        entries = {f"{i+1}_X": 0.1 for i in range(n_atoms)}
+        entries["sum"] = 1.0
+        entries["abs_sum"] = 1.0
+        _write_json(folder / "fuzzy_full.json", {"elf_fuzzy": entries})
+        assert _compiled_data_present(
+            str(folder),
+            "elf_fuzzy",
+            _COMPILED_MAP_FUZZY,
+            n_atoms=n_atoms,
+            fuzzy_routines={"elf_fuzzy"},
+        )
+
+    def test_n_atoms_none_falls_back_to_bool(self, tmp_path):
+        """n_atoms=None preserves legacy permissive behavior (bool check)."""
+        from qtaim_gen.source.core.omol import _compiled_data_present
+
+        folder = tmp_path / "job"
+        folder.mkdir()
+        _write_json(folder / "charge.json", {
+            "hirshfeld": {"charge": {"1_X": 0.1}}
+        })
+        assert _compiled_data_present(
+            str(folder), "hirshfeld", _COMPILED_MAP_CHARGE, n_atoms=None
+        )
+
+
+# ---------------------------------------------------------------------------
+# Tests: substantive .out detection (chelpg truncation guard)
+# ---------------------------------------------------------------------------
+
+
+# Multiwfn 3.8 banner — present in every .out, head-sniff sees it as "clean".
+_MULTIWFN_HEAD = (
+    " Multiwfn -- A Multifunctional Wavefunction Analyzer\n"
+    " Version 3.8(dev), update date: 2024-Oct-6\n"
+    " ( Number of parallel threads:   4 )\n"
+)
+
+# Realistic chelpg progress lines — no result table, run was killed.
+_CHELPG_TRUNCATED_TAIL = (
+    " Number of CHELPG fitting points used:     22327\n"
+    " Calculating ESP at fitting points, please wait...\n"
+    " Initializing LIBRETA library (fast version) for ESP evaluation ...\n"
+    " LIBRETA library has been successfully initialized!\n"
+    " Progress: 50.0%\n"
+) * 10  # padding to make the file > 8 KB so the marker check has to scan tail
+
+
+class TestSubstantiveStepOut:
+    """`_is_substantive_step_out` must reject chelpg.out files that lack the
+    'Center       Charge' completion marker, even if the head looks clean."""
+
+    def test_chelpg_truncated_rejected(self, tmp_path):
+        """chelpg killed mid-ESP: clean head, no result table → not substantive."""
+        from qtaim_gen.source.core.omol import _is_substantive_step_out
+
+        path = tmp_path / "chelpg.out"
+        path.write_text(_MULTIWFN_HEAD + _CHELPG_TRUNCATED_TAIL)
+        assert not _is_substantive_step_out(str(path), order="chelpg")
+
+    def test_chelpg_complete_accepted(self, tmp_path):
+        """chelpg with the 'Center       Charge' marker is accepted."""
+        from qtaim_gen.source.core.omol import _is_substantive_step_out
+
+        path = tmp_path / "chelpg.out"
+        body = (
+            _MULTIWFN_HEAD
+            + _CHELPG_TRUNCATED_TAIL
+            + "\n  Center       Charge\n"
+            + " Atom    1(C ): -0.123456\n"
+        )
+        path.write_text(body)
+        assert _is_substantive_step_out(str(path), order="chelpg")
+
+    def test_chelpg_marker_in_head_accepted(self, tmp_path):
+        """Marker landing inside the first 8 KB short-circuits the tail scan."""
+        from qtaim_gen.source.core.omol import _is_substantive_step_out
+
+        path = tmp_path / "chelpg.out"
+        path.write_text(_MULTIWFN_HEAD + " Center       Charge\n")
+        assert _is_substantive_step_out(str(path), order="chelpg")
+
+    def test_unknown_routine_keeps_legacy_behavior(self, tmp_path):
+        """Routines without a registered marker keep the head-only check."""
+        from qtaim_gen.source.core.omol import _is_substantive_step_out
+
+        path = tmp_path / "hirshfeld.out"
+        path.write_text(_MULTIWFN_HEAD + "some content\n")
+        assert _is_substantive_step_out(str(path), order="hirshfeld")
+
+    def test_error_signature_still_rejected(self, tmp_path):
+        """A multiwfn error signature in the head trumps everything."""
+        from qtaim_gen.source.core.omol import _is_substantive_step_out
+
+        path = tmp_path / "chelpg.out"
+        path.write_text(
+            _MULTIWFN_HEAD
+            + " Error: Unable to find input file\n"
+            + " Center       Charge\n"  # marker present but error wins
+        )
+        assert not _is_substantive_step_out(str(path), order="chelpg")
+
+
+# ---------------------------------------------------------------------------
+# Tests: parse_multiwfn compile loop tolerates empty / malformed intermediates
+# ---------------------------------------------------------------------------
+
+
+class TestParseMultiwfnEmptyIntermediates:
+    """`parse_multiwfn` must skip 0-byte or malformed per-routine .json files
+    rather than raising JSONDecodeError out of gbw_analysis. aniBB hit this
+    with hirshfeld.json being 0 bytes after a partial multiwfn crash."""
+
+    def _setup_folder(self, tmp_path, bad_routine, content):
+        """Stage a job folder with valid charge intermediates plus one bad file.
+
+        Returns folder path. No .out files -> compile loop runs without
+        re-parsing; bad intermediate triggers the new guard.
+        """
+        folder = tmp_path / "job"
+        folder.mkdir()
+        # orca.inp so any downstream call doesn't choke on n_atoms lookup
+        (folder / "orca.inp").write_text(
+            "! wB97M-V\n*xyz 0 1\nC 0 0 0\nH 0 0 1\n*\n"
+        )
+        # Good intermediates: adch / cm5 / becke for charge
+        for r in ("adch", "cm5", "becke"):
+            _write_json(folder / f"{r}.json", {"charge": {"1_C": 0.1, "2_H": 0.0}})
+        # Bad intermediate
+        (folder / f"{bad_routine}.json").write_text(content)
+        return folder
+
+    def test_empty_intermediate_skipped(self, tmp_path):
+        """0-byte hirshfeld.json: compile finishes, hirshfeld key absent."""
+        from qtaim_gen.source.core.omol import parse_multiwfn
+        import logging
+
+        folder = self._setup_folder(tmp_path, "hirshfeld", "")
+        logger = logging.getLogger("test_empty_intermediate")
+        parse_multiwfn(str(folder), separate=True, full_set=1, logger=logger)
+
+        with open(folder / "charge.json") as f:
+            charge = json.load(f)
+        assert "hirshfeld" not in charge
+        assert {"adch", "cm5", "becke"}.issubset(charge.keys())
+
+    def test_malformed_intermediate_skipped(self, tmp_path):
+        """Trailing-comma vdd.json: compile finishes, vdd key absent."""
+        from qtaim_gen.source.core.omol import parse_multiwfn
+        import logging
+
+        folder = self._setup_folder(tmp_path, "vdd", '{"charge": {},}')
+        logger = logging.getLogger("test_malformed_intermediate")
+        parse_multiwfn(str(folder), separate=True, full_set=1, logger=logger)
+
+        with open(folder / "charge.json") as f:
+            charge = json.load(f)
+        assert "vdd" not in charge
+        assert {"adch", "cm5", "becke"}.issubset(charge.keys())
+
+    def test_qtaim_out_does_not_emit_unknown_warning(self, tmp_path, caplog):
+        """qtaim.out is parsed elsewhere; the charge/bond/fuzzy compile loop
+        must not log 'Unknown routine qtaim' when it encounters it."""
+        import logging
+        from qtaim_gen.source.core.omol import parse_multiwfn
+
+        folder = tmp_path / "job"
+        folder.mkdir()
+        (folder / "orca.inp").write_text("! wB97M-V\n*xyz 0 1\nC 0 0 0\n*\n")
+        # Minimal qtaim.out — its content doesn't matter, only that the
+        # routine name resolves to a silent skip branch.
+        (folder / "qtaim.out").write_text(" Multiwfn 3.8\n some content\n")
+
+        with caplog.at_level(logging.WARNING):
+            parse_multiwfn(str(folder), separate=True, full_set=1)
+
+        for rec in caplog.records:
+            assert "Unknown routine 'qtaim'" not in rec.getMessage()
+
+
+# ---------------------------------------------------------------------------
+# Tests: move_results_to_folder quarantines unreadable destination JSON
+# ---------------------------------------------------------------------------
+
+
+class TestMoveResultsQuarantine:
+    """`move_results_to_folder` must overwrite a corrupted destination JSON
+    instead of silently keeping it. Otherwise the corrupted file is immortal
+    and validation never recovers."""
+
+    def test_corrupt_destination_quarantined_and_overwritten(self, tmp_path):
+        import logging
+        from qtaim_gen.source.core.omol import move_results_to_folder
+
+        folder = tmp_path / "job"
+        folder.mkdir()
+        gen = folder / "generator"
+        gen.mkdir()
+
+        # Trailing-comma corruption matching the 6i8a edge case.
+        (gen / "charge.json").write_text('{"adch": {"charge": {}},}')
+        fresh = {"adch": {"charge": {"1_C": 0.1}}, "becke": {"charge": {"1_C": 0.2}}}
+        _write_json(folder / "charge.json", fresh)
+
+        logger = logging.getLogger("test_quarantine")
+        move_results_to_folder(str(folder), logger=logger, clean=True)
+
+        with open(gen / "charge.json") as f:
+            merged = json.load(f)
+        assert merged == fresh
+        # Quarantined sidecar should exist with the malformed content
+        assert (gen / "charge.json.corrupt").exists()
+
+    def test_clean_destination_path_unchanged(self, tmp_path):
+        """Valid destination JSON: standard merge, no quarantine."""
+        import logging
+        from qtaim_gen.source.core.omol import move_results_to_folder
+
+        folder = tmp_path / "job"
+        folder.mkdir()
+        gen = folder / "generator"
+        gen.mkdir()
+
+        _write_json(gen / "charge.json", {"adch": {"charge": {"1_C": 0.1}}})
+        _write_json(folder / "charge.json", {"becke": {"charge": {"1_C": 0.2}}})
+
+        logger = logging.getLogger("test_clean_merge")
+        move_results_to_folder(str(folder), logger=logger, clean=True)
+
+        with open(gen / "charge.json") as f:
+            merged = json.load(f)
+        assert set(merged.keys()) == {"adch", "becke"}
+        assert not (gen / "charge.json.corrupt").exists()
+
+
+# ---------------------------------------------------------------------------
+# Tests: backfill_skip_timing (log -> sentinel) for restart-skip path
+# ---------------------------------------------------------------------------
+
+
+class TestBackfillSkipTiming:
+    """`backfill_skip_timing` must fill a missing timing key with a log-scraped
+    value when available, else a TIMING_PLACEHOLDER sentinel, and always
+    record provenance under TIMINGS_PATCHED_KEY."""
+
+    def test_log_value_used_when_available(self):
+        from qtaim_gen.source.core.omol import backfill_skip_timing
+        from qtaim_gen.source.utils.validation import (
+            TIMINGS_PATCHED_KEY, TIMING_PLACEHOLDER,
+        )
+
+        timings = {"qtaim": 12.3}
+        log_timings = {"chelpg": 87.4}
+        backfill_skip_timing(timings, "chelpg", log_timings)
+        assert timings["chelpg"] == 87.4
+        assert timings[TIMINGS_PATCHED_KEY]["chelpg"]["source"] == "log"
+        assert timings[TIMINGS_PATCHED_KEY]["chelpg"]["value"] == 87.4
+        assert TIMING_PLACEHOLDER < 0  # sanity
+
+    def test_placeholder_used_when_log_missing(self):
+        from qtaim_gen.source.core.omol import backfill_skip_timing
+        from qtaim_gen.source.utils.validation import (
+            TIMINGS_PATCHED_KEY, TIMING_PLACEHOLDER,
+        )
+
+        timings = {}
+        backfill_skip_timing(timings, "chelpg", {})
+        assert timings["chelpg"] == TIMING_PLACEHOLDER
+        assert timings[TIMINGS_PATCHED_KEY]["chelpg"]["source"] == "placeholder"
+
+    def test_placeholder_used_when_log_value_nonpositive(self):
+        """A -1.0 in the log (failed run) must NOT be propagated as 'log'."""
+        from qtaim_gen.source.core.omol import backfill_skip_timing
+        from qtaim_gen.source.utils.validation import (
+            TIMINGS_PATCHED_KEY, TIMING_PLACEHOLDER,
+        )
+
+        timings = {}
+        backfill_skip_timing(timings, "chelpg", {"chelpg": -1.0})
+        assert timings["chelpg"] == TIMING_PLACEHOLDER
+        assert timings[TIMINGS_PATCHED_KEY]["chelpg"]["source"] == "placeholder"
+
+    def test_marker_merges_across_calls(self):
+        """Backfilling two routines preserves both marker entries."""
+        from qtaim_gen.source.core.omol import backfill_skip_timing
+        from qtaim_gen.source.utils.validation import TIMINGS_PATCHED_KEY
+
+        timings = {}
+        backfill_skip_timing(timings, "chelpg", {"chelpg": 10.0})
+        backfill_skip_timing(timings, "elf_fuzzy", {})
+        marker = timings[TIMINGS_PATCHED_KEY]
+        assert set(marker.keys()) == {"chelpg", "elf_fuzzy"}
+        assert marker["chelpg"]["source"] == "log"
+        assert marker["elf_fuzzy"]["source"] == "placeholder"
+
+    def test_validator_accepts_backfilled_sentinel(self, tmp_path):
+        """End-to-end: a sentinel-backfilled chelpg must pass timing validation
+        when the routine is in TIMINGS_PATCHED_KEY -- otherwise the HPC loop
+        never terminates even with the backfill."""
+        from qtaim_gen.source.core.omol import backfill_skip_timing
+        from qtaim_gen.source.utils.validation import validate_timing_dict
+
+        # full_set=1 needs chelpg present; everything else has real timings.
+        timings = _make_timings_dict(full_set=1)
+        del timings["chelpg"]
+        backfill_skip_timing(timings, "chelpg", {})
+
+        path = tmp_path / "timings.json"
+        _write_json(path, timings)
+        assert validate_timing_dict(str(path), full_set=1)
 
 
 # ---------------------------------------------------------------------------

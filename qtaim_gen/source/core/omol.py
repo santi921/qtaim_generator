@@ -611,18 +611,57 @@ def run_jobs(
                 )
                 timings = {}
 
+    # Lazy log-scrape cache for backfill_skip_timing -- only the first
+    # missing-timing skip pays the parse cost.
+    _log_timings_cache: list = []  # 0- or 1-element box for lazy init
+
+    # n_atoms enables length-aware completeness checks in _compiled_data_present.
+    # Without it a partial chelpg entry (e.g. 30 of 142 atoms) would be treated
+    # as "data verified" and skipped forever while validation keeps failing.
+    n_atoms_for_skip: Optional[int] = None
+    try:
+        from qtaim_gen.source.utils.validation import (
+            get_charge_spin_n_atoms_from_folder,
+        )
+        dft_dict = get_charge_spin_n_atoms_from_folder(folder, logger=logger)
+        if dft_dict and dft_dict.get("mol"):
+            n_atoms_for_skip = len(dft_dict["mol"])
+    except Exception as e:
+        logger.warning(
+            "Could not determine n_atoms for skip-completeness check: %s", e
+        )
+    _fuzzy_routine_set = set(fuzzy_dict.keys()) if separate else set()
+
     for order in order_of_operations:
         # Per-sub-job restart: data presence is the primary skip signal; timing
         # is secondary. This handles cases where timings.json was reset/corrupted
         # or a crash occurred between the mfwn script finishing and the timing write.
         if restart:
             has_files = _has_usable_step_output(folder, order)
-            if has_files or _compiled_data_present(folder, order, _compiled_map):
-                _timing_str = (
-                    f", timing={timings[order]:.2f}s"
-                    if order in timings and timings[order] > 0
-                    else ", no timing entry"
+            if has_files or _compiled_data_present(
+                folder, order, _compiled_map,
+                n_atoms=n_atoms_for_skip,
+                fuzzy_routines=_fuzzy_routine_set,
+            ):
+                has_positive_timing = (
+                    order in timings
+                    and isinstance(timings[order], (int, float))
+                    and timings[order] > 0
                 )
+                if has_positive_timing:
+                    _timing_str = f", timing={timings[order]:.2f}s"
+                else:
+                    if not _log_timings_cache:
+                        _log_timings_cache.append(
+                            _parse_timings_from_log(
+                                os.path.join(folder, "gbw_analysis.log")
+                            )
+                        )
+                    backfill_skip_timing(timings, order, _log_timings_cache[0], logger)
+                    atomic_json_write(
+                        os.path.join(folder, "timings.json"), timings
+                    )
+                    _timing_str = f", timing backfilled={timings[order]:.2f}s"
                 logger.info(
                     f"Skipping {order} in {folder}: data verified{_timing_str}"
                 )
@@ -853,8 +892,13 @@ def parse_multiwfn(
                         elif routine in list(fuzzy_dict.keys()):
                             data = parse_fuzzy_real_space(file_full_path)
 
-                        # elif routine == "qtaim":
-                        #    pass
+                        elif routine == "qtaim":
+                            # qtaim has its own parser invoked elsewhere; the
+                            # routine name appears in routine_list because
+                            # ORDER_OF_OPERATIONS_separate includes it, but
+                            # this charge/bond/fuzzy/other loop is not where
+                            # qtaim.out gets parsed. Silent skip.
+                            continue
 
                         else:
                             logger.warning(
@@ -929,18 +973,39 @@ def parse_multiwfn(
         for routine in combined_routines:
             # json name
             file = routine + ".json"
-            if file in directory_files:
-                if routine == file.split(".json")[0]:
-                    with open(os.path.join(folder, file), "r") as f:
-                        if routine in charge_routines:
-                            charge_dict_compiled[routine] = json.load(f)
-                        elif routine in bond_routines:
-                            bond_dict_compiled[routine] = json.load(f)
-                        elif routine in fuzzy_routines:
-                            fuzzy_dict_compiled[routine] = json.load(f)[routine]
-                        elif routine in other_routines:
-                            # json.load will returna. dict with several keys, we just want to update onto compiled 
-                            other_dict_compiled.update(json.load(f))
+            if file not in directory_files:
+                continue
+            if routine != file.split(".json")[0]:
+                continue
+            full_path = os.path.join(folder, file)
+            # Zero-byte or malformed intermediate (e.g. multiwfn crashed
+            # between opening the json and writing content) must not kill
+            # the compile loop -- the routine is just treated as missing.
+            try:
+                if os.path.getsize(full_path) == 0:
+                    logger.warning("Skipping empty intermediate %s", full_path)
+                    continue
+                with open(full_path, "r") as f:
+                    payload = json.load(f)
+            except (OSError, json.JSONDecodeError) as e:
+                logger.warning("Skipping unreadable intermediate %s: %s", full_path, e)
+                continue
+            if routine in charge_routines:
+                charge_dict_compiled[routine] = payload
+            elif routine in bond_routines:
+                bond_dict_compiled[routine] = payload
+            elif routine in fuzzy_routines:
+                try:
+                    fuzzy_dict_compiled[routine] = payload[routine]
+                except (KeyError, TypeError) as e:
+                    logger.warning(
+                        "Fuzzy intermediate %s missing top-level '%s' key: %s",
+                        full_path, routine, e,
+                    )
+                    continue
+            elif routine in other_routines:
+                if isinstance(payload, dict):
+                    other_dict_compiled.update(payload)
                             
                     # remove the file
                     # if os.path.exists(os.path.join(folder, file)):
@@ -1122,6 +1187,43 @@ def _parse_timings_from_log(log_path: str) -> dict:
     return results
 
 
+def backfill_skip_timing(
+    timings: dict,
+    order: str,
+    log_timings: dict,
+    logger: Optional[logging.Logger] = None,
+) -> None:
+    """Stamp a backfilled timing entry for a restart-skipped routine.
+
+    Used when the routine's data files exist on disk but its timing key is
+    absent from timings.json -- without this, the next validate_timing_dict
+    call fails on the missing key and the folder loops on HPC.
+
+    Strategy:
+      1. If `log_timings[order] > 0`, use that scraped value.
+      2. Otherwise stamp TIMING_PLACEHOLDER.
+    In both cases, record provenance under TIMINGS_PATCHED_KEY so the
+    validator accepts the sentinel and downstream aggregates can filter it.
+    Mutates *timings* in place. Caller is responsible for persisting.
+    """
+    log_val = log_timings.get(order)
+    if isinstance(log_val, (int, float)) and log_val > 0:
+        timings[order] = log_val
+        source, value = "log", log_val
+    else:
+        timings[order] = TIMING_PLACEHOLDER
+        source, value = "placeholder", TIMING_PLACEHOLDER
+    marker = timings.get(TIMINGS_PATCHED_KEY)
+    if not isinstance(marker, dict):
+        marker = {}
+    marker[order] = {"source": source, "value": value}
+    timings[TIMINGS_PATCHED_KEY] = marker
+    if logger:
+        logger.info(
+            "Backfilled missing timing for '%s' = %.2f (%s)", order, value, source,
+        )
+
+
 def patch_timings_from_log(
     folder: str,
     full_set: int = 0,
@@ -1254,25 +1356,49 @@ def move_results_to_folder(
     for file in os.listdir(folder):
         if file in results_list:
             # if file exists in results folder, merge the jsons
-            if os.path.exists(os.path.join(results_folder, file)):
+            existing_path = os.path.join(results_folder, file)
+            new_path = os.path.join(folder, file)
+            if os.path.exists(existing_path):
                 try:
-                    with open(os.path.join(folder, file), "r") as f:
+                    with open(new_path, "r") as f:
                         data_new = json.load(f)
-                    with open(os.path.join(results_folder, file), "r") as f:
-                        data_existing = json.load(f)
+                    try:
+                        with open(existing_path, "r") as f:
+                            data_existing = json.load(f)
+                    except (json.JSONDecodeError, OSError) as e:
+                        # Quarantine corrupted destination so the fresh data
+                        # can overwrite it. Without this, a malformed
+                        # generator/<file>.json (e.g. trailing-comma
+                        # charge.json from a pre-atomic-write era) is
+                        # immortal: the merge keeps failing and the fresh
+                        # data is silently dropped, so validation never recovers.
+                        corrupt_path = existing_path + ".corrupt"
+                        try:
+                            os.replace(existing_path, corrupt_path)
+                            logger.error(
+                                "Quarantined unreadable %s -> %s (%s); "
+                                "fresh data will overwrite",
+                                existing_path, corrupt_path, e,
+                            )
+                        except OSError as mv_err:
+                            logger.error(
+                                "Failed to quarantine %s: %s",
+                                existing_path, mv_err,
+                            )
+                        data_existing = {}
                     # merge the two dicts
                     if isinstance(data_existing, dict) and isinstance(data_new, dict):
 
                         data_merged = {**data_existing, **data_new}
                     else:
                         data_merged = data_new  # if not dict, just overwrite
-                    atomic_json_write(os.path.join(results_folder, file), data_merged)
+                    atomic_json_write(existing_path, data_merged)
 
                     logger.info(f"Merged {file} into results folder")
                     # remove the original file
 
                     if clean:
-                        os.remove(os.path.join(folder, file))
+                        os.remove(new_path)
                 except Exception as e:
                     logger.error(f"Error merging file {file}: {e}")
             else:
@@ -1509,13 +1635,29 @@ _MULTIWFN_ERROR_SIGNATURES = (
 )
 
 
-def _is_substantive_step_out(path: str) -> bool:
+# Per-routine positive completion markers. Present in a .out only after the
+# routine finished writing its result section. Used to catch runs killed
+# mid-computation (walltime, OOM) whose .out has a clean banner + partial
+# progress but no result table — e.g. chelpg killed mid-LIBRETA-ESP.
+# Markers are strings the routine's own parser uses to locate the result
+# block, so by construction a parsed-without-error .out contains them.
+_STEP_COMPLETION_MARKERS = {
+    "chelpg": "Center       Charge",  # parse_charge_chelpg trigger
+}
+
+
+def _is_substantive_step_out(path: str, order: str = None) -> bool:
     """True if a multiwfn/orca_2mkl .out file looks like a successful run.
 
     Rejects empty files and any file whose first 8 KB contains one of the
     multiwfn error signatures. Both signatures appear early in the file
     (banner + first prompt loop), so a single bounded read catches them and
     keeps cost flat on large CPprop outputs.
+
+    For routines in `_STEP_COMPLETION_MARKERS`, additionally requires that
+    the .out tail contains the routine's positive completion marker. This
+    catches walltime-killed runs whose head looks clean but whose result
+    section was never reached.
     """
     if not os.path.isfile(path):
         return False
@@ -1527,7 +1669,29 @@ def _is_substantive_step_out(path: str) -> bool:
             head = f.read(8192).decode("utf-8", errors="replace")
     except OSError:
         return False
-    return not any(sig in head for sig in _MULTIWFN_ERROR_SIGNATURES)
+    if any(sig in head for sig in _MULTIWFN_ERROR_SIGNATURES):
+        return False
+
+    marker = _STEP_COMPLETION_MARKERS.get(order)
+    if marker is None:
+        return True
+
+    # Marker may live anywhere past the head; scan the whole file but cheaply.
+    if marker in head:
+        return True
+    try:
+        with open(path, "rb") as f:
+            # Scan the rest in 1 MB chunks; chelpg result block is tiny so a
+            # bounded streaming scan beats slurping a multi-MB progress log.
+            f.seek(8192)
+            while True:
+                chunk = f.read(1 << 20)
+                if not chunk:
+                    return False
+                if marker.encode("utf-8") in chunk:
+                    return True
+    except OSError:
+        return False
 
 
 def _wavefunction_present(folder: str) -> bool:
@@ -1565,7 +1729,7 @@ def _has_usable_step_output(folder: str, order: str) -> bool:
     for base in (folder, os.path.join(folder, "generator")):
         out_path = os.path.join(base, f"{order}.out")
         if os.path.isfile(out_path):
-            if _is_substantive_step_out(out_path):
+            if _is_substantive_step_out(out_path, order=order):
                 return True
             # .out present but bad — don't trust stale .json in this location
         else:
@@ -1581,11 +1745,29 @@ def _has_usable_step_output(folder: str, order: str) -> bool:
     return False
 
 
-def _compiled_data_present(folder: str, order: str, compiled_map: dict) -> bool:
-    """Return True if compiled JSON output for `order` exists and is non-empty.
+# Fuzzy compiled entries store n_atoms regular atoms plus two summary rows
+# ("sum" and "abs_sum"); validate_fuzzy_dict pins the count at n_atoms + 2.
+_FUZZY_EXTRA_ENTRIES = 2
+
+
+def _compiled_data_present(
+    folder: str,
+    order: str,
+    compiled_map: dict,
+    n_atoms: Optional[int] = None,
+    fuzzy_routines: Optional[set] = None,
+) -> bool:
+    """Return True if compiled JSON output for `order` exists and looks complete.
 
     Checks both the job root (in-progress run) and the generator/ subfolder
     (completed prior run after move_results_to_folder).
+
+    When `n_atoms` is supplied, the per-atom count is verified against the
+    same expectation the validator enforces (charge: exactly `n_atoms`;
+    fuzzy: exactly `n_atoms + _FUZZY_EXTRA_ENTRIES`). Without this length
+    check a partial write -- e.g. chelpg killed mid-table after writing 30
+    of 142 atoms -- would be treated as "data verified", the restart would
+    skip the routine, and the validator would fail forever on the next pass.
 
     Args:
         folder: Job folder path.
@@ -1593,6 +1775,12 @@ def _compiled_data_present(folder: str, order: str, compiled_map: dict) -> bool:
         compiled_map: Maps operation name → (compiled_json_filename, key_or_None).
             key=None for other_dict ops where other.json stores scalar fields
             via dict.update(), not keyed by operation name.
+        n_atoms: Atom count from the input file; enables length-based
+            completeness checks. None falls back to legacy bool-only check.
+        fuzzy_routines: Set of routine names that go into fuzzy_full.json.
+            Required to apply the `n_atoms + 2` fuzzy length expectation
+            (compiled_map alone can't distinguish bond vs. fuzzy ops since
+            both use the `else` branch below).
     """
     if order not in compiled_map:
         return False
@@ -1600,6 +1788,7 @@ def _compiled_data_present(folder: str, order: str, compiled_map: dict) -> bool:
     json_name = entry[0]
     key = entry[1]
     sub_key = entry[2] if len(entry) > 2 else None
+    fuzzy_routines = fuzzy_routines or set()
     for base in [folder, os.path.join(folder, "generator")]:
         json_path = os.path.join(base, json_name)
         if not os.path.exists(json_path) or os.path.getsize(json_path) == 0:
@@ -1614,12 +1803,24 @@ def _compiled_data_present(folder: str, order: str, compiled_map: dict) -> bool:
             elif sub_key is not None:
                 # charge ops: {"<op>": {"charge": {...}, ...}} — check the nested sub-key
                 # avoids false-positive when op-level dict exists but charge dict is empty
-                if bool(data.get(key, {}).get(sub_key)):
-                    return True
+                charges = data.get(key, {}).get(sub_key)
+                if not charges:
+                    continue
+                if n_atoms is not None and len(charges) != n_atoms:
+                    continue  # partial entry — treat as missing, force rerun
+                return True
             else:
                 # bond/fuzzy ops: key value is the data dict directly
-                if bool(data.get(key)):
-                    return True
+                payload = data.get(key)
+                if not payload:
+                    continue
+                if (
+                    n_atoms is not None
+                    and order in fuzzy_routines
+                    and len(payload) != n_atoms + _FUZZY_EXTRA_ENTRIES
+                ):
+                    continue  # partial fuzzy table — force rerun
+                return True
         except (json.JSONDecodeError, OSError):
             continue
     return False

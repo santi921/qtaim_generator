@@ -13,6 +13,31 @@ TIMINGS_PATCHED_KEY = "_timings_patched"
 TIMING_PLACEHOLDER = -1.0
 
 
+def _safe_json_load(path: str, logger=None):
+    """Load JSON from *path*, returning None on missing/empty/malformed file.
+
+    Validators must surface bad-JSON as a False validation result, not raise
+    out of validation_checks -- otherwise a single corrupted file (e.g.
+    trailing-comma charge.json from a pre-atomic-write era) kills the
+    whole gbw_analysis caller and the folder loops on HPC.
+    """
+    if not os.path.isfile(path):
+        if logger:
+            logger.error("Missing JSON file: %s", path)
+        return None
+    try:
+        if os.path.getsize(path) == 0:
+            if logger:
+                logger.error("Empty JSON file: %s", path)
+            return None
+        with open(path, "r") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError) as e:
+        if logger:
+            logger.error("Cannot read JSON %s: %s", path, e)
+        return None
+
+
 def get_charge_spin_n_atoms_from_folder(
     folder: str, logger=None, verbose=False
 ) -> tuple:
@@ -197,8 +222,9 @@ def validate_timing_dict(
     Basic check that the timing json file has the expected structure.
     Check that it has the keys 'total', 'qtaim', 'charge', 'bond', and 'fuzzy_full'.
     """
-    with open(timing_json_loc, "r") as f:
-        timing_dict = json.load(f)
+    timing_dict = _safe_json_load(timing_json_loc, logger=logger)
+    if timing_dict is None:
+        return False
 
     expected_keys, excepted_spin_keys = get_expected_timing_keys(
         full_set=full_set, spin_tf=False
@@ -279,8 +305,9 @@ def validate_bond_dict(
     For small molecules (n_atoms <= 2), missing bond keys are acceptable
     since there may be no bonds to analyze.
     """
-    with open(bond_json_loc, "r") as f:
-        bond_dict = json.load(f)
+    bond_dict = _safe_json_load(bond_json_loc, logger=logger)
+    if bond_dict is None:
+        return False
 
     expected_keys = ["fuzzy_bond"]
 
@@ -319,8 +346,9 @@ def validate_fuzzy_dict(
     Basic check that the fuzzy json file has the expected structure.
     Check that it has the keys 'fuzzy', 'fuzzy_bonds', 'fuzzy_bcp', 'fuzzy_ncp'.
     """
-    with open(fuzzy_json_loc, "r") as f:
-        fuzzy_dict = json.load(f)
+    fuzzy_dict = _safe_json_load(fuzzy_json_loc, logger=logger)
+    if fuzzy_dict is None:
+        return False
 
     expected_keys = [
         "becke_fuzzy_density",
@@ -365,8 +393,9 @@ def validate_other_dict(other_dict_loc: str, verbose: bool = False, logger: any 
     Basic check that the other json file has the expected structure.
     Check that it has the keys 'atoms', 'bonds', 'charges', and 'fuzzy'.
     """
-    with open(other_dict_loc, "r") as f:
-        other_dict = json.load(f)
+    other_dict = _safe_json_load(other_dict_loc, logger=logger)
+    if other_dict is None:
+        return False
 
     expected_keys = [
         "mpp_full",
@@ -423,8 +452,9 @@ def validate_charge_dict(
     Check that it has the keys 'mbis', 'adch', 'chelpg', 'becke',  'hirshfeld', 'cm5', 'bader', 'vdd'
     Check each one of these keys has a key "charge" with n_atoms entries.
     """
-    with open(charge_json_loc, "r") as f:
-        charge_dict = json.load(f)
+    charge_dict = _safe_json_load(charge_json_loc, logger=logger)
+    if charge_dict is None:
+        return False
 
     expected_keys = ["adch", "becke", "hirshfeld", "cm5"]
 
@@ -476,8 +506,9 @@ def validate_qtaim_dict(
     If n_atoms is provided, check that the number of non-bonded critical points matches n_atoms.
     If harsh_check is True, also check that the number of nuclear critical points matches n_atoms.
     """
-    with open(qtaim_json_loc, "r") as f:
-        qtaim_dict = json.load(f)
+    qtaim_dict = _safe_json_load(qtaim_json_loc, logger=logger)
+    if qtaim_dict is None:
+        return False
     # check it isn't empty
     if not qtaim_dict:
         if verbose:
