@@ -1,3 +1,5 @@
+import shutil
+import tempfile
 from pathlib import Path
 
 import numpy as np
@@ -25,15 +27,30 @@ TEST_FILES = Path(__file__).parent / "test_files"
 
 class TestMultiwfnParser:
 
-    orca_6 = str(TEST_FILES / "multiwfn")
-    gbw_analysis(
-        folder=orca_6,
-        orca_2mkl_cmd="orca2_mkl",
-        multiwfn_cmd="Multiwfn",
-        parse_only=True,
-        separate=True,
-        clean=False,
-    )  # works!
+    @classmethod
+    def setup_class(cls):
+        # run gbw_analysis on a temp copy so committed fixtures stay pristine
+        cls._tmp = tempfile.mkdtemp(prefix="multiwfn_")
+        dst = Path(cls._tmp) / "multiwfn"
+        shutil.copytree(
+            TEST_FILES / "multiwfn",
+            dst,
+            ignore=shutil.ignore_patterns("*.json", "*.txt"),
+        )
+        # gbw_analysis needs an ORCA .inp in the folder to read charge/spin
+        shutil.copy(TEST_FILES / "multiwfn" / "999" / "input.in", dst / "orca.inp")
+        gbw_analysis(
+            folder=str(dst),
+            orca_2mkl_cmd="orca2_mkl",
+            multiwfn_cmd="Multiwfn",
+            parse_only=True,
+            separate=True,
+            clean=False,
+        )  # works!
+
+    @classmethod
+    def teardown_class(cls):
+        shutil.rmtree(cls._tmp, ignore_errors=True)
 
     def test_bond_info(self):
         file_bond_info = str(TEST_FILES / "multiwfn" / "bond.out")
