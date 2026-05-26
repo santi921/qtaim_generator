@@ -751,17 +751,23 @@ def gather_qtaim_features(
         impute_count_reactants_bond = {i: 0 for i in features_bond}
         impute_count_products_bond = {i: 0 for i in features_bond}
 
+        # Initialize as None (object dtype) so later np.array / int assignments
+        # are accepted. pandas+pyarrow string dtype rejects non-string writes.
         for i in features_atom:
             str_reactant = "extra_feat_atom_reactant_" + i
             str_product = "extra_feat_atom_product_" + i
-            pandas_file[str_reactant] = ""
-            pandas_file[str_product] = ""
+            pandas_file[str_reactant] = None
+            pandas_file[str_product] = None
+            pandas_file[str_reactant] = pandas_file[str_reactant].astype(object)
+            pandas_file[str_product] = pandas_file[str_product].astype(object)
 
         for i in features_bond:
             str_reactant = "extra_feat_bond_reactant_" + i
             str_product = "extra_feat_bond_product_" + i
-            pandas_file[str_reactant] = ""
-            pandas_file[str_product] = ""
+            pandas_file[str_reactant] = None
+            pandas_file[str_product] = None
+            pandas_file[str_reactant] = pandas_file[str_reactant].astype(object)
+            pandas_file[str_product] = pandas_file[str_product].astype(object)
 
         fail_count = 0
 
@@ -1012,13 +1018,17 @@ def gather_qtaim_features(
         impute_count = {i: 0 for i in features_atom}
         impute_count_bond = {i: 0 for i in features_bond}
 
+        # Initialize as None (object dtype) so later np.array / int assignments
+        # are accepted. pandas+pyarrow string dtype rejects non-string writes.
         for i in features_atom:
             str_atom = "extra_feat_atom_" + i
-            pandas_file[str_atom] = ""
+            pandas_file[str_atom] = None
+            pandas_file[str_atom] = pandas_file[str_atom].astype(object)
 
         for i in features_bond:
             str_atom = "extra_feat_bond_" + i
-            pandas_file[str_atom] = ""
+            pandas_file[str_atom] = None
+            pandas_file[str_atom] = pandas_file[str_atom].astype(object)
 
         fail_count = 0
         for ind, row in pandas_file.iterrows():
