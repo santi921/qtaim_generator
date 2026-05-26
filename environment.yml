@@ -3,18 +3,23 @@ channels:
   - conda-forge
   - defaults
 dependencies:
-  - python=3.10
+  - python=3.11
   - rdkit
-  - pymatgen=2023.3.23
+  # pymatgen 2026.5.x split into a `pymatgen-core` distribution that drops
+  # `pymatgen.core.composition` etc. -- avoid until they stabilize.
+  - pymatgen<2026.5
   - pip
   - pytest
-  - numpy==2.3.4 # might need to install this after b/c of install order issues
+  - numpy>=2.0
   - pyarrow
   - tqdm
 
   - pip:
       - bson
-      - numpy==2.3.4
-      - lmdb
+      # lmdb >= 2.0 forbids opening the same env path twice in one process,
+      # which existing converter tests rely on. Aligned with qtaim_embed.
+      - lmdb<2
 
+    # Aligned with qtaim_embed/env.yml so a single conda env can host both
+    # repos. The Composition pickle shim lives in qtaim_gen/__init__.py.
     # keep pip-only extras here if needed

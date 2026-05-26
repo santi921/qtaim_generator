@@ -90,10 +90,12 @@ folder-orca-inp-to-pkl = "qtaim_gen.source.scripts.helpers.folder_orca_inp_to_pk
 # Channels to use when creating the environment
 channels = ["conda-forge", "defaults"]
 
-# Conda dependencies; prefer installing RDKit from conda-forge
+# Conda dependencies; prefer installing RDKit from conda-forge.
+# Aligned with environment.yml so the shared qtaim_embed/qtaim_generator env
+# resolves consistently.
 dependencies = [
-    "python=3.9",
+    "python=3.11",
     "rdkit",
-    "pymatgen>=2024.0.0",
+    "pymatgen<2026.5",
     "lmdb>=1.4.0"
 ]
