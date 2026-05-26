@@ -14,5 +14,5 @@ ulimit -s unlimited
 ROOT=/p/lustre5/vargas58/converters/converters_final
 OUT_DIR=/p/lustre5/vargas58/converters/noise_floors
 
-JOBS=16 ROOT=$ROOT OUT_DIR=$OUT_DIR \
+JOBS=8 WORKERS=4 ROOT=$ROOT OUT_DIR=$OUT_DIR \
     bash "$(dirname "$0")/noise_floors_corpus.sh"

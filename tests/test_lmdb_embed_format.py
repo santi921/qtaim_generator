@@ -128,7 +128,12 @@ class TestBaseConverterEmbedFormat:
 
         lmdb_path = Path(tmp_path) / "test_graphs.lmdb"
         env = lmdb.open(str(lmdb_path), subdir=False, readonly=True, lock=False)
-        skip_keys = {"length", "scaled", "scaler_finalized", "processed_source_keys"}
+        # Mirrors converter._merge_skip in qtaim_gen/source/core/converter.py.
+        skip_keys = {
+            "length", "scaled", "scaler_finalized", "processed_source_keys",
+            "feature_names", "feature_size", "target_dict", "element_set",
+            "allowed_ring_size", "allowed_charges", "allowed_spins",
+        }
 
         with env.begin() as txn:
             cursor = txn.cursor()

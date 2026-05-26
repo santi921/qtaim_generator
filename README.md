@@ -31,6 +31,10 @@ The package has two main workflows:
 
 For large datasets (e.g. OMol4M) with variable-depth job folder hierarchies, pass a flat list of absolute job paths to `json-to-lmdb --folder_list`. See `docs/SHARDING_GUIDE.md` for sharded conversion and `docs/JSON_TO_LMDB_SHARDING.md` for parallel shard processing.
 
+## Dataset
+
+OMol-Descriptors-4M, the dataset produced by this pipeline on the OMol25 4M public release, is hosted on Hugging Face: [santi921/OMol-Descriptors-4M](https://huggingface.co/datasets/santi921/OMol-Descriptors-4M). It ships six partial-charge schemes, four bond-order schemes, full QTAIM topology, fuzzy descriptors, and ORCA-derived globals across ~4M structures spanning 34 chemical verticals.
+
 ---
 
 ## Running at Scale

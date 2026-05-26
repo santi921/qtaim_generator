@@ -52,7 +52,7 @@ def discover_parquets(input_dir: Path, mode: str) -> list[ParquetSpec]:
             if not m:
                 continue
             found.append(ParquetSpec(path=p, source="omol", vertical=m.group("vertical")))
-    for src in ("schnet4aim", "qm7x", "pcqm4mv2", "qmugs"):
+    for src in ("schnet4aim", "qm7x", "pcqm4mv2", "qmugs", "tmqmplus"):
         p = input_dir / src / "soap.parquet"
         if p.is_file():
             found.append(ParquetSpec(path=p, source=src, vertical=src))

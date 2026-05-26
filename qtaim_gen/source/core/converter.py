@@ -705,6 +705,19 @@ class Converter:
         txn.put("length".encode("ascii"), pickle.dumps(processed_count, protocol=-1))
         txn.put("scaled".encode("ascii"), pickle.dumps(False, protocol=-1))
         txn.put("processed_source_keys".encode("ascii"), pickle.dumps(self._processed_source_keys, protocol=-1))
+        if self.grapher is not None and self.grapher.feat_names is not None:
+            feat_names = self.grapher.feat_names
+            feature_size = {k: len(v) for k, v in feat_names.items()}
+            txn.put("feature_names".encode("ascii"), pickle.dumps(feat_names, protocol=-1))
+            txn.put("feature_size".encode("ascii"), pickle.dumps(feature_size, protocol=-1))
+        txn.put("target_dict".encode("ascii"), pickle.dumps(self.keys_target, protocol=-1))
+        txn.put("element_set".encode("ascii"), pickle.dumps(self.element_set, protocol=-1))
+        txn.put("allowed_ring_size".encode("ascii"), pickle.dumps(
+            self.config_dict.get("allowed_ring_size"), protocol=-1))
+        txn.put("allowed_charges".encode("ascii"), pickle.dumps(
+            self.config_dict.get("allowed_charges"), protocol=-1))
+        txn.put("allowed_spins".encode("ascii"), pickle.dumps(
+            self.config_dict.get("allowed_spins"), protocol=-1))
         txn.commit()
         self.db.close()
 
@@ -865,14 +878,28 @@ class Converter:
         )
 
         # Copy all entries from shards, re-numbering graph keys to avoid collisions
-        _merge_skip = {b"length", b"scaled", b"scaler_finalized", b"processed_source_keys"}
+        _merge_skip = {
+            b"length", b"scaled", b"scaler_finalized", b"processed_source_keys",
+            b"feature_names", b"feature_size", b"target_dict", b"element_set",
+            b"allowed_ring_size", b"allowed_charges", b"allowed_spins",
+        }
+        _copy_meta = {
+            b"feature_names", b"feature_size", b"target_dict", b"element_set",
+            b"allowed_ring_size", b"allowed_charges", b"allowed_spins",
+        }
         total_copied = 0
         global_idx = 0
+        first_shard_meta: dict = {}
         with merged_env.begin(write=True) as dst_txn:
             for i, lmdb_path in enumerate(shard_lmdbs):
                 logger.info(f"Copying shard {i+1}/{len(shard_lmdbs)}")
                 src_env = lmdb.open(lmdb_path, subdir=False, readonly=True, lock=False)
                 with src_env.begin() as src_txn:
+                    if i == 0:
+                        for mk in _copy_meta:
+                            v = src_txn.get(mk)
+                            if v is not None:
+                                first_shard_meta[mk] = v
                     cursor = src_txn.cursor()
                     for key, value in cursor:
                         if key in _merge_skip:
@@ -883,6 +910,8 @@ class Converter:
                 src_env.close()
             dst_txn.put(b"length", pickle.dumps(global_idx, protocol=-1))
             dst_txn.put(b"scaled", pickle.dumps(False, protocol=-1))
+            for mk, mv in first_shard_meta.items():
+                dst_txn.put(mk, mv)
 
         merged_env.close()
         logger.info(f"Merged {total_copied} entries")
@@ -938,7 +967,11 @@ class Converter:
             logger.info("Applying merged scalers to LMDB...")
             env = lmdb.open(output_path, subdir=False, map_size=map_size)
             count = 0
-            metadata_keys = {b'scaled', b'scaler_finalized', b'length', b'processed_source_keys'}
+            metadata_keys = {
+                b'scaled', b'scaler_finalized', b'length', b'processed_source_keys',
+                b'feature_names', b'feature_size', b'target_dict', b'element_set',
+                b'allowed_ring_size', b'allowed_charges', b'allowed_spins',
+            }
             with env.begin(write=True) as txn:
                 cursor = txn.cursor()
                 for key, value in cursor:

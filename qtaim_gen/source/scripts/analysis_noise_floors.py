@@ -23,6 +23,7 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 import pandas as pd
@@ -49,11 +50,16 @@ def _run_vertical(
     nf_path: Path,
     topk: int,
     progress: bool,
+    workers: int = 1,
 ) -> pd.DataFrame:
     """Run B1-B5 for one vertical. Returns the noise-floor DataFrame.
 
     nf_path is the exact output path for the noise-floor parquet.
     Intermediate and exemplar files share the same directory and stem.
+
+    workers > 1 parallelizes LMDB fetch + per_record_fn within each of the
+    three stream passes (charge, bond, qtaim). Streams remain sequential
+    so the tqdm bar stays clean.
     """
     stem = nf_path.with_suffix("").name
     out_dir = nf_path.parent
@@ -72,6 +78,8 @@ def _run_vertical(
         per_record_fn=_charge_fn,
         output_path=charge_atoms_path,
         progress=progress,
+        desc=f"charge ({vertical})",
+        workers=workers,
     )
 
     # B2: stream bond.lmdb -> per-pair bond-order rows
@@ -84,6 +92,8 @@ def _run_vertical(
         per_record_fn=_bond_fn,
         output_path=bond_pairs_path,
         progress=progress,
+        desc=f"bond ({vertical})",
+        workers=workers,
     )
 
     # B3: stream qtaim.lmdb + structure.lmdb -> per-BCP descriptor rows
@@ -96,6 +106,8 @@ def _run_vertical(
         per_record_fn=_qtaim_fn,
         output_path=qtaim_bcps_path,
         progress=progress,
+        desc=f"qtaim ({vertical})",
+        workers=workers,
     )
 
     charge_df = pd.read_parquet(charge_atoms_path)
@@ -150,6 +162,11 @@ def main():
         help="Max exemplars emitted per (descriptor, element_or_pair). Default: 50.",
     )
     parser.add_argument("--no-progress", action="store_true")
+    parser.add_argument(
+        "--workers", type=int, default=1,
+        help="Threads for LMDB fetch + per_record_fn within each stream pass "
+             "(default 1). LMDB read transactions are thread-safe with lock=False.",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s",
@@ -168,16 +185,30 @@ def main():
         out_dir = args.output
         out_dir.mkdir(parents=True, exist_ok=True)
         nfs: list[pd.DataFrame] = []
-        for name, lmdb_root in verticals:
-            nf = _run_vertical(
-                vertical=name,
-                root=lmdb_root,
-                nf_path=out_dir / f"{name}_nf.parquet",
-                topk=args.topk,
-                progress=not args.no_progress,
-            )
-            if not nf.empty:
-                nfs.append(nf)
+        try:
+            from tqdm import tqdm as _tqdm
+            v_bar = _tqdm(total=len(verticals), desc="corpus", unit="v", position=0)
+        except ImportError:
+            v_bar = None
+        try:
+            for name, lmdb_root in verticals:
+                if v_bar is not None:
+                    v_bar.set_description(f"corpus [{name}]")
+                nf = _run_vertical(
+                    vertical=name,
+                    root=lmdb_root,
+                    nf_path=out_dir / f"{name}_nf.parquet",
+                    topk=args.topk,
+                    progress=not args.no_progress,
+                    workers=args.workers,
+                )
+                if not nf.empty:
+                    nfs.append(nf)
+                if v_bar is not None:
+                    v_bar.update(1)
+        finally:
+            if v_bar is not None:
+                v_bar.close()
         if nfs:
             _write_combined(nfs, out_dir)
     else:
@@ -190,6 +221,7 @@ def main():
             nf_path=args.output,
             topk=args.topk,
             progress=not args.no_progress,
+            workers=args.workers,
         )
         if not nf.empty:
             print(nf[nf["element"].isna() & nf["element_pair"].isna()][

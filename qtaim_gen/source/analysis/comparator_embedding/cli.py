@@ -18,12 +18,24 @@ from qtaim_gen.source.analysis.comparator_embedding.compute_soap import (
 from qtaim_gen.source.analysis.comparator_embedding.loaders import LOADERS
 
 
-# Global species lock (2026-05-04): one shared SOAP basis across OMol + all
-# four comparators so they can land in a single UMAP plot. Set is the union
-# of comparator-side >= 0.01% elements (12 Z values). Atoms outside this set
-# are silently dropped by dscribe; OMol structures with heavier elements
-# (e.g. transition metals) lose those atoms in their fingerprint.
+# Global species lock (2026-05-04): one shared SOAP basis across OMol + the
+# original four comparators so they can land in a single UMAP plot. Set is
+# the union of comparator-side >= 0.01% elements (12 Z values). Atoms outside
+# this set are silently dropped by dscribe; OMol structures with heavier
+# elements (e.g. transition metals) lose those atoms in their fingerprint.
 GLOBAL_SPECIES: list[int] = [1, 5, 6, 7, 8, 9, 14, 15, 16, 17, 35, 53]
+
+# TM-inclusive species lock (2026-05-06): used for the OMol-vs-tmQM+ overlay.
+# 12 organics + 1st-row TMs (Sc-Zn) + selected 2nd/3rd-row TMs that exceed
+# 1% of structures in either OMol or tmQM+. With n_max=4, l_max=3 the SOAP
+# dim lands at 33,024 -- same scale as the legacy 12-species basis at the
+# default n_max=8, l_max=6. Atoms outside this set are still dropped.
+GLOBAL_SPECIES_TM: list[int] = sorted([
+    1, 5, 6, 7, 8, 9, 14, 15, 16, 17, 35, 53,            # H,B,C,N,O,F,Si,P,S,Cl,Br,I
+    21, 22, 23, 24, 25, 26, 27, 28, 29, 30,              # Sc-Zn
+    42, 44, 45, 46,                                       # Mo,Ru,Rh,Pd
+    74, 75, 77, 78, 79, 80,                               # W,Re,Ir,Pt,Au,Hg
+])
 
 DEFAULT_SPECIES_BY_SOURCE: dict[str, list[int]] = {
     "omol": GLOBAL_SPECIES,
@@ -31,6 +43,7 @@ DEFAULT_SPECIES_BY_SOURCE: dict[str, list[int]] = {
     "qmugs": GLOBAL_SPECIES,
     "qm7x": GLOBAL_SPECIES,
     "schnet4aim": GLOBAL_SPECIES,
+    "tmqmplus": GLOBAL_SPECIES_TM,
 }
 
 

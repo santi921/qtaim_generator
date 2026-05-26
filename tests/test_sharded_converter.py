@@ -297,7 +297,11 @@ def test_merge_with_scaling(tmp_path):
     with env.begin() as txn:
         cursor = txn.cursor()
         graph_count = 0
-        metadata_keys = {b'scaled', b'scaler_finalized', b'length', b'processed_source_keys'}
+        metadata_keys = {
+            b'scaled', b'scaler_finalized', b'length', b'processed_source_keys',
+            b'feature_names', b'feature_size', b'target_dict', b'element_set',
+            b'allowed_ring_size', b'allowed_charges', b'allowed_spins',
+        }
 
         for key, value in cursor:
             # Skip metadata keys
