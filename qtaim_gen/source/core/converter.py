@@ -706,7 +706,20 @@ class Converter:
         txn.put("scaled".encode("ascii"), pickle.dumps(False, protocol=-1))
         txn.put("processed_source_keys".encode("ascii"), pickle.dumps(self._processed_source_keys, protocol=-1))
         if self.grapher is not None and self.grapher.feat_names is not None:
+            # grapher.feat_names is the PRE-split featurized schema: it includes
+            # the target columns, which split_graph_labels then moves into
+            # labels. Persist the POST-split schema (index_dict["exclude_names"],
+            # i.e. the kept feature columns) so feature_size/feature_names match
+            # the stored graphs' .feat width. Without this, an atom/bond/global
+            # target inflates feature_size by the target count and the model
+            # builds an embedding wider than the graphs it is fed.
             feat_names = self.grapher.feat_names
+            exclude_names = (self.index_dict or {}).get("exclude_names")
+            if exclude_names:
+                feat_names = {
+                    nt: exclude_names.get(nt, names)
+                    for nt, names in feat_names.items()
+                }
             feature_size = {k: len(v) for k, v in feat_names.items()}
             txn.put("feature_names".encode("ascii"), pickle.dumps(feat_names, protocol=-1))
             txn.put("feature_size".encode("ascii"), pickle.dumps(feature_size, protocol=-1))
