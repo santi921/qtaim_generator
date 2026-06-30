@@ -4,6 +4,7 @@ import json
 import os
 import pickle
 import tempfile
+from glob import glob
 
 import lmdb
 import pytest
@@ -20,6 +21,12 @@ from qtaim_gen.source.utils.multi_vertical import (
     load_pipeline_config,
     plan_phase,
     validate_schema_compatibility,
+)
+from qtaim_gen.source.scripts.helpers.multi_vertical_merge import (
+    build_phase,
+    scale_phase,
+    _build_shard_job,
+    _lmdb_is_scaled,
 )
 
 
@@ -480,3 +487,246 @@ class TestPlanPhase:
         assert "H" in plan.global_element_set
         assert "C" in plan.global_element_set
         assert "O" in plan.global_element_set
+
+
+# ---------------------------------------------------------------------------
+# Build / Scale phases (integration with real converter-built graphs)
+#
+# These use the merged LMDB fixtures and real qtaim_embed graphs, mirroring
+# test_sharded_converter.py. Fake-payload tests miss serialization-format bugs
+# (the gap that hid the silent no-op scaler), so these build genuine graphs.
+# ---------------------------------------------------------------------------
+
+_LMDB_TESTS_DIR = os.path.join(os.path.dirname(__file__), "test_files", "lmdb_tests")
+_MERGED_DIR = os.path.join(_LMDB_TESTS_DIR, "generator_lmdbs_merged")
+_MERGED_GEOM = os.path.join(_MERGED_DIR, "merged_geom.lmdb")
+_FIXTURE_KEYS = ["orca5", "orca5_rks", "orca5_uks", "orca6_rks"]
+
+requires_fixtures = pytest.mark.skipif(
+    not os.path.exists(_MERGED_GEOM),
+    reason="LMDB test fixtures (generator_lmdbs_merged) not available",
+)
+
+
+def _count_graphs(lmdb_path: str) -> int:
+    from qtaim_gen.source.utils.scaling import _METADATA_KEYS
+    env = lmdb.open(lmdb_path, subdir=False, readonly=True, lock=False)
+    n = 0
+    with env.begin() as txn:
+        for k, _ in txn.cursor():
+            if k not in _METADATA_KEYS:
+                n += 1
+    env.close()
+    return n
+
+
+def _fixture_element_set():
+    from qtaim_gen.source.utils.lmdbs import get_elements_from_structure_lmdb
+    env = lmdb.open(_MERGED_GEOM, subdir=False, readonly=True, lock=False)
+    elems = sorted(get_elements_from_structure_lmdb(env))
+    env.close()
+    return elems
+
+
+def _base_graph_lmdb(out_dir: str, name: str, include_keys=None) -> str:
+    """Build a real graph LMDB via BaseConverter (skip_scaling=True)."""
+    from qtaim_gen.source.core.converter import BaseConverter
+    os.makedirs(out_dir, exist_ok=True)
+    cfg = {
+        "chunk": -1, "filter_list": ["scaled", "length"], "restart": False,
+        "allowed_ring_size": [3, 4, 5, 6, 7, 8],
+        "allowed_charges": None, "allowed_spins": None,
+        "keys_target": {"atom": [], "bond": [], "global": ["n_atoms"]},
+        "keys_data": {"atom": [], "bond": [], "global": ["n_atoms"]},
+        "lmdb_path": out_dir, "lmdb_name": name,
+        "lmdb_locations": {"geom_lmdb": _MERGED_GEOM},
+        "n_workers": 1, "batch_size": 100, "skip_scaling": True,
+    }
+    if include_keys is not None:
+        cfg["include_keys"] = include_keys
+    BaseConverter(cfg).process()
+    return os.path.join(out_dir, name)
+
+
+def _general_converter_config() -> dict:
+    """Structural GeneralConverter config over the merged-geom fixture.
+
+    Only geom_lmdb is listed so data_inputs auto-detects to ["geom"]; listing
+    charge/qtaim/etc. would auto-enable those parse branches and require their
+    filters. Structural graphs with a global n_atoms feature/target are enough
+    to exercise build sharding and scaler fit/apply. build_phase overrides
+    lmdb_path/lmdb_name.
+    """
+    return {
+        "chunk": -1, "filter_list": ["scaled", "length"], "restart": False,
+        "allowed_ring_size": [3, 4, 5, 6, 7, 8],
+        "allowed_charges": None, "allowed_spins": None,
+        "keys_target": {"atom": [], "bond": [], "global": ["n_atoms"]},
+        "keys_data": {"atom": [], "bond": [], "global": ["n_atoms"]},
+        "bonding_scheme": "structural",
+        "charge_filter": None, "fuzzy_filter": None,
+        "bond_filter": None, "other_filter": None,
+        "lmdb_path": "PLACEHOLDER", "lmdb_name": "PLACEHOLDER",
+        "lmdb_locations": {"geom_lmdb": os.path.join(_MERGED_DIR, "merged_geom.lmdb")},
+        "n_workers": 1, "batch_size": 100,
+    }
+
+
+_SKIP = {"length", "scaled", "split_name", "scaler_finalized"}
+
+
+def test_fit_scalers_raises_on_corrupt_graph(tmp_path):
+    """fit no longer swallows load errors (the bug that masked the no-op)."""
+    from qtaim_gen.source.utils.scaling import fit_scalers_on_lmdbs
+    bad = str(tmp_path / "bad.lmdb")
+    env = lmdb.open(bad, subdir=False, map_size=10 * 1024 * 1024)
+    with env.begin(write=True) as txn:
+        txn.put(b"0", pickle.dumps({"molecule_graph": b"not-a-real-graph"}, protocol=-1))
+        txn.put(b"length", pickle.dumps(1, protocol=-1))
+    env.sync()
+    env.close()
+    with pytest.raises(RuntimeError, match="failed to load"):
+        fit_scalers_on_lmdbs([bad], _SKIP)
+
+
+@requires_fixtures
+def test_fit_and_apply_scale_real_graphs(tmp_path):
+    """Scaler actually fits and scales real graphs (catches the silent no-op)."""
+    from qtaim_gen.source.utils.scaling import (
+        fit_scalers_on_lmdbs,
+        apply_scalers_to_lmdb_inplace,
+        _deserialize_graph,
+    )
+    path = _base_graph_lmdb(str(tmp_path / "v"), "g.lmdb")
+    n = _count_graphs(path)
+    assert n == len(_FIXTURE_KEYS)
+
+    feature_scaler, label_scaler = fit_scalers_on_lmdbs([path], _SKIP)
+    # fit saw real graphs (empty before the dict-unwrap fix)
+    assert len(feature_scaler._mean) > 0
+
+    count = apply_scalers_to_lmdb_inplace(path, feature_scaler, label_scaler, _SKIP)
+    assert count == n  # was 0 with the swallowed dict-deserialize bug
+    assert _lmdb_is_scaled(path) is True
+
+    # Every value still deserializes (rewrap preserved the {"molecule_graph": ...} format)
+    env = lmdb.open(path, subdir=False, readonly=True, lock=False)
+    from qtaim_gen.source.utils.scaling import _METADATA_KEYS
+    with env.begin() as txn:
+        for k, v in txn.cursor():
+            if k in _METADATA_KEYS:
+                continue
+            _deserialize_graph(v)  # raises if format is wrong
+    env.close()
+
+
+@requires_fixtures
+def test_apply_scalers_batched_multiple_batches(tmp_path):
+    """Batched streaming apply handles >1 batch + final flush without dropping graphs."""
+    from qtaim_gen.source.utils.scaling import (
+        fit_scalers_on_lmdbs,
+        apply_scalers_to_lmdb_inplace,
+    )
+    path = _base_graph_lmdb(str(tmp_path / "v"), "g.lmdb")
+    n = _count_graphs(path)
+    feature_scaler, label_scaler = fit_scalers_on_lmdbs([path], _SKIP)
+    count = apply_scalers_to_lmdb_inplace(
+        path, feature_scaler, label_scaler, _SKIP, batch_size=1
+    )
+    assert count == n
+    assert _count_graphs(path) == n  # no graphs lost across batch boundaries
+
+
+@requires_fixtures
+def test_apply_recovers_from_stale_temp(tmp_path):
+    """A leftover .scaling.tmp from a prior crash is cleaned, source intact."""
+    from qtaim_gen.source.utils.scaling import (
+        fit_scalers_on_lmdbs,
+        apply_scalers_to_lmdb_inplace,
+    )
+    path = _base_graph_lmdb(str(tmp_path / "v"), "g.lmdb")
+    n = _count_graphs(path)
+    stale = path + ".scaling.tmp"
+    with open(stale, "wb") as f:
+        f.write(b"leftover-junk")
+
+    feature_scaler, label_scaler = fit_scalers_on_lmdbs([path], _SKIP)
+    count = apply_scalers_to_lmdb_inplace(path, feature_scaler, label_scaler, _SKIP)
+    assert count == n
+    assert not os.path.exists(stale)
+    assert _lmdb_is_scaled(path) is True
+
+
+@requires_fixtures
+def test_build_shard_job_sharded_equivalence(tmp_path):
+    """Sharded build covers the same graphs as an unsharded build (in-process)."""
+    cfg = _general_converter_config()
+    elems = _fixture_element_set()
+
+    uns = str(tmp_path / "unsharded")
+    _build_shard_job("v", "train", 0, list(_FIXTURE_KEYS), cfg, uns, elems)
+    n_unsharded = _count_graphs(os.path.join(uns, "shard_0.lmdb"))
+
+    shd = str(tmp_path / "sharded")
+    _build_shard_job("v", "train", 0, _FIXTURE_KEYS[0::2], cfg, shd, elems)
+    _build_shard_job("v", "train", 1, _FIXTURE_KEYS[1::2], cfg, shd, elems)
+    n_sharded = (
+        _count_graphs(os.path.join(shd, "shard_0.lmdb"))
+        + _count_graphs(os.path.join(shd, "shard_1.lmdb"))
+    )
+
+    assert n_unsharded == len(_FIXTURE_KEYS)
+    assert n_sharded == n_unsharded
+
+
+@requires_fixtures
+def test_build_scale_pipeline_end_to_end(tmp_path):
+    """build_phase -> scale_phase -> trainer load, plus resume no-ops."""
+    cfg = _general_converter_config()
+    elems = _fixture_element_set()
+    out_dir = str(tmp_path / "out")
+
+    # Manual SplitPlan with explicit non-empty train/val/test (avoids composition
+    # lumping the identical-formula fixtures into one split).
+    plan = SplitPlan(
+        assignment={"va": {
+            "train": _FIXTURE_KEYS[:2],
+            "val": _FIXTURE_KEYS[2:3],
+            "test": _FIXTURE_KEYS[3:4],
+        }},
+        global_element_set=elems,
+        converter_configs={"va": cfg},
+        summary={},
+    )
+    config = MultiVerticalPipelineConfig(
+        output_dir=out_dir,
+        verticals=(VerticalConfig(name="va", converter_config="unused"),),
+        split_config=SplitConfig(method="composition", ratios=(0.8, 0.1, 0.1)),
+        n_shards_per_split=2,
+        build_max_workers=2,
+    )
+
+    output_paths = build_phase(plan, config)
+    train_dir = output_paths["va"]["train"]
+    assert os.path.isdir(train_dir)
+
+    train_shards = sorted(glob(os.path.join(train_dir, "shard_*.lmdb")))
+    assert len(train_shards) == 2  # 2 train keys, n_shards_per_split=2
+    assert sum(_count_graphs(s) for s in train_shards) == 2
+
+    scale_phase(output_paths, config)
+    assert os.path.exists(os.path.join(out_dir, "feature_scaler_iterative.pt"))
+    assert os.path.exists(os.path.join(out_dir, "label_scaler_iterative.pt"))
+    for split in SPLIT_NAMES:
+        for shard in glob(os.path.join(output_paths["va"][split], "shard_*.lmdb")):
+            assert _lmdb_is_scaled(shard) is True
+
+    # Trainer consumes the split directory of shards directly (no merge).
+    from qtaim_embed.core.dataset import LMDBMoleculeDataset
+    ds = LMDBMoleculeDataset({"src": train_dir})
+    assert len(ds) == 2
+
+    # Resume: rerunning both phases is a no-op (no double-scaling, no rebuild).
+    output_paths2 = build_phase(plan, config)
+    scale_phase(output_paths2, config)
+    assert len(LMDBMoleculeDataset({"src": train_dir})) == 2

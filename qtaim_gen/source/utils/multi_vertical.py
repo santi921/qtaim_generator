@@ -48,6 +48,11 @@ class MultiVerticalPipelineConfig:
     split_config: SplitConfig
     n_shards_per_split: int = 1
     exclude_keys_path: str = ""  # optional manifest_holdout.parquet path
+    # How many shard build/scale jobs run concurrently. Effective CPU load is
+    # build_max_workers * each vertical config's n_workers, so keep n_workers low.
+    build_max_workers: int = field(
+        default_factory=lambda: max(4, (os.cpu_count() or 8) // 2)
+    )
 
     def __post_init__(self):
         if len(self.verticals) == 0:
@@ -57,6 +62,8 @@ class MultiVerticalPipelineConfig:
             raise ValueError(f"Vertical names must be unique, got {names}")
         if self.n_shards_per_split < 1:
             raise ValueError(f"n_shards_per_split must be >= 1, got {self.n_shards_per_split}")
+        if self.build_max_workers < 1:
+            raise ValueError(f"build_max_workers must be >= 1, got {self.build_max_workers}")
         if self.exclude_keys_path and not os.path.isfile(self.exclude_keys_path):
             raise FileNotFoundError(
                 f"exclude_keys_path is set but file not found: {self.exclude_keys_path}"
@@ -77,12 +84,17 @@ def load_pipeline_config(config_path: str) -> MultiVerticalPipelineConfig:
         ratios=tuple(raw["split_ratios"]),
         seed=raw["split_seed"],
     )
+    # Only pass build_max_workers when present so the cpu-derived default applies.
+    optional = {}
+    if "build_max_workers" in raw:
+        optional["build_max_workers"] = raw["build_max_workers"]
     return MultiVerticalPipelineConfig(
         output_dir=raw["output_dir"],
         verticals=verticals,
         split_config=split_config,
         n_shards_per_split=raw.get("n_shards_per_split", 1),
         exclude_keys_path=raw.get("exclude_keys_path", ""),
+        **optional,
     )
 
 

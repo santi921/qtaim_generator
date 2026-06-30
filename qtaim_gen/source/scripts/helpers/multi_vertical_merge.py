@@ -4,20 +4,25 @@ Multi-vertical converter-merge pipeline.
 Merges multiple dataset verticals into per-vertical train/val/test graph LMDBs
 with composition-stratified splitting and train-only scaler fitting.
 
+Each (vertical, split) is built as a *directory* of shard LMDBs
+(`{output_dir}/{vertical}/{split}/shard_{i}.lmdb`). qtaim_embed's
+LMDBMoleculeDataset consumes a directory of shards directly, so no merge step
+is needed -- point the trainer's `src` at the split directory.
+
 Usage:
     multi-vertical-merge --config pipeline.json
 """
 
 import argparse
-import json
+import multiprocessing
 import os
 import pickle
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from copy import deepcopy
+from glob import glob
 
 import lmdb
 
-from qtaim_gen.source.utils.lmdbs import parse_config_gen_to_embed
 from qtaim_gen.source.utils.multi_vertical import (
     MultiVerticalPipelineConfig,
     SplitPlan,
@@ -63,157 +68,199 @@ def _lmdb_is_scaled(lmdb_path: str) -> bool:
         return False
 
 
+def _shards_in(split_dir: str) -> list[str]:
+    """Sorted shard LMDB paths in a split directory."""
+    if not os.path.isdir(split_dir):
+        return []
+    return sorted(glob(os.path.join(split_dir, "shard_*.lmdb")))
+
+
 # ---------- Phase 2: Build ----------
 
-def _build_single_job(
+def _build_shard_job(
     vertical_name: str,
     split_name: str,
-    keys: list[str],
+    shard_index: int,
+    keys: list,
     converter_config: dict,
-    output_dir: str,
-    global_element_set: list[int],
+    split_dir: str,
+    global_element_set: list,
 ) -> str:
-    """Build unscaled graph LMDB for one (vertical, split) pair.
+    """Build one unscaled graph shard LMDB. Runs in a spawned subprocess.
 
-    Runs in a subprocess via ProcessPoolExecutor.
-    Returns the output LMDB path.
+    `keys` is this shard's disjoint key slice (parent pre-sliced), so the
+    converter runs unsharded (total_shards=1) and filters via include_keys.
+    Returns the output shard LMDB path.
     """
     from qtaim_gen.source.core.converter import GeneralConverter
 
-    vert_dir = os.path.join(output_dir, vertical_name)
-    os.makedirs(vert_dir, exist_ok=True)
-    lmdb_name = f"{split_name}.lmdb"
-    out_path = os.path.join(vert_dir, lmdb_name)
-
-    # Inject overrides into a copy of the config
+    lmdb_name = f"shard_{shard_index}.lmdb"
     cfg = deepcopy(converter_config)
-    cfg["lmdb_path"] = vert_dir
+    cfg["lmdb_path"] = split_dir
     cfg["lmdb_name"] = lmdb_name
+    cfg["total_shards"] = 1
+    cfg["shard_index"] = 0
+    cfg["auto_merge"] = False
+    cfg["restart"] = False  # wipe any partial shard and rebuild cleanly
     cfg["skip_scaling"] = True
     cfg["save_scaler"] = False
     cfg["save_unfinalized_scaler"] = False
     cfg["include_keys"] = keys
     cfg["element_set"] = global_element_set
 
-    print(f"[Build] {vertical_name}/{split_name}: {len(keys)} keys -> {out_path}")
+    print(f"[Build] {vertical_name}/{split_name}/shard_{shard_index}: "
+          f"{len(keys)} keys -> {split_dir}")
     converter = GeneralConverter(cfg)
     converter.process()
-    return out_path
+    return os.path.join(split_dir, lmdb_name)
 
 
 def build_phase(
     plan: SplitPlan,
     config: MultiVerticalPipelineConfig,
 ) -> dict[str, dict[str, str]]:
-    """Phase 2: Build unscaled graph LMDBs for each (vertical, split).
+    """Phase 2: Build unscaled graph shard directories for each (vertical, split).
 
-    Returns {vertical_name: {split_name: lmdb_path}}.
+    Returns {vertical_name: {split_name: split_dir}}.
     """
     output_paths: dict[str, dict[str, str]] = {}
 
-    # Collect all jobs, skipping already-complete ones
-    jobs = []
+    # Collect shard jobs, skipping already-complete shards (resume).
+    jobs = []  # (vertical, split, shard_index, slice_keys, split_dir)
     for vert in config.verticals:
-        vert_paths: dict[str, str] = {}
+        vert_dir = os.path.join(config.output_dir, vert.name)
+        output_paths[vert.name] = {}
         for split_name in SPLIT_NAMES:
-            vert_dir = os.path.join(config.output_dir, vert.name)
-            out_path = os.path.join(vert_dir, f"{split_name}.lmdb")
-            vert_paths[split_name] = out_path
-
-            if _lmdb_is_complete(out_path):
-                print(f"[Build] Skipping {vert.name}/{split_name} (already complete)")
-                continue
+            split_dir = os.path.join(vert_dir, split_name)
+            output_paths[vert.name][split_name] = split_dir
 
             keys = plan.assignment[vert.name][split_name]
             if not keys:
                 print(f"[Build] Skipping {vert.name}/{split_name} (no keys assigned)")
                 continue
 
-            jobs.append((vert.name, split_name, keys))
-
-        output_paths[vert.name] = vert_paths
+            n_eff = min(config.n_shards_per_split, len(keys))
+            os.makedirs(split_dir, exist_ok=True)
+            for i in range(n_eff):
+                shard_path = os.path.join(split_dir, f"shard_{i}.lmdb")
+                if _lmdb_is_complete(shard_path):
+                    print(f"[Build] Skipping {vert.name}/{split_name}/shard_{i} (complete)")
+                    continue
+                jobs.append((vert.name, split_name, i, keys[i::n_eff], split_dir))
 
     if not jobs:
-        print("[Build] All graph LMDBs already complete, skipping Phase 2")
+        print("[Build] All shards already complete, skipping Phase 2")
         return output_paths
 
-    print(f"[Build] Launching {len(jobs)} converter jobs...")
-
-    # Run jobs — use sequential execution to avoid issues with
-    # converter's internal threading (each converter already uses
-    # ThreadPoolExecutor internally for parallel graph construction)
-    for vert_name, split_name, keys in jobs:
-        _build_single_job(
-            vertical_name=vert_name,
-            split_name=split_name,
-            keys=keys,
-            converter_config=plan.converter_configs[vert_name],
-            output_dir=config.output_dir,
-            global_element_set=plan.global_element_set,
-        )
+    print(f"[Build] Launching {len(jobs)} shard jobs "
+          f"(max_workers={config.build_max_workers})...")
+    ctx = multiprocessing.get_context("spawn")
+    with ProcessPoolExecutor(
+        max_workers=config.build_max_workers, mp_context=ctx
+    ) as ex:
+        futures = {}
+        for vname, sname, i, slice_keys, split_dir in jobs:
+            fut = ex.submit(
+                _build_shard_job,
+                vname, sname, i, slice_keys,
+                plan.converter_configs[vname], split_dir, plan.global_element_set,
+            )
+            futures[fut] = (vname, sname, i)
+        for fut in as_completed(futures):
+            vname, sname, i = futures[fut]
+            fut.result()  # re-raise any worker exception loudly
+            print(f"[Build] Done {vname}/{sname}/shard_{i}")
 
     return output_paths
 
 
 # ---------- Phase 3: Scale ----------
 
+_SCALE_SKIP_KEYS = {"length", "scaled", "split_name", "scaler_finalized"}
+
+
+def _scale_shard_job(
+    shard_path: str,
+    feature_scaler_path: str,
+    label_scaler_path: str,
+    skip_keys: set,
+) -> int:
+    """Load saved scalers and apply them to one shard. Runs in a subprocess."""
+    from qtaim_embed.data.processing import HeteroGraphStandardScalerIterative
+    from qtaim_gen.source.utils.scaling import apply_scalers_to_lmdb_inplace
+
+    # finalized=True: __init__ restores fields from disk but then clobbers the
+    # finalized flag with the constructor arg (default False); our saved scalers
+    # are always finalized, and __call__ asserts finalized.
+    feature_scaler = HeteroGraphStandardScalerIterative(
+        features_tf=True, load=True, load_path=feature_scaler_path, finalized=True
+    )
+    label_scaler = HeteroGraphStandardScalerIterative(
+        features_tf=False, load=True, load_path=label_scaler_path, finalized=True
+    )
+    return apply_scalers_to_lmdb_inplace(
+        shard_path, feature_scaler, label_scaler, skip_keys
+    )
+
+
 def scale_phase(
     output_paths: dict[str, dict[str, str]],
     config: MultiVerticalPipelineConfig,
 ) -> None:
-    """Phase 3: Fit scaler on all train LMDBs, apply to all splits."""
-    from qtaim_gen.source.utils.scaling import (
-        apply_scalers_to_lmdb_inplace,
-        fit_scalers_on_lmdbs,
-        save_scalers,
-    )
+    """Phase 3: Fit scaler on all train shards, apply to every shard in parallel."""
+    from qtaim_gen.source.utils.scaling import fit_scalers_on_lmdbs, save_scalers
 
-    skip_keys = {"length", "scaled", "split_name", "scaler_finalized"}
-
-    # Check if scalers already exist
     feat_scaler_path = os.path.join(config.output_dir, "feature_scaler_iterative.pt")
     label_scaler_path = os.path.join(config.output_dir, "label_scaler_iterative.pt")
 
+    # Fit (or reuse saved scalers).
     if os.path.exists(feat_scaler_path) and os.path.exists(label_scaler_path):
-        # Scalers exist — load them instead of re-fitting
-        from qtaim_embed.data.processing import HeteroGraphStandardScalerIterative
-        print("[Scale] Loading existing scalers (delete .pt files to re-fit)")
-        feature_scaler = HeteroGraphStandardScalerIterative(
-            features_tf=True, mean={}, std={}
-        )
-        label_scaler = HeteroGraphStandardScalerIterative(
-            features_tf=False, mean={}, std={}
-        )
-        feature_scaler.load_scaler(feat_scaler_path)
-        label_scaler.load_scaler(label_scaler_path)
+        print("[Scale] Using existing scalers (delete .pt files to re-fit)")
     else:
-        # Collect train LMDB paths
-        train_paths = []
-        for vert_name, split_paths in output_paths.items():
-            train_path = split_paths.get("train")
-            if train_path and os.path.exists(train_path):
-                train_paths.append(train_path)
-
-        if not train_paths:
-            raise RuntimeError("No train LMDBs found for scaler fitting")
-
-        print(f"[Scale] Fitting scalers on {len(train_paths)} train LMDBs...")
-        feature_scaler, label_scaler = fit_scalers_on_lmdbs(train_paths, skip_keys)
+        train_shards = []
+        for split_paths in output_paths.values():
+            train_shards.extend(_shards_in(split_paths.get("train", "")))
+        if not train_shards:
+            raise RuntimeError("No train shards found for scaler fitting")
+        print(f"[Scale] Fitting scalers on {len(train_shards)} train shards...")
+        feature_scaler, label_scaler = fit_scalers_on_lmdbs(
+            train_shards, _SCALE_SKIP_KEYS
+        )
         save_scalers(feature_scaler, label_scaler, config.output_dir)
 
-    # Apply to all split LMDBs
-    for vert_name, split_paths in output_paths.items():
-        for split_name, lmdb_path in split_paths.items():
-            if not os.path.exists(lmdb_path):
-                continue
-            if _lmdb_is_scaled(lmdb_path):
-                print(f"[Scale] Skipping {vert_name}/{split_name} (already scaled)")
-                continue
-            print(f"[Scale] Applying scalers to {vert_name}/{split_name}...")
-            count = apply_scalers_to_lmdb_inplace(
-                lmdb_path, feature_scaler, label_scaler, skip_keys
+    # Collect shards to apply, skipping already-scaled (resume).
+    apply_jobs = []  # (vertical, split, shard_path)
+    for vname, split_paths in output_paths.items():
+        for split_name in SPLIT_NAMES:
+            for shard_path in _shards_in(split_paths.get(split_name, "")):
+                if _lmdb_is_scaled(shard_path):
+                    print(f"[Scale] Skipping {vname}/{split_name}/"
+                          f"{os.path.basename(shard_path)} (already scaled)")
+                    continue
+                apply_jobs.append((vname, split_name, shard_path))
+
+    if not apply_jobs:
+        print("[Scale] All shards already scaled")
+        return
+
+    print(f"[Scale] Applying scalers to {len(apply_jobs)} shards "
+          f"(max_workers={config.build_max_workers})...")
+    ctx = multiprocessing.get_context("spawn")
+    with ProcessPoolExecutor(
+        max_workers=config.build_max_workers, mp_context=ctx
+    ) as ex:
+        futures = {}
+        for vname, sname, shard_path in apply_jobs:
+            fut = ex.submit(
+                _scale_shard_job,
+                shard_path, feat_scaler_path, label_scaler_path, _SCALE_SKIP_KEYS,
             )
-            print(f"  Scaled {count} graphs")
+            futures[fut] = (vname, sname, shard_path)
+        for fut in as_completed(futures):
+            vname, sname, shard_path = futures[fut]
+            count = fut.result()  # re-raise any worker exception loudly
+            print(f"[Scale] Scaled {count} graphs in {vname}/{sname}/"
+                  f"{os.path.basename(shard_path)}")
 
 
 # ---------- Main ----------
@@ -242,6 +289,8 @@ def main():
     print(f"Verticals: {[v.name for v in config.verticals]}")
     print(f"Split: {config.split_config.method} {config.split_config.ratios} "
           f"seed={config.split_config.seed}")
+    print(f"Shards/split: {config.n_shards_per_split}  "
+          f"build_max_workers: {config.build_max_workers}")
     print()
 
     # Phase 1: Plan
@@ -264,11 +313,11 @@ def main():
     print("\n=== Pipeline complete ===")
     print(f"Output directory: {config.output_dir}")
     for vert in config.verticals:
-        vert_dir = os.path.join(config.output_dir, vert.name)
         for s in SPLIT_NAMES:
-            p = os.path.join(vert_dir, f"{s}.lmdb")
-            exists = "ok" if os.path.exists(p) else "MISSING"
-            print(f"  {vert.name}/{s}.lmdb: {exists}")
+            split_dir = os.path.join(config.output_dir, vert.name, s)
+            shards = _shards_in(split_dir)
+            status = f"{len(shards)} shard(s)" if shards else "MISSING"
+            print(f"  {vert.name}/{s}/: {status}")
 
 
 if __name__ == "__main__":
