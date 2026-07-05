@@ -230,7 +230,17 @@ Converter types:
     else:
         # Original behavior: scale the single output LMDB
         skip_scaling = args.skip_scaling or config_dict.get("skip_scaling", False)
-        if not skip_scaling:
+        if config_dict.get("total_shards", 1) > 1:
+            # Sharded runs must not self-scale here: scale_graph_lmdb() would
+            # scale this shard's own file with a scaler fit on only this
+            # shard's keys, and merge_shards() then applies the correctly-fit
+            # global scaler on top of those already-scaled bytes (it copies
+            # raw bytes verbatim, no reparsing -- converter.py merge_shards),
+            # double-scaling every shard except whichever one triggers
+            # auto_merge. Scaling for sharded runs happens exclusively in
+            # merge_shards().
+            print("Sharded run: scaling is handled by merge_shards(), not here.")
+        elif not skip_scaling:
             converter.scale_graph_lmdb()
         else:
             print("Skipping scaling step")
