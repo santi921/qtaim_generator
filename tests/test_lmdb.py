@@ -39,19 +39,19 @@ class TestLMDB:
     base_tests = Path(__file__).parent
 
     # json_2_lmdbs and write_lmdb expect directory paths that end with a separator
+    # dir_data is the committed, read-only source of JSON fixtures
     dir_data = str(base_tests / "test_files" / "lmdb_tests") + os.sep
-    dir_active = (
-        str(base_tests / "test_files" / "lmdb_tests" / "generator_lmdbs") + os.sep
-    )
-    dir_active_merged = (
-        str(base_tests / "test_files" / "lmdb_tests" / "generator_lmdbs_merged")
-        + os.sep
-    )
 
     chunk_size = 2
 
     @classmethod
     def setup_class(cls):
+        # write generated LMDBs to temp dirs so committed fixtures stay pristine
+        cls._tmp_active = tempfile.mkdtemp(prefix="generator_lmdbs_")
+        cls._tmp_active_merged = tempfile.mkdtemp(prefix="generator_lmdbs_merged_")
+        cls.dir_active = cls._tmp_active + os.sep
+        cls.dir_active_merged = cls._tmp_active_merged + os.sep
+
         # create folder if it doesn't exist
         os.makedirs(cls.dir_active, exist_ok=True)
         os.makedirs(cls.dir_active_merged, exist_ok=True)
@@ -175,6 +175,11 @@ class TestLMDB:
             merge=merge,
         )
 
+    @classmethod
+    def teardown_class(cls):
+        shutil.rmtree(cls._tmp_active, ignore_errors=True)
+        shutil.rmtree(cls._tmp_active_merged, ignore_errors=True)
+
     def read_helper(self, file, lookup):
         env = lmdb.open(
             file,
@@ -195,21 +200,11 @@ class TestLMDB:
     def test_write_read(self):
         base = self.base_tests / "test_files"
 
-        charge_lmdb = str(
-            base / "lmdb_tests" / "generator_lmdbs_merged" / "merged_charge.lmdb"
-        )
-        bond_lmdb = str(
-            base / "lmdb_tests" / "generator_lmdbs_merged" / "merged_bond.lmdb"
-        )
-        other_lmdb = str(
-            base / "lmdb_tests" / "generator_lmdbs_merged" / "merged_other.lmdb"
-        )
-        qtaim_lmdb = str(
-            base / "lmdb_tests" / "generator_lmdbs_merged" / "merged_qtaim.lmdb"
-        )
-        fuzzy_lmdb = str(
-            base / "lmdb_tests" / "generator_lmdbs_merged" / "merged_fuzzy.lmdb"
-        )
+        charge_lmdb = os.path.join(self.dir_active_merged, "merged_charge.lmdb")
+        bond_lmdb = os.path.join(self.dir_active_merged, "merged_bond.lmdb")
+        other_lmdb = os.path.join(self.dir_active_merged, "merged_other.lmdb")
+        qtaim_lmdb = os.path.join(self.dir_active_merged, "merged_qtaim.lmdb")
+        fuzzy_lmdb = os.path.join(self.dir_active_merged, "merged_fuzzy.lmdb")
 
         orca5_rks_bond = str(base / "lmdb_tests" / "orca5_rks" / "bond.json")
         orca5_qtaim = str(base / "lmdb_tests" / "orca5" / "qtaim.json")
@@ -253,26 +248,12 @@ class TestLMDB:
         ), f"Expected {orca5_rks_fuzzy_json['mbis_fuzzy_density']['45_Cl'] }, got {dict_orca5_fuzzy['mbis_fuzzy_density']['45_Cl'] }"
 
     def test_merge(self):
-        base = self.base_tests / "test_files"
-
-        charge_lmdb = str(
-            base / "lmdb_tests" / "generator_lmdbs_merged" / "merged_charge.lmdb"
-        )
-        bond_lmdb = str(
-            base / "lmdb_tests" / "generator_lmdbs_merged" / "merged_bond.lmdb"
-        )
-        other_lmdb = str(
-            base / "lmdb_tests" / "generator_lmdbs_merged" / "merged_other.lmdb"
-        )
-        qtaim_lmdb = str(
-            base / "lmdb_tests" / "generator_lmdbs_merged" / "merged_qtaim.lmdb"
-        )
-        geom_lmdb = str(
-            base / "lmdb_tests" / "generator_lmdbs_merged" / "merged_geom.lmdb"
-        )
-        fuzzy_lmdb = str(
-            base / "lmdb_tests" / "generator_lmdbs_merged" / "merged_fuzzy.lmdb"
-        )
+        charge_lmdb = os.path.join(self.dir_active_merged, "merged_charge.lmdb")
+        bond_lmdb = os.path.join(self.dir_active_merged, "merged_bond.lmdb")
+        other_lmdb = os.path.join(self.dir_active_merged, "merged_other.lmdb")
+        qtaim_lmdb = os.path.join(self.dir_active_merged, "merged_qtaim.lmdb")
+        geom_lmdb = os.path.join(self.dir_active_merged, "merged_geom.lmdb")
+        fuzzy_lmdb = os.path.join(self.dir_active_merged, "merged_fuzzy.lmdb")
 
         for lmdb_file in [
             charge_lmdb,
@@ -409,6 +390,18 @@ class TestConverters:
 
     @classmethod
     def setup_class(cls):
+        # redirect converter outputs to a temp dir; inputs stay on committed fixtures
+        cls._tmp_out = tempfile.mkdtemp(prefix="converter_out_")
+        cls.config_baseline["lmdb_path"] = os.path.join(cls._tmp_out, "baseline_converter")
+        cls.config_folder["lmdb_path"] = os.path.join(cls._tmp_out, "baseline_converter_folder")
+        cls.config_qtaim["lmdb_path"] = os.path.join(cls._tmp_out, "qtaim_converter")
+        cls.config_qtaim_folder["lmdb_path"] = os.path.join(cls._tmp_out, "qtaim_converter_folder")
+        cls.config_general["lmdb_path"] = os.path.join(cls._tmp_out, "qtaim_converter")
+        cls.config_path = os.path.join(cls._tmp_out, "config.json")
+        cls.config_folder_path = os.path.join(cls._tmp_out, "config_folder.json")
+        cls.config_qtaim_path = os.path.join(cls._tmp_out, "config_qtaim.json")
+        cls.config_qtaim_folder_path = os.path.join(cls._tmp_out, "config_qtaim_folder.json")
+
         # instantiate converters during test class setup (avoid running at import)
         cls.converter_baseline = BaseConverter(
             cls.config_baseline, config_path=cls.config_path
@@ -455,6 +448,10 @@ class TestConverters:
             cls.info_scale_qtaim_folder_restart,
             cls.first_graph_pre_qtaim_folder_post,
         ) = get_benchmark_info(cls.converter_qtaim_folder)
+
+    @classmethod
+    def teardown_class(cls):
+        shutil.rmtree(cls._tmp_out, ignore_errors=True)
 
     def test_restarts(self):
         # assert all the restart are None:

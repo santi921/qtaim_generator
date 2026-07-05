@@ -48,6 +48,11 @@ wandb/
 docs/plans/
 docs/solutions/
 docs/brainstorms/
+# neurips paper (drafts + latex build artifacts, not tracked)
+docs/neurips/
+
+# experiment run outputs
+runs/
 
 # Always track test fixtures regardless of extension rules above
 !tests/test_files/

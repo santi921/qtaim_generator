@@ -157,3 +157,38 @@ class TestGeneralConverterEmbedFormat:
 
         n = _assert_lmdb_embed_compatible(lmdb_path)
         assert n == info["processed_count"]
+
+    def test_feature_size_matches_graph_feat_width(self, tmp_path):
+        """Stored feature_size must equal each node type's actual .feat width.
+
+        Regression guard for the pre-split metadata bug (commit 9107606): the
+        converter wrote feature_size from grapher.feat_names, which includes
+        target columns that split_graph_labels removes from .feat. _general_config
+        has a global target ("n_atoms"), so a pre-fix run inflates global by 1.
+        """
+        config = _general_config(tmp_path)
+        GeneralConverter(config).process()
+        lmdb_path = Path(tmp_path) / "test_graphs.lmdb"
+
+        env = lmdb.open(str(lmdb_path), subdir=False, readonly=True, lock=False)
+        skip = {
+            "length", "scaled", "scaler_finalized", "processed_source_keys",
+            "feature_names", "feature_size", "target_dict", "element_set",
+            "allowed_ring_size", "allowed_charges", "allowed_spins",
+        }
+        with env.begin() as txn:
+            feature_size = pickle.loads(txn.get(b"feature_size"))
+            sample = None
+            for k, v in txn.cursor():
+                if k.decode("ascii") in skip:
+                    continue
+                sample = load_graph_from_serialized(pickle.loads(v)["molecule_graph"])
+                break
+        env.close()
+
+        assert sample is not None, "no graph entries found"
+        for ntype in sample.node_types:
+            assert feature_size[ntype] == sample[ntype].feat.shape[1], (
+                f"{ntype}: feature_size={feature_size[ntype]} != "
+                f"actual feat width {sample[ntype].feat.shape[1]}"
+            )
