@@ -15,6 +15,7 @@ import os
 import pickle
 
 import lmdb
+from tqdm import tqdm
 
 from qtaim_embed.data.processing import HeteroGraphStandardScalerIterative
 from qtaim_embed.data.lmdb import (
@@ -87,7 +88,12 @@ def fit_scalers_on_lmdbs(
             meminit=False,
         )
         with env.begin(write=False) as txn:
-            for key_bytes, value_bytes in txn.cursor():
+            total_entries = txn.stat()["entries"]
+            progress = tqdm(
+                txn.cursor(), total=total_entries,
+                desc=os.path.basename(train_path), unit="graph",
+            )
+            for key_bytes, value_bytes in progress:
                 if _is_metadata(key_bytes, skip_keys):
                     continue
                 try:
@@ -168,7 +174,12 @@ def apply_scalers_to_lmdb_inplace(
     # src and dst are separate envs, so holding the source read cursor open
     # while writing dst in batches is safe (no same-env read/write conflict).
     with src.begin(write=False) as rtxn:
-        for key_bytes, value_bytes in rtxn.cursor():
+        total_entries = rtxn.stat()["entries"]
+        progress = tqdm(
+            rtxn.cursor(), total=total_entries,
+            desc=os.path.basename(lmdb_path), unit="graph",
+        )
+        for key_bytes, value_bytes in progress:
             if _is_metadata(key_bytes, skip_keys):
                 meta.append((key_bytes, value_bytes))
                 continue
