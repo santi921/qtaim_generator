@@ -127,6 +127,39 @@ def load_scaler(scaler_path: str, features_tf: bool):
     )
 
 
+def _validate_and_log_scaler(scaler, name, logger):
+    """Log per-node-type std stats and raise on a degenerate std.
+
+    A zero std divides by zero at apply time (Inf); a non-finite std means a
+    raw feature contained NaN/Inf and poisoned the fit. Either silently
+    corrupts every scaled graph, so surface it here before applying.
+    """
+    import torch
+
+    bad = []
+    for nt, std in scaler._std.items():
+        finite = torch.isfinite(std)
+        n_zero = int((std == 0).sum())
+        n_bad = int((~finite).sum())
+        if bool(finite.any()):
+            smin = float(std[finite].min())
+            smax = float(std[finite].max())
+        else:
+            smin = smax = float("nan")
+        logger.info(
+            f"{name} scaler [{nt}]: dim={std.numel()} std_min={smin:.3e} "
+            f"std_max={smax:.3e} zeros={n_zero} nonfinite={n_bad}"
+        )
+        if n_zero or n_bad:
+            bad.append(f"{nt} (zeros={n_zero}, nonfinite={n_bad})")
+    if bad:
+        raise RuntimeError(
+            f"{name} scaler has degenerate std for: {', '.join(bad)}. "
+            "Refusing to apply (would write Inf/NaN). This indicates a broken "
+            "scaler merge or NaN/Inf in raw features."
+        )
+
+
 class Converter:
     def __init__(self, config_dict: Dict[str, Any], config_path: str = None):
         self.config_dict = config_dict
@@ -975,6 +1008,13 @@ class Converter:
             logger.warning("No label scalers found")
             merged_label_scaler = None
 
+        # Validate merged scalers before applying: a zero or non-finite std
+        # would silently write Inf/NaN into every graph. Fail loudly instead.
+        if merged_feature_scaler is not None:
+            _validate_and_log_scaler(merged_feature_scaler, "feature", logger)
+        if merged_label_scaler is not None:
+            _validate_and_log_scaler(merged_label_scaler, "label", logger)
+
         # Apply scalers to merged LMDB
         if not skip_scaling and merged_feature_scaler and merged_label_scaler:
             logger.info("Applying merged scalers to LMDB...")
@@ -1010,6 +1050,7 @@ class Converter:
                         count += 1
                     except Exception as e:
                         logger.warning(f"Failed to scale graph {key}: {e}")
+                txn.put(b"scaled", pickle.dumps(True, protocol=-1))
             env.close()
             logger.info(f"Applied scalers to {count} graphs")
 

@@ -1038,10 +1038,21 @@ class TestCompiledDataPresentLengthAware:
 
 
 # Multiwfn 3.8 banner — present in every .out, head-sniff sees it as "clean".
+# Includes the startup main-menu print (first of the two occurrences the
+# generic completion check counts).
 _MULTIWFN_HEAD = (
     " Multiwfn -- A Multifunctional Wavefunction Analyzer\n"
     " Version 3.8(dev), update date: 2024-Oct-6\n"
     " ( Number of parallel threads:   4 )\n"
+    "                    ************ Main function menu ************\n"
+    " 0 Show molecular structure and view orbitals\n"
+)
+
+# Re-printed main menu after the script's final "0" return — the second
+# banner occurrence that marks a completed run.
+_MULTIWFN_MENU_TAIL = (
+    "                    ************ Main function menu ************\n"
+    " 300 Other functions (Part 3)\n"
 )
 
 # Realistic chelpg progress lines — no result table, run was killed.
@@ -1055,8 +1066,10 @@ _CHELPG_TRUNCATED_TAIL = (
 
 
 class TestSubstantiveStepOut:
-    """`_is_substantive_step_out` must reject chelpg.out files that lack the
-    'Center       Charge' completion marker, even if the head looks clean."""
+    """`_is_substantive_step_out` must reject .out files from runs killed
+    mid-computation. Generic signal: the main-menu banner must appear twice
+    (startup + final return-to-main). chelpg additionally requires the
+    'Center       Charge' result marker."""
 
     def test_chelpg_truncated_rejected(self, tmp_path):
         """chelpg killed mid-ESP: clean head, no result table → not substantive."""
@@ -1067,7 +1080,7 @@ class TestSubstantiveStepOut:
         assert not _is_substantive_step_out(str(path), order="chelpg")
 
     def test_chelpg_complete_accepted(self, tmp_path):
-        """chelpg with the 'Center       Charge' marker is accepted."""
+        """chelpg with the result marker and both menu prints is accepted."""
         from qtaim_gen.source.core.omol import _is_substantive_step_out
 
         path = tmp_path / "chelpg.out"
@@ -1076,25 +1089,63 @@ class TestSubstantiveStepOut:
             + _CHELPG_TRUNCATED_TAIL
             + "\n  Center       Charge\n"
             + " Atom    1(C ): -0.123456\n"
+            + _MULTIWFN_MENU_TAIL
         )
         path.write_text(body)
         assert _is_substantive_step_out(str(path), order="chelpg")
 
-    def test_chelpg_marker_in_head_accepted(self, tmp_path):
-        """Marker landing inside the first 8 KB short-circuits the tail scan."""
+    def test_chelpg_marker_without_second_menu_rejected(self, tmp_path):
+        """Killed between the result table and the menu return → rejected."""
         from qtaim_gen.source.core.omol import _is_substantive_step_out
 
         path = tmp_path / "chelpg.out"
         path.write_text(_MULTIWFN_HEAD + " Center       Charge\n")
-        assert _is_substantive_step_out(str(path), order="chelpg")
+        assert not _is_substantive_step_out(str(path), order="chelpg")
 
-    def test_unknown_routine_keeps_legacy_behavior(self, tmp_path):
-        """Routines without a registered marker keep the head-only check."""
+    def test_generic_truncated_rejected(self, tmp_path):
+        """Any routine killed mid-progress (one banner only) → rejected.
+
+        This is the elytes 274-atom edge case: elf_fuzzy.out truncated at
+        38% progress passed the old head-only check and was skipped forever.
+        """
+        from qtaim_gen.source.core.omol import _is_substantive_step_out
+
+        path = tmp_path / "elf_fuzzy.out"
+        path.write_text(
+            _MULTIWFN_HEAD
+            + " Radial points:   75    Angular points:  434\n"
+            + " Progress: [####----------------]  38.0 %\n"
+        )
+        assert not _is_substantive_step_out(str(path), order="elf_fuzzy")
+
+    def test_generic_complete_accepted(self, tmp_path):
+        """Routine without a registered marker: two banners suffice."""
         from qtaim_gen.source.core.omol import _is_substantive_step_out
 
         path = tmp_path / "hirshfeld.out"
-        path.write_text(_MULTIWFN_HEAD + "some content\n")
+        path.write_text(
+            _MULTIWFN_HEAD
+            + " Final atomic charges:\n"
+            + " Atom    1(C ): -0.123456\n"
+            + _MULTIWFN_MENU_TAIL
+        )
         assert _is_substantive_step_out(str(path), order="hirshfeld")
+
+    def test_second_banner_spanning_chunk_boundary_accepted(self, tmp_path):
+        """A second banner that straddles the 1 MB read boundary is found
+        via the carry, not double counted, and accepted."""
+        from qtaim_gen.source.core.omol import (
+            _MULTIWFN_MENU_BANNER,
+            _is_substantive_step_out,
+        )
+
+        path = tmp_path / "mbis_fuzzy_density.out"
+        head = _MULTIWFN_HEAD.encode()
+        # Banner is 18 bytes; start it 9 bytes before the 1 MB boundary so
+        # it spans the first and second read chunks.
+        pad = b"x" * ((1 << 20) - 9 - len(head))
+        path.write_bytes(head + pad + _MULTIWFN_MENU_BANNER + b"\n")
+        assert _is_substantive_step_out(str(path), order="mbis_fuzzy_density")
 
     def test_error_signature_still_rejected(self, tmp_path):
         """A multiwfn error signature in the head trumps everything."""
@@ -1105,8 +1156,60 @@ class TestSubstantiveStepOut:
             _MULTIWFN_HEAD
             + " Error: Unable to find input file\n"
             + " Center       Charge\n"  # marker present but error wins
+            + _MULTIWFN_MENU_TAIL      # second banner present but error wins
         )
         assert not _is_substantive_step_out(str(path), order="chelpg")
+
+
+# ---------------------------------------------------------------------------
+# Tests: parse_multiwfn routine dispatch is exact-match on filename
+# ---------------------------------------------------------------------------
+
+
+# Minimal fuzzy real-space block in the shape parse_fuzzy_real_space expects.
+_FUZZY_REAL_SPACE_BLOCK = (
+    "   Atomic space        Value                % of sum            % of sum abs\n"
+    "     1(C )            6.42104237             0.796657             0.796657\n"
+    "     2(H )            0.79658570             0.098832             0.098832\n"
+    " Summing up all above values:            7.21762807\n"
+    " Summing up absolute value of above values:      7.21762807\n"
+    "\n"
+)
+
+
+class TestParseMultiwfnExactDispatch:
+    """Routine dispatch must exact-match the .out filename. Substring
+    matching parsed becke_fuzzy_density.out under both 'becke' and
+    'becke_fuzzy_density', writing wrong-parser output to the same json
+    that only routine-list order corrected."""
+
+    def test_fuzzy_density_parsed_once_by_right_parser(self, tmp_path, caplog):
+        from qtaim_gen.source.core.omol import parse_multiwfn
+        import logging
+
+        folder = tmp_path / "job"
+        folder.mkdir()
+        (folder / "orca.inp").write_text(
+            "! wB97M-V\n*xyz 0 1\nC 0 0 0\nH 0 0 1\n*\n"
+        )
+        (folder / "becke_fuzzy_density.out").write_text(_FUZZY_REAL_SPACE_BLOCK)
+
+        logger = logging.getLogger("test_exact_dispatch")
+        with caplog.at_level(logging.INFO, logger="test_exact_dispatch"):
+            parse_multiwfn(str(folder), separate=True, full_set=1, logger=logger)
+
+        messages = [r.message for r in caplog.records]
+        assert any(
+            m.startswith("Parsed becke_fuzzy_density output") for m in messages
+        )
+        # the 'becke' charge parser must never touch this file
+        assert not any(m.startswith("Parsed becke output") for m in messages)
+        assert not any(m.startswith("Error parsing becke in") for m in messages)
+
+        with open(folder / "fuzzy_full.json") as f:
+            fuzzy = json.load(f)
+        assert fuzzy["becke_fuzzy_density"]["sum"] == 7.21762807
+        assert fuzzy["becke_fuzzy_density"]["1_C"] == 6.42104237
 
 
 # ---------------------------------------------------------------------------
