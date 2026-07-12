@@ -1162,6 +1162,57 @@ class TestSubstantiveStepOut:
 
 
 # ---------------------------------------------------------------------------
+# Tests: parse_multiwfn routine dispatch is exact-match on filename
+# ---------------------------------------------------------------------------
+
+
+# Minimal fuzzy real-space block in the shape parse_fuzzy_real_space expects.
+_FUZZY_REAL_SPACE_BLOCK = (
+    "   Atomic space        Value                % of sum            % of sum abs\n"
+    "     1(C )            6.42104237             0.796657             0.796657\n"
+    "     2(H )            0.79658570             0.098832             0.098832\n"
+    " Summing up all above values:            7.21762807\n"
+    " Summing up absolute value of above values:      7.21762807\n"
+    "\n"
+)
+
+
+class TestParseMultiwfnExactDispatch:
+    """Routine dispatch must exact-match the .out filename. Substring
+    matching parsed becke_fuzzy_density.out under both 'becke' and
+    'becke_fuzzy_density', writing wrong-parser output to the same json
+    that only routine-list order corrected."""
+
+    def test_fuzzy_density_parsed_once_by_right_parser(self, tmp_path, caplog):
+        from qtaim_gen.source.core.omol import parse_multiwfn
+        import logging
+
+        folder = tmp_path / "job"
+        folder.mkdir()
+        (folder / "orca.inp").write_text(
+            "! wB97M-V\n*xyz 0 1\nC 0 0 0\nH 0 0 1\n*\n"
+        )
+        (folder / "becke_fuzzy_density.out").write_text(_FUZZY_REAL_SPACE_BLOCK)
+
+        logger = logging.getLogger("test_exact_dispatch")
+        with caplog.at_level(logging.INFO, logger="test_exact_dispatch"):
+            parse_multiwfn(str(folder), separate=True, full_set=1, logger=logger)
+
+        messages = [r.message for r in caplog.records]
+        assert any(
+            m.startswith("Parsed becke_fuzzy_density output") for m in messages
+        )
+        # the 'becke' charge parser must never touch this file
+        assert not any(m.startswith("Parsed becke output") for m in messages)
+        assert not any(m.startswith("Error parsing becke in") for m in messages)
+
+        with open(folder / "fuzzy_full.json") as f:
+            fuzzy = json.load(f)
+        assert fuzzy["becke_fuzzy_density"]["sum"] == 7.21762807
+        assert fuzzy["becke_fuzzy_density"]["1_C"] == 6.42104237
+
+
+# ---------------------------------------------------------------------------
 # Tests: parse_multiwfn compile loop tolerates empty / malformed intermediates
 # ---------------------------------------------------------------------------
 

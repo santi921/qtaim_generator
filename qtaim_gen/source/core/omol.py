@@ -779,7 +779,11 @@ def parse_multiwfn(
         if file.endswith(".out"):
             file_full_path = os.path.join(folder, file)
             for routine in routine_list:
-                if routine in file:
+                # Exact filename match: substring matching double-parsed
+                # becke_fuzzy_density.out under both 'becke' and
+                # 'becke_fuzzy_density' (same for mbis/*_spin variants),
+                # writing wrong-parser output that only list order corrected.
+                if file == routine + ".out":
                     json_file = file_full_path.replace(".out", ".json")
                     try:
                         if routine == "fuzzy_full":
