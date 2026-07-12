@@ -1646,18 +1646,33 @@ _STEP_COMPLETION_MARKERS = {
 }
 
 
+# Generic completion signal: multiwfn prints this banner once at startup and
+# once more when the .mfwn script's final "0" returns to the main menu before
+# "q". Every generated script is single-module (enter module -> compute ->
+# print results -> "0" -> "q"), so a second occurrence proves the routine
+# finished writing its results. A run killed mid-computation (walltime, OOM)
+# dies in a progress loop and never reaches the second print. Verified on
+# Multiwfn 3.8 noGUI: 12/12 complete .outs contain it twice, truncated .outs
+# once (see docs re: elytes 274-atom edge case, Jul 2026).
+_MULTIWFN_MENU_BANNER = b"Main function menu"
+_MENU_BANNER_REQUIRED_COUNT = 2
+
+
 def _is_substantive_step_out(path: str, order: str = None) -> bool:
-    """True if a multiwfn/orca_2mkl .out file looks like a successful run.
+    """True if a multiwfn .out file looks like a successful run.
 
     Rejects empty files and any file whose first 8 KB contains one of the
     multiwfn error signatures. Both signatures appear early in the file
-    (banner + first prompt loop), so a single bounded read catches them and
-    keeps cost flat on large CPprop outputs.
+    (banner + first prompt loop), so a single bounded read catches them.
 
-    For routines in `_STEP_COMPLETION_MARKERS`, additionally requires that
-    the .out tail contains the routine's positive completion marker. This
-    catches walltime-killed runs whose head looks clean but whose result
-    section was never reached.
+    Completion is detected generically via `_MULTIWFN_MENU_BANNER`: the
+    main-menu banner must appear at least `_MENU_BANNER_REQUIRED_COUNT`
+    times (startup print + the script's final return-to-main-menu). This
+    catches walltime-killed runs for every routine, whose head looks clean
+    but whose result section was never reached.
+
+    Routines in `_STEP_COMPLETION_MARKERS` must additionally contain their
+    positive result-section marker.
     """
     if not os.path.isfile(path):
         return False
@@ -1673,22 +1688,32 @@ def _is_substantive_step_out(path: str, order: str = None) -> bool:
         return False
 
     marker = _STEP_COMPLETION_MARKERS.get(order)
-    if marker is None:
-        return True
+    marker_bytes = marker.encode("utf-8") if marker is not None else None
 
-    # Marker may live anywhere past the head; scan the whole file but cheaply.
-    if marker in head:
-        return True
+    # Stream in 1 MB chunks with per-pattern carries. A carry of
+    # len(pattern)-1 bytes can never hold a complete occurrence, so
+    # prepending it to the next chunk catches boundary-spanning matches
+    # without double counting.
+    banner_count = 0
+    marker_found = marker_bytes is None
+    banner_carry = b""
+    marker_carry = b""
     try:
         with open(path, "rb") as f:
-            # Scan the rest in 1 MB chunks; chelpg result block is tiny so a
-            # bounded streaming scan beats slurping a multi-MB progress log.
-            f.seek(8192)
             while True:
                 chunk = f.read(1 << 20)
                 if not chunk:
                     return False
-                if marker.encode("utf-8") in chunk:
+                buf = banner_carry + chunk
+                banner_count += buf.count(_MULTIWFN_MENU_BANNER)
+                banner_carry = buf[len(buf) - (len(_MULTIWFN_MENU_BANNER) - 1):]
+                if not marker_found:
+                    mbuf = marker_carry + chunk
+                    if marker_bytes in mbuf:
+                        marker_found = True
+                    else:
+                        marker_carry = mbuf[len(mbuf) - (len(marker_bytes) - 1):]
+                if banner_count >= _MENU_BANNER_REQUIRED_COUNT and marker_found:
                     return True
     except OSError:
         return False
