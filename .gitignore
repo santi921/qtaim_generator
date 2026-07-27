@@ -48,8 +48,28 @@ wandb/
 docs/plans/
 docs/solutions/
 docs/brainstorms/
-# neurips paper (drafts + latex build artifacts, not tracked)
-docs/neurips/
+# neurips paper: track the LaTeX sources so the manuscript is version
+# controlled. Everything else under docs/neurips/ stays local: build artifacts,
+# figures (large binaries), and -- deliberately -- the confidential peer-review
+# material. This repo is PUBLIC and its URL is known to the reviewers, so the
+# reviews and our rebuttal strategy must never be pushed here.
+docs/neurips/*
+!docs/neurips/*.tex
+!docs/neurips/*.sty
+!docs/neurips/build.sh
+!docs/neurips/sections/
+docs/neurips/sections/*
+!docs/neurips/sections/*.tex
+!docs/neurips/bib/
+docs/neurips/bib/*
+!docs/neurips/bib/*.bib
+!docs/neurips/tables/
+docs/neurips/tables/*
+!docs/neurips/tables/*.tex
+# confidential -- peer review material and internal assessments, local only
+docs/neurips/neurips_reviews.md
+docs/neurips/neurips_rebuttals.md
+docs/neurips/neurips_status.md
 
 # experiment run outputs
 runs/

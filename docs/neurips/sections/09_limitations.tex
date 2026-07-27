@@ -1,0 +1,34 @@
+\section{Limitations and Broader Impact}
+\label{sec:limits}
+% Level-of-theory transferability: functional inherited from OMol25.
+% Not supported: force prediction, MD, conformational sampling.
+% ECP artifacts, basis-set sensitivity.
+% Rare chemistry counts with honest call-out.
+% Open dataset and pipeline lower barrier to reproducible chemistry ML.
+% Low dual-use risk.
+
+This dataset is a subset of OMol25; release of the full electronic-structure
+slice would scale us into the hundreds of billions of atom and bond records, but
+we already cover the original's rich set of verticals. Descriptors are generated
+exclusively with Multiwfn, so a cross-package benchmark against AIMAll~\citep{aimall}
+or Critic2~\citep{critic2} would be a useful follow-up. Compute budget restricted
+us to the Tier 0 features; future releases will add the more expensive schemes
+relevant to other communities (MBIS for force-field~\citep{mbis} and MLIP
+development~\citep{bamboo}, IBSI for bond-strength analysis~\citep{ibsi}). We do
+not currently merge the energy and force values from the original work, though
+this is an ongoing effort that could enable partial-charge-aware MLIPs.
+
+We are bound by the single level-of-theory used in OMol25 and so do not measure
+descriptor sensitivity to basis set or functional. Prior work
+by~\citet{D5DD00220F} found that QTAIM features can vary significantly across
+LOTs while remaining useful for ML. OMol25 also covers only ground-state
+calculations, so excited-state sensitivity is out of scope.
+
+\textbf{Dual-use considerations.} The dual-use risk of this
+release is minimal. The dataset surfaces interpretive electronic-structure
+descriptors (charges, bond orders, QTAIM topology) on neutral and charged
+molecules; it confers no obvious uplift for chemical, biological, or materials
+threats beyond what the underlying OMol25 wavefunctions already permit. We
+release the data and pipeline under an open license to support reproducibility
+in chemistry ML.
+

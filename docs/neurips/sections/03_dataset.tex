@@ -1,0 +1,101 @@
+\section{Dataset}
+\label{sec:dataset}
+
+
+\subsection{Descriptor Families}
+
+\textbf{Partial charges.}
+Six independent atomic partial-charge schemes are computed per structure.
+Hirshfeld \citep{hirshfeld1977}, CM5 \citep{cm5}, ADCH \citep{adch}, and Becke
+\citep{becke1988} charges are produced by Multiwfn \citep{multiwfn} from the DFT electron density;
+Mulliken and L\"owdin charges are extracted directly from the ORCA output \citep{orca5}.
+Hirshfeld charges partition the electron density by the stockholder principle: each
+atom claims a share of the density at every point proportional to its free-atom
+promolecular density, yielding compact, chemically intuitive atomic populations.
+CM5 applies a pairwise connectivity-based correction to Hirshfeld charges to
+reproduce experimental dipole moments across diverse environments \citep{cm5}.
+Becke charges integrate the molecular density over smooth, fuzzy atomic basins
+defined by Becke's numerical weight functions \citep{becke1988}, providing a
+partition that is independent of the basis set and free of the basis-function
+artifacts that affect Mulliken and L\"owdin populations.
+ADCH further corrects Hirshfeld charges for atomic dipole contributions to reduce
+basis-set dependence \citep{adch}.
+
+\textbf{Bond orders.}
+Four schemes are universal across the corpus: Mayer \citep{mayer1983} and
+L\"owdin bond orders from ORCA, fuzzy bond orders from Multiwfn
+\citep{multiwfn,becke1988}, and QTAIM bond presence inferred from bond critical points.
+Mayer bond orders derive from the density matrix and capture bond multiplicity
+beyond formal valence, including partial and dative character.
+L\"owdin bond orders use a symmetrically orthogonalized basis, reducing
+the basis-set sensitivity that affects Mulliken-derived indices.
+Fuzzy bond orders integrate the exchange-correlation hole over Becke fuzzy-atom
+basins, providing a real-space, basis-set-independent measure of covalent
+bond character. QTAIM bond presence is a binary signal at each bond critical
+point; the corresponding density and Laplacian scalars are stored under QTAIM topology.
+
+\textbf{QTAIM topology.}
+Critical points of the electron density are located via Multiwfn following Bader's
+Quantum Theory of Atoms in Molecules \citep{bader1990}.
+Each bond critical point carries 26 scalar fields ($\rho$, $\nabla^2\rho$,
+ellipticity, kinetic/potential energy densities); ring and cage CPs, non-nuclear
+attractors, and atomic basin integrals are stored where present.
+
+\textbf{Fuzzy and surface descriptors.}
+Fuzzy atom analysis partitions molecular properties via smooth, overlapping atomic
+weight functions, yielding basis-set-independent atomic populations, valences, and
+bond orders~\citep{mayersalvador2004}.
+Per-atom Becke and Hirshfeld fuzzy electron-density integrations \citep{becke1988}
+are computed via Multiwfn for every structure (with spin-density counterparts for
+open-shell records).
+These provide atomic electron and spin populations that are independent of the
+one-electron basis. Molecular-level ALIE (Average Local Ionization Energy) 
+surface properties, including surface volume, area, extrema, polarity index, 
+and internal charge separation are additionally extracted per molecule, 
+encoding site-specific electrophilicity and reactivity complementary 
+to the atomic-level descriptors.
+
+\textbf{ORCA globals.}
+Total SCF energy, HOMO/LUMO orbital energies, molecular dipole, nuclear gradient, and
+SCF convergence metadata are parsed from the ORCA output file \citep{orca5,ORCA}.
+
+
+\subsection{Storage Layout}
+\label{sec:storage}
+
+Each split folder contains eight LMDB files keyed on a single string identifier
+$k = \texttt{relpath(folder, root).replace("/", "\_\_")}$. Keys for each structure
+are shared across all lmdbs and they each contain different datatypes:
+\begin{itemize}
+\item \texttt{structure.lmdb}: pymatgen \texttt{Molecule} (positions, elements), total spin and charge, RDKit-derived bond list, and external identifiers.
+\item \texttt{charge.lmdb}: per-atom charges nested by scheme (\texttt{hirshfeld}, \texttt{cm5}, \texttt{adch}, \texttt{becke}, \texttt{mulliken\_orca}, \texttt{loewdin\_orca}); \texttt{hirshfeld}/\texttt{cm5} also carry a total dipole, \texttt{adch}/\texttt{becke} carry total and per-atom dipoles.
+\item \texttt{qtaim.lmdb}: per-structure dict of critical points keyed by atom ID for nuclear CPs or by atom-pair for bond CPs; 26 scalar fields per CP including $\rho$, $\nabla^{2}\rho$, ellipticity, kinetic and potential energy densities.
+\item \texttt{bond.lmdb}: bond-order schemes (\texttt{fuzzy\_bond}, \texttt{mayer\_orca}, \texttt{loewdin\_orca}) keyed by directed atom-pair strings \texttt{"\{i\}\_\{El\_i\}\_to\_\{j\}\_\{El\_j\}"}; the fourth scheme, QTAIM bond presence, is recoverable from \texttt{qtaim.lmdb} BCP keys.
+\item \texttt{fuzzy.lmdb}: per-atom Multiwfn fuzzy integrations (\texttt{becke\_fuzzy\_density}, \texttt{hirsh\_fuzzy\_density}; spin counterparts for open-shell records).
+\item \texttt{other.lmdb}: molecular descriptors from ESP and ALIE surface analysis (volume, surface area, min/max, signed mean and variance, polarity index, internal charge separation) plus four polarity scalars (\texttt{mpp\_full}, \texttt{sdp\_full}, \texttt{mpp\_heavy}, \texttt{sdp\_heavy}).
+\item \texttt{orca.lmdb}: ORCA-derived globals (total energy, orbital energies, dipole, gradient, SCF metadata), filtered via \texttt{DEFAULT\_ORCA\_FILTER} when consumed by the converter.
+\item \texttt{timings.lmdb}: per-job step durations; provenance only.
+\end{itemize}
+
+
+\subsection{Data Quality and Per-Vertical Breakdown}
+\label{sec:dataset-quality}
+
+Calculations and conversions to LMDBs are highly stable with five of the
+seven analytic LMDBs showing no corrupt or incomplete data storage. 
+For \texttt{qtaim} and \texttt{orca} we have 25 (0.0006\%) and 1{,}607 (0.0403\%)
+failed calculations; the ORCA failures concentrate on physically
+hard cases (solvated biomolecules, scaled-separation electrolytes,
+open-shell TM redox), and geometry plus Multiwfn-side descriptors stay
+valid for those records. The failed QTAIM records were instances where
+no BCPs were detected or where the Poincare-Hopf formula was not obeyed.
+Cross-LMDB key alignment holds to within four
+records on a 4M-key index, so any descriptor combination joins on
+the full corpus. Each of the six charge schemes (Hirshfeld, ADCH, CM5,
+Becke, Mulliken, L\"owdin), four bond-order schemes (fuzzy,
+Mayer, L\"owdin, QTAIM), full QTAIM topology, and the standard ORCA globals
+reaches $\geq$99\% on every one of the 34 verticals; in other words, the same
+profile is available for a noble-gas dimer, a 200-atom solvated protein
+pocket, and a transition-metal redox complex. Full audit
+table, coverage heatmap, and per-vertical record counts:
+App.~\ref{app:lmdb_audit} and Table~\ref{tab:t1_census}.

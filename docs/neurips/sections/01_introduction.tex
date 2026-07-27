@@ -1,0 +1,42 @@
+\section{Introduction}
+\label{sec:intro}
+% Motivating gap: descriptor-based ML bottlenecked by O(10^3)-O(10^5) labeled datasets.
+% Three-claim structure: Scale, Pipeline, Evaluation.
+% Track-fit paragraph: explicit evaluative claims, scope, what the dataset cannot evaluate.
+% Final paragraph: contributions list.
+
+Machine learning and deep learning have upended the relationship between large datasets
+and how we interpret, predict, and generate information.
+Prior to this revolution, humans relied on low-dimensional embeddings and descriptors to 
+parse and understand large swaths of data. Today, a wide spectrum of models operate on language~\citep{gpt3},
+vision~\citep{yolo,sam}, and biological~\citep{alphafold2} data. In the chemical sciences, we have seen the decades long
+development of descriptors and models heat up in the last 10 years. Cheminformatics via 
+fingerprinting descriptors \citep{ecfp} and Morgan~\citep{morgan1965} coupling to tree-based supervised-learning algorithms\cite{ahneman2018}
+have given way to advanced architectures and representations rooted in graph-based embeddings 
+of chemical structures. These newer approaches include continuous-filter graph neural
+networks~\citep{schnet}, directional message-passing architectures~\citep{dimenetpp},
+and equivariant foundation models capable of stable atomistic simulation across
+nearly the entire periodic table~\citep{macemp}. High-profile applications include
+generative inorganic materials design with MatterGen~\citep{mattergen}, the OMat24
+dataset and models for materials neural network potentials~\citep{omat24}, and 3D
+pre-training on hundreds of millions of conformers for broad molecular property
+prediction~\citep{unimol}.
+
+
+
+Naturally, chemistry and material science, with their mature methods for generating simulated data via
+Density Functional Theory (DFT) have led to the creation of many datasets. QM9, for example, is one of the
+most popular datasets and covers a set of $\sim$134K organic molecules with up to 9 heavy atoms~\citep{qm9}.
+Beyond this, SPICE~\citep{spice} and ANI-1x~\citep{ani1x} extended this coverage to biomolecular and reactive domains. OC20~\citep{oc20}, Materials Project~\citep{matproj}
+and tmQM+~\citep{D5DD00220F} pushed the boundary towards inorganic materials and transition-metal complexes. Alongside datasets, benchmarking suites such as
+MoleculeNet~\citep{moleculenet} and MOSES~\citep{moses} have standardized
+evaluation across property prediction and molecular generation tasks. The recent OMol25~\citep{levine2026openmolecules2025omol25} is notable among molecular MLIP datasets due to 
+its size, diversity, and high-level of accuracy. It pushes beyond 100M structures, 
+80+ elements, and many chemical verticals to provide the community with a rich repository for 
+training neural network potentials. To date, the team has shared the wavefunction, density matrices, 
+and orca.out files of 4M of those datapoints. This additional information serves as the basis for this work 
+where we post-processed OMol25 wavefunctions to yield a new dataset of descriptors. 
+We name the result \textbf{OMol-Descriptors-4M} and contribute: (i) the dataset
+itself, (ii) the open generation pipeline, and (iii) an evaluation protocol with
+composition-ordered splits, five held-out stress-test suites, and quantified
+per-descriptor noise floors.

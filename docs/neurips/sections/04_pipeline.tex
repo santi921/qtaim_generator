@@ -1,0 +1,159 @@
+\section{Pipeline}\label{sec:pipeline}
+
+\subsection{Architecture}
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\linewidth]{figures/pipeline_diagram.png}
+  \caption{Overview of the \texttt{generator} post-processing pipeline. Starting from an
+    OMol25 \texttt{.gbw} wavefunction, the pipeline converts to Molden format (with EDF
+    loading for ECP correctness), runs one of three calculation tiers through Multiwfn, and
+    emits seven per-folder JSON outputs. These are converted to typed LMDBs sharing a common
+    key, which can be consumed directly by graph-based frameworks or converted to DGL
+    heterographs via our sister package \texttt{qtaim\_embed}\footnote{\url{https://github.com/santi921/qtaim_embed}}.}
+  \label{fig:pipeline}
+\end{figure}
+
+The pipeline is an orchestration layer over two external binaries, ORCA's
+\texttt{orca\_2mkl}~\cite{ORCA} and Multiwfn~\cite{multiwfn}, applied to the 4M OMol25
+electronic-structure release that ships wavefunctions, density matrices, and raw ORCA
+outputs (\texttt{.out}, \texttt{.engrad}, \texttt{orca\_property.txt}). For each job folder
+we read the \texttt{.gbw} and \texttt{.out}; because Multiwfn has more complete
+compatibility with \texttt{.wfn}/\texttt{.wfx} files, the \texttt{.gbw} is converted to
+Molden via \texttt{orca\_2mkl} and the EDF library is loaded inside Multiwfn so ECPs are
+treated correctly~\citep{multiwfn}. Folders that fail the EDF load are flagged
+automatically (see Sec.~\ref{sec:dataset}) and re-queued.
+
+A user selects a calculation tier through a single integer \texttt{full\_set}~$\in\{0,1,2\}$
+which cascades through the four post-DFT families implemented in
+\texttt{qtaim\_gen/source/data/multiwfn.py}. Tiers are strict supersets, so calculations
+stack from 0 to 2 as descriptor needs grow. Table~\ref{tab:tiers} summarizes per-family
+additions at each tier; the QTAIM critical-point search and ORCA-derived globals run at
+every tier.
+
+\begin{table}[H]
+\centering
+\small
+\caption{Per-family contents of each calculation tier (\texttt{full\_set}). Tiers are
+strict supersets: tier $k$ runs everything in tiers $0, \dots, k$. Schemes shown in a column
+are those \emph{added} at that tier. Source: \texttt{qtaim\_gen/source/data/multiwfn.py}.}
+\label{tab:tiers}
+\begin{tabular}{lp{3.6cm}p{3.0cm}p{3.4cm}}
+\toprule
+\textbf{Family} & \textbf{Tier 0 (baseline)} & \textbf{Tier 1 (+adds)} & \textbf{Tier 2 (+adds)} \\
+\midrule
+Partial charges & Hirshfeld, ADCH, CM5, Becke & VDD, MBIS, CHELPG & Bader (basin-integrated) \\
+Bond orders & Fuzzy bond order & IBSI bond order & Laplacian bond order \\
+Fuzzy density & Becke density, Hirshfeld density, Becke spin, Hirshfeld spin & ELF, MBIS density, MBIS spin & Laplacian $\rho$, gradient-norm $|\nabla \rho|$ \\
+Other (scalar fields) & Geometry (ellipticity), ALIE & (none) & ESP geometry \\
+\midrule
+\multicolumn{4}{p{12cm}}{\textit{Every Tier:} full QTAIM critical-point search (atoms, bond CPs, ring CPs, cage CPs; $\rho$, $\nabla^2\rho$, ellipticity, energy density); ORCA \texttt{.out} parsed globals (energies, orbital eigenvalues, dipole, gradient, Mulliken / Loewdin charges, SCF metadata, quality flags).} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Each job folder tracks its own completion state. A \texttt{.processing.lock} file with a
+stale-mtime threshold prevents conflicting writes across distributed workers, and a
+per-folder \texttt{out\_files.zip} archives every Multiwfn stream so a folder can be
+reparsed without recomputing. Validation is structural: each tier defines the JSON keys
+that must be present, and a folder is treated as done only if all expected keys are populated.
+
+The per-folder outputs are seven JSON files (\texttt{charge}, \texttt{bond}, \texttt{qtaim},
+\texttt{fuzzy\_full}, \texttt{other}, \texttt{orca}, \texttt{timings}); the first five are
+Multiwfn-derived and the per-method schema is in Sec.~\ref{sec:dataset}. \texttt{orca.json}
+is parsed directly from the ORCA \texttt{.out} via a single-pass enum state machine in
+\texttt{qtaim\_gen/source/core/parse\_orca.py}, chosen over a general parser like
+\texttt{cclib}~\citep{cclib} because it streams the file once with no runtime dependencies
+and only extracts the fields we need. \texttt{timings.json} is a provenance record (per-step
+wallclock seconds, no hardware metadata).
+
+Once a tier completes, \texttt{json-to-lmdb} converts the JSONs into typed LMDB files (one
+per descriptor family) sharing a common key derived from the relative path of the job
+folder. The LMDB representation is portable and self-describing, so it is directly usable
+by external graph models like Chemprop~\citep{Heid2024-gd} or any custom PyG/DGL pipeline.
+For users of \texttt{qtaim\_embed}, the \texttt{generator-to-embed} entrypoint composes the
+typed LMDBs into PyG heterographs through \texttt{GeneralConverter}, with configurable
+bonding (cutoff, fuzzy, IBSI, or QTAIM), charge filter, fuzzy filter, and ORCA-globals
+filter, exposing atom-, bond-, and global-level targets simultaneously.
+
+%\paragraph{Foundation for downstream ML work.} This pipeline is intented to provide not just
+%\subsection{ML-Ready Post-Processing}\label{sec:ml_postprocessing}
+%
+%The LMDB stage is the boundary between the pipeline and downstream machine-learning use.
+%Three features sit on top of that boundary and are intended to make benchmark construction
+%turnkey rather than reinventable.
+%
+%The first is \emph{merging}: after a sharded run, the per-shard LMDBs across all descriptor
+%families are merged into one LMDB per family with a single pass that reads each shard, copies
+%records, and verifies key uniqueness. Merge is the operation that produces the artifact a
+%benchmark consumer actually reads.
+%
+%The second is \emph{multi-vertical splitting}. The \texttt{multi-vertical-merge} entrypoint
+%takes a pipeline JSON config that lists multiple verticals (e.g.\ SPICE, QM9, RMechDB,
+%OMol25 subsets) and produces per-vertical train/val/test graph LMDBs whose splits are
+%globally consistent: a molecular formula that appears in two verticals is assigned to the
+%same split partition in both, so a held-out composition is held out everywhere. The
+%implementation lives in \texttt{qtaim\_gen/source/utils/multi\_vertical.py} and runs in
+%three phases (Plan, Build, Scale).
+%
+%The third is \emph{train-only scaler fitting}. Feature scalers (atomic, bond, and global)
+%are fit on the train split only and applied to validation and test, eliminating the
+%quiet-but-common leakage path where a scaler fit on the full pool implicitly tells the
+%model the test-set mean. When \texttt{multi-vertical-merge} is used, the scaler is fit on
+%the union of all train splits across verticals and then applied per-vertical, which is the
+%right behavior when the downstream model is trained on the full mixture.
+%
+%Together these three features turn a raw LMDB dump into something a benchmarking team can
+%load directly: composition-consistent splits, per-vertical files, leakage-safe scalers, and
+%deterministic keys.
+
+
+%\subsection{ML-Ready Post-Processing}\label{sec:ml_postprocessing}
+%
+%The LMDB stage is the boundary between the pipeline and downstream machine-learning use.
+%Three features sit on top of that boundary and are intended to make benchmark construction
+%turnkey rather than reinventable.
+%
+%The first is \emph{merging}: after a sharded run, the per-shard LMDBs across all descriptor
+%families are merged into one LMDB per family with a single pass that reads each shard, copies
+%records, and verifies key uniqueness. Merge is the operation that produces the artifact a
+%benchmark consumer actually reads.
+%
+%The second is \emph{multi-vertical splitting}. The \texttt{multi-vertical-merge} entrypoint
+%takes a pipeline JSON config that lists multiple verticals (e.g.\ SPICE, QM9, RMechDB,
+%OMol25 subsets) and produces per-vertical train/val/test graph LMDBs whose splits are
+%globally consistent: a molecular formula that appears in two verticals is assigned to the
+%same split partition in both, so a held-out composition is held out everywhere. The
+%implementation lives in \texttt{qtaim\_gen/source/utils/multi\_vertical.py} and runs in
+%three phases (Plan, Build, Scale).
+%
+%The third is \emph{train-only scaler fitting}. Feature scalers (atomic, bond, and global)
+%are fit on the train split only and applied to validation and test, eliminating the
+%quiet-but-common leakage path where a scaler fit on the full pool implicitly tells the
+%model the test-set mean. When \texttt{multi-vertical-merge} is used, the scaler is fit on
+%the union of all train splits across verticals and then applied per-vertical, which is the
+%right behavior when the downstream model is trained on the full mixture.
+%
+%Together these three features turn a raw LMDB dump into something a benchmarking team can
+%load directly: composition-consistent splits, per-vertical files, leakage-safe scalers, and
+%deterministic keys.
+
+\subsection{HPC Portability and Reproducibility}
+
+We exercised the pipeline across three HPC schedulers (PBS Pro on ALCF Polaris, Slurm on
+NERSC Perlmutter, Flux on LLNL Tuolumne). PBS and Slurm use a controller-and-workers Parsl
+topology where a login node farms job folders out to allocated worker nodes via the
+\texttt{PBSProProvider}/\texttt{SlurmProvider} executors. Flux uses a single-node Parsl
+\texttt{ThreadPoolExecutor} that works through a local job queue without remote dispatch;
+this is the same path used for laptop and workstation runs (\texttt{full-runner}). All
+three configs live in \texttt{qtaim\_gen/source/utils/parsl\_configs.py} as minimal edits of
+the same template, so porting to a new center is expected to require only swapping the
+provider class and queue/account fields.
+
+The pipeline pins no specific ORCA or Multiwfn version. The reported dataset was produced
+with ORCA 6.0.0 (matching OMol25) and Multiwfn 3.8; ORCA 5/6.1 and Multiwfn 3.9 have also
+been exercised. Determinism is structural rather than numeric: the LMDB key derivation,
+per-tier JSON-key sets, and parsing logic for Multiwfn and ORCA outputs are fixed by code
+and covered by the test suite under \texttt{tests/}. Numeric reproducibility of the
+underlying QM calculation is the responsibility of ORCA. Running \texttt{pytest -q} on a
+fresh checkout exercises json-to-lmdb, sharded conversion, and merging end-to-end, so a
+user's local toolchain reproduces the LMDB and JSON artifacts we ship.
