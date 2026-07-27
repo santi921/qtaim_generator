@@ -767,15 +767,51 @@ class Converter:
         txn.commit()
         self.db.close()
 
+        # Post-build accounting: every input key must end up processed,
+        # logged as a failure, or skipped by restart. Keys that fail during
+        # phase-1 grapher init are only logged to the console and otherwise
+        # vanish -- fold them into the error stats so a run never under-reports
+        # its failures.
+        existing_keys = getattr(self, "existing_keys", set()) if self.restart else set()
+        failed_keys = set()
+        for fail_list in self.fail_log_dict.values():
+            failed_keys.update(fail_list)
+        skipped = 0
+        unaccounted = []
+        for k in keys_to_iterate:
+            k_str = k.decode("ascii") if isinstance(k, bytes) else str(k)
+            if k_str in self._processed_source_keys or k_str in failed_keys:
+                continue
+            if k_str in existing_keys:
+                skipped += 1
+                continue
+            unaccounted.append(k_str)
+        if unaccounted:
+            self.fail_log_dict.setdefault("unaccounted", []).extend(unaccounted)
+
         print("error dict stats:")
         for key in self.fail_log_dict.keys():
             print(f"{key}: \t\t {len(self.fail_log_dict[key])} errors")
             if len(self.fail_log_dict[key]) > 0:
                 print(f"error keys: \t{self.fail_log_dict[key]}")
-        
+
         # number of keys in the lmdb file
         print(f"Total number of keys in LMDB: {len(keys_to_iterate)}")
-        
+
+        # A run that builds nothing while keys were eligible is never a
+        # success, no matter what the error stats say -- a stale qtaim_embed
+        # makes every key fail featurization and, before this guard, the run
+        # exited 0 with an empty LMDB. Fail loudly instead.
+        eligible = len(keys_to_iterate) - skipped
+        if eligible > 0 and processed_count == 0:
+            failed = sum(len(v) for v in self.fail_log_dict.values())
+            raise RuntimeError(
+                f"Converter built 0 graphs but {eligible} keys were eligible "
+                f"({failed} failures, of which {len(unaccounted)} were "
+                f"silently consumed during phase-1 init). Environment or "
+                f"config is broken."
+            )
+
         if return_info:
             return {
                 "fail_log_dict": self.fail_log_dict,
@@ -1608,8 +1644,7 @@ class GeneralConverter(Converter):
                     auto_detected.append(data_name)
             self.data_inputs = auto_detected if auto_detected else ["geom", "qtaim", "charge"]
 
-        if config_dict.get("charge_filter", None) is not None:
-            self.charge_filter = config_dict["charge_filter"]
+        self.charge_filter = config_dict.get("charge_filter", None)
 
         # Optional filters for fuzzy and other data
         self.fuzzy_filter = config_dict.get("fuzzy_filter", None)
