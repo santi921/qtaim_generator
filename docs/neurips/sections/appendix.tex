@@ -156,7 +156,10 @@ three HPC systems:
   \item \textbf{Step 3 -- Split.} \texttt{split\_descriptor\_lmdbs.py}
     reads \texttt{structure.lmdb}, drops excluded keys, assigns each
     remaining key to train/val/test by
-    \texttt{BLAKE2b(formula\_hill) \% 10}, then partitions each of the
+    \revised{\texttt{SHA-256(Composition.formula)}, mapped to $[0,1)$ and
+    thresholded at $0.8 / 0.1 / 0.1$; the composition string is
+    \texttt{pymatgen}'s electronegativity-ordered formula, not Hill notation},
+    then partitions each of the
     8 descriptor LMDBs (\texttt{structure}, \texttt{charge},
     \texttt{qtaim}, \texttt{bond}, \texttt{fuzzy}, \texttt{other},
     \texttt{orca}, \texttt{timings}) into the assigned split.
@@ -296,6 +299,22 @@ consolidated LMDB per family. The same shard/merge pattern is implemented at the
 stage in \texttt{converter.py}, so graph construction can also be parallelized and joined
 into one final per-vertical graph LMDB.
 
+
+\begingroup\color{revcolor}
+\section{Per-Vertical Post-Split Distribution}
+\label{app:post_split}
+
+Table~\ref{tab:per_vertical_split} reports the realized train / val / test counts
+per vertical after held-out exclusion, referenced from
+\S\ref{sec:eval-main-split}. Because the split is global by composition rather
+than stratified per vertical, realized per-vertical ratios deviate from the
+nominal $0.8 / 0.1 / 0.1$; verticals holding few unique compositions relative to
+their row count deviate most, since one composition carries many rows there.
+Row counts are exact: for every vertical, total $=$ train $+$ val $+$ test $+$
+held-out, and the column totals recover the full 3{,}986{,}738-structure corpus.
+
+\input{tables/per_vertical_split}
+\endgroup
 
 \section{LMDB Conversion Quality Audit}
 \label{app:lmdb_audit}

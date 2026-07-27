@@ -9,7 +9,8 @@
 
 \begin{itemize}
   \item \textbf{T1 -- Per-atom partial charge regression.} Multi-target:
-    ADCH, Lowdin, Mulliken, Hirshfeld, CM5 jointly per atom. Headline:
+    \revised{ADCH, Becke, CM5, Hirshfeld, L\"owdin and Mulliken (six schemes)}
+    jointly per atom. Headline:
     per-method, per-element MAE and Pearson $r$ on the test split.
   \item \textbf{T2 -- BCP property regression.} Targets: $\rho$,
     $\nabla^2\rho$, ellipticity at every QTAIM bond critical point.
@@ -25,20 +26,50 @@
 \subsection{Main Split}
 \label{sec:eval-main-split}
 
-The corpus is partitioned by molecular composition: each unique
-\texttt{formula\_hill} is hashed via BLAKE2b~\cite{10.1007/978-3-642-38980-1_8}
-into $N=10$ buckets, with 8 buckets used for training, and one for test and validation 
-each.
-Held-out sets (\S\ref{sec:eval-holdouts}) are excluded prior to bucketing, so no
+The corpus is partitioned by molecular composition: \revised{each structure's
+composition string -- the electronegativity-ordered formula produced by
+\texttt{pymatgen}'s \texttt{Composition.formula} -- is hashed with SHA-256, mapped
+to $[0,1)$, and assigned to train / val / test by cumulative thresholds
+$0.8 / 0.1 / 0.1$. Because the key is an exact function of composition, every
+structure sharing a composition receives the same assignment.}
+Held-out sets (\S\ref{sec:eval-holdouts}) are excluded prior to \revised{hashing}, so no
 structure appears as both an in-distribution test point and a stress-test point.
 Hashing on composition rather than on row identity prevents near-duplicate
 conformers of the same formula from crossing the train/val/test boundary.
-Realized post-holdout sizes are 3{,}189{,}390 / 399{,}690 / 415{,}913
-(train / val / test), with bucket-size variance under 5\% of the mean:
-the partition balances composition without distorting row count.
+\revised{Realized sizes are 3{,}125{,}019 / 398{,}982 / 403{,}951
+(train / val / test) after excluding 58{,}786 held-out structures, which together
+account for the full 3{,}986{,}738-structure corpus. Realized ratios are
+79.6\,\% / 10.2\,\% / 10.3\,\% of the post-holdout corpus, within 0.4 percentage
+points of the nominal targets.}
 Verticals are not sampled uniformly because the split is global by formula; a
 per-vertical post-split distribution table is provided in
-App.~\ref{app:lmdb_audit} as a transparency artifact.
+\revised{App.~\ref{app:post_split}} as a transparency artifact.
+
+\begingroup\color{revcolor}
+\paragraph{Split leakage audit.}
+Composition hashing removes exact-composition leakage but does not by itself
+control scaffold- or homologue-level similarity, so we quantify both. No test
+structure shares its exact composition with any training structure (0.0\,\%),
+against 80.9\,\% for a row-level random split of the same corpus: same-composition
+and conformer leakage are eliminated rather than reduced. Residual similarity is
+real but bounded. Taking each test composition's nearest training neighbour among
+compositions with an identical element set, 96.0\,\% of test compositions have such
+a neighbour and it differs by a median of 5.3\,\% of the atom count. For
+calibration, withholding the \texttt{tm\_react} vertical entirely raises that
+median to 16.5\,\%, so the composition split sits roughly one third of the way from
+a random split to a full vertical holdout. A direct homologue probe finds that
+17.3\,\% of test compositions have a training composition differing by exactly one
+CH$_2$ unit. We report these measurements rather than adding a Murcko scaffold
+split because scaffold decomposition requires a sanitized covalent bond graph,
+which is undefined for the transition-metal, ionic, multi-fragment and
+reaction-path verticals that motivate this corpus: 27.0\,\% of structures contain
+an element outside the organic subset that scaffold perception assumes, and
+19.0\,\% contain a transition metal, lanthanide or actinide. A further observation
+supports the stress-suite design in \S\ref{sec:eval-holdouts} over per-vertical
+holdout: withholding \texttt{droplet} or \texttt{rna} entirely still leaves
+67--68\,\% of their compositions matched exactly in training, because solvent
+clusters and nucleotide fragments recur across verticals.
+\endgroup
 
 \subsection{Held-Out Evaluation Sets}
 \label{sec:eval-holdouts}
@@ -46,7 +77,10 @@ App.~\ref{app:lmdb_audit} as a transparency artifact.
 Held-out sets are constructed independently of the main split. Membership is
 decided from the manifest (and from \texttt{bond.lmdb} for the two metal-ligand
 sets) and removed from train/val/test so no structure is evaluated as both
-in-distribution test and stress-test. Overlaps between held-out sets are allowed
+in-distribution test and stress-test. \revised{Where a set is subsampled
+(H1, H3, H6), sampling is composition-stratified using a
+BLAKE2b~\cite{10.1007/978-3-642-38980-1_8} rank over
+\texttt{formula\_hill}, so the subsample is deterministic and reproducible.} Overlaps between held-out sets are allowed
 (a structure can be both H7-large and H8-high-charge), but each set is generated
 separately so error attributes to one axis. The headline signal per set is the
 gap $\Delta = \mathrm{metric}_{\mathrm{held\text{-}out}} -
@@ -56,16 +90,22 @@ indicates pair-level memorization. Three of the five sets (H1, H6, H7) inherit
 the hardest axes from the OMol25 paper directly.
 
 \paragraph{Sets and sizes.}
-The five held-out sets together cover roughly 60{,}719 structures
-($\sim$1.5\% of the dataset; overlaps allowed):
+The five held-out sets together \revised{contain 60{,}578 records spanning 58{,}786
+distinct structures} ($\sim$1.5\% of the dataset; \revised{overlaps allowed, and
+1{,}792 records are structures belonging to two sets}):
 
 \begin{itemize}
-  \item \textbf{H1 -- Metal-ligand pairs (15{,}030):} eleven (TM, partner) bond pairs sampled stratified across log-spaced frequency bands; selection driven by \emph{true} bonds (Mayer/fuzzy $\geq 0.3$) from \texttt{bond.lmdb}, not element co-occurrence (App.~\ref{app:heldout-h1}).
-  \item \textbf{H3 -- Reactivity (12{,}507):} composition-stratified subsample of \texttt{tm\_react} (5k), \texttt{electrolytes\_reactivity} (5k), \texttt{pmechdb} (2.5k); tests non-equilibrium and transition-state-adjacent geometries.
+  \item \textbf{H1 -- Metal-ligand pairs (\revised{15{,}025}):} eleven (TM, partner) bond pairs sampled stratified across log-spaced frequency bands; selection driven by \emph{true} bonds (Mayer/fuzzy $\geq 0.3$) from \texttt{bond.lmdb}, not element co-occurrence (App.~\ref{app:heldout-h1}).
+  \item \textbf{H3 -- Reactivity (\revised{12{,}506}):} composition-stratified subsample of \texttt{tm\_react} (5k), \texttt{electrolytes\_reactivity} (5k), \texttt{pmechdb} (2.5k); tests non-equilibrium and transition-state-adjacent geometries.
   \item \textbf{H6 -- Lanthanide-ligand pairs (2{,}589):} same construction as H1 applied to (Ln, partner) bonds (App.~\ref{app:heldout-h6}).
-  \item \textbf{H7 -- Large systems (18{,}200):} \texttt{n\_atoms > 250}; size extrapolation where fuzzy integration and grid-based QTAIM are most expensive and per-atom DFT SNR is hardest to maintain.
-  \item \textbf{H8 -- Large net charges (12{,}393):} \texttt{net\_charge\_abs > 4}; the high-charge tail where partial-charge schemes disagree most and SCF is most sensitive to functional and basis.
+  \item \textbf{H7 -- Large systems (\revised{18{,}096}):} \texttt{n\_atoms > 250}; size extrapolation where fuzzy integration and grid-based QTAIM are most expensive and per-atom DFT SNR is hardest to maintain.
+  \item \textbf{H8 -- Large net charges (\revised{12{,}362}):} \texttt{net\_charge\_abs > 4}; the high-charge tail where partial-charge schemes disagree most and SCF is most sensitive to functional and basis.
 \end{itemize}
+
+\revised{Counts are the records present in the released held-out LMDBs, verified
+against each database's stored length. They fall a few records short of the
+selection targets (H1 15{,}030, H3 12{,}507, H7 18{,}200, H8 12{,}393) where a
+selected structure lacked a complete descriptor set at pull time.}
 
 We deliberately use pair-level held-outs (H1, H6) rather than
 whole-element held-outs because the goal of this benchmark is to produce

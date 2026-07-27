@@ -21,6 +21,14 @@
 % suppress overfull hbox warnings below 5pt
 \hfuzz=5pt
 
+% ---- rebuttal revision tracking (2026-07-27) --------------------------------
+% \revised{...} marks text added or corrected in response to the NeurIPS reviews.
+% Longer revised blocks use \begingroup\color{revcolor} ... \endgroup.
+% For a clean camera-ready, redefine as: \newcommand{\revised}[1]{#1}
+% and delete the \color{revcolor} group markers.
+\definecolor{revcolor}{RGB}{178,24,43}
+\newcommand{\revised}[1]{\textcolor{revcolor}{#1}}
+
 \title{Beyond Energies and Forces: OMol-Descriptors-4M, an Open
   Post-DFT Pipeline and Evaluation Protocol for Machine Learning in Chemistry}
 
@@ -66,7 +74,7 @@ We name this dataset OMol-Descriptors-4M and present it as the first
 multi-vertical descriptor dataset at this scale beyond energies and forces.
 Analogous to the source dataset, we establish an evaluation protocol with
 explicit evaluative claims and scope boundaries: composition-ordered
-train/val/test splits via blake2b-hashed molecular formula and five
+train/val/test splits via \revised{a hashed molecular composition} and five
 domain-specific held-out stress tests (metal-ligand bond pairs, lanthanide-ligand
 bond pairs, reactivity, large systems, and high-charge regimes; $\sim$60k
 structures total). Together with the open
