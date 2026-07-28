@@ -103,6 +103,16 @@ def main(argv=None):
         ),
     )
 
+    parser.add_argument(
+        "--horton_python",
+        type=str,
+        default="",
+        help=(
+            "python interpreter of the separate horton environment; setting "
+            "this enables the HORTON charge engine post-step (default off)"
+        ),
+    )
+
     args = parser.parse_args(argv)
 
     overrun_running = bool(args.overrun_running) if "overrun_running" in args else False
@@ -122,6 +132,7 @@ def main(argv=None):
     move_results = bool(args.move_results) if "move_results" in args else False
     wfx: bool = bool(getattr(args, "wfx", False))
     patch_timings: bool = bool(getattr(args, "patch_timings", False))
+    horton_python: str = str(getattr(args, "horton_python", ""))
     job_file = args.job_file
 
     # set env vars
@@ -206,6 +217,7 @@ def main(argv=None):
                     move_results=move_results,
                     wfx=wfx,
                     patch_timings=patch_timings,
+                    horton_python=horton_python,
                 )  # works!
             except Exception as e:
                 print(f"Error in gbw_analysis for {run_root}: {e}")

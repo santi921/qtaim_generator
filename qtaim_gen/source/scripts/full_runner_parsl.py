@@ -186,6 +186,16 @@ def main(argv: Optional[List[str]] = None) -> int:
         ),
     )
 
+    parser.add_argument(
+        "--horton_python",
+        type=str,
+        default="",
+        help=(
+            "python interpreter of the separate horton environment; setting "
+            "this enables the HORTON charge engine post-step (default off)"
+        ),
+    )
+
     args = parser.parse_args(argv)
     # print(args)
     for key, value in vars(args).items():
@@ -212,6 +222,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     wfx: bool = bool(getattr(args, "wfx", False))
     exhaustive_qtaim: bool = bool(getattr(args, "exhaustive_qtaim", False))
     patch_timings: bool = bool(getattr(args, "patch_timings", False))
+    horton_python: str = str(getattr(args, "horton_python", ""))
 
     # parsl args
     type_runner: str = str(getattr(args, "type_runner", "local"))
@@ -303,6 +314,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             wfx=wfx,
             exhaustive_qtaim=exhaustive_qtaim,
             patch_timings=patch_timings,
+            horton_python=horton_python,
         )
         for f in folders_run
     ]

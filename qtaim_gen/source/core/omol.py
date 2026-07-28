@@ -16,6 +16,7 @@ from qtaim_gen.source.utils.validation import (
 
 from qtaim_gen.source.utils.io import check_results_exist
 from qtaim_gen.source.utils.atomic_write import atomic_json_write
+from qtaim_gen.source.core.horton import run_horton_analysis
 
 from qtaim_gen.source.data.multiwfn import (
     charge_data,
@@ -1879,6 +1880,7 @@ def gbw_analysis(
     exhaustive_qtaim: bool = False,
     subprocess_env: Optional[dict] = None,
     patch_timings: bool = False,
+    horton_python: str = "",
 ) -> None:
     """
     Run a full analysis on a folder of gbw files
@@ -1901,6 +1903,8 @@ def gbw_analysis(
         full_set(int): refined set of cheaper calcs or full set of analysis
         move_results(bool): whether to move results to a single results folder after analysis
         wfx(bool): whether to use .wfx format instead of .wfn for conversion
+        horton_python(str): python interpreter of the separate horton environment;
+            non-empty enables the HORTON charge engine post-step (default off)
     Writes:
         - settings.ini file with memory and n_threads
         - jobs for conversion to wfn/wfx and multiwfn analysis
@@ -2082,6 +2086,14 @@ def gbw_analysis(
             # we might change level-of-analysis so only return if all requested analyses are present
             if tf_validation:
                 logger.info("Output already exists and is valid - skipping analysis")
+                if horton_python:
+                    run_horton_analysis(
+                        folder=folder,
+                        horton_python=horton_python,
+                        subprocess_env=subprocess_env,
+                        move_results=move_results,
+                        logger=logger,
+                    )
                 logger.info("gbw_analysis completed in folder: {}".format(folder))
                 logger.info("Validation status: {}".format(tf_validation))
                 return
@@ -2109,6 +2121,14 @@ def gbw_analysis(
                         "Validation passes without orca check - running orca-only parse"
                     )
                     _run_orca_parse(folder, move_results, logger)
+                    if horton_python:
+                        run_horton_analysis(
+                            folder=folder,
+                            horton_python=horton_python,
+                            subprocess_env=subprocess_env,
+                            move_results=move_results,
+                            logger=logger,
+                        )
                     if move_results:
                         move_results_to_folder(folder, logger=logger, clean=clean)
                     # Clean up orca.out after successful orca-only parse (28-114 MB)
@@ -2162,6 +2182,14 @@ def gbw_analysis(
                         logger.info(
                             "Reparsing successful on 2nd try - skipping analysis"
                         )
+                        if horton_python:
+                            run_horton_analysis(
+                                folder=folder,
+                                horton_python=horton_python,
+                                subprocess_env=subprocess_env,
+                                move_results=move_results,
+                                logger=logger,
+                            )
                         logger.info(
                             "gbw_analysis completed in folder: {}".format(folder)
                         )
@@ -2211,6 +2239,16 @@ def gbw_analysis(
 
     # Parse ORCA output file (if present)
     _run_orca_parse(folder, move_results, logger)
+
+    # HORTON charge engine post-step (separate python env, see core/horton.py)
+    if horton_python:
+        run_horton_analysis(
+            folder=folder,
+            horton_python=horton_python,
+            subprocess_env=subprocess_env,
+            move_results=move_results,
+            logger=logger,
+        )
 
     # move all results to a results folder
 
