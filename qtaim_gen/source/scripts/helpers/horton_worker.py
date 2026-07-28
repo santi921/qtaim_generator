@@ -28,14 +28,23 @@ PROATOM_RMIN = 1e-5
 PROATOM_RMAX = 20.0
 PROATOM_NPOINT = 300
 
-# Ground-state multiplicities H-Xe for the atomdb proatom lookup
+# Ground-state multiplicities H(1) through Lr(103) for the atomdb proatom lookup.
+# Verified against every neutral-atom filename in the qc-AtomDB slater dataset
+# (98 elements, zero mismatches). That dataset has no density for Ce(58),
+# Bk(97), Md(101), No(102), Lr(103), so `hirshfeld` records a skip for those;
+# becke / becke_csd / is need no proatoms and work across the full range.
 GROUND_STATE_MULT = {
     1: 2, 2: 1, 3: 2, 4: 1, 5: 2, 6: 3, 7: 4, 8: 3, 9: 2, 10: 1,
     11: 2, 12: 1, 13: 2, 14: 3, 15: 4, 16: 3, 17: 2, 18: 1, 19: 2, 20: 1,
     21: 2, 22: 3, 23: 4, 24: 7, 25: 6, 26: 5, 27: 4, 28: 3, 29: 2, 30: 1,
     31: 2, 32: 3, 33: 4, 34: 3, 35: 2, 36: 1, 37: 2, 38: 1, 39: 2, 40: 3,
     41: 6, 42: 7, 43: 6, 44: 5, 45: 4, 46: 1, 47: 2, 48: 1, 49: 2, 50: 3,
-    51: 4, 52: 3, 53: 2, 54: 1,
+    51: 4, 52: 3, 53: 2, 54: 1, 55: 2, 56: 1, 57: 2, 58: 1, 59: 4, 60: 5,
+    61: 6, 62: 7, 63: 8, 64: 9, 65: 6, 66: 5, 67: 4, 68: 3, 69: 2, 70: 1,
+    71: 2, 72: 3, 73: 4, 74: 5, 75: 6, 76: 5, 77: 4, 78: 3, 79: 2, 80: 1,
+    81: 2, 82: 3, 83: 4, 84: 3, 85: 2, 86: 1, 87: 2, 88: 1,
+    89: 2, 90: 3, 91: 4, 92: 5, 93: 6, 94: 7, 95: 8, 96: 9, 97: 6, 98: 5,
+    99: 4, 100: 3, 101: 2, 102: 1, 103: 2,
 }
 
 CACHE_DIR = os.path.join(
@@ -68,7 +77,12 @@ COVR_TIANLU = {
     72: 1.75, 73: 1.70, 74: 1.62, 75: 1.51, 76: 1.44, 77: 1.41, 78: 1.36,
     79: 1.36, 80: 1.32,
     **{z: 1.46 for z in range(81, 89)},
+    89: 2.15, 90: 2.06, 91: 2.00, 92: 1.96, 93: 1.90, 94: 1.87, 95: 1.80,
+    96: 1.69,
+    # Multiwfn uses 1.5 A for everything above Cm; explicit through Lr (103)
+    **{z: 1.5 for z in range(97, 104)},
 }
+COVR_TIANLU_DEFAULT = 1.5
 
 
 def make_tianlu_becke_wpart():
@@ -86,7 +100,7 @@ def make_tianlu_becke_wpart():
         def update_at_weights(self):
             self.logger.info("Computing Becke weights (modified CSD radii).")
             radii_dict = {
-                int(z): COVR_TIANLU[int(z)] * ANGSTROM
+                int(z): COVR_TIANLU.get(int(z), COVR_TIANLU_DEFAULT) * ANGSTROM
                 for z in set(self.numbers.tolist())
             }
             bw_helper = BeckeWeights(radii_dict, self._k)
@@ -211,11 +225,45 @@ def build_proatomdb(atnums):
     return ProAtomDB(records)
 
 
+SCHEMES = ("becke", "becke_csd", "hirshfeld", "is")
+
+
+def build_part(scheme, mol, molgrid, rho):
+    """Construct the WPart object for a scheme name."""
+    if scheme == "becke":
+        from horton_part import BeckeWPart
+
+        return BeckeWPart(mol.atcoords, mol.atnums, mol.atcorenums, molgrid, rho)
+    if scheme == "becke_csd":
+        cls = make_tianlu_becke_wpart()
+        return cls(mol.atcoords, mol.atnums, mol.atcorenums, molgrid, rho)
+    if scheme == "is":
+        from horton_part import ISAWPart
+
+        return ISAWPart(mol.atcoords, mol.atnums, mol.atcorenums, molgrid, rho)
+    if scheme == "hirshfeld":
+        from horton_part import HirshfeldWPart
+
+        return HirshfeldWPart(
+            mol.atcoords,
+            mol.atnums,
+            mol.atcorenums,
+            molgrid,
+            rho,
+            build_proatomdb(mol.atnums),
+        )
+    raise ValueError(f"unknown scheme: {scheme}")
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--wfx", required=True, help="wavefunction file (EDF-free wfx)")
     parser.add_argument("--out", required=True, help="output JSON path")
-    parser.add_argument("--schemes", default="becke,hirshfeld,is")
+    parser.add_argument(
+        "--schemes",
+        default="becke,hirshfeld,is",
+        help=f"comma-separated subset of {','.join(SCHEMES)}",
+    )
     parser.add_argument("--grid", default="fine", help="MolGrid preset")
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args(argv)
@@ -251,41 +299,37 @@ def main(argv=None) -> int:
     has_ecp = bool((mol.atcorenums != mol.atnums).any())
     atom_keys = [f"{i + 1}_{num2sym[int(n)]}" for i, n in enumerate(mol.atnums)]
 
+    requested = [s.strip() for s in args.schemes.split(",") if s.strip()]
+    unknown = [s for s in requested if s not in SCHEMES]
+    if unknown:
+        print(f"unknown scheme(s): {','.join(unknown)}", file=sys.stderr)
+        return 2
+
     result = {}
     skipped = []
-    for scheme in [s.strip() for s in args.schemes.split(",") if s.strip()]:
-        if scheme == "becke":
-            from horton_part import BeckeWPart
-
-            part = BeckeWPart(mol.atcoords, mol.atnums, mol.atcorenums, molgrid, rho)
-        elif scheme == "becke_csd":
-            cls = make_tianlu_becke_wpart()
-            part = cls(mol.atcoords, mol.atnums, mol.atcorenums, molgrid, rho)
-        elif scheme == "is":
-            from horton_part import ISAWPart
-
-            part = ISAWPart(mol.atcoords, mol.atnums, mol.atcorenums, molgrid, rho)
-        elif scheme == "hirshfeld":
-            if has_ecp:
-                # all-electron proatoms vs valence-only molecular density
-                # would be inconsistent
-                skipped.append({"scheme": "hirshfeld", "reason": "ecp_atoms_present"})
-                continue
-            from horton_part import HirshfeldWPart
-
-            proatomdb = build_proatomdb(mol.atnums)
-            part = HirshfeldWPart(
-                mol.atcoords, mol.atnums, mol.atcorenums, molgrid, rho, proatomdb
-            )
-        else:
-            print(f"unknown scheme: {scheme}", file=sys.stderr)
-            return 2
-
-        part.do_charges()
-        charges = part.cache["charges"]
+    for scheme in requested:
+        if scheme == "hirshfeld" and has_ecp:
+            # all-electron proatoms vs valence-only molecular density
+            # would be inconsistent
+            skipped.append({"scheme": scheme, "reason": "ecp_atoms_present"})
+            continue
+        # One scheme failing must not discard the schemes that already
+        # succeeded: record it and keep going.
+        try:
+            part = build_part(scheme, mol, molgrid, rho)
+            part.do_charges()
+            charges = part.cache["charges"]
+        except Exception as e:
+            skipped.append({"scheme": scheme, "reason": f"{type(e).__name__}: {e}"[:200]})
+            print(f"scheme {scheme} failed: {type(e).__name__}: {e}", file=sys.stderr)
+            continue
         result[f"{scheme}_horton"] = {
             "charge": {k: round(float(q), 8) for k, q in zip(atom_keys, charges)}
         }
+
+    if not result:
+        print("no scheme produced charges", file=sys.stderr)
+        return 3
 
     import gbasis
     import grid as grid_pkg

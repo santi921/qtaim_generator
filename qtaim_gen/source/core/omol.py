@@ -1353,6 +1353,7 @@ def move_results_to_folder(
         "qtaim.json",
         "other.json",
         "orca.json",
+        "horton.json",
     ]
     results_folder = os.path.join(folder, "generator")
 

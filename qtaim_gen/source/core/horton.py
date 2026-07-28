@@ -51,6 +51,27 @@ def find_wfx(folder: str) -> Optional[str]:
     return None
 
 
+def find_horton_json(folder: str) -> Optional[str]:
+    """Locate a non-empty horton.json in the folder root or generator/."""
+    for cand in (
+        os.path.join(folder, "horton.json"),
+        os.path.join(folder, "generator", "horton.json"),
+    ):
+        if os.path.isfile(cand) and os.path.getsize(cand) > 0:
+            return cand
+    return None
+
+
+def resolve_charge_json(folder: str, move_results: bool) -> str:
+    """Charge.json path to merge into: generator/ when results were moved."""
+    charge_path = os.path.join(folder, "charge.json")
+    if move_results:
+        gen_charge = os.path.join(folder, "generator", "charge.json")
+        if os.path.isfile(gen_charge):
+            return gen_charge
+    return charge_path
+
+
 def merge_horton_into_charge_json(horton_dict: dict, charge_json_path: str) -> None:
     """Merge HORTON charge schemes into existing charge.json.
 
@@ -115,12 +136,20 @@ def run_horton_analysis(
         logger = logging.getLogger(__name__)
 
     horton_json_path = os.path.join(folder, "horton.json")
-    if (
-        not overwrite
-        and os.path.isfile(horton_json_path)
-        and os.path.getsize(horton_json_path) > 0
-    ):
-        logger.info("horton.json already present in %s -- skipping", folder)
+    existing = None if overwrite else find_horton_json(folder)
+    if existing is not None:
+        # Skip the expensive recompute, but always (re)attempt the merge: it is
+        # cheap and idempotent, and a run interrupted between writing
+        # horton.json and merging would otherwise never integrate its results.
+        logger.info("horton.json already present in %s -- merging only", folder)
+        try:
+            with open(existing, "r") as f:
+                merge_horton_into_charge_json(
+                    json.load(f), resolve_charge_json(folder, move_results)
+                )
+        except (json.JSONDecodeError, OSError) as e:
+            logger.error("Could not merge existing %s: %s", existing, e)
+            return False
         return True
 
     wfx_path = find_wfx(folder)
@@ -178,12 +207,9 @@ def run_horton_analysis(
         with open(horton_json_path, "r") as f:
             horton_dict = json.load(f)
 
-        charge_path = os.path.join(folder, "charge.json")
-        if move_results:
-            gen_charge = os.path.join(folder, "generator", "charge.json")
-            if os.path.isfile(gen_charge):
-                charge_path = gen_charge
-        merge_horton_into_charge_json(horton_dict, charge_path)
+        merge_horton_into_charge_json(
+            horton_dict, resolve_charge_json(folder, move_results)
+        )
 
         elapsed = round(time.time() - t_start, 2)
         _write_horton_timing(folder, elapsed)
