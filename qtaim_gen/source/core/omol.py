@@ -1877,6 +1877,7 @@ def gbw_analysis(
     move_results: bool = True,
     patch_path: bool= False,
     check_orca: bool = False,
+    check_bcp_count: bool = False,
     wfx: bool = False,
     exhaustive_qtaim: bool = False,
     subprocess_env: Optional[dict] = None,
@@ -1906,6 +1907,8 @@ def gbw_analysis(
         wfx(bool): whether to use .wfx format instead of .wfn for conversion
         horton_python(str): python interpreter of the separate horton environment;
             non-empty enables the HORTON charge engine post-step (default off)
+        check_bcp_count(bool): reject qtaim.json records holding fewer bond
+            critical points than Multiwfn reported in qtaim.out
     Writes:
         - settings.ini file with memory and n_threads
         - jobs for conversion to wfn/wfx and multiwfn analysis
@@ -2079,6 +2082,7 @@ def gbw_analysis(
                     move_results=move_results,
                     logger=logger,
                     check_orca=check_orca,
+                    check_bcp_count=check_bcp_count,
                 )
             except Exception as e:
                 logger.error(f"Error during validation checks: {e}")
@@ -2112,6 +2116,7 @@ def gbw_analysis(
                         move_results=move_results,
                         logger=logger,
                         check_orca=False,
+                        check_bcp_count=check_bcp_count,
                     )
                 except Exception:
                     tf_without_orca = False
@@ -2177,6 +2182,7 @@ def gbw_analysis(
                         move_results=move_results,
                         logger=logger,
                         check_orca=check_orca,
+                        check_bcp_count=check_bcp_count,
                     )
 
                     if tf_validation:
@@ -2263,6 +2269,7 @@ def gbw_analysis(
         move_results=move_results,
         logger=logger,
         check_orca=check_orca,
+        check_bcp_count=check_bcp_count,
     )
 
     # Optional repair pass: if validation failed and patch_timings is on,

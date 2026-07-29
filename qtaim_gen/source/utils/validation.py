@@ -1,6 +1,9 @@
 from asyncio.log import logger
 import os
 import json
+import re
+import zipfile
+from typing import Optional
 from qtaim_gen.source.core.parse_qtaim import dft_inp_to_dict
 import numpy as np
 from datetime import datetime
@@ -497,8 +500,51 @@ def validate_charge_dict(
     return True
 
 
+def count_reported_bcps(folder: str) -> Optional[int]:
+    """Number of (3,-1) CPs Multiwfn *reported*, or None if unavailable.
+
+    Multiwfn prints "Number of (3,-1) CPs:  N" to qtaim.out. Comparing that to
+    the bond-CP count in qtaim.json detects critical points lost between the
+    search and the stored record - most importantly a truncated CPprop.txt,
+    which validate_qtaim_dict's nuclear-CP check cannot see because Multiwfn
+    numbers nuclear CPs first, so any surviving prefix still satisfies it.
+
+    Looks in the folder root, generator/, then generator/out_files.zip.
+    """
+    pattern = re.compile(r"Number of \(3,-1\) CPs:\s*(\d+)")
+
+    for rel in ("qtaim.out", os.path.join("generator", "qtaim.out")):
+        path = os.path.join(folder, rel)
+        if os.path.isfile(path) and os.path.getsize(path) > 0:
+            try:
+                with open(path, "r", errors="replace") as f:
+                    found = pattern.findall(f.read())
+                if found:
+                    return int(found[-1])
+            except OSError:
+                pass
+
+    zip_path = os.path.join(folder, "generator", "out_files.zip")
+    if os.path.isfile(zip_path):
+        try:
+            with zipfile.ZipFile(zip_path, "r") as zf:
+                if "qtaim.out" in zf.namelist():
+                    text = zf.read("qtaim.out").decode("utf-8", errors="replace")
+                    found = pattern.findall(text)
+                    if found:
+                        return int(found[-1])
+        except (zipfile.BadZipFile, OSError, KeyError):
+            pass
+    return None
+
+
 def validate_qtaim_dict(
-    qtaim_json_loc: str, n_atoms: int = None, verbose: bool = False, logger: any = None
+    qtaim_json_loc: str,
+    n_atoms: int = None,
+    verbose: bool = False,
+    logger: any = None,
+    folder: str = None,
+    check_bcp_count: bool = False,
 ):
     """
     Basic check that the qtaim json file has the expected structure
@@ -531,6 +577,36 @@ def validate_qtaim_dict(
                     f"Number of nuclear critical points ({len(dict_ncps)}) does not match expected ({n_atoms})."
                 )
             return False
+    # A bound multi-atom system must have at least one bond critical point.
+    # Logged unconditionally (cheap, and this class of failure is otherwise
+    # invisible), but only fatal under check_bcp_count, since a genuinely
+    # non-interacting pair of atoms legitimately has none.
+    if not dict_bcps and n_atoms is not None and n_atoms > 1:
+        msg = (
+            f"QTAIM json has no bond critical points for {n_atoms} atoms: "
+            f"{qtaim_json_loc}"
+        )
+        if verbose:
+            print(msg)
+        if logger:
+            logger.error(msg)
+        if check_bcp_count:
+            return False
+
+    if check_bcp_count and folder is not None:
+        reported = count_reported_bcps(folder)
+        if reported is not None and len(dict_bcps) < reported:
+            msg = (
+                f"QTAIM json holds {len(dict_bcps)} bond critical points but "
+                f"Multiwfn reported {reported} -- critical points were lost "
+                f"between the search and the stored record ({qtaim_json_loc})"
+            )
+            if verbose:
+                print(msg)
+            if logger:
+                logger.error(msg)
+            return False
+
     if verbose:
         print(f"Number of nuclear critical points: {len(dict_ncps)}")
         print(f"Number of bond critical points: {len(dict_bcps)}")
@@ -649,6 +725,7 @@ def validation_checks(
     move_results: bool = True,
     logger=None,
     check_orca: bool = False,
+    check_bcp_count: bool = False,
 ):
     """
     Run all validation checks on the json files in the given folder.
@@ -657,6 +734,10 @@ def validation_checks(
         verbose (bool): If True, print detailed validation messages.
         full_set (int): Level of calculation detail (0-baseline, 1-baseline, 2-full).
         move_results (bool): Adjust if files have been moved during cleaning.
+        check_bcp_count (bool): cross-check qtaim.json's bond-CP count against
+            the count Multiwfn reported in qtaim.out, and reject records whose
+            critical points were lost between the search and the stored file.
+            Off by default: it needs qtaim.out, which older runs may not retain.
     Returns:
         bool: True if all validation checks pass, False otherwise.
     """
@@ -750,7 +831,12 @@ def validation_checks(
         tf_cond = False
 
     if not validate_qtaim_dict(
-        qtaim_json_loc, n_atoms=n_atoms, verbose=verbose, logger=logger
+        qtaim_json_loc,
+        n_atoms=n_atoms,
+        verbose=verbose,
+        logger=logger,
+        folder=folder,
+        check_bcp_count=check_bcp_count,
     ):
         if logger:
             logger.error(f"QTAIM json validation failed in folder: {folder}")

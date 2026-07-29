@@ -232,6 +232,16 @@ def main(argv: Optional[List[str]] = None) -> int:
         ),
     )
 
+    parser.add_argument(
+        "--check_bcp_count",
+        action="store_true",
+        help=(
+            "reject qtaim.json records holding fewer bond critical points than "
+            "Multiwfn reported in qtaim.out (catches truncated CPprop.txt, "
+            "which the nuclear-CP check cannot see)"
+        ),
+    )
+
     args = parser.parse_args(argv)
     # print(args)
     for key, value in vars(args).items():
@@ -264,6 +274,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     exhaustive_qtaim: bool = bool(getattr(args, "exhaustive_qtaim", False))
     patch_timings: bool = bool(getattr(args, "patch_timings", False))
     horton_python: str = str(getattr(args, "horton_python", ""))
+    check_bcp_count: bool = bool(getattr(args, "check_bcp_count", False))
 
     # parsl args
     type_runner: str = str(getattr(args, "type_runner", "local"))
@@ -379,6 +390,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             exhaustive_qtaim=exhaustive_qtaim,
             patch_timings=patch_timings,
             horton_python=horton_python,
+            check_bcp_count=check_bcp_count,
         )
         for f in folders_run
     ]

@@ -103,6 +103,7 @@ def process_folder(
     move_results: bool = True,
     wfx: bool = False,
     check_orca: bool = False,
+    check_bcp_count: bool = False,
     exhaustive_qtaim: bool = False,
     patch_timings: bool = False,
     horton_python: str = "",
@@ -215,6 +216,7 @@ def process_folder(
             move_results=move_results,
             wfx=wfx,
             check_orca=check_orca,
+            check_bcp_count=check_bcp_count,
             exhaustive_qtaim=exhaustive_qtaim,
             subprocess_env=subprocess_env,
             patch_timings=patch_timings,
@@ -281,6 +283,7 @@ def process_folder_alcf(
     root_omol_inputs: Optional[str] = None,  # root where input folders are located
     wfx: bool = False,
     check_orca: bool = False,
+    check_bcp_count: bool = False,
     exhaustive_qtaim: bool = False,
     patch_timings: bool = False,
     horton_python: str = "",
@@ -404,6 +407,7 @@ def process_folder_alcf(
                 move_results=move_results,
                 logger=logger,
                 check_orca=check_orca,
+                check_bcp_count=check_bcp_count,
             )
 
             if not overwrite and tf_validation:
@@ -476,6 +480,7 @@ def process_folder_alcf(
             patch_path=patch_path,
             wfx=wfx,
             check_orca=check_orca,
+            check_bcp_count=check_bcp_count,
             exhaustive_qtaim=exhaustive_qtaim,
             subprocess_env=subprocess_env,
             patch_timings=patch_timings,

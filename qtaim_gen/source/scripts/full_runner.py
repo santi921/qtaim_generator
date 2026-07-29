@@ -113,6 +113,16 @@ def main(argv=None):
         ),
     )
 
+    parser.add_argument(
+        "--check_bcp_count",
+        action="store_true",
+        help=(
+            "reject qtaim.json records holding fewer bond critical points than "
+            "Multiwfn reported in qtaim.out (catches truncated CPprop.txt, "
+            "which the nuclear-CP check cannot see)"
+        ),
+    )
+
     args = parser.parse_args(argv)
 
     overrun_running = bool(args.overrun_running) if "overrun_running" in args else False
@@ -133,6 +143,7 @@ def main(argv=None):
     wfx: bool = bool(getattr(args, "wfx", False))
     patch_timings: bool = bool(getattr(args, "patch_timings", False))
     horton_python: str = str(getattr(args, "horton_python", ""))
+    check_bcp_count: bool = bool(getattr(args, "check_bcp_count", False))
     job_file = args.job_file
 
     # set env vars
@@ -218,6 +229,7 @@ def main(argv=None):
                     wfx=wfx,
                     patch_timings=patch_timings,
                     horton_python=horton_python,
+                    check_bcp_count=check_bcp_count,
                 )  # works!
             except Exception as e:
                 print(f"Error in gbw_analysis for {run_root}: {e}")
