@@ -348,6 +348,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         move_results=move_results,
         full_set=full_set,
         check_orca=check_orca,
+        check_bcp_count=check_bcp_count,
         check_ecp=check_ecp,
     )
 

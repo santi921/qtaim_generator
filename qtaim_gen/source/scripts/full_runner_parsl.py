@@ -288,6 +288,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         pre_validate=prevalidate,
         move_results=move_results,
         full_set=full_set,
+        check_bcp_count=check_bcp_count,
     )
 
     if not folders_run:
