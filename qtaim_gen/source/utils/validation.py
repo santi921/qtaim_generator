@@ -500,42 +500,72 @@ def validate_charge_dict(
     return True
 
 
-def count_reported_bcps(folder: str) -> Optional[int]:
-    """Number of (3,-1) CPs Multiwfn *reported*, or None if unavailable.
+QTAIM_EXPORT_MARKER = "have been outputted to CPprop.txt"
+QTAIM_COUNT_PATTERN = re.compile(r"Number of \(3,-1\) CPs:\s*(\d+)")
 
-    Multiwfn prints "Number of (3,-1) CPs:  N" to qtaim.out. Comparing that to
-    the bond-CP count in qtaim.json detects critical points lost between the
-    search and the stored record - most importantly a truncated CPprop.txt,
-    which validate_qtaim_dict's nuclear-CP check cannot see because Multiwfn
-    numbers nuclear CPs first, so any surviving prefix still satisfies it.
 
-    Looks in the folder root, generator/, then generator/out_files.zip.
-    """
-    pattern = re.compile(r"Number of \(3,-1\) CPs:\s*(\d+)")
-
+def read_qtaim_out(folder: str) -> Optional[str]:
+    """Multiwfn's qtaim.out text, or None. Checks root, generator/, then the
+    out_files.zip that survives cleanup."""
     for rel in ("qtaim.out", os.path.join("generator", "qtaim.out")):
         path = os.path.join(folder, rel)
         if os.path.isfile(path) and os.path.getsize(path) > 0:
             try:
                 with open(path, "r", errors="replace") as f:
-                    found = pattern.findall(f.read())
-                if found:
-                    return int(found[-1])
+                    return f.read()
             except OSError:
                 pass
-
     zip_path = os.path.join(folder, "generator", "out_files.zip")
     if os.path.isfile(zip_path):
         try:
             with zipfile.ZipFile(zip_path, "r") as zf:
                 if "qtaim.out" in zf.namelist():
-                    text = zf.read("qtaim.out").decode("utf-8", errors="replace")
-                    found = pattern.findall(text)
-                    if found:
-                        return int(found[-1])
+                    return zf.read("qtaim.out").decode("utf-8", errors="replace")
         except (zipfile.BadZipFile, OSError, KeyError):
             pass
     return None
+
+
+def qtaim_run_status(folder: str) -> dict:
+    """Whether Multiwfn's QTAIM step actually ran to completion.
+
+    Multiwfn prints the CP count at the end of the *search*, then exports the
+    per-CP properties to CPprop.txt and prints a completion line. Both markers
+    together distinguish the ways the step can end early:
+
+    - no qtaim.out            -> unknown; absence of evidence, not evidence of
+                                 completeness
+    - no count line           -> killed during the CP search
+    - count but no export line -> killed during the CPprop.txt write, so the
+                                 file that got parsed is partial
+
+    Only the last case is visible by comparing counts; the others need these
+    markers, which is why "count matched" alone must not be read as "complete".
+    """
+    text = read_qtaim_out(folder)
+    if text is None:
+        return {"have_qtaim_out": False, "search_done": None, "export_done": None,
+                "reported_bcp": None}
+    found = QTAIM_COUNT_PATTERN.findall(text)
+    return {
+        "have_qtaim_out": True,
+        "search_done": bool(found),
+        "export_done": QTAIM_EXPORT_MARKER in text,
+        "reported_bcp": int(found[-1]) if found else None,
+    }
+
+
+def count_reported_bcps(folder: str) -> Optional[int]:
+    """Number of (3,-1) CPs Multiwfn *reported*, or None if unavailable.
+
+    Comparing this to the bond-CP count in qtaim.json detects critical points
+    lost between the search and the stored record - most importantly a
+    truncated CPprop.txt, which validate_qtaim_dict's nuclear-CP check cannot
+    see because Multiwfn numbers nuclear CPs first, so any surviving prefix
+    still satisfies it. See qtaim_run_status for the completeness markers this
+    count cannot provide.
+    """
+    return qtaim_run_status(folder)["reported_bcp"]
 
 
 def validate_qtaim_dict(
@@ -594,7 +624,29 @@ def validate_qtaim_dict(
             return False
 
     if check_bcp_count and folder is not None:
-        reported = count_reported_bcps(folder)
+        status = qtaim_run_status(folder)
+        # An incomplete run is a defect even when the counts happen to agree:
+        # if the search or the export never finished, the record cannot be
+        # complete regardless of what it contains.
+        if status["have_qtaim_out"] and not status["search_done"]:
+            msg = f"QTAIM search never completed (no CP count in qtaim.out): {folder}"
+            if verbose:
+                print(msg)
+            if logger:
+                logger.error(msg)
+            return False
+        if status["have_qtaim_out"] and not status["export_done"]:
+            msg = (
+                f"QTAIM CPprop.txt export never completed, so the parsed record "
+                f"is partial: {folder}"
+            )
+            if verbose:
+                print(msg)
+            if logger:
+                logger.error(msg)
+            return False
+
+        reported = status["reported_bcp"]
         if reported is not None and len(dict_bcps) < reported:
             msg = (
                 f"QTAIM json holds {len(dict_bcps)} bond critical points but "

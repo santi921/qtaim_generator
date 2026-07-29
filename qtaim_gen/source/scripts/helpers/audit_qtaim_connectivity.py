@@ -152,7 +152,7 @@ def audit_folder(folder: str, covalent_factor: float) -> dict:
     import json as _json
 
     from qtaim_gen.source.core.parse_qtaim import dft_inp_to_dict
-    from qtaim_gen.source.utils.validation import count_reported_bcps
+    from qtaim_gen.source.utils.validation import qtaim_run_status
 
     qpath = os.path.join(folder, "qtaim.json")
     if not os.path.isfile(qpath):
@@ -184,8 +184,14 @@ def audit_folder(folder: str, covalent_factor: float) -> dict:
     mol.cart_coords = coords
     row = audit_record({"molecule": mol}, qtaim_rec, covalent_factor)
 
-    reported = count_reported_bcps(folder)
+    status = qtaim_run_status(folder)
+    reported = status["reported_bcp"]
     row["reported_bcp"] = reported
+    # A matching count does not prove completeness: the run can die during the
+    # search (no count at all) or during the CPprop.txt export (count present,
+    # partial file). Carry both markers so those are not read as clean.
+    row["search_done"] = status["search_done"]
+    row["export_done"] = status["export_done"]
     row["bcp_shortfall"] = (
         reported - row["n_bcp"] if reported is not None else None
     )
@@ -256,7 +262,7 @@ def _run_folder_mode(args) -> int:
 
     fields = [
         "vertical", "key", "folder", "n_atoms", "n_ncp", "n_bcp", "reported_bcp",
-        "bcp_shortfall", "qtaim_time_s", "total_time_s",
+        "bcp_shortfall", "search_done", "export_done", "qtaim_time_s", "total_time_s",
         "n_cov_bonds", "n_components", "n_isolated_bonded",
         "isolated_bonded", "n_missing_cov_bonds", "missing_cov_bonds",
         "ncp_matches_atoms", "error",
@@ -295,14 +301,28 @@ def _run_folder_mode(args) -> int:
             "shortfall rate\n     below is computed over that subset only."
         )
     m = len(with_prov) or 1
+    incomplete = [
+        r for r in ok
+        if r.get("search_done") is False or r.get("export_done") is False
+    ]
     print(f"  empty BCP set:                 {len(empty):>7} ({100*len(empty)/n:.3f}%)")
+    print(
+        f"  qtaim.out shows an unfinished run: {len(incomplete):>4} "
+        f"({100*len(incomplete)/m:.3f}% of those with provenance)  <- proof of "
+        f"an incomplete write"
+    )
     print(
         f"  fewer BCPs than Multiwfn said: {len(short):>7} "
         f"({100*len(short)/m:.3f}% of those with provenance)  <- strongest signal"
     )
     print(f"  severe (>10% atoms isolated):  {len(severe):>7} ({100*len(severe)/n:.3f}%)")
     print(f"  any isolated bonded atom:      {len(iso):>7} ({100*len(iso)/n:.3f}%)")
-    unamb = {id(r) for r in empty} | {id(r) for r in short} | {id(r) for r in severe}
+    unamb = (
+        {id(r) for r in empty}
+        | {id(r) for r in short}
+        | {id(r) for r in severe}
+        | {id(r) for r in incomplete}
+    )
     print(f"  UNAMBIGUOUS DEFECTS:           {len(unamb):>7} ({100*len(unamb)/n:.3f}%)")
 
     import statistics as _st
