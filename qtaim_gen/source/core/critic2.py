@@ -119,6 +119,9 @@ def parse_critic2_cps(cpreport_path: str, validate_pairs: bool = True) -> dict:
     neq = data["critical_points"]["nonequivalent_cps"]
     cell = data["critical_points"]["cell_cps"]
     by_id = {c["id"]: c for c in neq}
+    # attractors' cell_id indexes the cell CP list; for a molecule that list is
+    # 1:1 with nonequivalent_cps, but resolve it properly rather than assuming.
+    cell_by_id = {c["id"]: c for c in cell}
 
     counts = {"nucleus": 0, "bond": 0, "ring": 0, "cage": 0}
     for c in neq:
@@ -146,7 +149,12 @@ def parse_critic2_cps(cpreport_path: str, validate_pairs: bool = True) -> dict:
                 continue
             # Non-nuclear attractor (ECP core artifact): attribute the bond to
             # the nearest real atom rather than discarding a physical BCP.
-            phantom = by_id.get(att["cell_id"])
+            phantom_cell = cell_by_id.get(att["cell_id"])
+            phantom = (
+                by_id.get(phantom_cell["nonequivalent_id"])
+                if phantom_cell
+                else by_id.get(att["cell_id"])
+            )
             if phantom is None:
                 continue
             dists = np.linalg.norm(
@@ -246,9 +254,12 @@ def _critic2_version(cro_path: str) -> Optional[str]:
             line = f.readline()
             if not line:
                 break
-            m = re.search(r"critic2.*?\(version\s*([^)]+)\)", line, re.I)
+            # e.g. "+ critic2 (development), version 1.1"
+            m = re.search(r"critic2\s*(\([^)]*\))?,?\s*version\s*(\S+)", line, re.I)
             if m:
-                return m.group(1).strip()
+                build = (m.group(1) or "").strip("()")
+                ver = m.group(2).strip().rstrip(".,")
+                return f"{ver} ({build})" if build else ver
     return None
 
 

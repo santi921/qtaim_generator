@@ -133,7 +133,12 @@ def proatom_radial_density(atnum: int) -> tuple:
     Densities come from qc-AtomDB's Slater dataset (Koga et al. HF atoms);
     first use per element downloads a small file from the AtomDB data repo.
     """
-    cache_file = os.path.join(CACHE_DIR, f"{atnum}.npz")
+    # grid parameters are part of the key: changing them must not silently
+    # reuse a stale cached density
+    cache_file = os.path.join(
+        CACHE_DIR,
+        f"{atnum}_{PROATOM_RMIN:g}_{PROATOM_RMAX:g}_{PROATOM_NPOINT}.npz",
+    )
     if os.path.isfile(cache_file):
         data = np.load(cache_file)
         return data["r"], data["rho"]
