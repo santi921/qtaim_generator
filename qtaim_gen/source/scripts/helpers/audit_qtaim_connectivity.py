@@ -305,21 +305,60 @@ def _run_folder_mode(args) -> int:
     unamb = {id(r) for r in empty} | {id(r) for r in short} | {id(r) for r in severe}
     print(f"  UNAMBIGUOUS DEFECTS:           {len(unamb):>7} ({100*len(unamb)/n:.3f}%)")
 
+    import statistics as _st
+
+    def _aff(r):
+        return (r.get("bcp_shortfall") or 0) > 0
+
     timed = [r for r in with_prov if isinstance(r.get("qtaim_time_s"), (int, float))]
     if timed:
-        import statistics as _st
-
-        bad = [r["qtaim_time_s"] for r in timed if (r.get("bcp_shortfall") or 0) > 0]
-        good = [r["qtaim_time_s"] for r in timed if (r.get("bcp_shortfall") or 0) <= 0]
+        bad = [r["qtaim_time_s"] for r in timed if _aff(r)]
+        good = [r["qtaim_time_s"] for r in timed if not _aff(r)]
         if bad and good:
             print(
                 f"\n  qtaim step wall time (s), median: "
                 f"affected={_st.median(bad):.1f}  unaffected={_st.median(good):.1f}"
             )
             print(
-                f"    max affected={max(bad):.1f}  max unaffected={max(good):.1f}  "
-                f"(a kill-mid-write cause predicts affected jobs run long)"
+                f"    max affected={max(bad):.1f}  max unaffected={max(good):.1f}"
             )
+            if max(good) >= max(bad):
+                print(
+                    "    note: the longest job is UNAFFECTED, so there is no runtime\n"
+                    "    ceiling -- this argues against a walltime kill."
+                )
+
+    # Runtime and size are confounded: larger systems take longer AND have more
+    # CPs to lose. Bin by size, then compare times within a bin, to see which
+    # actually drives the loss.
+    sized = [r for r in with_prov if isinstance(r.get("n_atoms"), int)]
+    if sized:
+        print("\n  shortfall rate by system size (controls for the size/time confound):")
+        print(f"    {'atoms':<12}{'n':>7}{'affected':>10}{'rate':>9}"
+              f"{'med t aff':>11}{'med t un':>10}{'med BCPs':>10}")
+        for lo, hi in ((0, 50), (50, 100), (100, 200), (200, 400), (400, 10**6)):
+            sub = [r for r in sized if lo <= r["n_atoms"] < hi]
+            if not sub:
+                continue
+            a = [r for r in sub if _aff(r)]
+            u = [r for r in sub if not _aff(r)]
+            ta = [r["qtaim_time_s"] for r in a
+                  if isinstance(r.get("qtaim_time_s"), (int, float))]
+            tu = [r["qtaim_time_s"] for r in u
+                  if isinstance(r.get("qtaim_time_s"), (int, float))]
+            bcps = [r["reported_bcp"] for r in sub
+                    if isinstance(r.get("reported_bcp"), int)]
+            label = f"{lo}-{hi}" if hi < 10**6 else f"{lo}+"
+            print(
+                f"    {label:<12}{len(sub):>7}{len(a):>10}{100*len(a)/len(sub):>8.2f}%"
+                f"{(_st.median(ta) if ta else float('nan')):>11.1f}"
+                f"{(_st.median(tu) if tu else float('nan')):>10.1f}"
+                f"{(_st.median(bcps) if bcps else float('nan')):>10.1f}"
+            )
+        print(
+            "    if the rate rises with size but times match within a bin, size (memory\n"
+            "    or write volume) is the driver, not elapsed time."
+        )
     if errs:
         import collections as _c
         print("\n  error kinds:", dict(_c.Counter(
