@@ -189,6 +189,28 @@ def audit_folder(folder: str, covalent_factor: float) -> dict:
     row["bcp_shortfall"] = (
         reported - row["n_bcp"] if reported is not None else None
     )
+
+    # Leading hypothesis for lost CPs is the QTAIM step being killed mid-write
+    # (walltime/OOM), which would leave a partial CPprop.txt that still parses.
+    # Carrying the step's wall time lets that be tested directly: affected jobs
+    # should cluster at long qtaim times, or pile up against a ceiling.
+    row["qtaim_time_s"] = None
+    row["total_time_s"] = None
+    for base in (folder, os.path.join(folder, "generator")):
+        tpath = os.path.join(base, "timings.json")
+        if os.path.isfile(tpath) and os.path.getsize(tpath) > 0:
+            try:
+                with open(tpath) as f:
+                    timings = _json.load(f)
+            except (ValueError, OSError):
+                continue
+            if isinstance(timings, dict):
+                row["qtaim_time_s"] = timings.get("qtaim")
+                numeric = [
+                    v for v in timings.values() if isinstance(v, (int, float)) and v > 0
+                ]
+                row["total_time_s"] = round(sum(numeric), 2) if numeric else None
+            break
     return row
 
 
@@ -234,7 +256,8 @@ def _run_folder_mode(args) -> int:
 
     fields = [
         "vertical", "key", "folder", "n_atoms", "n_ncp", "n_bcp", "reported_bcp",
-        "bcp_shortfall", "n_cov_bonds", "n_components", "n_isolated_bonded",
+        "bcp_shortfall", "qtaim_time_s", "total_time_s",
+        "n_cov_bonds", "n_components", "n_isolated_bonded",
         "isolated_bonded", "n_missing_cov_bonds", "missing_cov_bonds",
         "ncp_matches_atoms", "error",
     ]
@@ -281,6 +304,22 @@ def _run_folder_mode(args) -> int:
     print(f"  any isolated bonded atom:      {len(iso):>7} ({100*len(iso)/n:.3f}%)")
     unamb = {id(r) for r in empty} | {id(r) for r in short} | {id(r) for r in severe}
     print(f"  UNAMBIGUOUS DEFECTS:           {len(unamb):>7} ({100*len(unamb)/n:.3f}%)")
+
+    timed = [r for r in with_prov if isinstance(r.get("qtaim_time_s"), (int, float))]
+    if timed:
+        import statistics as _st
+
+        bad = [r["qtaim_time_s"] for r in timed if (r.get("bcp_shortfall") or 0) > 0]
+        good = [r["qtaim_time_s"] for r in timed if (r.get("bcp_shortfall") or 0) <= 0]
+        if bad and good:
+            print(
+                f"\n  qtaim step wall time (s), median: "
+                f"affected={_st.median(bad):.1f}  unaffected={_st.median(good):.1f}"
+            )
+            print(
+                f"    max affected={max(bad):.1f}  max unaffected={max(good):.1f}  "
+                f"(a kill-mid-write cause predicts affected jobs run long)"
+            )
     if errs:
         import collections as _c
         print("\n  error kinds:", dict(_c.Counter(
