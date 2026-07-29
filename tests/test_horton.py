@@ -15,12 +15,12 @@ import pytest
 
 from qtaim_gen.source.core.horton import (
     find_horton_json,
-    find_wfx,
     merge_horton_into_charge_json,
     resolve_charge_json,
     run_horton_analysis,
     strip_edf,
 )
+from qtaim_gen.source.utils.io import find_wfx
 
 # The worker runs in a separate env, but its module-level tables import with
 # stdlib + numpy only, so they are testable here.

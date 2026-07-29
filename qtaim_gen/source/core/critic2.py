@@ -31,6 +31,8 @@ from typing import Optional
 
 import numpy as np
 
+from qtaim_gen.source.utils.io import find_wfx
+
 BOHR_TO_ANG = 0.529177249
 
 # Critic2 POINTPROP shorthands -> shipped qtaim.json field names. All verified
@@ -281,8 +283,6 @@ def run_critic2_analysis(
     if logger is None:
         logger = logging.getLogger(__name__)
 
-    from qtaim_gen.source.core.horton import find_wfx
-
     out_path = os.path.join(folder, "critic2.json")
     if (
         not overwrite
@@ -297,18 +297,21 @@ def run_critic2_analysis(
         logger.info("No orca.wfx found in %s -- skipping Critic2", folder)
         return False
 
-    # Critic2 writes its outputs relative to cwd; run in the wfx's directory.
-    work_dir = os.path.dirname(wfx_path)
+    # Critic2 writes its outputs relative to cwd. Run in the job folder so
+    # every artifact -- deck, log, cpreport, critic2.json -- lands together,
+    # even when the wfx itself lives in generator/.
+    work_dir = folder
     deck_path = os.path.join(work_dir, DECK_NAME)
     cro_path = os.path.join(work_dir, CRO_NAME)
     cpreport_path = os.path.join(work_dir, CPREPORT_NAME)
+    wfx_rel = os.path.relpath(wfx_path, work_dir)
 
     t_start = time.time()
     try:
         with open(deck_path, "w") as f:
             f.write(
                 write_critic2_deck(
-                    os.path.basename(wfx_path),
+                    wfx_rel,
                     cpreport_name=CPREPORT_NAME,
                     discard=discard,
                     pointprops=pointprops,

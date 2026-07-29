@@ -15,6 +15,7 @@ import time
 from typing import Optional
 
 from qtaim_gen.source.utils.atomic_write import atomic_json_write
+from qtaim_gen.source.utils.io import find_wfx
 
 HORTON_SCHEMES = ("becke", "hirshfeld", "is")
 
@@ -38,17 +39,6 @@ def strip_edf(wfx_text: str) -> str:
     while j < len(wfx_text) and wfx_text[j] in "\r\n":
         j += 1
     return wfx_text[:i] + wfx_text[j:]
-
-
-def find_wfx(folder: str) -> Optional[str]:
-    """Locate orca.wfx in the folder root or generator/ subfolder."""
-    for cand in (
-        os.path.join(folder, "orca.wfx"),
-        os.path.join(folder, "generator", "orca.wfx"),
-    ):
-        if os.path.isfile(cand) and os.path.getsize(cand) > 0:
-            return cand
-    return None
 
 
 def find_horton_json(folder: str) -> Optional[str]:
