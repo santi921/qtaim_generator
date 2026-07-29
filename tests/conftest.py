@@ -18,6 +18,10 @@ def pytest_configure(config):
         "markers",
         "slow: tests that hit real OMol4M_lmdbs verticals; skipped if data is missing",
     )
+    config.addinivalue_line(
+        "markers",
+        "critic2: tests that shell out to the critic2 binary; skipped if not on PATH",
+    )
 
 
 _LMDB_TYPES = ["structure", "charge", "qtaim", "bond", "fuzzy", "other", "orca", "timings"]
