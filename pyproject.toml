@@ -33,6 +33,7 @@ multi-vertical-merge = "qtaim_gen.source.scripts.helpers.multi_vertical_merge:ma
 horton-charges = "qtaim_gen.source.scripts.helpers.horton_charges:main"
 critic2-qtaim = "qtaim_gen.source.scripts.helpers.critic2_qtaim:main"
 audit-qtaim-connectivity = "qtaim_gen.source.scripts.helpers.audit_qtaim_connectivity:main"
+select-qtaim-rerun = "qtaim_gen.source.scripts.helpers.select_qtaim_rerun:main"
 build-manifest = "qtaim_gen.source.scripts.helpers.build_manifest:main"
 lmdb-status-audit = "qtaim_gen.source.scripts.helpers.lmdb_status_audit:main"
 lmdb-filter-vertical = "qtaim_gen.source.scripts.helpers.filter_lmdb_vertical:main"
