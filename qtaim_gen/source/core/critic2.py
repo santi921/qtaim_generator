@@ -49,6 +49,15 @@ DEFAULT_POINTPROPS = tuple(POINTPROP_MAP)
 # expected to agree numerically (report as convention differences).
 CONVENTION_DIVERGENT = ("e_loc_func", "lol")
 
+# Critic2 assigns a BCP to the atoms its gradient path terminates at, which is
+# more rigorous than a distance heuristic - but in metal/ECP systems, where the
+# core density is missing, the integration can terminate at a distant atom. A
+# claimed attractor is overridden (in favour of the two nearest atoms, which is
+# Multiwfn's own add_closest_atoms_to_bond heuristic) only when it is
+# implausible by this factor relative to the second-nearest atom, so genuinely
+# curved bond paths keep Critic2's assignment.
+PAIR_IMPLAUSIBLE_FACTOR = 1.5
+
 DECK_NAME = "critic2_run.cri"
 CRO_NAME = "critic2_run.cro"
 CPREPORT_NAME = "critic2_cps.json"
@@ -89,11 +98,15 @@ def _pos_ang(cp_or_atom: dict, centering_vector) -> list:
     ]
 
 
-def parse_critic2_cps(cpreport_path: str) -> dict:
+def parse_critic2_cps(cpreport_path: str, validate_pairs: bool = True) -> dict:
     """Parse a Critic2 cpreport JSON into qtaim.json-compatible BCP entries.
 
     Returns {"<i>_<j>": {<multiwfn field names>}, ..., "_meta": {...}} with
     0-based atom-pair keys sorted ascending, matching the shipped schema.
+
+    With validate_pairs, implausible attractor assignments are corrected to the
+    two nearest atoms and recorded in `_meta.pair_corrections`; see
+    PAIR_IMPLAUSIBLE_FACTOR.
     """
     with open(cpreport_path, "r") as f:
         data = json.load(f)
@@ -117,6 +130,7 @@ def parse_critic2_cps(cpreport_path: str) -> dict:
     result = {}
     nna_remapped = []
     collisions = []
+    pair_corrections = []
     for c in cell:
         if c["signature"] != -1:
             continue
@@ -150,6 +164,28 @@ def parse_critic2_cps(cpreport_path: str) -> dict:
         if len(pair) != 2 or pair[0] == pair[1]:
             continue
 
+        cp_pos = np.array(_pos_ang(props, cv))
+        if validate_pairs:
+            d = np.linalg.norm(atom_pos - cp_pos, axis=1)
+            order = np.argsort(d)
+            two_nearest = sorted(int(i) for i in order[:2])
+            if sorted(pair) != two_nearest and len(atom_pos) > 2:
+                # is a claimed attractor implausibly far, given a closer atom?
+                if max(d[pair]) > PAIR_IMPLAUSIBLE_FACTOR * d[order[1]]:
+                    pair_corrections.append(
+                        {
+                            "critic2_pair": sorted(pair),
+                            "corrected_pair": two_nearest,
+                            "claimed_distances_ang": [
+                                round(float(d[i]), 6) for i in sorted(pair)
+                            ],
+                            "nearest_distances_ang": [
+                                round(float(d[i]), 6) for i in two_nearest
+                            ],
+                        }
+                    )
+                    pair = two_nearest
+
         lam = props["hessian_eigenvalues"]  # ascending
         entry = {
             "density_all": props["field"],
@@ -159,7 +195,7 @@ def parse_critic2_cps(cpreport_path: str) -> dict:
             "det_hessian": float(lam[0] * lam[1] * lam[2]),
             "ellip_e_dens": float(lam[0] / lam[1] - 1) if lam[1] else float("nan"),
             "eta": float(abs(lam[0]) / lam[2]) if lam[2] else float("nan"),
-            "pos_ang": _pos_ang(props, cv),
+            "pos_ang": [float(x) for x in cp_pos],
             "hessian_eigenvalues": list(lam),
         }
         for pp in props.get("pointprops", []):
@@ -194,6 +230,7 @@ def parse_critic2_cps(cpreport_path: str) -> dict:
         "poincare_hopf_ok": ph_sum == 1,
         "n_bcps_resolved": sum(1 for k in result if k != "_meta"),
         "nna_remapped": nna_remapped,
+        "pair_corrections": pair_corrections,
         "pair_collisions": collisions,
         "source_units": data.get("units"),
         "field_type": data.get("field", {}).get("type"),

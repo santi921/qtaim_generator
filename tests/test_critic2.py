@@ -261,6 +261,71 @@ class TestNonNuclearAttractorRemap:
                 assert idx < n_atoms
 
 
+class TestPairValidation:
+    """Critic2's gradient-path terminator can be wrong in metal/ECP systems.
+
+    Regression: a Dy/La cluster reported a BCP as La-O at 3.47 A with
+    rho = 0.69 when it was really the C-O bond CP (0.45 A from O, 0.76 A from
+    C, with the La 3.05 A away).
+    """
+
+    def _redirect_attractor(self, tmp_path, target_offset=0):
+        """Point one attractor of one BCP at a deliberately distant atom."""
+        with open(CPREPORT_FIXTURE) as f:
+            data = json.load(f)
+        cv = data["structure"]["molecule_centering_vector"]
+        atoms = np.array(
+            [
+                [(c + cv[i]) * BOHR_TO_ANG for i, c in enumerate(a["cartesian_coordinates"])]
+                for a in data["structure"]["cell_atoms"]
+            ]
+        )
+        neq = {c["id"]: c for c in data["critical_points"]["nonequivalent_cps"]}
+        bcp = next(
+            c for c in data["critical_points"]["cell_cps"] if c["signature"] == -1
+        )
+        pos = np.array(
+            [
+                (c + cv[i]) * BOHR_TO_ANG
+                for i, c in enumerate(neq[bcp["nonequivalent_id"]]["cartesian_coordinates"])
+            ]
+        )
+        d = np.linalg.norm(atoms - pos, axis=1)
+        true_pair = sorted(a["cell_id"] - 1 for a in bcp["attractors"])
+        farthest = int(np.argsort(d)[-1 - target_offset])
+        bcp["attractors"][0]["cell_id"] = farthest + 1
+        path = tmp_path / "redirected.json"
+        path.write_text(json.dumps(data))
+        return path, true_pair, farthest
+
+    def test_implausible_pair_is_corrected(self, tmp_path):
+        path, true_pair, farthest = self._redirect_attractor(tmp_path)
+        parsed = parse_critic2_cps(str(path))
+        key = f"{true_pair[0]}_{true_pair[1]}"
+        assert key in parsed, "correction should restore the geometric pair"
+        assert f"{min(true_pair[1], farthest)}_{max(true_pair[1], farthest)}" not in parsed
+
+    def test_correction_recorded_in_meta(self, tmp_path):
+        path, true_pair, _ = self._redirect_attractor(tmp_path)
+        corrections = parse_critic2_cps(str(path))["_meta"]["pair_corrections"]
+        assert len(corrections) == 1
+        c = corrections[0]
+        assert c["corrected_pair"] == true_pair
+        assert max(c["claimed_distances_ang"]) > max(c["nearest_distances_ang"])
+
+    def test_validation_can_be_disabled(self, tmp_path):
+        path, true_pair, farthest = self._redirect_attractor(tmp_path)
+        parsed = parse_critic2_cps(str(path), validate_pairs=False)
+        assert parsed["_meta"]["pair_corrections"] == []
+        bogus = sorted([true_pair[1], farthest])
+        assert f"{bogus[0]}_{bogus[1]}" in parsed
+
+    def test_untouched_fixture_needs_no_corrections(self):
+        """A well-behaved all-electron molecule must not trip the heuristic."""
+        parsed = parse_critic2_cps(CPREPORT_FIXTURE)
+        assert parsed["_meta"]["pair_corrections"] == []
+
+
 class TestConstants:
     def test_pointprop_map_covers_defaults(self):
         assert set(DEFAULT_POINTPROPS) == set(POINTPROP_MAP)
