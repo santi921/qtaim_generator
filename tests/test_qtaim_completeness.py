@@ -162,3 +162,123 @@ class TestValidateBcpCompleteness:
         assert validate_qtaim_dict(
             str(p), n_atoms=12, folder=str(tmp_path), check_bcp_count=True
         )
+
+
+class TestRestartSkipHonorsCompleteness:
+    """The restart path must not skip a QTAIM step whose output is incomplete.
+
+    Regression: `_has_usable_step_output` accepted any non-empty qtaim.json, so
+    a record with every nuclear CP and no bond CPs was skipped as "data
+    verified" while validation failed the same job for having no bond critical
+    points -- the pipeline detecting a defect and then declining to fix it.
+    """
+
+    @staticmethod
+    def _job(tmp_path, name, n_atoms, n_bcp, with_out=True):
+        folder = tmp_path / name
+        (folder / "generator").mkdir(parents=True)
+        rec = {str(i): {"cp_num": i + 1} for i in range(n_atoms)}
+        for b in range(n_bcp):
+            rec[f"{b}_{b + 1}"] = {"cp_num": n_atoms + b + 1}
+        (folder / "generator" / "qtaim.json").write_text(json.dumps(rec))
+        if with_out:
+            (folder / "qtaim.out").write_text(QTAIM_OUT_LINE)
+        return folder
+
+    def test_empty_bcp_set_is_never_skipped(self, tmp_path):
+        from qtaim_gen.source.core.omol import _has_usable_step_output
+
+        folder = self._job(tmp_path, "empty", n_atoms=225, n_bcp=0)
+        assert not _has_usable_step_output(str(folder), "qtaim", n_atoms=225)
+
+    def test_truncated_skipped_unless_flag_set(self, tmp_path):
+        from qtaim_gen.source.core.omol import _has_usable_step_output
+
+        # qtaim.out reports 11; the record holds 5
+        folder = self._job(tmp_path, "trunc", n_atoms=12, n_bcp=5)
+        assert _has_usable_step_output(str(folder), "qtaim", n_atoms=12)
+        assert not _has_usable_step_output(
+            str(folder), "qtaim", n_atoms=12, check_bcp_count=True
+        )
+
+    def test_complete_record_is_skipped(self, tmp_path):
+        from qtaim_gen.source.core.omol import _has_usable_step_output
+
+        folder = self._job(tmp_path, "good", n_atoms=12, n_bcp=11)
+        assert _has_usable_step_output(
+            str(folder), "qtaim", n_atoms=12, check_bcp_count=True
+        )
+
+    def test_nuclear_cp_mismatch_is_never_skipped(self, tmp_path):
+        from qtaim_gen.source.core.omol import _has_usable_step_output
+
+        folder = self._job(tmp_path, "ncp", n_atoms=12, n_bcp=11)
+        assert not _has_usable_step_output(str(folder), "qtaim", n_atoms=20)
+
+    def test_unfinished_export_is_not_skipped(self, tmp_path):
+        from qtaim_gen.source.core.omol import _has_usable_step_output
+
+        folder = self._job(tmp_path, "noexport", n_atoms=12, n_bcp=11, with_out=False)
+        (folder / "qtaim.out").write_text(COUNT_LINE)  # no export marker
+        assert not _has_usable_step_output(
+            str(folder), "qtaim", n_atoms=12, check_bcp_count=True
+        )
+
+    def test_single_atom_with_no_bcps_is_fine(self, tmp_path):
+        from qtaim_gen.source.core.omol import _has_usable_step_output
+
+        folder = self._job(tmp_path, "atom", n_atoms=1, n_bcp=0, with_out=False)
+        assert _has_usable_step_output(str(folder), "qtaim", n_atoms=1)
+
+
+class TestCPpropArchived:
+    """CPprop.txt must survive into out_files.zip.
+
+    Regression: the cleanup loop deleted CPprop.txt before the zip was built,
+    making the zip's own `endswith("CPprop.txt")` clause dead code. No archived
+    job retained the per-CP property blocks, so a lost critical point could not
+    be diagnosed after the fact -- qtaim.out carries only the count.
+    """
+
+    @staticmethod
+    def _job(tmp_path):
+        folder = tmp_path / "job"
+        folder.mkdir()
+        for name in (
+            "qtaim.out", "charge.out", "convert.out", "orca.out",
+            "CPprop.txt", "settings.ini", "qtaim.txt",
+        ):
+            (folder / name).write_text(f"content of {name}\n")
+        (folder / "qtaim.json").write_text('{"0": {"cp_num": 1}}')
+        return folder
+
+    def _clean(self, folder):
+        import logging
+
+        from qtaim_gen.source.core.omol import clean_jobs
+
+        clean_jobs(
+            str(folder),
+            separate=False,
+            logger=logging.getLogger("test_clean"),
+            full_set=0,
+            move_results=False,
+        )
+        return zipfile.ZipFile(folder / "out_files.zip").namelist()
+
+    def test_cpprop_is_archived(self, tmp_path):
+        folder = self._job(tmp_path)
+        assert "CPprop.txt" in self._clean(folder)
+
+    def test_cpprop_removed_from_disk_after_archiving(self, tmp_path):
+        folder = self._job(tmp_path)
+        self._clean(folder)
+        assert not (folder / "CPprop.txt").exists()
+
+    def test_step_outs_archived_but_orca_out_kept_loose(self, tmp_path):
+        folder = self._job(tmp_path)
+        names = self._clean(folder)
+        assert "qtaim.out" in names
+        # orca.out is parsed separately and must not be swept into the zip
+        assert "orca.out" not in names
+        assert (folder / "orca.out").exists()

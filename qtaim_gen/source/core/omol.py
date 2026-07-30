@@ -492,6 +492,7 @@ def run_jobs(
     move_results: bool = False,
     clean_jobs_tf: bool = False,
     subprocess_env: Optional[dict] = None,
+    check_bcp_count: bool = False,
 ) -> None:
     """
     Run conversion and multiwfn jobs
@@ -638,7 +639,12 @@ def run_jobs(
         # is secondary. This handles cases where timings.json was reset/corrupted
         # or a crash occurred between the mfwn script finishing and the timing write.
         if restart:
-            has_files = _has_usable_step_output(folder, order)
+            has_files = _has_usable_step_output(
+                folder,
+                order,
+                n_atoms=n_atoms_for_skip,
+                check_bcp_count=check_bcp_count,
+            )
             if has_files or _compiled_data_present(
                 folder, order, _compiled_map,
                 n_atoms=n_atoms_for_skip,
@@ -1113,9 +1119,12 @@ def clean_jobs(
             if file.endswith("convert.in"):
                 os.remove(os.path.join(folder, file))
                 logger.info(f"Removed {file}")
-            if file.endswith("CPprop.txt"):
-                os.remove(os.path.join(folder, file))
-                logger.info(f"Removed {file}")
+            # NOT CPprop.txt: it is collected into out_files.zip below and
+            # deleted only after the zip is safely merged. Deleting it here made
+            # the zip's CPprop.txt clause dead code, which is why no archived
+            # job retained the one file needed to diagnose a lost critical
+            # point (the per-CP property blocks live nowhere else -- qtaim.out
+            # carries only the count).
             if file.endswith("fuzzy_full.txt"):
                 os.remove(os.path.join(folder, file))
                 logger.info(f"Removed {file}")
@@ -1738,7 +1747,63 @@ def _wavefunction_present(folder: str) -> bool:
     return False
 
 
-def _has_usable_step_output(folder: str, order: str) -> bool:
+def _qtaim_output_complete(
+    folder: str,
+    n_atoms: Optional[int] = None,
+    check_bcp_count: bool = False,
+) -> bool:
+    """Whether qtaim.json looks complete enough to skip the QTAIM step.
+
+    A non-empty qtaim.json is not sufficient. Multiwfn numbers nuclear CPs
+    first, so a record truncated in the bond-CP tail -- or one carrying every
+    nuclear CP and no bond CPs at all -- is still a well-formed, non-empty file.
+    Accepting it made the restart path contradict the validator: the step was
+    skipped as "data verified" and the same job then failed validation for
+    having no bond critical points, every pass, forever.
+
+    Rejects (forcing a rerun) when the nuclear-CP count disagrees with the atom
+    count, or a multi-atom system has no bond CPs. With check_bcp_count it also
+    consults qtaim.out, rejecting a run whose CPprop.txt export never finished
+    or whose stored bond-CP count falls short of what Multiwfn reported.
+    """
+    from qtaim_gen.source.utils.validation import qtaim_run_status
+
+    for base in (folder, os.path.join(folder, "generator")):
+        path = os.path.join(base, "qtaim.json")
+        if not os.path.isfile(path) or os.path.getsize(path) == 0:
+            continue
+        try:
+            with open(path, "r") as f:
+                data = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not data:
+            continue
+
+        n_ncp = sum(1 for k in data if k != "_meta" and "_" not in k)
+        n_bcp = sum(1 for k in data if k != "_meta" and "_" in k)
+        if n_atoms is not None and n_ncp != n_atoms:
+            return False
+        if (n_atoms if n_atoms is not None else 2) > 1 and n_bcp == 0:
+            return False
+        if check_bcp_count:
+            status = qtaim_run_status(folder)
+            if status["have_qtaim_out"]:
+                if not status["export_done"]:
+                    return False
+                reported = status["reported_bcp"]
+                if reported is not None and n_bcp < reported:
+                    return False
+        return True
+    return False
+
+
+def _has_usable_step_output(
+    folder: str,
+    order: str,
+    n_atoms: Optional[int] = None,
+    check_bcp_count: bool = False,
+) -> bool:
     """Check whether a sub-job appears to have produced usable output on disk.
 
     Primary signal: `.out` file must be substantive (see `_is_substantive_step_out`).
@@ -1756,6 +1821,12 @@ def _has_usable_step_output(folder: str, order: str) -> bool:
     # accumulating elif's here.
     if order == "convert":
         return _wavefunction_present(folder)
+
+    # qtaim.json can be non-empty yet incomplete, so presence is not enough
+    if order == "qtaim":
+        return _qtaim_output_complete(
+            folder, n_atoms=n_atoms, check_bcp_count=check_bcp_count
+        )
 
     for base in (folder, os.path.join(folder, "generator")):
         out_path = os.path.join(base, f"{order}.out")
@@ -2236,6 +2307,7 @@ def gbw_analysis(
             move_results=move_results,
             clean_jobs_tf=clean,
             subprocess_env=subprocess_env,
+            check_bcp_count=check_bcp_count,
         )
 
     print("... Parsing multiwfn output")
