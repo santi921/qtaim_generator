@@ -11,11 +11,10 @@ refine_list_of_jobs cannot:
    would make repaired records inconsistent with untouched ones. That is the
    finding that would otherwise go unnoticed.
 
-It also checks that only the QTAIM step moved, by comparing modification times:
-charge/bond/fuzzy/other/orca json older than qtaim.json means they were not
-rewritten. That is a proxy rather than a hash comparison, since pre-run hashes
-are not available after the fact, but it catches a runner that redid more than
-it was asked to.
+It also reports whether charge/bond/fuzzy/other/orca json mtimes advanced, but
+only as a note: move_results_to_folder rewrites those on every run, so the
+signal fires even when the step was skipped and the content is identical. The
+unchanged controls are the real evidence that nothing was disturbed.
 
 Example:
     verify-qtaim-rerun --before_csv qtaim_rerun_test_before.csv \
@@ -40,7 +39,15 @@ def as_int(value, default=0):
 
 
 def newer_siblings(folder: str) -> List[str]:
-    """Sibling JSONs modified no earlier than qtaim.json, i.e. likely rewritten."""
+    """Sibling JSONs whose mtime advanced with qtaim.json's.
+
+    WEAK SIGNAL, and it over-reports: move_results_to_folder re-merges these
+    files into generator/ on every run, so their mtimes advance even when the
+    step was skipped and the content is byte-identical. Observed firing on
+    98/100 jobs in a run whose logs showed every charge step skipped as "data
+    verified". Read it as "the runner rewrote the file", not "the values
+    changed"; a content diff needs hashes captured before the rerun.
+    """
     qtaim_mtime = None
     for base in (folder, os.path.join(folder, "generator")):
         p = os.path.join(base, "qtaim.json")
@@ -169,9 +176,12 @@ def main(argv: Optional[List[str]] = None) -> int:
                 f"    perturbed: {r['key']} bcp {r['n_bcp_before']} -> {r['n_bcp_after']}"
             )
     if touched:
-        problems.append(
-            f"{len(touched)} job(s) had non-QTAIM json rewritten (see "
-            "siblings_touched) -- the rerun did more than the QTAIM step"
+        # deliberately not a hard problem: see newer_siblings' docstring
+        print(
+            f"\n  note: {len(touched)} job(s) had non-QTAIM json mtimes advance. "
+            "move_results_to_folder\n  rewrites those every run, so this is "
+            "expected and does not by itself mean the\n  values changed -- "
+            "unchanged controls are the stronger evidence of that."
         )
     still = [r for r in defects if r["verdict"].endswith("still_broken")]
     if still:
