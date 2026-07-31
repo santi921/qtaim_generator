@@ -23,19 +23,46 @@ reports two signals per record:
   Broader, and expected to be nonzero for ionic/metal contacts, so use it as a
   ranking signal rather than a pass/fail.
 
-Runs entirely on existing LMDBs - no wavefunctions, no recomputation.
+Runs entirely on existing LMDBs or job folders - no wavefunctions, no
+recomputation.
 
-Example:
+Two modes:
+
+  --mode audit    (default) scan for records with missing bond CPs
+  --mode explain  attribute a known set of defects to a cause, with the
+                  forensic evidence that separates a killed run from ordinary
+                  parse behaviour
+
+Explain mode needs CPprop.txt, which only runs after the archiving fix retain.
+It reports, per job: whether the shortfall is real truncation or one of three
+legitimate merge drops (a CP with no "Connected atoms:" line, two CPs colliding
+on one atom pair, an attractor with no nuclear-CP match); whether CPprop.txt
+stops mid-write (an OOM/SIGKILL signature) or ends cleanly; Multiwfn's reported
+count against the blocks actually present; and the Atoms/Basis/GTF sizes, which
+with --compare_csv turn successfully repaired jobs into a control group for the
+memory question.
+
+Examples:
     audit-qtaim-connectivity --lmdb_root data/OMol4M_lmdbs \
         --out_csv qtaim_connectivity_audit.csv
+
+    audit-qtaim-connectivity --mode explain \
+        --from_csv qtaim_rerun_test_verified.csv \
+        --compare_csv qtaim_rerun_test_verified.csv \
+        --out_csv residual_causes.csv
 """
 
 import argparse
+import collections
 import csv
+import json
 import os
 import pickle
+import re
 import sys
+import tempfile
 import warnings
+import zipfile
 from typing import List, Optional
 
 warnings.filterwarnings("ignore")
@@ -119,6 +146,243 @@ def audit_record(structure_rec: dict, qtaim_rec: dict, covalent_factor: float) -
         "missing_cov_bonds": " ".join(f"{i}_{j}" for i, j in missing_cov[:12]),
         "ncp_matches_atoms": int(n_ncp == n_atoms),
     }
+
+
+# Multiwfn's own wavefunction summary; GTFs drive CP-search allocations
+HEADER_RE = re.compile(
+    r"Atoms:\s*(\d+),\s*Basis functions:\s*(\d+),\s*GTFs:\s*(\d+)"
+)
+BLOCK_RE = re.compile(r"^ -{4,}\s+CP\s+\d+", re.M)
+# things Multiwfn or the shell print when a run dies badly
+ERROR_SIGNATURES = (
+    "Error", "error", "insufficient memory", "Insufficient", "allocat",
+    "forrtl", "SIGSEGV", "Killed", "killed", "cannot", "Warning: Unable",
+)
+COMPLETION_MARKER = "have been outputted to CPprop.txt"
+
+
+
+
+def read_from_zip_or_disk(folder: str, name: str) -> Optional[str]:
+    for rel in (name, os.path.join("generator", name)):
+        path = os.path.join(folder, rel)
+        if os.path.isfile(path) and os.path.getsize(path) > 0:
+            with open(path, "r", errors="replace") as f:
+                return f.read()
+    zip_path = os.path.join(folder, "generator", "out_files.zip")
+    if os.path.isfile(zip_path):
+        try:
+            with zipfile.ZipFile(zip_path, "r") as zf:
+                if name in zf.namelist():
+                    return zf.read(name).decode("utf-8", errors="replace")
+        except (zipfile.BadZipFile, OSError, KeyError):
+            return None
+    return None
+
+
+def zip_inventory(folder: str) -> str:
+    zip_path = os.path.join(folder, "generator", "out_files.zip")
+    if not os.path.isfile(zip_path):
+        return "NO_ZIP"
+    try:
+        with zipfile.ZipFile(zip_path, "r") as zf:
+            names = zf.namelist()
+        return f"{len(names)} entries" + ("" if "CPprop.txt" in names else " NO_CPPROP")
+    except (zipfile.BadZipFile, OSError):
+        return "BAD_ZIP"
+
+
+def _fmt_time(value):
+    try:
+        return f"{float(value):.0f}s"
+    except (TypeError, ValueError):
+        return "?"
+
+
+def diagnose(folder: str, cause: str) -> dict:
+    from qtaim_gen.source.core.parse_qtaim import get_qtaim_descs, only_atom_cps
+
+    out = {"folder": folder, "cause": cause, "zip": zip_inventory(folder)}
+
+    qout = read_from_zip_or_disk(folder, "qtaim.out")
+    # The "Atoms / Basis functions / GTFs" line is printed when Multiwfn *loads*
+    # the wavefunction, which happens in the convert step -- qtaim.out usually
+    # does not carry it, so search the other step logs too.
+    for src in ("qtaim.out", "convert.out", "orca.out"):
+        text = qout if src == "qtaim.out" else read_from_zip_or_disk(folder, src)
+        if not text:
+            continue
+        m = HEADER_RE.search(text)
+        if m:
+            out["n_atoms_mwfn"] = int(m.group(1))
+            out["n_basis"] = int(m.group(2))
+            out["n_gtf"] = int(m.group(3))
+            out["header_from"] = src
+            break
+    if qout:
+        out["qtaim_out_bytes"] = len(qout)
+        out["export_marker"] = COMPLETION_MARKER in qout
+        tail = qout.rstrip().splitlines()[-1:] or [""]
+        out["qtaim_out_last_line"] = tail[0].strip()[:90]
+        hits = sorted({sig for sig in ERROR_SIGNATURES if sig in qout})
+        out["error_signatures"] = " ".join(hits)[:90]
+    else:
+        out["qtaim_out_bytes"] = 0
+
+    if qout:
+        found = re.findall(r"Number of \(3,-1\) CPs:\s*(\d+)", qout)
+        out["reported_bcp"] = int(found[-1]) if found else None
+        out["cpprop_is_loose"] = os.path.isfile(os.path.join(folder, "CPprop.txt")) or (
+            os.path.isfile(os.path.join(folder, "generator", "CPprop.txt"))
+        )
+
+    cpprop = read_from_zip_or_disk(folder, "CPprop.txt")
+    if cpprop:
+        out["cpprop_bytes"] = len(cpprop)
+        out["n_cp_blocks"] = len(BLOCK_RE.findall(cpprop))
+        out["n_bcp_blocks"] = len(re.findall(r"Type \(3,-1\)", cpprop))
+        out["n_nuclear_blocks"] = len(re.findall(r"Type \(3,-3\)", cpprop))
+        out["n_connected_lines"] = len(re.findall(r"Connected atoms:", cpprop))
+        # A cleanly finished file ends with a complete final line. Stopping
+        # mid-line means the process died while writing -- the SIGKILL/OOM
+        # signature we are looking for.
+        out["ends_with_newline"] = cpprop.endswith("\n")
+        last = cpprop.rstrip().splitlines()[-1:] or [""]
+        out["cpprop_last_line"] = last[0].strip()[:90]
+        # a complete CP block ends on a property line, not a header
+        out["ends_mid_block"] = bool(
+            BLOCK_RE.search(cpprop[-400:] if len(cpprop) > 400 else cpprop)
+        )
+    else:
+        out["cpprop_bytes"] = 0
+
+    if cause.startswith("duplicate_pair") and cpprop:
+        try:
+            tmp = os.path.join(
+                os.path.dirname(os.path.abspath(__file__)), ".cpprop_tmp"
+            )
+            with open(tmp, "w") as f:
+                f.write(cpprop)
+            _atoms, bonds = only_atom_cps(get_qtaim_descs(tmp))
+            os.remove(tmp)
+            by_pair = collections.defaultdict(list)
+            for v in bonds.values():
+                if v.get("connected_bond_paths"):
+                    by_pair[tuple(sorted(v["connected_bond_paths"]))].append(
+                        round(float(v.get("density_all", 0.0)), 5)
+                    )
+            collisions = {p: r for p, r in by_pair.items() if len(r) > 1}
+            out["collision_detail"] = "; ".join(
+                f"{a}-{b}: rho={sorted(rhos, reverse=True)}"
+                for (a, b), rhos in list(collisions.items())[:4]
+            )[:180]
+        except Exception as e:
+            out["collision_detail"] = f"{type(e).__name__}: {e}"[:60]
+
+    for base in (folder, os.path.join(folder, "generator")):
+        tpath = os.path.join(base, "timings.json")
+        if os.path.isfile(tpath):
+            try:
+                with open(tpath) as f:
+                    out["qtaim_time_s"] = json.load(f).get("qtaim")
+            except (ValueError, OSError):
+                pass
+            break
+    return out
+
+
+def find_cpprop(folder: str) -> Optional[str]:
+    """Path to a readable CPprop.txt, extracting from the zip if needed.
+
+    Returns a path the caller should treat as read-only; when extracted from the
+    archive it lands in a temp dir the caller need not clean up eagerly.
+    """
+    for rel in ("CPprop.txt", os.path.join("generator", "CPprop.txt")):
+        path = os.path.join(folder, rel)
+        if os.path.isfile(path) and os.path.getsize(path) > 0:
+            return path
+    zip_path = os.path.join(folder, "generator", "out_files.zip")
+    if os.path.isfile(zip_path):
+        try:
+            with zipfile.ZipFile(zip_path, "r") as zf:
+                if "CPprop.txt" in zf.namelist():
+                    tmp = tempfile.mkdtemp(prefix="cpprop_")
+                    zf.extract("CPprop.txt", tmp)
+                    return os.path.join(tmp, "CPprop.txt")
+        except (zipfile.BadZipFile, OSError, KeyError):
+            pass
+    return None
+
+
+def explain_shortfall(folder: str) -> dict:
+    """Attribute a folder's bond-CP shortfall to the causes above."""
+    from qtaim_gen.source.core.parse_qtaim import get_qtaim_descs, only_atom_cps
+    from qtaim_gen.source.utils.validation import qtaim_run_status
+
+    out = {"folder": folder, "cause": "", "detail": ""}
+
+    qpath = None
+    for base in (folder, os.path.join(folder, "generator")):
+        cand = os.path.join(base, "qtaim.json")
+        if os.path.isfile(cand):
+            qpath = cand
+            break
+    if qpath is None:
+        out["cause"] = "no_qtaim_json"
+        return out
+    with open(qpath) as f:
+        stored = json.load(f)
+    n_stored = sum(1 for k in stored if k != "_meta" and "_" in k)
+    out["n_bcp_stored"] = n_stored
+
+    status = qtaim_run_status(folder)
+    out["reported_bcp"] = status["reported_bcp"]
+    out["export_done"] = status["export_done"]
+
+    cpprop = find_cpprop(folder)
+    if cpprop is None:
+        out["cause"] = "no_cpprop"
+        out["detail"] = "CPprop.txt not retained; cannot attribute"
+        return out
+
+    descs = get_qtaim_descs(cpprop)
+    _atoms, bonds = only_atom_cps(descs)
+    out["n_bcp_blocks"] = len(bonds)
+
+    with_paths = {k: v for k, v in bonds.items() if v.get("connected_bond_paths")}
+    out["n_no_bond_path"] = len(bonds) - len(with_paths)
+
+    pairs = [tuple(sorted(v["connected_bond_paths"])) for v in with_paths.values()]
+    counts = collections.Counter(pairs)
+    dups = {p: c for p, c in counts.items() if c > 1}
+    out["n_duplicate_pairs"] = sum(c - 1 for c in dups.values())
+    out["duplicate_pairs"] = " ".join(f"{a}-{b}" for a, b in list(dups)[:6])
+    out["n_unique_pairs"] = len(counts)
+
+    reported = status["reported_bcp"]
+    if reported is not None and len(bonds) < reported:
+        out["cause"] = "truncated"
+        out["detail"] = (
+            f"CPprop.txt holds {len(bonds)} (3,-1) blocks vs {reported} reported"
+        )
+        return out
+
+    # CPprop.txt is complete; the shortfall came from the merge
+    if out["n_duplicate_pairs"] and out["n_no_bond_path"]:
+        out["cause"] = "duplicate_pair+no_bond_path"
+    elif out["n_duplicate_pairs"]:
+        out["cause"] = "duplicate_pair"
+    elif out["n_no_bond_path"]:
+        out["cause"] = "no_bond_path"
+    elif n_stored < len(bonds):
+        out["cause"] = "unmatched_attractor"
+    else:
+        out["cause"] = "explained_none"
+    out["detail"] = (
+        f"{len(bonds)} blocks -> {out['n_unique_pairs']} unique pairs -> "
+        f"{n_stored} stored"
+    )
+    return out
 
 
 def find_job_folders(root: str, max_depth: int = 8):
@@ -386,6 +650,133 @@ def _run_folder_mode(args) -> int:
     return 0
 
 
+def _run_explain_mode(args) -> int:
+    """Attribute a set of defects to a cause, with the forensic evidence.
+
+    Folds together what used to be two sequential tools: attribution needed
+    CPprop.txt and the forensics needed attribution's output, so running them
+    as one pass removes an intermediate CSV and a second walk of the same
+    folders.
+    """
+    import statistics as _st
+
+    folders, source = [], args.from_csv
+    if source:
+        with open(source) as f:
+            reader = list(csv.DictReader(f))
+        if reader and "verdict" in reader[0]:
+            folders = [r["folder"] for r in reader if r["verdict"] in args.verdicts]
+        elif reader and "cause" in reader[0]:
+            folders = [r["folder"] for r in reader]
+        else:
+            folders = [r["folder"] for r in reader if r.get("folder")]
+    if args.folders:
+        folders += list(args.folders)
+    if not folders:
+        print("no folders to explain", file=sys.stderr)
+        return 2
+
+    print(f"explaining {len(folders)} folders\n")
+    rows = []
+    for folder in folders:
+        row = explain_shortfall(folder)
+        row.update(
+            {k: v for k, v in diagnose(folder, row["cause"]).items() if k != "folder"}
+        )
+        rows.append(row)
+
+    control = []
+    if args.compare_csv:
+        with open(args.compare_csv) as f:
+            fixed = [
+                r["folder"] for r in csv.DictReader(f) if r.get("verdict") == "fixed"
+            ]
+        control = [diagnose(f, "fixed_control") for f in fixed]
+
+    fields = [
+        "cause", "detail", "n_bcp_stored", "reported_bcp", "n_bcp_blocks",
+        "n_unique_pairs", "n_no_bond_path", "n_duplicate_pairs", "duplicate_pairs",
+        "n_connected_lines", "n_nuclear_blocks", "n_atoms_mwfn", "n_basis", "n_gtf",
+        "header_from", "qtaim_time_s", "cpprop_bytes", "cpprop_is_loose",
+        "ends_with_newline", "ends_mid_block", "cpprop_last_line", "export_done",
+        "export_marker", "qtaim_out_last_line", "error_signatures", "zip",
+        "collision_detail", "folder",
+    ]
+    with open(args.out_csv, "w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore")
+        w.writeheader()
+        w.writerows(rows + control)
+
+    causes = collections.Counter(r["cause"] for r in rows)
+    for cause, n in causes.most_common():
+        print(f"  {cause:<28}{n:>5}")
+    repairable = causes["truncated"]
+    deterministic = sum(
+        n for c, n in causes.items()
+        if c in ("duplicate_pair", "no_bond_path", "duplicate_pair+no_bond_path",
+                 "unmatched_attractor")
+    )
+    print(f"\n  repairable by rerunning (truncated): {repairable}")
+    print(f"  deterministic merge behaviour:        {deterministic}")
+    if causes["no_cpprop"]:
+        print(f"  unattributable (no CPprop.txt):       {causes['no_cpprop']}")
+
+    with_file = [r for r in rows if r.get("cpprop_bytes")]
+    mid = [
+        r for r in with_file
+        if r.get("ends_mid_block") or r.get("ends_with_newline") is False
+    ]
+    if with_file:
+        print(
+            f"\n  CPprop.txt write integrity: {len(mid)} of {len(with_file)} stop "
+            "mid-line or mid-block."
+        )
+        if not mid:
+            print(
+                "  Every file ends cleanly, so none was killed while writing -- that\n"
+                "  rules out OOM truncation for this set, and a count shortfall against\n"
+                "  a complete file is a reporting/parse mismatch, not lost output."
+            )
+    no_file = [r for r in rows if not r.get("cpprop_bytes")]
+    if no_file:
+        print(
+            f"\n  {len(no_file)} job(s) produced no CPprop.txt at all; with no export\n"
+            "  marker either, these are the only genuine killed-run candidates here."
+        )
+
+    trunc = [r for r in rows if r["cause"] == "truncated" and r.get("n_gtf")]
+    ctrl = [r for r in control if r.get("n_gtf")]
+    if trunc and ctrl:
+        print("\n  memory hypothesis: truncated vs jobs that completed")
+        for label, key in (("GTFs", "n_gtf"), ("basis fns", "n_basis"),
+                           ("atoms", "n_atoms_mwfn")):
+            t = [r[key] for r in trunc if r.get(key)]
+            c = [r[key] for r in ctrl if r.get(key)]
+            if t and c:
+                print(
+                    f"    {label:<10} truncated median={_st.median(t):>9.0f} "
+                    f"max={max(t):>9.0f} | completed median={_st.median(c):>9.0f} "
+                    f"max={max(c):>9.0f}"
+                )
+        over = [r for r in ctrl if r["n_gtf"] >= max(x["n_gtf"] for x in trunc)]
+        print(
+            f"    {len(over)} completed job(s) are at least as large by GTFs as the "
+            "largest truncated one"
+        )
+        print(
+            "    -> a hard memory ceiling requires zero such jobs; any of them points\n"
+            "       at run-time concurrency instead."
+            if over else
+            "    -> every truncated job is larger than every completed one, which is\n"
+            "       what a memory ceiling looks like."
+        )
+    elif trunc:
+        print("\n  memory hypothesis: pass --compare_csv for a control group")
+
+    print(f"\n  -> {args.out_csv}")
+    return 0
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     import lmdb
 
@@ -416,8 +807,38 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
     parser.add_argument("--out_csv", required=True)
     parser.add_argument("--covalent_factor", type=float, default=1.3)
+    parser.add_argument(
+        "--mode",
+        choices=("audit", "explain"),
+        default="audit",
+        help="audit: scan for defects. explain: attribute known defects to a "
+        "cause, with forensics",
+    )
+    parser.add_argument(
+        "--from_csv",
+        default=None,
+        help="explain mode: a verify-qtaim-rerun or prior explain CSV",
+    )
+    parser.add_argument(
+        "--folders", nargs="+", default=None, help="explain mode: folders directly"
+    )
+    parser.add_argument(
+        "--verdicts",
+        nargs="+",
+        default=["unchanged_still_broken", "changed_still_broken"],
+        help="explain mode: which verify verdicts to explain",
+    )
+    parser.add_argument(
+        "--compare_csv",
+        default=None,
+        help="explain mode: 'fixed' jobs from a verify CSV become the size "
+        "control group for the memory comparison",
+    )
     parser.add_argument("--limit", type=int, default=None, help="records per vertical")
     args = parser.parse_args(argv)
+
+    if args.mode == "explain":
+        return _run_explain_mode(args)
 
     if not args.lmdb_root and not args.folder_root:
         print("give --lmdb_root or --folder_root", file=sys.stderr)
