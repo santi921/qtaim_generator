@@ -2,6 +2,8 @@ from asyncio.log import logger
 import os
 import json
 import re
+import shutil
+import tempfile
 import zipfile
 from typing import Optional
 from qtaim_gen.source.core.parse_qtaim import dft_inp_to_dict
@@ -555,6 +557,69 @@ def qtaim_run_status(folder: str) -> dict:
     }
 
 
+UNATTRIBUTABLE_SHORTFALL_FRAC = 0.10
+
+
+def storable_bcp_count(folder: str) -> Optional[int]:
+    """How many bond CPs the atom-pair-keyed schema can actually hold.
+
+    Multiwfn's reported (3,-1) count is an upper bound, not a target. Three
+    kinds of CP are legitimately unstorable, and measured on a 100-job repair
+    test they accounted for 21 of 28 residual shortfalls:
+
+    - no "Connected atoms:" line, so the CP has no attributable atom pair
+      (18 of 28 -- by far the most common)
+    - two CPs resolving to the same pair, which the merge collapses because it
+      keys a plain dict on that pair (2 of 28)
+    - an attractor with no nuclear-CP match (1 of 28)
+
+    Comparing against this instead of the raw count is what keeps the
+    completeness check from rejecting records that are already as complete as
+    the schema permits -- which would otherwise livelock, since the restart
+    path reruns anything that fails validation and the rerun reproduces the
+    same result exactly.
+
+    Returns None when CPprop.txt is unavailable (it is only archived by runs
+    after the fix that stopped deleting it before the zip was built).
+    """
+    from qtaim_gen.source.core.parse_qtaim import get_qtaim_descs, only_atom_cps
+
+    text_path = None
+    tmpdir = None
+    for rel in ("CPprop.txt", os.path.join("generator", "CPprop.txt")):
+        cand = os.path.join(folder, rel)
+        if os.path.isfile(cand) and os.path.getsize(cand) > 0:
+            text_path = cand
+            break
+    if text_path is None:
+        zip_path = os.path.join(folder, "generator", "out_files.zip")
+        if os.path.isfile(zip_path):
+            try:
+                with zipfile.ZipFile(zip_path, "r") as zf:
+                    if "CPprop.txt" in zf.namelist():
+                        tmpdir = tempfile.mkdtemp(prefix="cpprop_val_")
+                        zf.extract("CPprop.txt", tmpdir)
+                        text_path = os.path.join(tmpdir, "CPprop.txt")
+            except (zipfile.BadZipFile, OSError, KeyError):
+                return None
+    if text_path is None:
+        return None
+
+    try:
+        _atoms, bonds = only_atom_cps(get_qtaim_descs(text_path))
+        pairs = {
+            tuple(sorted(v["connected_bond_paths"]))
+            for v in bonds.values()
+            if v.get("connected_bond_paths")
+        }
+        return len(pairs)
+    except Exception:
+        return None
+    finally:
+        if tmpdir:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+
 def count_reported_bcps(folder: str) -> Optional[int]:
     """Number of (3,-1) CPs Multiwfn *reported*, or None if unavailable.
 
@@ -648,16 +713,55 @@ def validate_qtaim_dict(
 
         reported = status["reported_bcp"]
         if reported is not None and len(dict_bcps) < reported:
-            msg = (
-                f"QTAIM json holds {len(dict_bcps)} bond critical points but "
-                f"Multiwfn reported {reported} -- critical points were lost "
-                f"between the search and the stored record ({qtaim_json_loc})"
-            )
-            if verbose:
-                print(msg)
-            if logger:
-                logger.error(msg)
-            return False
+            # The raw count is an upper bound. Confirm against what the schema
+            # can actually store before rejecting, or a record that is already
+            # maximally complete gets rerun forever.
+            storable = storable_bcp_count(folder)
+            if storable is not None:
+                if len(dict_bcps) >= storable:
+                    if verbose or logger:
+                        note = (
+                            f"QTAIM json holds {len(dict_bcps)} of {reported} "
+                            f"reported bond critical points; the {reported - storable} "
+                            f"missing have no storable atom pair, so the record is "
+                            f"complete for this schema ({qtaim_json_loc})"
+                        )
+                        if verbose:
+                            print(note)
+                        if logger:
+                            logger.info(note)
+                else:
+                    msg = (
+                        f"QTAIM json holds {len(dict_bcps)} bond critical points but "
+                        f"{storable} are storable (of {reported} reported) -- "
+                        f"critical points were lost ({qtaim_json_loc})"
+                    )
+                    if verbose:
+                        print(msg)
+                    if logger:
+                        logger.error(msg)
+                    return False
+            else:
+                # Cannot attribute without CPprop.txt. Reject only a shortfall
+                # too large to be explained by unstorable CPs, since those are
+                # typically one or two; failing on a small unattributable gap
+                # would livelock the restart path.
+                deficit = (reported - len(dict_bcps)) / max(reported, 1)
+                msg = (
+                    f"QTAIM json holds {len(dict_bcps)} bond critical points vs "
+                    f"{reported} reported, and CPprop.txt is not retained so the "
+                    f"gap cannot be attributed ({qtaim_json_loc})"
+                )
+                if deficit > UNATTRIBUTABLE_SHORTFALL_FRAC:
+                    if verbose:
+                        print(msg)
+                    if logger:
+                        logger.error(msg)
+                    return False
+                if verbose:
+                    print(msg + " -- within tolerance, not failing")
+                if logger:
+                    logger.warning(msg + " -- within tolerance, not failing")
 
     if verbose:
         print(f"Number of nuclear critical points: {len(dict_ncps)}")

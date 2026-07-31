@@ -282,3 +282,106 @@ class TestCPpropArchived:
         # orca.out is parsed separately and must not be swept into the zip
         assert "orca.out" not in names
         assert (folder / "orca.out").exists()
+
+
+class TestStorableVsReportedCount:
+    """Multiwfn's reported count is an upper bound, not a target.
+
+    A 100-job repair test found 21 of 28 residual shortfalls were CPs the
+    atom-pair-keyed schema cannot store -- 18 of them CPs with no
+    "Connected atoms:" line. Rejecting those would livelock: validation fails,
+    the restart path reruns, the rerun reproduces the identical record.
+    """
+
+    # exact Multiwfn CPprop.txt block shape; the parser is column/token
+    # sensitive, so this mirrors a real file rather than approximating it
+    CP_BLOCK = (
+        " ----------------   CP{n:>6},     Type (3,-1)   ----------------\n"
+        "{connected}"
+        " Position (Bohr):        1.000000000000    0.000000000000    {z:.12f}\n"
+        " Position (Angstrom):    0.529177000000    0.000000000000    {z:.12f}\n"
+        " Density of all electrons:  0.1000000000E+00\n"
+    )
+
+    def _cpprop(self, tmp_path, n_with_paths, n_without_paths):
+        blocks = []
+        for i in range(n_with_paths):
+            blocks.append(
+                self.CP_BLOCK.format(
+                    n=i + 1,
+                    z=1.0 + i,
+                    connected=(
+                        f" Connected atoms: {i + 1:>5}(H )   --  {i + 2:>5}(H )\n"
+                    ),
+                )
+            )
+        for j in range(n_without_paths):
+            # a CP Multiwfn found but could not attribute to an atom pair
+            blocks.append(
+                self.CP_BLOCK.format(n=100 + j, z=50.0 + j, connected="")
+            )
+        (tmp_path / "CPprop.txt").write_text("".join(blocks))
+
+    def test_storable_excludes_cps_without_bond_paths(self, tmp_path):
+        from qtaim_gen.source.utils.validation import storable_bcp_count
+
+        self._cpprop(tmp_path, n_with_paths=5, n_without_paths=3)
+        assert storable_bcp_count(str(tmp_path)) == 5
+
+    def test_storable_collapses_duplicate_pairs(self, tmp_path):
+        from qtaim_gen.source.utils.validation import storable_bcp_count
+
+        blocks = [
+            self.CP_BLOCK.format(
+                n=i + 1, z=1.0 + i,
+                connected=" Connected atoms:     1(H )   --      2(H )\n",
+            )
+            for i in range(3)
+        ]
+        (tmp_path / "CPprop.txt").write_text("".join(blocks))
+        # three CPs, one atom pair
+        assert storable_bcp_count(str(tmp_path)) == 1
+
+    def test_missing_cpprop_returns_none(self, tmp_path):
+        from qtaim_gen.source.utils.validation import storable_bcp_count
+
+        assert storable_bcp_count(str(tmp_path)) is None
+
+    def test_unstorable_shortfall_passes_validation(self, tmp_path):
+        """The livelock case: reported 8, storable 5, stored 5 -> complete."""
+        (tmp_path / "qtaim.out").write_text(
+            " Number of (3,-1) CPs:     8\n"
+            " Done! The results have been outputted to CPprop.txt in current folder\n"
+        )
+        self._cpprop(tmp_path, n_with_paths=5, n_without_paths=3)
+        p = _write_qtaim_json(tmp_path / "qtaim.json", n_atoms=12, n_bcps=5)
+        assert validate_qtaim_dict(
+            str(p), n_atoms=12, folder=str(tmp_path), check_bcp_count=True
+        )
+
+    def test_real_loss_below_storable_still_fails(self, tmp_path):
+        (tmp_path / "qtaim.out").write_text(
+            " Number of (3,-1) CPs:     8\n"
+            " Done! The results have been outputted to CPprop.txt in current folder\n"
+        )
+        self._cpprop(tmp_path, n_with_paths=5, n_without_paths=3)
+        p = _write_qtaim_json(tmp_path / "qtaim.json", n_atoms=12, n_bcps=2)
+        assert not validate_qtaim_dict(
+            str(p), n_atoms=12, folder=str(tmp_path), check_bcp_count=True
+        )
+
+    def test_small_unattributable_gap_tolerated(self, tmp_path):
+        """No CPprop.txt: an off-by-one gap must not fail, or older records
+        (which never archived CPprop.txt) would rerun forever."""
+        (tmp_path / "qtaim.out").write_text(QTAIM_OUT_LINE)  # reports 11
+        p = _write_qtaim_json(tmp_path / "qtaim.json", n_atoms=12, n_bcps=10)
+        assert validate_qtaim_dict(
+            str(p), n_atoms=12, folder=str(tmp_path), check_bcp_count=True
+        )
+
+    def test_large_unattributable_gap_fails(self, tmp_path):
+        (tmp_path / "qtaim.out").write_text(QTAIM_OUT_LINE)  # reports 11
+        p = _write_qtaim_json(tmp_path / "qtaim.json", n_atoms=12, n_bcps=3)
+        assert not validate_qtaim_dict(
+            str(p), n_atoms=12, folder=str(tmp_path), check_bcp_count=True
+        )
