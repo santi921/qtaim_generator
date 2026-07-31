@@ -4,7 +4,9 @@ explain-qtaim-shortfall says *which* cause applies. This says *why*, by pulling
 the evidence that distinguishes a resource kill from ordinary parse behaviour:
 
 - **truncation point**: whether CPprop.txt stops mid-line / mid-block, which is
-  a SIGKILL signature (OOM), versus at a clean block boundary, which is not.
+  a SIGKILL signature (OOM), versus at a clean block boundary, which is not. On
+  the first 28 residuals every file ended cleanly, which ruled out an OOM
+  truncation for that set and moved the question to parse/report mismatch.
 - **process end state**: whether qtaim.out reaches Multiwfn's completion lines
   or simply stops, plus any error text it did manage to print.
 - **memory proxies**: the "Atoms / Basis functions / GTFs" header Multiwfn
@@ -15,6 +17,10 @@ the evidence that distinguishes a resource kill from ordinary parse behaviour:
 - **collision detail**: for duplicate_pair, both colliding CPs with their
   densities, since a real second CP being silently overwritten is data loss by
   a different name than a CP that was never storable.
+- **counts side by side**: Multiwfn's reported (3,-1) count, the (3,-1) blocks
+  actually in CPprop.txt, and the "Connected atoms:" lines. A "truncated"
+  verdict against a complete, cleanly-ended file means these three disagree,
+  which is a reporting/parse question rather than lost output.
 
 Example:
     diagnose-qtaim-residual --causes_csv qtaim_shortfall_causes.csv \
@@ -73,18 +79,34 @@ def zip_inventory(folder: str) -> str:
         return "BAD_ZIP"
 
 
+def _fmt_time(value):
+    try:
+        return f"{float(value):.0f}s"
+    except (TypeError, ValueError):
+        return "?"
+
+
 def diagnose(folder: str, cause: str) -> dict:
     from qtaim_gen.source.core.parse_qtaim import get_qtaim_descs, only_atom_cps
 
     out = {"folder": folder, "cause": cause, "zip": zip_inventory(folder)}
 
     qout = read_from_zip_or_disk(folder, "qtaim.out")
-    if qout:
-        m = HEADER_RE.search(qout)
+    # The "Atoms / Basis functions / GTFs" line is printed when Multiwfn *loads*
+    # the wavefunction, which happens in the convert step -- qtaim.out usually
+    # does not carry it, so search the other step logs too.
+    for src in ("qtaim.out", "convert.out", "orca.out"):
+        text = qout if src == "qtaim.out" else read_from_zip_or_disk(folder, src)
+        if not text:
+            continue
+        m = HEADER_RE.search(text)
         if m:
             out["n_atoms_mwfn"] = int(m.group(1))
             out["n_basis"] = int(m.group(2))
             out["n_gtf"] = int(m.group(3))
+            out["header_from"] = src
+            break
+    if qout:
         out["qtaim_out_bytes"] = len(qout)
         out["export_marker"] = COMPLETION_MARKER in qout
         tail = qout.rstrip().splitlines()[-1:] or [""]
@@ -94,10 +116,20 @@ def diagnose(folder: str, cause: str) -> dict:
     else:
         out["qtaim_out_bytes"] = 0
 
+    if qout:
+        found = re.findall(r"Number of \(3,-1\) CPs:\s*(\d+)", qout)
+        out["reported_bcp"] = int(found[-1]) if found else None
+        out["cpprop_is_loose"] = os.path.isfile(os.path.join(folder, "CPprop.txt")) or (
+            os.path.isfile(os.path.join(folder, "generator", "CPprop.txt"))
+        )
+
     cpprop = read_from_zip_or_disk(folder, "CPprop.txt")
     if cpprop:
         out["cpprop_bytes"] = len(cpprop)
         out["n_cp_blocks"] = len(BLOCK_RE.findall(cpprop))
+        out["n_bcp_blocks"] = len(re.findall(r"Type \(3,-1\)", cpprop))
+        out["n_nuclear_blocks"] = len(re.findall(r"Type \(3,-3\)", cpprop))
+        out["n_connected_lines"] = len(re.findall(r"Connected atoms:", cpprop))
         # A cleanly finished file ends with a complete final line. Stopping
         # mid-line means the process died while writing -- the SIGKILL/OOM
         # signature we are looking for.
@@ -182,8 +214,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         control = [diagnose(f, "fixed_control") for f in fixed]
 
     fields = [
-        "cause", "n_atoms_mwfn", "n_basis", "n_gtf", "qtaim_time_s",
-        "cpprop_bytes", "n_cp_blocks", "ends_with_newline", "ends_mid_block",
+        "cause", "n_atoms_mwfn", "n_basis", "n_gtf", "header_from", "qtaim_time_s",
+        "reported_bcp", "n_bcp_blocks", "n_nuclear_blocks", "n_connected_lines",
+        "cpprop_is_loose", "cpprop_bytes", "n_cp_blocks", "ends_with_newline",
+        "ends_mid_block",
         "cpprop_last_line", "qtaim_out_bytes", "export_marker",
         "qtaim_out_last_line", "error_signatures", "zip", "collision_detail",
         "folder",
@@ -200,9 +234,11 @@ def main(argv: Optional[List[str]] = None) -> int:
             bits = [
                 f"atoms={d.get('n_atoms_mwfn','?')}",
                 f"GTFs={d.get('n_gtf','?')}",
-                f"t={d.get('qtaim_time_s','?')}",
-                f"CPprop={d.get('cpprop_bytes',0)}B/{d.get('n_cp_blocks','?')}blocks",
-                f"export_marker={d.get('export_marker','?')}",
+                f"t={_fmt_time(d.get('qtaim_time_s'))}",
+                f"reported={d.get('reported_bcp','?')}",
+                f"bcp_blocks={d.get('n_bcp_blocks','?')}",
+                f"connected_lines={d.get('n_connected_lines','?')}",
+                f"export={d.get('export_marker','?')}",
             ]
             print("   " + "  ".join(str(b) for b in bits))
             if d.get("cpprop_bytes"):
@@ -255,12 +291,34 @@ def main(argv: Optional[List[str]] = None) -> int:
     elif trunc:
         print("== memory hypothesis: pass --compare_csv to get a control group")
 
-    mid = [d for d in diags if d.get("ends_mid_block") or d.get("ends_with_newline") is False]
-    if mid:
+    with_file = [d for d in diags if d.get("cpprop_bytes")]
+    mid = [
+        d for d in with_file
+        if d.get("ends_mid_block") or d.get("ends_with_newline") is False
+    ]
+    if with_file:
         print(
-            f"\n  {len(mid)} job(s) have a CPprop.txt that stops mid-line or mid-block "
-            "-- the process\n  died while writing, rather than finishing and being "
-            "parsed badly."
+            f"\n  CPprop.txt write integrity: {len(mid)} of {len(with_file)} stop "
+            "mid-line or mid-block."
+        )
+        if not mid:
+            print(
+                "  Every file ends cleanly, so none of these was killed while writing.\n"
+                "  That rules out an OOM/SIGKILL truncation for this set -- a count\n"
+                "  shortfall against a complete, cleanly-ended file is a parse or\n"
+                "  reporting mismatch, not lost output."
+            )
+    no_file = [d for d in diags if not d.get("cpprop_bytes")]
+    if no_file:
+        print(
+            f"\n  {len(no_file)} job(s) produced no CPprop.txt at all"
+            + (
+                f" (qtaim ran {_fmt_time(no_file[0].get('qtaim_time_s'))}+)"
+                if no_file[0].get("qtaim_time_s")
+                else ""
+            )
+            + ".\n  With no export marker either, these are the only genuine "
+            "killed-run candidates here."
         )
     print(f"\n  -> {args.out_csv}")
     return 0
