@@ -670,6 +670,7 @@ def validate_qtaim_dict(
     folder: str = None,
     check_bcp_count: bool = False,
     bcp_tolerance: int = DEFAULT_BCP_TOLERANCE,
+    require_provenance: bool = False,
 ):
     """
     Basic check that the qtaim json file has the expected structure
@@ -716,6 +717,25 @@ def validate_qtaim_dict(
         if logger:
             logger.error(msg)
         if check_bcp_count:
+            return False
+
+    if require_provenance and folder is not None:
+        # Absent qtaim.out means the record's completeness cannot be established
+        # from anything on disk. check_bcp_count cannot catch this on its own:
+        # with no reported count there is no shortfall to measure, so the record
+        # passes and the runner skips the folder -- while the audit classifies it
+        # no_provenance and selects it for rerun. This is what makes the two
+        # agree, at the cost of rerunning records that may well be fine.
+        if not qtaim_run_status(folder)["have_qtaim_out"]:
+            msg = (
+                f"No qtaim.out for {folder}, so the bond-CP count cannot be "
+                f"verified; treating as incomplete because --require_qtaim_"
+                f"provenance is set ({qtaim_json_loc})"
+            )
+            if verbose:
+                print(msg)
+            if logger:
+                logger.error(msg)
             return False
 
     if check_bcp_count and folder is not None:
@@ -914,6 +934,7 @@ def validation_checks(
     check_orca: bool = False,
     check_bcp_count: bool = False,
     bcp_tolerance: int = DEFAULT_BCP_TOLERANCE,
+    require_qtaim_provenance: bool = False,
 ):
     """
     Run all validation checks on the json files in the given folder.
@@ -926,6 +947,9 @@ def validation_checks(
             is treated as defective. Guards against queueing jobs no rerun can
             fix, since a CP with no traceable bond path has no storable atom
             pair. Default DEFAULT_BCP_TOLERANCE.
+        require_qtaim_provenance (bool): fail records with no qtaim.out. Their
+            completeness is unverifiable rather than verified, and without this
+            the runner skips them while the audit selects them for rerun.
         check_bcp_count (bool): cross-check qtaim.json's bond-CP count against
             the count Multiwfn reported in qtaim.out, and reject records whose
             critical points were lost between the search and the stored file.
@@ -1030,6 +1054,7 @@ def validation_checks(
         folder=folder,
         check_bcp_count=check_bcp_count,
         bcp_tolerance=bcp_tolerance,
+        require_provenance=require_qtaim_provenance,
     ):
         if logger:
             logger.error(f"QTAIM json validation failed in folder: {folder}")

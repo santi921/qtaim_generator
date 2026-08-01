@@ -137,6 +137,19 @@ def main(argv=None):
         ),
     )
 
+    parser.add_argument(
+        "--require_qtaim_provenance",
+        action="store_true",
+        help=(
+            "treat a job with no qtaim.out as incomplete. Its bond-CP count "
+            "cannot be checked against anything, so --check_bcp_count alone "
+            "passes it and the folder is skipped -- while the audit classifies "
+            "it no_provenance and selects it for rerun. Set this to make the "
+            "runner agree with the selector. Reruns records that may be fine, "
+            "which is the point: unverifiable is not verified."
+        ),
+    )
+
     args = parser.parse_args(argv)
 
     overrun_running = bool(args.overrun_running) if "overrun_running" in args else False
@@ -159,6 +172,9 @@ def main(argv=None):
     horton_python: str = str(getattr(args, "horton_python", ""))
     check_bcp_count: bool = bool(getattr(args, "check_bcp_count", False))
     bcp_tolerance = int(getattr(args, "bcp_tolerance", 2))
+    require_qtaim_provenance = bool(
+        getattr(args, "require_qtaim_provenance", False)
+    )
     job_file = args.job_file
 
     # set env vars
@@ -246,6 +262,7 @@ def main(argv=None):
                     horton_python=horton_python,
                     check_bcp_count=check_bcp_count,
                     bcp_tolerance=bcp_tolerance,
+                    require_qtaim_provenance=require_qtaim_provenance,
                 )  # works!
             except Exception as e:
                 print(f"Error in gbw_analysis for {run_root}: {e}")

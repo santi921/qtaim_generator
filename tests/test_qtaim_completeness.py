@@ -740,3 +740,108 @@ class TestShortfallCheckCost:
             )
             assert gate == val, deficit
             assert gate is (deficit <= 2)
+
+
+class TestRequireProvenance:
+    """Absent qtaim.out must be rejectable, not silently accepted.
+
+    check_bcp_count cannot catch this on its own: with no qtaim.out there is no
+    reported count, so there is no shortfall to measure and the record passes.
+    The runner then skips the folder as "already processed and validated" while
+    the audit classifies it no_provenance and selects it for rerun -- the two
+    halves disagree, and the campaign quietly does nothing. This flag is what
+    makes them agree.
+    """
+
+    @staticmethod
+    def _job(tmp_path, with_qtaim_out, n_atoms=12, n_bcp=11):
+        (tmp_path / "generator").mkdir(exist_ok=True)
+        if with_qtaim_out:
+            (tmp_path / "qtaim.out").write_text(
+                f" Number of (3,-1) CPs:    {n_bcp}\n"
+                " Done! The results have been outputted to CPprop.txt in current folder\n"
+            )
+        return _write_qtaim_json(
+            tmp_path / "generator" / "qtaim.json", n_atoms=n_atoms, n_bcps=n_bcp
+        )
+
+    def test_check_bcp_count_alone_cannot_see_missing_provenance(self, tmp_path):
+        """The gap this flag closes: no qtaim.out means nothing to measure."""
+        p = self._job(tmp_path, with_qtaim_out=False)
+        assert validate_qtaim_dict(
+            str(p), n_atoms=12, folder=str(tmp_path),
+            check_bcp_count=True, bcp_tolerance=2,
+        )
+
+    def test_require_provenance_rejects_it(self, tmp_path):
+        p = self._job(tmp_path, with_qtaim_out=False)
+        assert not validate_qtaim_dict(
+            str(p), n_atoms=12, folder=str(tmp_path),
+            check_bcp_count=True, bcp_tolerance=2, require_provenance=True,
+        )
+
+    def test_provenance_present_is_unaffected(self, tmp_path):
+        """The flag must not fail records that can be checked and are fine,
+        or it degenerates into --overwrite."""
+        p = self._job(tmp_path, with_qtaim_out=True)
+        assert validate_qtaim_dict(
+            str(p), n_atoms=12, folder=str(tmp_path),
+            check_bcp_count=True, bcp_tolerance=2, require_provenance=True,
+        )
+
+    def test_restart_gate_agrees_with_the_validator(self, tmp_path):
+        """If the gate and the validator disagree the step is skipped and then
+        the folder fails validation, forever."""
+        from qtaim_gen.source.core.omol import (
+            _has_usable_step_output,
+            _qtaim_output_complete,
+        )
+
+        for with_out in (True, False):
+            d = tmp_path / f"out_{with_out}"
+            d.mkdir()
+            p = self._job(d, with_qtaim_out=with_out)
+            val = validate_qtaim_dict(
+                str(p), n_atoms=12, folder=str(d),
+                check_bcp_count=True, bcp_tolerance=2, require_provenance=True,
+            )
+            gate = _qtaim_output_complete(
+                str(d), n_atoms=12, check_bcp_count=True, bcp_tolerance=2,
+                require_qtaim_provenance=True,
+            )
+            step = _has_usable_step_output(
+                str(d), "qtaim", n_atoms=12, check_bcp_count=True,
+                bcp_tolerance=2, require_qtaim_provenance=True,
+            )
+            assert val == gate == step == with_out, with_out
+
+    def test_threaded_through_every_layer(self):
+        """A dropped kwarg anywhere in the chain silently reverts to the default
+        -- exactly the bug that made bcp_tolerance ineffective in the gate."""
+        import inspect
+
+        from qtaim_gen.source.core.omol import gbw_analysis, run_jobs
+        from qtaim_gen.source.core.workflow import process_folder, process_folder_alcf
+        from qtaim_gen.source.utils.io import get_folders_from_file
+        from qtaim_gen.source.utils.validation import validation_checks
+
+        for fn in (validation_checks, get_folders_from_file, gbw_analysis,
+                   run_jobs, process_folder, process_folder_alcf):
+            params = inspect.signature(fn).parameters
+            assert "require_qtaim_provenance" in params, fn.__name__
+            assert params["require_qtaim_provenance"].default is False, fn.__name__
+
+    def test_qtaim_out_inside_the_zip_counts_as_provenance(self, tmp_path):
+        """qtaim.out survives cleanup inside generator/out_files.zip, so a
+        cleaned-but-complete folder must not be forced to rerun."""
+        p = self._job(tmp_path, with_qtaim_out=False)
+        with zipfile.ZipFile(tmp_path / "generator" / "out_files.zip", "w") as z:
+            z.writestr(
+                "qtaim.out",
+                " Number of (3,-1) CPs:    11\n"
+                " Done! The results have been outputted to CPprop.txt in current folder\n",
+            )
+        assert validate_qtaim_dict(
+            str(p), n_atoms=12, folder=str(tmp_path),
+            check_bcp_count=True, bcp_tolerance=2, require_provenance=True,
+        )

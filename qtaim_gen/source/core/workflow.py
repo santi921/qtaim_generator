@@ -105,6 +105,7 @@ def process_folder(
     check_orca: bool = False,
     check_bcp_count: bool = False,
     bcp_tolerance: int = 2,
+    require_qtaim_provenance: bool = False,
     exhaustive_qtaim: bool = False,
     patch_timings: bool = False,
     horton_python: str = "",
@@ -219,6 +220,7 @@ def process_folder(
             check_orca=check_orca,
             check_bcp_count=check_bcp_count,
             bcp_tolerance=bcp_tolerance,
+            require_qtaim_provenance=require_qtaim_provenance,
             exhaustive_qtaim=exhaustive_qtaim,
             subprocess_env=subprocess_env,
             patch_timings=patch_timings,
@@ -287,6 +289,7 @@ def process_folder_alcf(
     check_orca: bool = False,
     check_bcp_count: bool = False,
     bcp_tolerance: int = 2,
+    require_qtaim_provenance: bool = False,
     exhaustive_qtaim: bool = False,
     patch_timings: bool = False,
     horton_python: str = "",
@@ -412,6 +415,7 @@ def process_folder_alcf(
                 check_orca=check_orca,
                 check_bcp_count=check_bcp_count,
                 bcp_tolerance=bcp_tolerance,
+                require_qtaim_provenance=require_qtaim_provenance,
             )
 
             if not overwrite and tf_validation:
@@ -486,6 +490,7 @@ def process_folder_alcf(
             check_orca=check_orca,
             check_bcp_count=check_bcp_count,
             bcp_tolerance=bcp_tolerance,
+            require_qtaim_provenance=require_qtaim_provenance,
             exhaustive_qtaim=exhaustive_qtaim,
             subprocess_env=subprocess_env,
             patch_timings=patch_timings,

@@ -186,6 +186,7 @@ def get_folders_from_file(
     check_orca: bool = False,
     check_bcp_count: bool = False,
     bcp_tolerance: int = 2,
+    require_qtaim_provenance: bool = False,
     check_ecp: bool = False,
     checkpoint_path: Optional[str] = None,
     stop_check: Optional[Callable[[], bool]] = None,
@@ -232,6 +233,7 @@ def get_folders_from_file(
                     check_orca=check_orca,
                     check_bcp_count=check_bcp_count,
                     bcp_tolerance=bcp_tolerance,
+                    require_qtaim_provenance=require_qtaim_provenance,
                 )
                 if not tf_validation:
                     if logger:

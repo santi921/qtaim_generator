@@ -494,6 +494,7 @@ def run_jobs(
     subprocess_env: Optional[dict] = None,
     check_bcp_count: bool = False,
     bcp_tolerance: int = 2,
+    require_qtaim_provenance: bool = False,
 ) -> None:
     """
     Run conversion and multiwfn jobs
@@ -646,6 +647,7 @@ def run_jobs(
                 n_atoms=n_atoms_for_skip,
                 check_bcp_count=check_bcp_count,
                 bcp_tolerance=bcp_tolerance,
+                require_qtaim_provenance=require_qtaim_provenance,
             )
             if has_files or _compiled_data_present(
                 folder, order, _compiled_map,
@@ -1754,6 +1756,7 @@ def _qtaim_output_complete(
     n_atoms: Optional[int] = None,
     check_bcp_count: bool = False,
     bcp_tolerance: int = 2,
+    require_qtaim_provenance: bool = False,
 ) -> bool:
     """Whether qtaim.json looks complete enough to skip the QTAIM step.
 
@@ -1789,6 +1792,10 @@ def _qtaim_output_complete(
             return False
         if (n_atoms if n_atoms is not None else 2) > 1 and n_bcp == 0:
             return False
+        if require_qtaim_provenance and not qtaim_run_status(folder)["have_qtaim_out"]:
+            # no qtaim.out means completeness is unverifiable; must match the
+            # validator or the step is skipped and then fails validation
+            return False
         if check_bcp_count:
             status = qtaim_run_status(folder)
             if status["have_qtaim_out"]:
@@ -1819,6 +1826,7 @@ def _has_usable_step_output(
     n_atoms: Optional[int] = None,
     check_bcp_count: bool = False,
     bcp_tolerance: int = 2,
+    require_qtaim_provenance: bool = False,
 ) -> bool:
     """Check whether a sub-job appears to have produced usable output on disk.
 
@@ -1845,6 +1853,7 @@ def _has_usable_step_output(
             n_atoms=n_atoms,
             check_bcp_count=check_bcp_count,
             bcp_tolerance=bcp_tolerance,
+            require_qtaim_provenance=require_qtaim_provenance,
         )
 
     for base in (folder, os.path.join(folder, "generator")):
@@ -1969,6 +1978,7 @@ def gbw_analysis(
     check_orca: bool = False,
     check_bcp_count: bool = False,
     bcp_tolerance: int = 2,
+    require_qtaim_provenance: bool = False,
     wfx: bool = False,
     exhaustive_qtaim: bool = False,
     subprocess_env: Optional[dict] = None,
@@ -2175,6 +2185,7 @@ def gbw_analysis(
                     check_orca=check_orca,
                     check_bcp_count=check_bcp_count,
                     bcp_tolerance=bcp_tolerance,
+                    require_qtaim_provenance=require_qtaim_provenance,
                 )
             except Exception as e:
                 logger.error(f"Error during validation checks: {e}")
@@ -2210,6 +2221,7 @@ def gbw_analysis(
                         check_orca=False,
                         check_bcp_count=check_bcp_count,
                         bcp_tolerance=bcp_tolerance,
+                        require_qtaim_provenance=require_qtaim_provenance,
                     )
                 except Exception:
                     tf_without_orca = False
@@ -2277,6 +2289,7 @@ def gbw_analysis(
                         check_orca=check_orca,
                         check_bcp_count=check_bcp_count,
                         bcp_tolerance=bcp_tolerance,
+                        require_qtaim_provenance=require_qtaim_provenance,
                     )
 
                     if tf_validation:
@@ -2332,6 +2345,7 @@ def gbw_analysis(
             subprocess_env=subprocess_env,
             check_bcp_count=check_bcp_count,
             bcp_tolerance=bcp_tolerance,
+            require_qtaim_provenance=require_qtaim_provenance,
         )
 
     print("... Parsing multiwfn output")
@@ -2367,6 +2381,7 @@ def gbw_analysis(
         check_orca=check_orca,
         check_bcp_count=check_bcp_count,
         bcp_tolerance=bcp_tolerance,
+        require_qtaim_provenance=require_qtaim_provenance,
     )
 
     # Optional repair pass: if validation failed and patch_timings is on,
