@@ -29,7 +29,10 @@ import random
 import sys
 from typing import List, Optional
 
-from qtaim_gen.source.utils.validation import DEFAULT_BCP_TOLERANCE
+from qtaim_gen.source.utils.validation import (
+    DEFAULT_BCP_TOLERANCE,
+    as_tristate,
+)
 
 
 def classify(row: dict, bcp_tolerance: int = DEFAULT_BCP_TOLERANCE) -> str:
@@ -52,13 +55,16 @@ def classify(row: dict, bcp_tolerance: int = DEFAULT_BCP_TOLERANCE) -> str:
     # Both have to rerun for the dataset to be uniform, so they are selectable
     # modes rather than controls -- which is what they used to fall through to,
     # because search_done/export_done are empty (not "False") without qtaim.out.
-    if row.get("have_qtaim_json") == "False":
+    if as_tristate(row.get("have_qtaim_json")) is False:
         return "no_qtaim_json"
     if row.get("error"):
         return "error"
-    if row.get("search_done") == "False" or row.get("export_done") == "False":
+    if (
+        as_tristate(row.get("search_done")) is False
+        or as_tristate(row.get("export_done")) is False
+    ):
         return "incomplete_run"
-    if row.get("have_qtaim_out") == "False":
+    if as_tristate(row.get("have_qtaim_out")) is False:
         return "no_provenance"
     if as_int("n_bcp") == 0 and as_int("n_cov_bonds") > 0:
         return "empty_bcp"

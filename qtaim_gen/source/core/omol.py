@@ -1797,10 +1797,14 @@ def _qtaim_output_complete(
                 # Must use the same tolerance the validator does, or the
                 # restart path reruns records validation is happy to accept --
                 # which is how a repair campaign ends up looping forever.
-                from qtaim_gen.source.utils.validation import storable_bcp_count
-
                 reported = status["reported_bcp"]
-                if reported is not None:
+                if reported is not None and reported - n_bcp > bcp_tolerance:
+                    # Raw count first: it is an upper bound on the storable
+                    # count, so a raw deficit inside the tolerance guarantees
+                    # the exact one is too. Only past that is it worth reading
+                    # CPprop.txt back out of out_files.zip.
+                    from qtaim_gen.source.utils.validation import storable_bcp_count
+
                     storable = storable_bcp_count(folder)
                     expected = storable if storable is not None else reported
                     if expected - n_bcp > bcp_tolerance:

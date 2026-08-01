@@ -28,7 +28,10 @@ import os
 import sys
 from typing import List, Optional
 
-from qtaim_gen.source.utils.validation import DEFAULT_BCP_TOLERANCE
+from qtaim_gen.source.utils.validation import (
+    DEFAULT_BCP_TOLERANCE,
+    as_tristate,
+)
 
 SIBLING_JSONS = ("charge.json", "bond.json", "fuzzy_full.json", "other.json", "orca.json")
 
@@ -76,13 +79,16 @@ def classify_state(row: dict, bcp_tolerance: int = DEFAULT_BCP_TOLERANCE) -> str
     """
     if row.get("error"):
         return "error"
-    if row.get("have_qtaim_json") is False:
+    if as_tristate(row.get("have_qtaim_json")) is False:
         return "no_qtaim_json"
-    if row.get("search_done") is False or row.get("export_done") is False:
+    if (
+        as_tristate(row.get("search_done")) is False
+        or as_tristate(row.get("export_done")) is False
+    ):
         return "incomplete_run"
     # No qtaim.out means the rerun left nothing to check the CP count against,
     # so it cannot be called fixed -- the shortfall column is null, not zero.
-    if row.get("have_qtaim_out") is False:
+    if as_tristate(row.get("have_qtaim_out")) is False:
         return "no_provenance"
     n_bcp = as_int(row.get("n_bcp"))
     if n_bcp == 0 and as_int(row.get("n_cov_bonds")) > 0:

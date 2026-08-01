@@ -568,6 +568,27 @@ def qtaim_run_status(folder: str) -> dict:
 DEFAULT_BCP_TOLERANCE = 2
 
 
+def as_tristate(value) -> Optional[bool]:
+    """Read a bool-ish audit field that may have been through a CSV.
+
+    Audit rows are consumed two ways -- straight from audit_folder (real bools,
+    None for unknown) and out of a CSV via DictReader (the strings "True",
+    "False", ""). Comparing against one form silently mishandles the other, and
+    for these fields the wrong answer is the dangerous direction: a job with no
+    QTAIM output at all reads as a known-good control and never gets requeued.
+    """
+    if value is None or value == "":
+        return None
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().lower()
+    if text in ("true", "1"):
+        return True
+    if text in ("false", "0"):
+        return False
+    return None
+
+
 def storable_bcp_count(folder: str) -> Optional[int]:
     """How many bond CPs the atom-pair-keyed schema can actually hold.
 
@@ -721,26 +742,33 @@ def validate_qtaim_dict(
             return False
 
         reported = status["reported_bcp"]
-        if reported is not None and len(dict_bcps) < reported:
-            # The raw count is an upper bound. Confirm against what the schema
-            # can actually store before rejecting, or a record that is already
-            # maximally complete gets rerun forever.
-            # Expected = what the schema can actually hold. With CPprop.txt that
-            # is exact; without it, fall back to Multiwfn's raw count, which is
-            # an upper bound.
+        raw_deficit = reported - len(dict_bcps) if reported is not None else 0
+        # 0 < raw_deficit <= tolerance is deliberately silent. Those records are
+        # almost all schema-complete, and saying so would mean paying the
+        # CPprop.txt parse on the majority of folders just to emit a line.
+        if raw_deficit > bcp_tolerance:
+            # Only now is the exact storable count worth computing. Multiwfn's
+            # reported count is an upper bound on what the atom-pair-keyed
+            # schema can hold, so storable <= reported and the raw deficit is
+            # an upper bound on the real one -- if that already fits inside the
+            # tolerance, the real one does too. Checking it first is what keeps
+            # the common clean case from extracting CPprop.txt out of
+            # out_files.zip and reparsing every CP block.
             storable = storable_bcp_count(folder)
             expected = storable if storable is not None else reported
             basis = "storable" if storable is not None else "reported (upper bound)"
             deficit = expected - len(dict_bcps)
 
             if deficit <= 0:
+                note = (
+                    f"QTAIM json holds {len(dict_bcps)} of {reported} reported "
+                    f"bond critical points; the rest have no storable atom pair, "
+                    f"so the record is complete for this schema ({qtaim_json_loc})"
+                )
+                if verbose:
+                    print(note)
                 if logger:
-                    logger.info(
-                        "QTAIM json holds %d of %d reported bond critical points; "
-                        "the rest have no storable atom pair, so the record is "
-                        "complete for this schema (%s)",
-                        len(dict_bcps), reported, qtaim_json_loc,
-                    )
+                    logger.info(note)
             elif deficit > bcp_tolerance:
                 msg = (
                     f"QTAIM json holds {len(dict_bcps)} bond critical points but "

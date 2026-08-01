@@ -10,6 +10,8 @@ import json
 import os
 import zipfile
 
+import pytest
+
 from qtaim_gen.source.utils.validation import (
     count_reported_bcps,
     qtaim_run_status,
@@ -598,3 +600,143 @@ class TestMissingQtaimDiscovery:
         assert classify_state({"have_qtaim_json": False}) == "no_qtaim_json"
         assert classify_state({"have_qtaim_out": True, "n_bcp": 5,
                                "n_cov_bonds": 5, "bcp_shortfall": 0}) == "ok"
+
+
+class TestTristateCoercion:
+    """One reader for bool-ish audit fields, whichever side they arrive from.
+
+    Audit rows are consumed straight from audit_folder (real bools) and out of
+    a CSV (the strings "True"/"False"/""). Comparing against one form silently
+    mishandles the other, and here the wrong answer is the dangerous direction:
+    a job with no QTAIM output reads as a known-good control and never requeues.
+    """
+
+    def test_accepts_both_forms(self):
+        from qtaim_gen.source.utils.validation import as_tristate
+
+        assert as_tristate(False) is False
+        assert as_tristate("False") is False
+        assert as_tristate(True) is True
+        assert as_tristate("True") is True
+        assert as_tristate(None) is None
+        assert as_tristate("") is None
+        assert as_tristate("garbage") is None
+
+    def test_selector_and_verifier_agree_across_both_forms(self):
+        from qtaim_gen.source.scripts.helpers.select_qtaim_rerun import classify
+        from qtaim_gen.source.scripts.helpers.verify_qtaim_rerun import classify_state
+
+        cases = {
+            "no_qtaim_json": {"have_qtaim_json": False, "have_qtaim_out": True},
+            "no_provenance": {"have_qtaim_json": True, "have_qtaim_out": False},
+        }
+        for expected, extra in cases.items():
+            row = dict(
+                n_atoms=3, n_bcp=2, n_cov_bonds=2, n_isolated_bonded=0,
+                bcp_shortfall=0, **extra,
+            )
+            as_csv = {k: "" if v is None else str(v) for k, v in row.items()}
+            assert classify(row) == expected
+            assert classify(as_csv) == expected
+            assert classify_state(row) == expected
+
+
+class TestShortfallCheckCost:
+    """The clean path must not pay for a CPprop.txt parse it cannot need.
+
+    storable_bcp_count extracts CPprop.txt from generator/out_files.zip and
+    reparses every CP block. Multiwfn's reported count is an upper bound on
+    what the atom-pair schema can hold, so storable <= reported and a raw
+    deficit already inside the tolerance guarantees the exact one is too --
+    consulting it first is wasted I/O on the majority of folders.
+    """
+
+    @staticmethod
+    def _job(tmp_path, reported, n_bcp, storable=None, zipped=False, n_atoms=12):
+        (tmp_path / "generator").mkdir(exist_ok=True)
+        (tmp_path / "qtaim.out").write_text(
+            f" Number of (3,-1) CPs:    {reported}\n"
+            " Done! The results have been outputted to CPprop.txt in current folder\n"
+        )
+        if storable is not None:
+            blocks = []
+            for k in range(1, reported + 1):
+                blocks.append(
+                    f" ----------------   CP{k:>6},     Type (3,-1)   ----------------"
+                )
+                if k <= storable:
+                    blocks.append(
+                        f" Connected atoms: {k:>5}(H )   --  {k + 1:>5}(H )"
+                    )
+            body = "\n".join(blocks) + "\n"
+            if zipped:
+                with zipfile.ZipFile(
+                    tmp_path / "generator" / "out_files.zip", "w"
+                ) as z:
+                    z.writestr("CPprop.txt", body)
+            else:
+                (tmp_path / "CPprop.txt").write_text(body)
+        return _write_qtaim_json(
+            tmp_path / "qtaim.json", n_atoms=n_atoms, n_bcps=n_bcp
+        )
+
+    @pytest.mark.parametrize("deficit,expect_calls", [(0, 0), (1, 0), (2, 0), (3, 1)])
+    def test_parse_only_reached_past_the_tolerance(
+        self, tmp_path, monkeypatch, deficit, expect_calls
+    ):
+        import qtaim_gen.source.utils.validation as V
+
+        p = self._job(tmp_path, reported=11, n_bcp=11 - deficit)
+        calls = []
+        real = V.storable_bcp_count
+        monkeypatch.setattr(
+            V, "storable_bcp_count", lambda f: (calls.append(f), real(f))[1]
+        )
+        V.validate_qtaim_dict(
+            str(p), n_atoms=12, folder=str(tmp_path),
+            check_bcp_count=True, bcp_tolerance=2,
+        )
+        assert len(calls) == expect_calls
+
+    def test_restart_gate_skips_the_parse_too(self, tmp_path, monkeypatch):
+        import qtaim_gen.source.utils.validation as V
+        from qtaim_gen.source.core.omol import _qtaim_output_complete
+
+        gen = tmp_path / "generator"
+        gen.mkdir()
+        self._job(tmp_path, reported=11, n_bcp=10)
+        os.replace(tmp_path / "qtaim.json", gen / "qtaim.json")
+        calls = []
+        monkeypatch.setattr(
+            V, "storable_bcp_count", lambda f: calls.append(f) or None
+        )
+        assert _qtaim_output_complete(
+            str(tmp_path), n_atoms=12, check_bcp_count=True, bcp_tolerance=2
+        )
+        assert calls == []
+
+    def test_zipped_cpprop_still_rescues_a_large_deficit(self, tmp_path):
+        """Past the tolerance the exact count is consulted, and a record that
+        is maximally complete for the schema still passes."""
+        p = self._job(tmp_path, reported=14, n_bcp=11, storable=11, zipped=True)
+        assert validate_qtaim_dict(
+            str(p), n_atoms=12, folder=str(tmp_path),
+            check_bcp_count=True, bcp_tolerance=2,
+        )
+
+    def test_gate_and_validator_agree_either_side_of_the_tolerance(self, tmp_path):
+        from qtaim_gen.source.core.omol import _qtaim_output_complete
+
+        for deficit in (1, 3):
+            d = tmp_path / f"d{deficit}"
+            (d / "generator").mkdir(parents=True)
+            p = self._job(d, reported=11, n_bcp=11 - deficit)
+            gate = _qtaim_output_complete(
+                str(d), n_atoms=12, check_bcp_count=True, bcp_tolerance=2
+            )
+            val = validate_qtaim_dict(
+                str(p), n_atoms=12, folder=str(d),
+                check_bcp_count=True, bcp_tolerance=2,
+            )
+            assert gate == val, deficit
+            assert gate is (deficit <= 2)
