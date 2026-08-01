@@ -104,6 +104,7 @@ def process_folder(
     wfx: bool = False,
     check_orca: bool = False,
     check_bcp_count: bool = False,
+    bcp_tolerance: int = 2,
     exhaustive_qtaim: bool = False,
     patch_timings: bool = False,
     horton_python: str = "",
@@ -217,6 +218,7 @@ def process_folder(
             wfx=wfx,
             check_orca=check_orca,
             check_bcp_count=check_bcp_count,
+            bcp_tolerance=bcp_tolerance,
             exhaustive_qtaim=exhaustive_qtaim,
             subprocess_env=subprocess_env,
             patch_timings=patch_timings,
@@ -284,6 +286,7 @@ def process_folder_alcf(
     wfx: bool = False,
     check_orca: bool = False,
     check_bcp_count: bool = False,
+    bcp_tolerance: int = 2,
     exhaustive_qtaim: bool = False,
     patch_timings: bool = False,
     horton_python: str = "",
@@ -408,6 +411,7 @@ def process_folder_alcf(
                 logger=logger,
                 check_orca=check_orca,
                 check_bcp_count=check_bcp_count,
+                bcp_tolerance=bcp_tolerance,
             )
 
             if not overwrite and tf_validation:
@@ -481,6 +485,7 @@ def process_folder_alcf(
             wfx=wfx,
             check_orca=check_orca,
             check_bcp_count=check_bcp_count,
+            bcp_tolerance=bcp_tolerance,
             exhaustive_qtaim=exhaustive_qtaim,
             subprocess_env=subprocess_env,
             patch_timings=patch_timings,

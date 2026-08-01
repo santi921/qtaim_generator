@@ -557,7 +557,15 @@ def qtaim_run_status(folder: str) -> dict:
     }
 
 
-UNATTRIBUTABLE_SHORTFALL_FRAC = 0.10
+# How many bond CPs may be missing before a record counts as defective.
+# Measured on 19 residual jobs from a repair test: 17 were missing exactly one
+# CP and 2 were missing two, and the count did not scale with system size (one
+# missing out of 299 blocks, one out of 27). That flat 1-2 is a single
+# pathological CP per molecule whose gradient path cannot be traced to two
+# nuclei, so it has no storable atom pair -- unrepairable by definition. An
+# absolute tolerance matches that; a fractional one would be lenient on large
+# systems and strict on small ones, which is backwards.
+DEFAULT_BCP_TOLERANCE = 2
 
 
 def storable_bcp_count(folder: str) -> Optional[int]:
@@ -640,6 +648,7 @@ def validate_qtaim_dict(
     logger: any = None,
     folder: str = None,
     check_bcp_count: bool = False,
+    bcp_tolerance: int = DEFAULT_BCP_TOLERANCE,
 ):
     """
     Basic check that the qtaim json file has the expected structure
@@ -716,52 +725,46 @@ def validate_qtaim_dict(
             # The raw count is an upper bound. Confirm against what the schema
             # can actually store before rejecting, or a record that is already
             # maximally complete gets rerun forever.
+            # Expected = what the schema can actually hold. With CPprop.txt that
+            # is exact; without it, fall back to Multiwfn's raw count, which is
+            # an upper bound.
             storable = storable_bcp_count(folder)
-            if storable is not None:
-                if len(dict_bcps) >= storable:
-                    if verbose or logger:
-                        note = (
-                            f"QTAIM json holds {len(dict_bcps)} of {reported} "
-                            f"reported bond critical points; the {reported - storable} "
-                            f"missing have no storable atom pair, so the record is "
-                            f"complete for this schema ({qtaim_json_loc})"
-                        )
-                        if verbose:
-                            print(note)
-                        if logger:
-                            logger.info(note)
-                else:
-                    msg = (
-                        f"QTAIM json holds {len(dict_bcps)} bond critical points but "
-                        f"{storable} are storable (of {reported} reported) -- "
-                        f"critical points were lost ({qtaim_json_loc})"
-                    )
-                    if verbose:
-                        print(msg)
-                    if logger:
-                        logger.error(msg)
-                    return False
-            else:
-                # Cannot attribute without CPprop.txt. Reject only a shortfall
-                # too large to be explained by unstorable CPs, since those are
-                # typically one or two; failing on a small unattributable gap
-                # would livelock the restart path.
-                deficit = (reported - len(dict_bcps)) / max(reported, 1)
-                msg = (
-                    f"QTAIM json holds {len(dict_bcps)} bond critical points vs "
-                    f"{reported} reported, and CPprop.txt is not retained so the "
-                    f"gap cannot be attributed ({qtaim_json_loc})"
-                )
-                if deficit > UNATTRIBUTABLE_SHORTFALL_FRAC:
-                    if verbose:
-                        print(msg)
-                    if logger:
-                        logger.error(msg)
-                    return False
-                if verbose:
-                    print(msg + " -- within tolerance, not failing")
+            expected = storable if storable is not None else reported
+            basis = "storable" if storable is not None else "reported (upper bound)"
+            deficit = expected - len(dict_bcps)
+
+            if deficit <= 0:
                 if logger:
-                    logger.warning(msg + " -- within tolerance, not failing")
+                    logger.info(
+                        "QTAIM json holds %d of %d reported bond critical points; "
+                        "the rest have no storable atom pair, so the record is "
+                        "complete for this schema (%s)",
+                        len(dict_bcps), reported, qtaim_json_loc,
+                    )
+            elif deficit > bcp_tolerance:
+                msg = (
+                    f"QTAIM json holds {len(dict_bcps)} bond critical points but "
+                    f"{expected} are {basis} (of {reported} reported) -- "
+                    f"{deficit} lost, above the tolerance of {bcp_tolerance} "
+                    f"({qtaim_json_loc})"
+                )
+                if verbose:
+                    print(msg)
+                if logger:
+                    logger.error(msg)
+                return False
+            else:
+                # Within tolerance: almost certainly CPs with no traceable bond
+                # path. Failing here would queue a job that no rerun can fix.
+                msg = (
+                    f"QTAIM json is {deficit} bond critical point(s) short of "
+                    f"{expected} {basis}, within the tolerance of {bcp_tolerance} "
+                    f"({qtaim_json_loc})"
+                )
+                if verbose:
+                    print(msg)
+                if logger:
+                    logger.warning(msg)
 
     if verbose:
         print(f"Number of nuclear critical points: {len(dict_ncps)}")
@@ -882,6 +885,7 @@ def validation_checks(
     logger=None,
     check_orca: bool = False,
     check_bcp_count: bool = False,
+    bcp_tolerance: int = DEFAULT_BCP_TOLERANCE,
 ):
     """
     Run all validation checks on the json files in the given folder.
@@ -890,6 +894,10 @@ def validation_checks(
         verbose (bool): If True, print detailed validation messages.
         full_set (int): Level of calculation detail (0-baseline, 1-baseline, 2-full).
         move_results (bool): Adjust if files have been moved during cleaning.
+        bcp_tolerance (int): how many bond CPs may be missing before the record
+            is treated as defective. Guards against queueing jobs no rerun can
+            fix, since a CP with no traceable bond path has no storable atom
+            pair. Default DEFAULT_BCP_TOLERANCE.
         check_bcp_count (bool): cross-check qtaim.json's bond-CP count against
             the count Multiwfn reported in qtaim.out, and reject records whose
             critical points were lost between the search and the stored file.
@@ -993,6 +1001,7 @@ def validation_checks(
         logger=logger,
         folder=folder,
         check_bcp_count=check_bcp_count,
+        bcp_tolerance=bcp_tolerance,
     ):
         if logger:
             logger.error(f"QTAIM json validation failed in folder: {folder}")

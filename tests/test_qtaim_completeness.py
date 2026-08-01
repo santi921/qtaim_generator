@@ -7,6 +7,7 @@ nuclear CPs first so any surviving prefix still satisfies
 """
 
 import json
+import os
 import zipfile
 
 from qtaim_gen.source.utils.validation import (
@@ -385,3 +386,215 @@ class TestStorableVsReportedCount:
         assert not validate_qtaim_dict(
             str(p), n_atoms=12, folder=str(tmp_path), check_bcp_count=True
         )
+
+
+class TestBcpTolerance:
+    """Wiggle room so unrepairable jobs stop requeueing.
+
+    Some CPs have no traceable bond path and therefore no storable atom pair.
+    Measured on a repair test: 17 jobs missing exactly 1 and 2 missing exactly
+    2, independent of system size. Without slack those jobs fail validation,
+    get requeued, rerun identically, and never clear.
+    """
+
+    @staticmethod
+    def _job(tmp_path, n_bcp, reported=11, n_atoms=12):
+        (tmp_path / "qtaim.out").write_text(
+            f" Number of (3,-1) CPs:    {reported}\n"
+            " Done! The results have been outputted to CPprop.txt in current folder\n"
+        )
+        return _write_qtaim_json(tmp_path / "qtaim.json", n_atoms=n_atoms, n_bcps=n_bcp)
+
+    def test_within_tolerance_passes(self, tmp_path):
+        p = self._job(tmp_path, n_bcp=9)  # 2 missing
+        assert validate_qtaim_dict(
+            str(p), n_atoms=12, folder=str(tmp_path), check_bcp_count=True,
+            bcp_tolerance=2,
+        )
+
+    def test_beyond_tolerance_fails(self, tmp_path):
+        p = self._job(tmp_path, n_bcp=8)  # 3 missing
+        assert not validate_qtaim_dict(
+            str(p), n_atoms=12, folder=str(tmp_path), check_bcp_count=True,
+            bcp_tolerance=2,
+        )
+
+    def test_zero_tolerance_is_strict(self, tmp_path):
+        p = self._job(tmp_path, n_bcp=10)  # 1 missing
+        assert not validate_qtaim_dict(
+            str(p), n_atoms=12, folder=str(tmp_path), check_bcp_count=True,
+            bcp_tolerance=0,
+        )
+
+    def test_tolerance_is_absolute_not_fractional(self, tmp_path):
+        """One missing CP must be tolerated the same whether the system has 11
+        BCPs or 300; the observed loss does not scale with size."""
+        for sub, reported in (("small", 11), ("large", 300)):
+            d = tmp_path / sub
+            d.mkdir()
+            p = self._job(d, n_bcp=reported - 1, reported=reported, n_atoms=reported + 1)
+            assert validate_qtaim_dict(
+                str(p), n_atoms=reported + 1, folder=str(d),
+                check_bcp_count=True, bcp_tolerance=2,
+            ), sub
+
+    def test_empty_bcp_set_ignores_tolerance(self, tmp_path):
+        """A multi-atom system with no bond CPs is broken regardless of slack."""
+        p = self._job(tmp_path, n_bcp=0)
+        assert not validate_qtaim_dict(
+            str(p), n_atoms=12, folder=str(tmp_path), check_bcp_count=True,
+            bcp_tolerance=99,
+        )
+
+    def test_restart_gate_uses_same_tolerance(self, tmp_path):
+        """The skip gate and the validator must agree, or the restart path
+        reruns records validation accepts."""
+        from qtaim_gen.source.core.omol import _has_usable_step_output
+
+        folder = tmp_path / "job"
+        (folder / "generator").mkdir(parents=True)
+        rec = {str(i): {"cp_num": i + 1} for i in range(12)}
+        for b in range(10):  # 1 short of the 11 reported
+            rec[f"{b}_{b + 1}"] = {"cp_num": 13 + b}
+        (folder / "generator" / "qtaim.json").write_text(json.dumps(rec))
+        (folder / "qtaim.out").write_text(QTAIM_OUT_LINE)
+        assert _has_usable_step_output(
+            str(folder), "qtaim", n_atoms=12, check_bcp_count=True, bcp_tolerance=2
+        )
+        assert not _has_usable_step_output(
+            str(folder), "qtaim", n_atoms=12, check_bcp_count=True, bcp_tolerance=0
+        )
+
+
+ORCA_INP_H2O = """! B3LYP def2-SVP
+* xyz 0 1
+O   0.000000  0.000000  0.117300
+H   0.000000  0.757200 -0.469200
+H   0.000000 -0.757200 -0.469200
+*
+"""
+
+
+class TestMissingQtaimDiscovery:
+    """Folders with no qtaim.json / no qtaim.out must be enumerable.
+
+    Discovery used to key on qtaim.json alone, so a job whose QTAIM step never
+    ran did not appear in the audit at all -- indistinguishable from a job that
+    was never submitted, and reported as if the vertical were clean. And a job
+    with qtaim.json but no qtaim.out left search_done/export_done null, which
+    the selector read as "not False" and so classified as a known-good control.
+    Both populations have to be selectable for the dataset to end up uniform.
+    """
+
+    @staticmethod
+    def _job(root, name, qtaim=True, qtaim_out=True, n_bcp=2):
+        d = os.path.join(root, "vert", name)
+        os.makedirs(d)
+        with open(os.path.join(d, "orca.inp"), "w") as f:
+            f.write(ORCA_INP_H2O)
+        if qtaim:
+            rec = {str(i): {"cp_num": i + 1} for i in range(3)}
+            for b in range(n_bcp):
+                rec[f"0_{b + 1}"] = {"cp_num": 4 + b}
+            with open(os.path.join(d, "qtaim.json"), "w") as f:
+                json.dump(rec, f)
+        if qtaim_out:
+            with open(os.path.join(d, "qtaim.out"), "w") as f:
+                f.write(
+                    " Number of (3,-1) CPs:     2\n"
+                    " Done! The results have been outputted to CPprop.txt"
+                    " in current folder\n"
+                )
+        return d
+
+    def test_default_walk_skips_folders_without_qtaim_json(self, tmp_path):
+        from qtaim_gen.source.scripts.helpers.audit_qtaim_connectivity import (
+            find_job_folders,
+        )
+
+        root = str(tmp_path)
+        self._job(root, "complete")
+        self._job(root, "no_json", qtaim=False)
+        found = {os.path.basename(f) for f in find_job_folders(root)}
+        assert found == {"complete"}
+
+    def test_include_missing_finds_them_by_orca_input(self, tmp_path):
+        from qtaim_gen.source.scripts.helpers.audit_qtaim_connectivity import (
+            find_job_folders,
+        )
+
+        root = str(tmp_path)
+        self._job(root, "complete")
+        self._job(root, "no_json", qtaim=False)
+        found = {
+            os.path.basename(f)
+            for f in find_job_folders(root, require_qtaim=False)
+        }
+        assert found == {"complete", "no_json"}
+
+    def test_audit_folder_reports_absence_instead_of_raising(self, tmp_path):
+        from qtaim_gen.source.scripts.helpers.audit_qtaim_connectivity import (
+            audit_folder,
+        )
+
+        d = self._job(str(tmp_path), "no_json", qtaim=False)
+        row = audit_folder(d, 1.3)
+        assert row["have_qtaim_json"] is False
+        assert row["n_atoms"] == 3
+        # blank, not zero: zero would read as "searched and found nothing"
+        assert row["n_bcp"] is None
+        assert row["bcp_shortfall"] is None
+
+    def test_audit_folder_flags_absent_provenance(self, tmp_path):
+        from qtaim_gen.source.scripts.helpers.audit_qtaim_connectivity import (
+            audit_folder,
+        )
+
+        d = self._job(str(tmp_path), "no_out", qtaim_out=False)
+        row = audit_folder(d, 1.3)
+        assert row["have_qtaim_json"] is True
+        assert row["have_qtaim_out"] is False
+        assert row["reported_bcp"] is None
+        assert row["bcp_shortfall"] is None
+
+    def test_selector_classifies_the_absence_modes(self, tmp_path):
+        from qtaim_gen.source.scripts.helpers.audit_qtaim_connectivity import (
+            audit_folder,
+        )
+        from qtaim_gen.source.scripts.helpers.select_qtaim_rerun import classify
+
+        root = str(tmp_path)
+        cases = {
+            "complete": ("control", {}),
+            "no_json": ("no_qtaim_json", {"qtaim": False}),
+            "no_out": ("no_provenance", {"qtaim_out": False}),
+            "short": ("shortfall", {"n_bcp": 1}),
+        }
+        for name, (expected, kwargs) in cases.items():
+            d = self._job(root, name, **kwargs)
+            row = audit_folder(d, 1.3)
+            # go through the CSV round trip: DictReader yields strings
+            as_csv = {k: "" if v is None else str(v) for k, v in row.items()}
+            assert classify(as_csv, bcp_tolerance=0) == expected, name
+
+    def test_selector_respects_the_runner_tolerance(self, tmp_path):
+        """A shortfall the runner tolerates must not be selected, or the job
+        reruns, returns identical, and is selected again forever."""
+        from qtaim_gen.source.scripts.helpers.audit_qtaim_connectivity import (
+            audit_folder,
+        )
+        from qtaim_gen.source.scripts.helpers.select_qtaim_rerun import classify
+
+        d = self._job(str(tmp_path), "short", n_bcp=1)  # 1 missing of 2
+        row = audit_folder(d, 1.3)
+        as_csv = {k: "" if v is None else str(v) for k, v in row.items()}
+        assert classify(as_csv, bcp_tolerance=0) == "shortfall"
+        assert classify(as_csv, bcp_tolerance=2) != "shortfall"
+
+    def test_verify_does_not_call_unverifiable_records_fixed(self):
+        from qtaim_gen.source.scripts.helpers.verify_qtaim_rerun import classify_state
+
+        assert classify_state({"have_qtaim_out": False}) == "no_provenance"
+        assert classify_state({"have_qtaim_json": False}) == "no_qtaim_json"
+        assert classify_state({"have_qtaim_out": True, "n_bcp": 5,
+                               "n_cov_bonds": 5, "bcp_shortfall": 0}) == "ok"

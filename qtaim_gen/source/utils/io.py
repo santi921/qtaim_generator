@@ -185,6 +185,7 @@ def get_folders_from_file(
     max_workers: int = 8,
     check_orca: bool = False,
     check_bcp_count: bool = False,
+    bcp_tolerance: int = 2,
     check_ecp: bool = False,
     checkpoint_path: Optional[str] = None,
     stop_check: Optional[Callable[[], bool]] = None,
@@ -230,6 +231,7 @@ def get_folders_from_file(
                     logger=logger,
                     check_orca=check_orca,
                     check_bcp_count=check_bcp_count,
+                    bcp_tolerance=bcp_tolerance,
                 )
                 if not tf_validation:
                     if logger:

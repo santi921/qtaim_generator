@@ -123,6 +123,20 @@ def main(argv=None):
         ),
     )
 
+    parser.add_argument(
+        "--bcp_tolerance",
+        type=int,
+        default=2,
+        help=(
+            "with --check_bcp_count, how many bond critical points may be "
+            "missing before a job counts as defective (default 2). Some CPs have "
+            "no traceable bond path and so no storable atom pair; measured on a "
+            "repair test that was 1 or 2 per molecule regardless of size, and no "
+            "rerun can recover them. Without this slack such jobs requeue on "
+            "every pass and never clear."
+        ),
+    )
+
     args = parser.parse_args(argv)
 
     overrun_running = bool(args.overrun_running) if "overrun_running" in args else False
@@ -144,6 +158,7 @@ def main(argv=None):
     patch_timings: bool = bool(getattr(args, "patch_timings", False))
     horton_python: str = str(getattr(args, "horton_python", ""))
     check_bcp_count: bool = bool(getattr(args, "check_bcp_count", False))
+    bcp_tolerance = int(getattr(args, "bcp_tolerance", 2))
     job_file = args.job_file
 
     # set env vars
@@ -230,6 +245,7 @@ def main(argv=None):
                     patch_timings=patch_timings,
                     horton_python=horton_python,
                     check_bcp_count=check_bcp_count,
+                    bcp_tolerance=bcp_tolerance,
                 )  # works!
             except Exception as e:
                 print(f"Error in gbw_analysis for {run_root}: {e}")

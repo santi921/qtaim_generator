@@ -29,9 +29,16 @@ import random
 import sys
 from typing import List, Optional
 
+from qtaim_gen.source.utils.validation import DEFAULT_BCP_TOLERANCE
 
-def classify(row: dict) -> str:
-    """Failure mode, or 'control' for a record with no detected defect."""
+
+def classify(row: dict, bcp_tolerance: int = DEFAULT_BCP_TOLERANCE) -> str:
+    """Failure mode, or 'control' for a record with no detected defect.
+
+    bcp_tolerance must match what the runner and refine_list_of_jobs use, or
+    this keeps selecting jobs those two consider acceptable -- they would rerun,
+    come back identical, and be selected again on the next pass.
+    """
 
     def as_int(key):
         try:
@@ -39,13 +46,23 @@ def classify(row: dict) -> str:
         except ValueError:
             return 0
 
+    # Absence first: these are not "clean", they are unexamined. A folder with
+    # no qtaim.json never ran QTAIM (or lost the output); one with no qtaim.out
+    # may hold a silently truncated CP set that nothing on disk can rule out.
+    # Both have to rerun for the dataset to be uniform, so they are selectable
+    # modes rather than controls -- which is what they used to fall through to,
+    # because search_done/export_done are empty (not "False") without qtaim.out.
+    if row.get("have_qtaim_json") == "False":
+        return "no_qtaim_json"
     if row.get("error"):
         return "error"
     if row.get("search_done") == "False" or row.get("export_done") == "False":
         return "incomplete_run"
+    if row.get("have_qtaim_out") == "False":
+        return "no_provenance"
     if as_int("n_bcp") == 0 and as_int("n_cov_bonds") > 0:
         return "empty_bcp"
-    if as_int("bcp_shortfall") > 0:
+    if as_int("bcp_shortfall") > bcp_tolerance:
         return "shortfall"
     n_atoms = as_int("n_atoms")
     if n_atoms and as_int("n_isolated_bonded") / n_atoms > 0.10:
@@ -104,9 +121,29 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument(
+        "--bcp_tolerance",
+        type=int,
+        default=DEFAULT_BCP_TOLERANCE,
+        help=(
+            "bond CPs allowed to be missing before 'shortfall' is selectable "
+            f"(default {DEFAULT_BCP_TOLERANCE}). Keep this equal to the runner's "
+            "--bcp_tolerance; a smaller value here selects jobs the runner will "
+            "accept unchanged, and they never leave the queue."
+        ),
+    )
+    parser.add_argument(
         "--modes",
-        default="shortfall,incomplete_run,empty_bcp,severe_isolated",
-        help="failure modes eligible for selection",
+        default=(
+            "shortfall,incomplete_run,empty_bcp,severe_isolated,"
+            "no_qtaim_json,no_provenance"
+        ),
+        help=(
+            "failure modes eligible for selection. no_qtaim_json and "
+            "no_provenance are the absence modes: nothing on disk proves those "
+            "records complete, so they rerun for uniformity. They dominate the "
+            "count on verticals that were cleaned, so drop them from this list "
+            "to target proven defects only."
+        ),
     )
     args = parser.parse_args(argv)
 
@@ -121,7 +158,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                         file=sys.stderr,
                     )
                     return 2
-                row["_mode"] = classify(row)
+                row["_mode"] = classify(row, args.bcp_tolerance)
                 row["_bin"] = size_bin(row)
                 row["_source"] = os.path.basename(path)
                 rows.append(row)
@@ -178,7 +215,8 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     fields = [
         "_mode", "_bin", "_source", "vertical", "key", "folder", "n_atoms", "n_ncp",
-        "n_bcp", "reported_bcp", "bcp_shortfall", "search_done", "export_done",
+        "n_bcp", "reported_bcp", "bcp_shortfall", "have_qtaim_json",
+        "have_qtaim_out", "search_done", "export_done",
         "n_cov_bonds", "n_isolated_bonded", "n_components", "qtaim_time_s",
     ]
     with open(before_path, "w", newline="") as f:

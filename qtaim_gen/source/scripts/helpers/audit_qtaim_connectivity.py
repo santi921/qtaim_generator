@@ -385,11 +385,21 @@ def explain_shortfall(folder: str) -> dict:
     return out
 
 
-def find_job_folders(root: str, max_depth: int = 8):
+JOB_INPUT_NAMES = ("orca.inp", "input.in", "orca.in", "input.inp")
+
+
+def find_job_folders(root: str, max_depth: int = 8, require_qtaim: bool = True):
     """Yield job folders under root, i.e. those holding a qtaim.json.
 
     The OMol4M hierarchy is jagged, so this walks rather than globbing a fixed
     depth. Checks the folder root and generator/ (post-cleanup layout).
+
+    With require_qtaim=False, a folder holding an ORCA input but no qtaim.json
+    is yielded too. Keying discovery on qtaim.json alone makes a job whose
+    QTAIM step never ran indistinguishable from a job that was never submitted:
+    it simply does not appear, so the audit reports the surviving folders as
+    clean. Those absences are the population that has to be rerun for the
+    dataset to be uniform, so they need to be enumerable.
     """
     root = os.path.abspath(root)
     base_depth = root.rstrip(os.sep).count(os.sep)
@@ -401,6 +411,18 @@ def find_job_folders(root: str, max_depth: int = 8):
             dirnames[:] = [d for d in dirnames if d != "generator"]
         elif "generator" in dirnames and os.path.isfile(
             os.path.join(dirpath, "generator", "qtaim.json")
+        ):
+            yield dirpath
+            dirnames[:] = [d for d in dirnames if d != "generator"]
+        elif not require_qtaim and (
+            any(name in filenames for name in JOB_INPUT_NAMES)
+            or (
+                "generator" in dirnames
+                and any(
+                    os.path.isfile(os.path.join(dirpath, "generator", name))
+                    for name in JOB_INPUT_NAMES
+                )
+            )
         ):
             yield dirpath
             dirnames[:] = [d for d in dirnames if d != "generator"]
@@ -418,14 +440,16 @@ def audit_folder(folder: str, covalent_factor: float) -> dict:
     from qtaim_gen.source.core.parse_qtaim import dft_inp_to_dict
     from qtaim_gen.source.utils.validation import qtaim_run_status
 
-    qpath = os.path.join(folder, "qtaim.json")
-    if not os.path.isfile(qpath):
-        qpath = os.path.join(folder, "generator", "qtaim.json")
-    with open(qpath) as f:
-        qtaim_rec = _json.load(f)
+    qtaim_rec = None
+    for base in (folder, os.path.join(folder, "generator")):
+        qpath = os.path.join(base, "qtaim.json")
+        if os.path.isfile(qpath) and os.path.getsize(qpath) > 0:
+            with open(qpath) as f:
+                qtaim_rec = _json.load(f)
+            break
 
     inp = None
-    for cand in ("orca.inp", "input.in", "orca.in", "input.inp"):
+    for cand in JOB_INPUT_NAMES:
         for base in (folder, os.path.join(folder, "generator")):
             p = os.path.join(base, cand)
             if os.path.isfile(p):
@@ -446,10 +470,29 @@ def audit_folder(folder: str, covalent_factor: float) -> dict:
     mol = _Mol()
     mol.species = species
     mol.cart_coords = coords
-    row = audit_record({"molecule": mol}, qtaim_rec, covalent_factor)
+    if qtaim_rec is None:
+        # No QTAIM record at all. Everything downstream keys off n_atoms, so
+        # report the geometry and leave the CP columns blank rather than zero:
+        # a zero here would read as "searched, found nothing".
+        row = {
+            "n_atoms": len(species),
+            "n_ncp": None,
+            "n_bcp": None,
+            "n_cov_bonds": None,
+            "n_components": None,
+            "n_isolated_bonded": None,
+            "isolated_bonded": "",
+            "n_missing_cov_bonds": None,
+            "missing_cov_bonds": "",
+            "ncp_matches_atoms": 0,
+        }
+    else:
+        row = audit_record({"molecule": mol}, qtaim_rec, covalent_factor)
+    row["have_qtaim_json"] = qtaim_rec is not None
 
     status = qtaim_run_status(folder)
     reported = status["reported_bcp"]
+    row["have_qtaim_out"] = status["have_qtaim_out"]
     row["reported_bcp"] = reported
     # A matching count does not prove completeness: the run can die during the
     # search (no count at all) or during the CPprop.txt export (count present,
@@ -457,7 +500,9 @@ def audit_folder(folder: str, covalent_factor: float) -> dict:
     row["search_done"] = status["search_done"]
     row["export_done"] = status["export_done"]
     row["bcp_shortfall"] = (
-        reported - row["n_bcp"] if reported is not None else None
+        reported - row["n_bcp"]
+        if reported is not None and row["n_bcp"] is not None
+        else None
     )
 
     # Leading hypothesis for lost CPs is the QTAIM step being killed mid-write
@@ -497,7 +542,13 @@ def _run_folder_mode(args) -> int:
         if not os.path.isdir(r):
             print(f"skip missing root: {r}", file=sys.stderr)
             continue
-        found = list(find_job_folders(r, args.max_depth))
+        found = list(
+            find_job_folders(
+                r,
+                args.max_depth,
+                require_qtaim=not getattr(args, "include_missing_qtaim", False),
+            )
+        )
         print(f"{os.path.basename(r.rstrip(os.sep)):<24} job folders: {len(found)}", flush=True)
         folders.extend(found)
         if args.limit and len(folders) >= args.limit:
@@ -526,7 +577,8 @@ def _run_folder_mode(args) -> int:
 
     fields = [
         "vertical", "key", "folder", "n_atoms", "n_ncp", "n_bcp", "reported_bcp",
-        "bcp_shortfall", "search_done", "export_done", "qtaim_time_s", "total_time_s",
+        "bcp_shortfall", "have_qtaim_json", "have_qtaim_out",
+        "search_done", "export_done", "qtaim_time_s", "total_time_s",
         "n_cov_bonds", "n_components", "n_isolated_bonded",
         "isolated_bonded", "n_missing_cov_bonds", "missing_cov_bonds",
         "ncp_matches_atoms", "error",
@@ -536,7 +588,11 @@ def _run_folder_mode(args) -> int:
         w.writeheader()
         w.writerows(rows)
 
-    ok = [r for r in rows if r.get("n_atoms")]
+    # rows with no qtaim.json carry a geometry but no CP columns; keep them out
+    # of the per-CP statistics rather than letting None compare against 0
+    missing_json = [r for r in rows if r.get("have_qtaim_json") is False]
+    no_prov_rows = [r for r in rows if r.get("have_qtaim_out") is False]
+    ok = [r for r in rows if r.get("n_atoms") and r.get("n_bcp") is not None]
     errs = [r for r in rows if r.get("error")]
     empty = [r for r in ok if r.get("n_bcp") == 0]
     short = [r for r in ok if (r.get("bcp_shortfall") or 0) > 0]
@@ -548,6 +604,15 @@ def _run_folder_mode(args) -> int:
     n = len(ok) or 1
     with_prov = [r for r in ok if r.get("reported_bcp") is not None]
     print(f"\n{len(rows)} folders audited -> {args.out_csv}  ({len(errs)} errors)")
+    if getattr(args, "include_missing_qtaim", False):
+        print(
+            f"  no qtaim.json at all:          {len(missing_json):>7} "
+            "<- QTAIM never ran or its output was lost; needs a full rerun"
+        )
+    print(
+        f"  no qtaim.out (no provenance):  {len(no_prov_rows):>7} "
+        "<- completeness is UNVERIFIABLE, not verified"
+    )
     print(
         f"  qtaim.out provenance available: {len(with_prov):>7} "
         f"({100*len(with_prov)/n:.1f}%)"
@@ -833,6 +898,16 @@ def main(argv: Optional[List[str]] = None) -> int:
         default=None,
         help="explain mode: 'fixed' jobs from a verify CSV become the size "
         "control group for the memory comparison",
+    )
+    parser.add_argument(
+        "--include_missing_qtaim",
+        action="store_true",
+        help=(
+            "folder mode: also audit job folders that hold no qtaim.json at all "
+            "(discovered by their ORCA input instead). Those are invisible to "
+            "the default walk, so a vertical whose QTAIM step never ran looks "
+            "clean rather than absent. Reported with have_qtaim_json=False."
+        ),
     )
     parser.add_argument("--limit", type=int, default=None, help="records per vertical")
     args = parser.parse_args(argv)

@@ -28,6 +28,8 @@ import os
 import sys
 from typing import List, Optional
 
+from qtaim_gen.source.utils.validation import DEFAULT_BCP_TOLERANCE
+
 SIBLING_JSONS = ("charge.json", "bond.json", "fuzzy_full.json", "other.json", "orca.json")
 
 
@@ -66,16 +68,26 @@ def newer_siblings(folder: str) -> List[str]:
     return touched
 
 
-def classify_state(row: dict) -> str:
-    """'ok' or the reason the record is still considered defective."""
+def classify_state(row: dict, bcp_tolerance: int = DEFAULT_BCP_TOLERANCE) -> str:
+    """'ok' or the reason the record is still considered defective.
+
+    Uses the runner's tolerance so a job left one unmappable CP short reads as
+    repaired rather than as a permanent failure.
+    """
     if row.get("error"):
         return "error"
+    if row.get("have_qtaim_json") is False:
+        return "no_qtaim_json"
     if row.get("search_done") is False or row.get("export_done") is False:
         return "incomplete_run"
+    # No qtaim.out means the rerun left nothing to check the CP count against,
+    # so it cannot be called fixed -- the shortfall column is null, not zero.
+    if row.get("have_qtaim_out") is False:
+        return "no_provenance"
     n_bcp = as_int(row.get("n_bcp"))
     if n_bcp == 0 and as_int(row.get("n_cov_bonds")) > 0:
         return "empty_bcp"
-    if as_int(row.get("bcp_shortfall")) > 0:
+    if as_int(row.get("bcp_shortfall")) > bcp_tolerance:
         return "shortfall"
     return "ok"
 
@@ -87,6 +99,13 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--before_csv", required=True)
     parser.add_argument("--out_csv", required=True)
     parser.add_argument("--covalent_factor", type=float, default=1.3)
+    parser.add_argument(
+        "--bcp_tolerance",
+        type=int,
+        default=DEFAULT_BCP_TOLERANCE,
+        help="match the runner's --bcp_tolerance so a tolerated shortfall "
+        "counts as fixed",
+    )
     args = parser.parse_args(argv)
 
     with open(args.before_csv) as f:
@@ -123,7 +142,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                 "reported_after": after.get("reported_bcp"),
                 "shortfall_after": after.get("bcp_shortfall"),
                 "export_done_after": after.get("export_done"),
-                "state_after": classify_state(after),
+                "state_after": classify_state(after, args.bcp_tolerance),
                 "siblings_touched": " ".join(newer_siblings(folder)),
             }
         )

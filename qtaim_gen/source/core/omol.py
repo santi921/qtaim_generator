@@ -493,6 +493,7 @@ def run_jobs(
     clean_jobs_tf: bool = False,
     subprocess_env: Optional[dict] = None,
     check_bcp_count: bool = False,
+    bcp_tolerance: int = 2,
 ) -> None:
     """
     Run conversion and multiwfn jobs
@@ -644,6 +645,7 @@ def run_jobs(
                 order,
                 n_atoms=n_atoms_for_skip,
                 check_bcp_count=check_bcp_count,
+                bcp_tolerance=bcp_tolerance,
             )
             if has_files or _compiled_data_present(
                 folder, order, _compiled_map,
@@ -1751,6 +1753,7 @@ def _qtaim_output_complete(
     folder: str,
     n_atoms: Optional[int] = None,
     check_bcp_count: bool = False,
+    bcp_tolerance: int = 2,
 ) -> bool:
     """Whether qtaim.json looks complete enough to skip the QTAIM step.
 
@@ -1791,9 +1794,17 @@ def _qtaim_output_complete(
             if status["have_qtaim_out"]:
                 if not status["export_done"]:
                     return False
+                # Must use the same tolerance the validator does, or the
+                # restart path reruns records validation is happy to accept --
+                # which is how a repair campaign ends up looping forever.
+                from qtaim_gen.source.utils.validation import storable_bcp_count
+
                 reported = status["reported_bcp"]
-                if reported is not None and n_bcp < reported:
-                    return False
+                if reported is not None:
+                    storable = storable_bcp_count(folder)
+                    expected = storable if storable is not None else reported
+                    if expected - n_bcp > bcp_tolerance:
+                        return False
         return True
     return False
 
@@ -1803,6 +1814,7 @@ def _has_usable_step_output(
     order: str,
     n_atoms: Optional[int] = None,
     check_bcp_count: bool = False,
+    bcp_tolerance: int = 2,
 ) -> bool:
     """Check whether a sub-job appears to have produced usable output on disk.
 
@@ -1825,7 +1837,10 @@ def _has_usable_step_output(
     # qtaim.json can be non-empty yet incomplete, so presence is not enough
     if order == "qtaim":
         return _qtaim_output_complete(
-            folder, n_atoms=n_atoms, check_bcp_count=check_bcp_count
+            folder,
+            n_atoms=n_atoms,
+            check_bcp_count=check_bcp_count,
+            bcp_tolerance=bcp_tolerance,
         )
 
     for base in (folder, os.path.join(folder, "generator")):
@@ -1949,6 +1964,7 @@ def gbw_analysis(
     patch_path: bool= False,
     check_orca: bool = False,
     check_bcp_count: bool = False,
+    bcp_tolerance: int = 2,
     wfx: bool = False,
     exhaustive_qtaim: bool = False,
     subprocess_env: Optional[dict] = None,
@@ -2154,6 +2170,7 @@ def gbw_analysis(
                     logger=logger,
                     check_orca=check_orca,
                     check_bcp_count=check_bcp_count,
+                    bcp_tolerance=bcp_tolerance,
                 )
             except Exception as e:
                 logger.error(f"Error during validation checks: {e}")
@@ -2188,6 +2205,7 @@ def gbw_analysis(
                         logger=logger,
                         check_orca=False,
                         check_bcp_count=check_bcp_count,
+                        bcp_tolerance=bcp_tolerance,
                     )
                 except Exception:
                     tf_without_orca = False
@@ -2254,6 +2272,7 @@ def gbw_analysis(
                         logger=logger,
                         check_orca=check_orca,
                         check_bcp_count=check_bcp_count,
+                        bcp_tolerance=bcp_tolerance,
                     )
 
                     if tf_validation:
@@ -2308,6 +2327,7 @@ def gbw_analysis(
             clean_jobs_tf=clean,
             subprocess_env=subprocess_env,
             check_bcp_count=check_bcp_count,
+            bcp_tolerance=bcp_tolerance,
         )
 
     print("... Parsing multiwfn output")
@@ -2342,6 +2362,7 @@ def gbw_analysis(
         logger=logger,
         check_orca=check_orca,
         check_bcp_count=check_bcp_count,
+        bcp_tolerance=bcp_tolerance,
     )
 
     # Optional repair pass: if validation failed and patch_timings is on,

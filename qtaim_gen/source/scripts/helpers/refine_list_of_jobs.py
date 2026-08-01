@@ -154,6 +154,20 @@ def main(argv: Optional[List[str]] = None) -> int:
         ),
     )
 
+    parser.add_argument(
+        "--bcp_tolerance",
+        type=int,
+        default=2,
+        help=(
+            "with --check_bcp_count, how many bond critical points may be "
+            "missing before a job counts as defective (default 2). Some CPs have "
+            "no traceable bond path and so no storable atom pair; measured on a "
+            "repair test that was 1 or 2 per molecule regardless of size, and no "
+            "rerun can recover them. Without this slack such jobs requeue on "
+            "every pass and never clear."
+        ),
+    )
+
     args = parser.parse_args(argv)
 
     log_file: Optional[str] = getattr(args, "log_file", None)
@@ -177,6 +191,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     orphaned_check: bool = bool(getattr(args, "check_orphaned", False))
     check_orca: bool = bool(getattr(args, "check_orca", False))
     check_bcp_count: bool = bool(getattr(args, "check_bcp_count", False))
+    bcp_tolerance = int(getattr(args, "bcp_tolerance", 2))
     check_ecp: bool = bool(getattr(args, "check_ecp", False))
     n_workers: int = int(getattr(args, "n_workers", 8))
     refined_job_file: str = getattr(args, "refined_job_file", "refined_jobs.txt")
@@ -219,6 +234,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         full_set=full_set,
         check_orca=check_orca,
         check_bcp_count=check_bcp_count,
+        bcp_tolerance=bcp_tolerance,
         check_ecp=check_ecp,
         logger=logger,
         max_workers=n_workers,
