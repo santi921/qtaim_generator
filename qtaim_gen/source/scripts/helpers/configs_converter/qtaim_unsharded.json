@@ -37,15 +37,15 @@
             "n_atoms"
         ]
     },
-    "lmdb_path": "/tmp/pytest-of-santiagovargas/pytest-92/test_config_builds_graphs_from8",
+    "lmdb_path": "/path/to/output",
     "lmdb_name": "qtaim_graphs.lmdb",
     "lmdb_locations": {
-        "geom_lmdb": "/home/santiagovargas/dev/qtaim_generator/tests/test_files/lmdb_tests/generator_lmdbs_merged/merged_geom.lmdb",
-        "qtaim_lmdb": "/home/santiagovargas/dev/qtaim_generator/tests/test_files/lmdb_tests/generator_lmdbs_merged/merged_qtaim.lmdb",
-        "charge_lmdb": "/home/santiagovargas/dev/qtaim_generator/tests/test_files/lmdb_tests/generator_lmdbs_merged/merged_charge.lmdb"
+        "geom_lmdb": "/path/to/source/geom.lmdb",
+        "qtaim_lmdb": "/path/to/source/qtaim.lmdb",
+        "charge_lmdb": "/path/to/source/charge.lmdb"
     },
     "charge_filter": [],
-    "n_workers": 1,
+    "n_workers": 8,
     "batch_size": 500,
     "index_dict": {
         "include_locs": {
