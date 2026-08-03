@@ -1,0 +1,135 @@
+{
+    "chunk": -1,
+    "filter_list": [
+        "length",
+        "scaled"
+    ],
+    "restart": false,
+    "allowed_ring_size": [
+        3,
+        4,
+        5,
+        6,
+        7,
+        8
+    ],
+    "allowed_charges": null,
+    "allowed_spins": null,
+    "keys_target": {
+        "atom": [],
+        "bond": [],
+        "global": [
+            "n_atoms"
+        ]
+    },
+    "keys_data": {
+        "atom": [],
+        "bond": [],
+        "global": [
+            "n_atoms"
+        ]
+    },
+    "lmdb_path": "/tmp/pytest-of-santiagovargas/pytest-92/test_config_builds_graphs_from0",
+    "lmdb_name": "base_graphs.lmdb",
+    "lmdb_locations": {
+        "geom_lmdb": "/home/santiagovargas/dev/qtaim_generator/tests/test_files/lmdb_tests/generator_lmdbs_merged/merged_geom.lmdb"
+    },
+    "n_workers": 1,
+    "batch_size": 500,
+    "shard_index": 0,
+    "total_shards": 2,
+    "skip_scaling": true,
+    "save_unfinalized_scaler": true,
+    "index_dict": {
+        "include_locs": {
+            "global": [
+                3
+            ]
+        },
+        "exclude_locs": {
+            "atom": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7,
+                8,
+                9,
+                10,
+                11,
+                12,
+                13,
+                14,
+                15,
+                16,
+                17,
+                18,
+                19,
+                20
+            ],
+            "bond": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7
+            ],
+            "global": [
+                0,
+                1,
+                2
+            ]
+        },
+        "include_names": {
+            "global": [
+                "n_atoms"
+            ]
+        },
+        "exclude_names": {
+            "atom": [
+                "total_degree",
+                "total_H",
+                "is_in_ring",
+                "ring_size_3",
+                "ring_size_4",
+                "ring_size_5",
+                "ring_size_6",
+                "ring_size_7",
+                "ring_size_8",
+                "chemical_symbol_C",
+                "chemical_symbol_Cl",
+                "chemical_symbol_F",
+                "chemical_symbol_Ge",
+                "chemical_symbol_H",
+                "chemical_symbol_N",
+                "chemical_symbol_O",
+                "chemical_symbol_P",
+                "chemical_symbol_S",
+                "chemical_symbol_Sb",
+                "chemical_symbol_Tl",
+                "chemical_symbol_Y"
+            ],
+            "bond": [
+                "metal bond",
+                "ring inclusion",
+                "ring size_3",
+                "ring size_4",
+                "ring size_5",
+                "ring size_6",
+                "ring size_7",
+                "ring size_8"
+            ],
+            "global": [
+                "num atoms",
+                "num bonds",
+                "molecule weight"
+            ]
+        }
+    }
+}

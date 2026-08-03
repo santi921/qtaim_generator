@@ -222,6 +222,53 @@ def main(argv: Optional[List[str]] = None) -> int:
         ),
     )
 
+    parser.add_argument(
+        "--horton_python",
+        type=str,
+        default="",
+        help=(
+            "python interpreter of the separate horton environment; setting "
+            "this enables the HORTON charge engine post-step (default off)"
+        ),
+    )
+
+    parser.add_argument(
+        "--check_bcp_count",
+        action="store_true",
+        help=(
+            "reject qtaim.json records holding fewer bond critical points than "
+            "Multiwfn reported in qtaim.out (catches truncated CPprop.txt, "
+            "which the nuclear-CP check cannot see)"
+        ),
+    )
+
+    parser.add_argument(
+        "--bcp_tolerance",
+        type=int,
+        default=2,
+        help=(
+            "with --check_bcp_count, how many bond critical points may be "
+            "missing before a job counts as defective (default 2). Some CPs have "
+            "no traceable bond path and so no storable atom pair; measured on a "
+            "repair test that was 1 or 2 per molecule regardless of size, and no "
+            "rerun can recover them. Without this slack such jobs requeue on "
+            "every pass and never clear."
+        ),
+    )
+
+    parser.add_argument(
+        "--require_qtaim_provenance",
+        action="store_true",
+        help=(
+            "treat a job with no qtaim.out as incomplete. Its bond-CP count "
+            "cannot be checked against anything, so --check_bcp_count alone "
+            "passes it and the folder is skipped -- while the audit classifies "
+            "it no_provenance and selects it for rerun. Set this to make the "
+            "runner agree with the selector. Reruns records that may be fine, "
+            "which is the point: unverifiable is not verified."
+        ),
+    )
+
     args = parser.parse_args(argv)
     # print(args)
     for key, value in vars(args).items():
@@ -253,6 +300,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     check_ecp: bool = bool(getattr(args, "check_ecp", False))
     exhaustive_qtaim: bool = bool(getattr(args, "exhaustive_qtaim", False))
     patch_timings: bool = bool(getattr(args, "patch_timings", False))
+    horton_python: str = str(getattr(args, "horton_python", ""))
+    check_bcp_count: bool = bool(getattr(args, "check_bcp_count", False))
+    bcp_tolerance = int(getattr(args, "bcp_tolerance", 2))
+    require_qtaim_provenance = bool(
+        getattr(args, "require_qtaim_provenance", False)
+    )
 
     # parsl args
     type_runner: str = str(getattr(args, "type_runner", "local"))
@@ -326,6 +379,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         move_results=move_results,
         full_set=full_set,
         check_orca=check_orca,
+        check_bcp_count=check_bcp_count,
+        bcp_tolerance=bcp_tolerance,
+        require_qtaim_provenance=require_qtaim_provenance,
         check_ecp=check_ecp,
     )
 
@@ -367,6 +423,10 @@ def main(argv: Optional[List[str]] = None) -> int:
             check_orca=check_orca,
             exhaustive_qtaim=exhaustive_qtaim,
             patch_timings=patch_timings,
+            horton_python=horton_python,
+            check_bcp_count=check_bcp_count,
+            bcp_tolerance=bcp_tolerance,
+            require_qtaim_provenance=require_qtaim_provenance,
         )
         for f in folders_run
     ]

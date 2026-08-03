@@ -1,7 +1,7 @@
 import json
 import os
 import tempfile
-from typing import Dict, Sequence, Any, Union, List, Tuple, Optional
+from typing import Dict, Sequence, Any, Union, List, Tuple, Optional, Callable
 import time
 import random
 import concurrent.futures
@@ -33,6 +33,23 @@ def find_wavefunction_file(folder: str) -> Optional[str]:
         matches = _glob(os.path.join(folder, f"*{ext}"))
         if matches:
             return matches[0]
+    return None
+
+
+def find_wfx(folder: str) -> Optional[str]:
+    """Find orca.wfx in a job folder, checking the root then generator/.
+
+    Narrower than find_wavefunction_file: the post-processing engines
+    (core/horton.py, core/critic2.py) require the wfx specifically -- wfn
+    carries no usable EDF core density -- and must look in both locations
+    because move_results relocates outputs into generator/.
+    """
+    for cand in (
+        os.path.join(folder, "orca.wfx"),
+        os.path.join(folder, "generator", "orca.wfx"),
+    ):
+        if os.path.isfile(cand) and os.path.getsize(cand) > 0:
+            return cand
     return None
 
 
@@ -167,7 +184,12 @@ def get_folders_from_file(
     logger: Any = None,
     max_workers: int = 8,
     check_orca: bool = False,
+    check_bcp_count: bool = False,
+    bcp_tolerance: int = 2,
+    require_qtaim_provenance: bool = False,
     check_ecp: bool = False,
+    checkpoint_path: Optional[str] = None,
+    stop_check: Optional[Callable[[], bool]] = None,
 ) -> List[str]:
     print(
         f"collecting {num_folders} folders from {job_file} with pre_validate={pre_validate} (parallelized)"
@@ -209,6 +231,9 @@ def get_folders_from_file(
                     move_results=move_results,
                     logger=logger,
                     check_orca=check_orca,
+                    check_bcp_count=check_bcp_count,
+                    bcp_tolerance=bcp_tolerance,
+                    require_qtaim_provenance=require_qtaim_provenance,
                 )
                 if not tf_validation:
                     if logger:
@@ -233,24 +258,63 @@ def get_folders_from_file(
                     )
                 return folder
 
-        folders_run = []
-        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = {
-                executor.submit(validate_folder, folder): folder for folder in folders
-            }
-            with tqdm(
-                total=len(folders), desc="Pre-validating folders", unit="folder"
-            ) as pbar:
-                for future in concurrent.futures.as_completed(futures):
-                    result = future.result()
-                    pbar.update(1)
-                    if result:
-                        folders_run.append(result)
-                        if len(folders_run) >= num_folders:
+        # checkpoint: one "folder\tKEEP|SKIP" line per decided folder
+        decided = {}
+        if checkpoint_path and os.path.exists(checkpoint_path):
+            with open(checkpoint_path, "r") as f:
+                for line in f:
+                    parts = line.rstrip("\n").split("\t")
+                    if len(parts) == 2 and parts[1] in ("KEEP", "SKIP"):
+                        decided[parts[0]] = parts[1]
+            if decided:
+                print(
+                    f"Loaded {len(decided)} prior decisions from checkpoint {checkpoint_path}"
+                )
+
+        folders_run = [f for f in folders if decided.get(f) == "KEEP"]
+        pending = [f for f in folders if f not in decided]
+        if len(folders_run) >= num_folders:
+            print(f"Checkpoint already holds {len(folders_run)} folders to run.")
+            return folders_run
+
+        ckpt_f = open(checkpoint_path, "a") if checkpoint_path else None
+        try:
+            with concurrent.futures.ThreadPoolExecutor(
+                max_workers=max_workers
+            ) as executor:
+                futures = {
+                    executor.submit(validate_folder, folder): folder
+                    for folder in pending
+                }
+                with tqdm(
+                    total=len(pending), desc="Pre-validating folders", unit="folder"
+                ) as pbar:
+                    for future in concurrent.futures.as_completed(futures):
+                        if stop_check and stop_check():
                             print(
-                                f"Pre-validation collected {len(folders_run)} folders to run."
+                                "Stop requested; cancelling remaining validations."
                             )
+                            executor.shutdown(wait=False, cancel_futures=True)
                             break
+                        result = future.result()
+                        pbar.update(1)
+                        if ckpt_f:
+                            folder = futures[future]
+                            ckpt_f.write(
+                                f"{folder}\t{'KEEP' if result else 'SKIP'}\n"
+                            )
+                            ckpt_f.flush()
+                        if result:
+                            folders_run.append(result)
+                            if len(folders_run) >= num_folders:
+                                print(
+                                    f"Pre-validation collected {len(folders_run)} folders to run."
+                                )
+                                executor.shutdown(wait=False, cancel_futures=True)
+                                break
+        finally:
+            if ckpt_f:
+                ckpt_f.close()
         return folders_run
     else:
         folders_run = folders[:num_folders]

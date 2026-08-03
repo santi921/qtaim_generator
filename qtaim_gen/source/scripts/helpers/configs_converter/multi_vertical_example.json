@@ -1,0 +1,18 @@
+{
+  "output_dir": "/path/to/merged_output",
+  "verticals": [
+    {
+      "name": "spice",
+      "converter_config": "/path/to/spice/converter_config.json"
+    },
+    {
+      "name": "qm9",
+      "converter_config": "/path/to/qm9/converter_config.json"
+    }
+  ],
+  "split_method": "composition",
+  "split_ratios": [0.8, 0.1, 0.1],
+  "split_seed": 42,
+  "n_shards_per_split": 8,
+  "build_max_workers": 8
+}

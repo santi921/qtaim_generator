@@ -16,6 +16,7 @@ from qtaim_gen.source.utils.validation import (
 
 from qtaim_gen.source.utils.io import check_results_exist
 from qtaim_gen.source.utils.atomic_write import atomic_json_write
+from qtaim_gen.source.core.horton import run_horton_analysis
 
 from qtaim_gen.source.data.multiwfn import (
     charge_data,
@@ -491,6 +492,9 @@ def run_jobs(
     move_results: bool = False,
     clean_jobs_tf: bool = False,
     subprocess_env: Optional[dict] = None,
+    check_bcp_count: bool = False,
+    bcp_tolerance: int = 2,
+    require_qtaim_provenance: bool = False,
 ) -> None:
     """
     Run conversion and multiwfn jobs
@@ -637,7 +641,14 @@ def run_jobs(
         # is secondary. This handles cases where timings.json was reset/corrupted
         # or a crash occurred between the mfwn script finishing and the timing write.
         if restart:
-            has_files = _has_usable_step_output(folder, order)
+            has_files = _has_usable_step_output(
+                folder,
+                order,
+                n_atoms=n_atoms_for_skip,
+                check_bcp_count=check_bcp_count,
+                bcp_tolerance=bcp_tolerance,
+                require_qtaim_provenance=require_qtaim_provenance,
+            )
             if has_files or _compiled_data_present(
                 folder, order, _compiled_map,
                 n_atoms=n_atoms_for_skip,
@@ -1112,9 +1123,12 @@ def clean_jobs(
             if file.endswith("convert.in"):
                 os.remove(os.path.join(folder, file))
                 logger.info(f"Removed {file}")
-            if file.endswith("CPprop.txt"):
-                os.remove(os.path.join(folder, file))
-                logger.info(f"Removed {file}")
+            # NOT CPprop.txt: it is collected into out_files.zip below and
+            # deleted only after the zip is safely merged. Deleting it here made
+            # the zip's CPprop.txt clause dead code, which is why no archived
+            # job retained the one file needed to diagnose a lost critical
+            # point (the per-CP property blocks live nowhere else -- qtaim.out
+            # carries only the count).
             if file.endswith("fuzzy_full.txt"):
                 os.remove(os.path.join(folder, file))
                 logger.info(f"Removed {file}")
@@ -1352,6 +1366,7 @@ def move_results_to_folder(
         "qtaim.json",
         "other.json",
         "orca.json",
+        "horton.json",
     ]
     results_folder = os.path.join(folder, "generator")
 
@@ -1736,7 +1751,107 @@ def _wavefunction_present(folder: str) -> bool:
     return False
 
 
-def _has_usable_step_output(folder: str, order: str) -> bool:
+def _qtaim_output_complete(
+    folder: str,
+    n_atoms: Optional[int] = None,
+    check_bcp_count: bool = False,
+    bcp_tolerance: int = 2,
+    require_qtaim_provenance: bool = False,
+) -> bool:
+    """Whether qtaim.json looks complete enough to skip the QTAIM step.
+
+    A non-empty qtaim.json is not sufficient. Multiwfn numbers nuclear CPs
+    first, so a record truncated in the bond-CP tail -- or one carrying every
+    nuclear CP and no bond CPs at all -- is still a well-formed, non-empty file.
+    Accepting it made the restart path contradict the validator: the step was
+    skipped as "data verified" and the same job then failed validation for
+    having no bond critical points, every pass, forever.
+
+    Rejects (forcing a rerun) when the nuclear-CP count disagrees with the atom
+    count, or a multi-atom system has no bond CPs. With check_bcp_count it also
+    consults qtaim.out, rejecting a run whose CP search or CPprop.txt export
+    never finished or whose stored bond-CP count falls short of what Multiwfn
+    reported; conversely, an empty BCP set is then acceptable when a complete
+    run itself reported none (genuinely non-interacting fragments).
+    """
+    from qtaim_gen.source.utils.validation import qtaim_run_status
+
+    for base in (folder, os.path.join(folder, "generator")):
+        path = os.path.join(base, "qtaim.json")
+        if not os.path.isfile(path) or os.path.getsize(path) == 0:
+            continue
+        try:
+            with open(path, "r") as f:
+                data = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not data:
+            continue
+
+        n_ncp = sum(1 for k in data if k != "_meta" and "_" not in k)
+        n_bcp = sum(1 for k in data if k != "_meta" and "_" in k)
+        if n_atoms is not None and n_ncp != n_atoms:
+            return False
+        status = None
+        if (n_atoms if n_atoms is not None else 2) > 1 and n_bcp == 0:
+            # Under check_bcp_count, an empty BCP set backed by a *complete*
+            # run defers to the reported-count logic below: a run that itself
+            # found zero (or only unstorable) bond CPs is deterministic, and
+            # rerunning it forever cannot change the record (far-separated
+            # fragments legitimately have none). Must match the validator or
+            # the step reruns on every pass while validation keeps passing.
+            if not check_bcp_count:
+                return False
+            status = qtaim_run_status(folder)
+            if not (
+                status["have_qtaim_out"]
+                and status["search_done"]
+                and status["export_done"]
+            ):
+                return False
+        if require_qtaim_provenance:
+            if status is None:
+                status = qtaim_run_status(folder)
+            if not status["have_qtaim_out"]:
+                # no qtaim.out means completeness is unverifiable; must match
+                # the validator or the step is skipped and then fails validation
+                return False
+        if check_bcp_count:
+            if status is None:
+                status = qtaim_run_status(folder)
+            if status["have_qtaim_out"]:
+                # search_done too, not just export_done: a qtaim.out with the
+                # export marker but no parseable CP count line fails the
+                # validator, so skipping here would be skip-then-fail forever
+                if not status["search_done"] or not status["export_done"]:
+                    return False
+                # Must use the same tolerance the validator does, or the
+                # restart path reruns records validation is happy to accept --
+                # which is how a repair campaign ends up looping forever.
+                reported = status["reported_bcp"]
+                if reported is not None and reported - n_bcp > bcp_tolerance:
+                    # Raw count first: it is an upper bound on the storable
+                    # count, so a raw deficit inside the tolerance guarantees
+                    # the exact one is too. Only past that is it worth reading
+                    # CPprop.txt back out of out_files.zip.
+                    from qtaim_gen.source.utils.validation import storable_bcp_count
+
+                    storable = storable_bcp_count(folder)
+                    expected = storable if storable is not None else reported
+                    if expected - n_bcp > bcp_tolerance:
+                        return False
+        return True
+    return False
+
+
+def _has_usable_step_output(
+    folder: str,
+    order: str,
+    n_atoms: Optional[int] = None,
+    check_bcp_count: bool = False,
+    bcp_tolerance: int = 2,
+    require_qtaim_provenance: bool = False,
+) -> bool:
     """Check whether a sub-job appears to have produced usable output on disk.
 
     Primary signal: `.out` file must be substantive (see `_is_substantive_step_out`).
@@ -1754,6 +1869,16 @@ def _has_usable_step_output(folder: str, order: str) -> bool:
     # accumulating elif's here.
     if order == "convert":
         return _wavefunction_present(folder)
+
+    # qtaim.json can be non-empty yet incomplete, so presence is not enough
+    if order == "qtaim":
+        return _qtaim_output_complete(
+            folder,
+            n_atoms=n_atoms,
+            check_bcp_count=check_bcp_count,
+            bcp_tolerance=bcp_tolerance,
+            require_qtaim_provenance=require_qtaim_provenance,
+        )
 
     for base in (folder, os.path.join(folder, "generator")):
         out_path = os.path.join(base, f"{order}.out")
@@ -1875,10 +2000,14 @@ def gbw_analysis(
     move_results: bool = True,
     patch_path: bool= False,
     check_orca: bool = False,
+    check_bcp_count: bool = False,
+    bcp_tolerance: int = 2,
+    require_qtaim_provenance: bool = False,
     wfx: bool = False,
     exhaustive_qtaim: bool = False,
     subprocess_env: Optional[dict] = None,
     patch_timings: bool = False,
+    horton_python: str = "",
 ) -> None:
     """
     Run a full analysis on a folder of gbw files
@@ -1901,6 +2030,10 @@ def gbw_analysis(
         full_set(int): refined set of cheaper calcs or full set of analysis
         move_results(bool): whether to move results to a single results folder after analysis
         wfx(bool): whether to use .wfx format instead of .wfn for conversion
+        horton_python(str): python interpreter of the separate horton environment;
+            non-empty enables the HORTON charge engine post-step (default off)
+        check_bcp_count(bool): reject qtaim.json records holding fewer bond
+            critical points than Multiwfn reported in qtaim.out
     Writes:
         - settings.ini file with memory and n_threads
         - jobs for conversion to wfn/wfx and multiwfn analysis
@@ -2074,6 +2207,9 @@ def gbw_analysis(
                     move_results=move_results,
                     logger=logger,
                     check_orca=check_orca,
+                    check_bcp_count=check_bcp_count,
+                    bcp_tolerance=bcp_tolerance,
+                    require_qtaim_provenance=require_qtaim_provenance,
                 )
             except Exception as e:
                 logger.error(f"Error during validation checks: {e}")
@@ -2082,6 +2218,13 @@ def gbw_analysis(
             # we might change level-of-analysis so only return if all requested analyses are present
             if tf_validation:
                 logger.info("Output already exists and is valid - skipping analysis")
+                if horton_python:
+                    run_horton_analysis(
+                        folder=folder,
+                        horton_python=horton_python,
+                        subprocess_env=subprocess_env,
+                        logger=logger,
+                    )
                 logger.info("gbw_analysis completed in folder: {}".format(folder))
                 logger.info("Validation status: {}".format(tf_validation))
                 return
@@ -2099,6 +2242,9 @@ def gbw_analysis(
                         move_results=move_results,
                         logger=logger,
                         check_orca=False,
+                        check_bcp_count=check_bcp_count,
+                        bcp_tolerance=bcp_tolerance,
+                        require_qtaim_provenance=require_qtaim_provenance,
                     )
                 except Exception:
                     tf_without_orca = False
@@ -2109,6 +2255,13 @@ def gbw_analysis(
                         "Validation passes without orca check - running orca-only parse"
                     )
                     _run_orca_parse(folder, move_results, logger)
+                    if horton_python:
+                        run_horton_analysis(
+                            folder=folder,
+                            horton_python=horton_python,
+                            subprocess_env=subprocess_env,
+                            logger=logger,
+                        )
                     if move_results:
                         move_results_to_folder(folder, logger=logger, clean=clean)
                     # Clean up orca.out after successful orca-only parse (28-114 MB)
@@ -2156,12 +2309,22 @@ def gbw_analysis(
                         move_results=move_results,
                         logger=logger,
                         check_orca=check_orca,
+                        check_bcp_count=check_bcp_count,
+                        bcp_tolerance=bcp_tolerance,
+                        require_qtaim_provenance=require_qtaim_provenance,
                     )
 
                     if tf_validation:
                         logger.info(
                             "Reparsing successful on 2nd try - skipping analysis"
                         )
+                        if horton_python:
+                            run_horton_analysis(
+                                folder=folder,
+                                horton_python=horton_python,
+                                subprocess_env=subprocess_env,
+                                logger=logger,
+                            )
                         logger.info(
                             "gbw_analysis completed in folder: {}".format(folder)
                         )
@@ -2201,6 +2364,9 @@ def gbw_analysis(
             move_results=move_results,
             clean_jobs_tf=clean,
             subprocess_env=subprocess_env,
+            check_bcp_count=check_bcp_count,
+            bcp_tolerance=bcp_tolerance,
+            require_qtaim_provenance=require_qtaim_provenance,
         )
 
     print("... Parsing multiwfn output")
@@ -2211,6 +2377,15 @@ def gbw_analysis(
 
     # Parse ORCA output file (if present)
     _run_orca_parse(folder, move_results, logger)
+
+    # HORTON charge engine post-step (separate python env, see core/horton.py)
+    if horton_python:
+        run_horton_analysis(
+            folder=folder,
+            horton_python=horton_python,
+            subprocess_env=subprocess_env,
+            logger=logger,
+        )
 
     # move all results to a results folder
 
@@ -2224,6 +2399,9 @@ def gbw_analysis(
         move_results=move_results,
         logger=logger,
         check_orca=check_orca,
+        check_bcp_count=check_bcp_count,
+        bcp_tolerance=bcp_tolerance,
+        require_qtaim_provenance=require_qtaim_provenance,
     )
 
     # Optional repair pass: if validation failed and patch_timings is on,

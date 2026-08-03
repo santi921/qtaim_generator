@@ -14,9 +14,10 @@ exclusively with Multiwfn, so a cross-package benchmark against AIMAll~\citep{ai
 or Critic2~\citep{critic2} would be a useful follow-up. Compute budget restricted
 us to the Tier 0 features; future releases will add the more expensive schemes
 relevant to other communities (MBIS for force-field~\citep{mbis} and MLIP
-development~\citep{bamboo}, IBSI for bond-strength analysis~\citep{ibsi}). We do
-not currently merge the energy and force values from the original work, though
-this is an ongoing effort that could enable partial-charge-aware MLIPs.
+development~\citep{bamboo}, IBSI for bond-strength analysis~\citep{ibsi}).
+\revised{The original work's energy and force labels are merged into the release
+as \texttt{energy.lmdb}, aligned to the same per-structure keys across all
+splits and held-out suites, enabling partial-charge-aware MLIP development.}
 
 We are bound by the single level-of-theory used in OMol25 and so do not measure
 descriptor sensitivity to basis set or functional. Prior work

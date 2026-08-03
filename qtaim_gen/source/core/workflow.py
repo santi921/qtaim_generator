@@ -103,8 +103,12 @@ def process_folder(
     move_results: bool = True,
     wfx: bool = False,
     check_orca: bool = False,
+    check_bcp_count: bool = False,
+    bcp_tolerance: int = 2,
+    require_qtaim_provenance: bool = False,
     exhaustive_qtaim: bool = False,
     patch_timings: bool = False,
+    horton_python: str = "",
 ) -> Dict[str, Any]:
     """Process a single folder and return a small status dict.
 
@@ -214,9 +218,13 @@ def process_folder(
             move_results=move_results,
             wfx=wfx,
             check_orca=check_orca,
+            check_bcp_count=check_bcp_count,
+            bcp_tolerance=bcp_tolerance,
+            require_qtaim_provenance=require_qtaim_provenance,
             exhaustive_qtaim=exhaustive_qtaim,
             subprocess_env=subprocess_env,
             patch_timings=patch_timings,
+            horton_python=horton_python,
         )
         t1: float = time.time()
 
@@ -279,8 +287,12 @@ def process_folder_alcf(
     root_omol_inputs: Optional[str] = None,  # root where input folders are located
     wfx: bool = False,
     check_orca: bool = False,
+    check_bcp_count: bool = False,
+    bcp_tolerance: int = 2,
+    require_qtaim_provenance: bool = False,
     exhaustive_qtaim: bool = False,
     patch_timings: bool = False,
+    horton_python: str = "",
 ) -> Dict[str, Any]:
     """Process a single folder and return a small status dict.
 
@@ -401,6 +413,9 @@ def process_folder_alcf(
                 move_results=move_results,
                 logger=logger,
                 check_orca=check_orca,
+                check_bcp_count=check_bcp_count,
+                bcp_tolerance=bcp_tolerance,
+                require_qtaim_provenance=require_qtaim_provenance,
             )
 
             if not overwrite and tf_validation:
@@ -473,9 +488,13 @@ def process_folder_alcf(
             patch_path=patch_path,
             wfx=wfx,
             check_orca=check_orca,
+            check_bcp_count=check_bcp_count,
+            bcp_tolerance=bcp_tolerance,
+            require_qtaim_provenance=require_qtaim_provenance,
             exhaustive_qtaim=exhaustive_qtaim,
             subprocess_env=subprocess_env,
             patch_timings=patch_timings,
+            horton_python=horton_python,
         )
         t1: float = time.time()
 

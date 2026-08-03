@@ -10,6 +10,7 @@
 *in
 *ipynb
 *json
+!qtaim_gen/source/scripts/helpers/configs_converter/*.json
 *ini
 *.lmdb
 *.lmdb-lock

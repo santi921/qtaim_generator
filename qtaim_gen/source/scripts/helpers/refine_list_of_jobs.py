@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import os
+import signal
 import logging
 import argparse
 from typing import Optional, List
@@ -90,6 +91,27 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
 
     parser.add_argument(
+
+        "--check_bcp_count",
+
+        action="store_true",
+
+        help=(
+
+            "also require that qtaim.json holds every bond critical point "
+
+            "Multiwfn reported, and that the QTAIM step finished. Catches "
+
+            "truncated CPprop.txt, which the nuclear-CP check cannot see, so "
+
+            "affected jobs get queued for rerun instead of passing as done."
+
+        ),
+
+    )
+
+
+    parser.add_argument(
         "--check_orca",
         action="store_true",
         help="require orca.json during validation (for retroactive ORCA .out parsing)",
@@ -121,6 +143,44 @@ def main(argv: Optional[List[str]] = None) -> int:
         help="number of parallel workers for pre-validation (default: 8)",
     )
 
+    parser.add_argument(
+        "--checkpoint_file",
+        type=str,
+        default=None,
+        help=(
+            "path to a checkpoint file recording per-folder KEEP/SKIP decisions; "
+            "a rerun skips already-decided folders. Requires the full job list "
+            "(num_folders >= lines in job_file). Delete the file to start fresh."
+        ),
+    )
+
+    parser.add_argument(
+        "--bcp_tolerance",
+        type=int,
+        default=2,
+        help=(
+            "with --check_bcp_count, how many bond critical points may be "
+            "missing before a job counts as defective (default 2). Some CPs have "
+            "no traceable bond path and so no storable atom pair; measured on a "
+            "repair test that was 1 or 2 per molecule regardless of size, and no "
+            "rerun can recover them. Without this slack such jobs requeue on "
+            "every pass and never clear."
+        ),
+    )
+
+    parser.add_argument(
+        "--require_qtaim_provenance",
+        action="store_true",
+        help=(
+            "treat a job with no qtaim.out as incomplete. Its bond-CP count "
+            "cannot be checked against anything, so --check_bcp_count alone "
+            "passes it and the folder is skipped -- while the audit classifies "
+            "it no_provenance and selects it for rerun. Set this to make the "
+            "runner agree with the selector. Reruns records that may be fine, "
+            "which is the point: unverifiable is not verified."
+        ),
+    )
+
     args = parser.parse_args(argv)
 
     log_file: Optional[str] = getattr(args, "log_file", None)
@@ -143,6 +203,11 @@ def main(argv: Optional[List[str]] = None) -> int:
     job_file: str = getattr(args, "job_file")
     orphaned_check: bool = bool(getattr(args, "check_orphaned", False))
     check_orca: bool = bool(getattr(args, "check_orca", False))
+    check_bcp_count: bool = bool(getattr(args, "check_bcp_count", False))
+    bcp_tolerance = int(getattr(args, "bcp_tolerance", 2))
+    require_qtaim_provenance = bool(
+        getattr(args, "require_qtaim_provenance", False)
+    )
     check_ecp: bool = bool(getattr(args, "check_ecp", False))
     n_workers: int = int(getattr(args, "n_workers", 8))
     refined_job_file: str = getattr(args, "refined_job_file", "refined_jobs.txt")
@@ -150,15 +215,30 @@ def main(argv: Optional[List[str]] = None) -> int:
     root_omol_inputs: Optional[str] = getattr(args, "root_omol_inputs", None)
     # if not set default to the entire length of the job file
 
-    num_folders: int = int(getattr(args, "num_folders", -1))
-    if num_folders <= 0:
-        with open(job_file, "r") as f:
-            num_folders = sum(1 for _ in f)
+    checkpoint_file: Optional[str] = getattr(args, "checkpoint_file", None)
 
     # Basic static checks before launching heavy work
     if not os.path.exists(job_file):
         logger.error(f"job_file '{job_file}' does not exist")
         return 2
+
+    with open(job_file, "r") as f:
+        total_lines = sum(1 for _ in f)
+
+    num_folders: int = int(getattr(args, "num_folders", -1))
+    if num_folders <= 0:
+        num_folders = total_lines
+
+    if checkpoint_file and num_folders < total_lines:
+        logger.error(
+            f"--checkpoint_file requires the full job list: num_folders={num_folders} "
+            f"< {total_lines} lines in {job_file}. Sampling draws a different subset "
+            f"each run, so the checkpoint would not resume correctly. Use --num_folders -1."
+        )
+        return 2
+
+    signal.signal(signal.SIGINT, handle_signal)
+    signal.signal(signal.SIGTERM, handle_signal)
 
     folders_run = get_folders_from_file(
         job_file,
@@ -169,9 +249,14 @@ def main(argv: Optional[List[str]] = None) -> int:
         move_results=move_results,
         full_set=full_set,
         check_orca=check_orca,
+        check_bcp_count=check_bcp_count,
+        bcp_tolerance=bcp_tolerance,
+        require_qtaim_provenance=require_qtaim_provenance,
         check_ecp=check_ecp,
         logger=logger,
         max_workers=n_workers,
+        checkpoint_path=checkpoint_file,
+        stop_check=lambda: should_stop,
     )
 
     if not folders_run:
@@ -188,6 +273,14 @@ def main(argv: Optional[List[str]] = None) -> int:
     with open(refined_job_file, "w") as f:
         for folder in folders_run:
             f.write(f"{folder}\n")
+
+    if should_stop:
+        msg = (
+            f"Interrupted: partial results ({len(folders_run)} folders) written to "
+            f"{refined_job_file}; rerun with the same --checkpoint_file to resume."
+        )
+        logger.info(msg)
+        print(msg)
 
     if orphaned_check:
         count_orphaned = 0

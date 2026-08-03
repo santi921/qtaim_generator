@@ -1,6 +1,11 @@
 from asyncio.log import logger
 import os
 import json
+import re
+import shutil
+import tempfile
+import zipfile
+from typing import Optional
 from qtaim_gen.source.core.parse_qtaim import dft_inp_to_dict
 import numpy as np
 from datetime import datetime
@@ -497,8 +502,175 @@ def validate_charge_dict(
     return True
 
 
+QTAIM_EXPORT_MARKER = "have been outputted to CPprop.txt"
+QTAIM_COUNT_PATTERN = re.compile(r"Number of \(3,-1\) CPs:\s*(\d+)")
+
+
+def read_qtaim_out(folder: str) -> Optional[str]:
+    """Multiwfn's qtaim.out text, or None. Checks root, generator/, then the
+    out_files.zip that survives cleanup."""
+    for rel in ("qtaim.out", os.path.join("generator", "qtaim.out")):
+        path = os.path.join(folder, rel)
+        if os.path.isfile(path) and os.path.getsize(path) > 0:
+            try:
+                with open(path, "r", errors="replace") as f:
+                    return f.read()
+            except OSError:
+                pass
+    zip_path = os.path.join(folder, "generator", "out_files.zip")
+    if os.path.isfile(zip_path):
+        try:
+            with zipfile.ZipFile(zip_path, "r") as zf:
+                if "qtaim.out" in zf.namelist():
+                    return zf.read("qtaim.out").decode("utf-8", errors="replace")
+        except (zipfile.BadZipFile, OSError, KeyError):
+            pass
+    return None
+
+
+def qtaim_run_status(folder: str) -> dict:
+    """Whether Multiwfn's QTAIM step actually ran to completion.
+
+    Multiwfn prints the CP count at the end of the *search*, then exports the
+    per-CP properties to CPprop.txt and prints a completion line. Both markers
+    together distinguish the ways the step can end early:
+
+    - no qtaim.out            -> unknown; absence of evidence, not evidence of
+                                 completeness
+    - no count line           -> killed during the CP search
+    - count but no export line -> killed during the CPprop.txt write, so the
+                                 file that got parsed is partial
+
+    Only the last case is visible by comparing counts; the others need these
+    markers, which is why "count matched" alone must not be read as "complete".
+    """
+    text = read_qtaim_out(folder)
+    if text is None:
+        return {"have_qtaim_out": False, "search_done": None, "export_done": None,
+                "reported_bcp": None}
+    found = QTAIM_COUNT_PATTERN.findall(text)
+    return {
+        "have_qtaim_out": True,
+        "search_done": bool(found),
+        "export_done": QTAIM_EXPORT_MARKER in text,
+        "reported_bcp": int(found[-1]) if found else None,
+    }
+
+
+# How many bond CPs may be missing before a record counts as defective.
+# Measured on 19 residual jobs from a repair test: 17 were missing exactly one
+# CP and 2 were missing two, and the count did not scale with system size (one
+# missing out of 299 blocks, one out of 27). That flat 1-2 is a single
+# pathological CP per molecule whose gradient path cannot be traced to two
+# nuclei, so it has no storable atom pair -- unrepairable by definition. An
+# absolute tolerance matches that; a fractional one would be lenient on large
+# systems and strict on small ones, which is backwards.
+DEFAULT_BCP_TOLERANCE = 2
+
+
+def as_tristate(value) -> Optional[bool]:
+    """Read a bool-ish audit field that may have been through a CSV.
+
+    Audit rows are consumed two ways -- straight from audit_folder (real bools,
+    None for unknown) and out of a CSV via DictReader (the strings "True",
+    "False", ""). Comparing against one form silently mishandles the other, and
+    for these fields the wrong answer is the dangerous direction: a job with no
+    QTAIM output at all reads as a known-good control and never gets requeued.
+    """
+    if value is None or value == "":
+        return None
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().lower()
+    if text in ("true", "1"):
+        return True
+    if text in ("false", "0"):
+        return False
+    return None
+
+
+def storable_bcp_count(folder: str) -> Optional[int]:
+    """How many bond CPs the atom-pair-keyed schema can actually hold.
+
+    Multiwfn's reported (3,-1) count is an upper bound, not a target. Three
+    kinds of CP are legitimately unstorable, and measured on a 100-job repair
+    test they accounted for 21 of 28 residual shortfalls:
+
+    - no "Connected atoms:" line, so the CP has no attributable atom pair
+      (18 of 28 -- by far the most common)
+    - two CPs resolving to the same pair, which the merge collapses because it
+      keys a plain dict on that pair (2 of 28)
+    - an attractor with no nuclear-CP match (1 of 28)
+
+    Comparing against this instead of the raw count is what keeps the
+    completeness check from rejecting records that are already as complete as
+    the schema permits -- which would otherwise livelock, since the restart
+    path reruns anything that fails validation and the rerun reproduces the
+    same result exactly.
+
+    Returns None when CPprop.txt is unavailable (it is only archived by runs
+    after the fix that stopped deleting it before the zip was built).
+    """
+    from qtaim_gen.source.core.parse_qtaim import get_qtaim_descs, only_atom_cps
+
+    text_path = None
+    tmpdir = None
+    for rel in ("CPprop.txt", os.path.join("generator", "CPprop.txt")):
+        cand = os.path.join(folder, rel)
+        if os.path.isfile(cand) and os.path.getsize(cand) > 0:
+            text_path = cand
+            break
+    if text_path is None:
+        zip_path = os.path.join(folder, "generator", "out_files.zip")
+        if os.path.isfile(zip_path):
+            try:
+                with zipfile.ZipFile(zip_path, "r") as zf:
+                    if "CPprop.txt" in zf.namelist():
+                        tmpdir = tempfile.mkdtemp(prefix="cpprop_val_")
+                        zf.extract("CPprop.txt", tmpdir)
+                        text_path = os.path.join(tmpdir, "CPprop.txt")
+            except (zipfile.BadZipFile, OSError, KeyError):
+                return None
+    if text_path is None:
+        return None
+
+    try:
+        _atoms, bonds = only_atom_cps(get_qtaim_descs(text_path))
+        pairs = {
+            tuple(sorted(v["connected_bond_paths"]))
+            for v in bonds.values()
+            if v.get("connected_bond_paths")
+        }
+        return len(pairs)
+    except Exception:
+        return None
+    finally:
+        if tmpdir:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+def count_reported_bcps(folder: str) -> Optional[int]:
+    """Number of (3,-1) CPs Multiwfn *reported*, or None if unavailable.
+
+    Comparing this to the bond-CP count in qtaim.json detects critical points
+    lost between the search and the stored record - most importantly a
+    truncated CPprop.txt, which validate_qtaim_dict's nuclear-CP check cannot
+    see because Multiwfn numbers nuclear CPs first, so any surviving prefix
+    still satisfies it. See qtaim_run_status for the completeness markers this
+    count cannot provide.
+    """
+    return qtaim_run_status(folder)["reported_bcp"]
+
+
 def validate_qtaim_dict(
-    qtaim_json_loc: str, n_atoms: int = None, verbose: bool = False, logger: any = None
+    qtaim_json_loc: str,
+    n_atoms: int = None,
+    verbose: bool = False,
+    logger: any = None,
+    folder: str = None,
+    check_bcp_count: bool = False,
+    bcp_tolerance: int = DEFAULT_BCP_TOLERANCE,
+    require_provenance: bool = False,
 ):
     """
     Basic check that the qtaim json file has the expected structure
@@ -531,6 +703,131 @@ def validate_qtaim_dict(
                     f"Number of nuclear critical points ({len(dict_ncps)}) does not match expected ({n_atoms})."
                 )
             return False
+    status = None
+    if folder is not None and (check_bcp_count or require_provenance):
+        status = qtaim_run_status(folder)
+
+    # A bound multi-atom system must have at least one bond critical point.
+    # Logged unconditionally (cheap, and this class of failure is otherwise
+    # invisible), and only fatal under check_bcp_count, since a genuinely
+    # non-interacting pair of atoms legitimately has none. Even then, an empty
+    # BCP set backed by a *complete* run defers to the reported/storable
+    # shortfall logic below: a run that itself found zero (or only unstorable)
+    # bond CPs is deterministic, and failing it would requeue a job that no
+    # rerun can change.
+    if not dict_bcps and n_atoms is not None and n_atoms > 1:
+        msg = (
+            f"QTAIM json has no bond critical points for {n_atoms} atoms: "
+            f"{qtaim_json_loc}"
+        )
+        if verbose:
+            print(msg)
+        if logger:
+            logger.error(msg)
+        if check_bcp_count:
+            run_complete = (
+                status is not None
+                and status["have_qtaim_out"]
+                and status["search_done"]
+                and status["export_done"]
+            )
+            if not run_complete:
+                return False
+
+    if require_provenance and folder is not None:
+        # Absent qtaim.out means the record's completeness cannot be established
+        # from anything on disk. check_bcp_count cannot catch this on its own:
+        # with no reported count there is no shortfall to measure, so the record
+        # passes and the runner skips the folder -- while the audit classifies it
+        # no_provenance and selects it for rerun. This is what makes the two
+        # agree, at the cost of rerunning records that may well be fine.
+        if not status["have_qtaim_out"]:
+            msg = (
+                f"No qtaim.out for {folder}, so the bond-CP count cannot be "
+                f"verified; treating as incomplete because --require_qtaim_"
+                f"provenance is set ({qtaim_json_loc})"
+            )
+            if verbose:
+                print(msg)
+            if logger:
+                logger.error(msg)
+            return False
+
+    if check_bcp_count and folder is not None:
+        # An incomplete run is a defect even when the counts happen to agree:
+        # if the search or the export never finished, the record cannot be
+        # complete regardless of what it contains.
+        if status["have_qtaim_out"] and not status["search_done"]:
+            msg = f"QTAIM search never completed (no CP count in qtaim.out): {folder}"
+            if verbose:
+                print(msg)
+            if logger:
+                logger.error(msg)
+            return False
+        if status["have_qtaim_out"] and not status["export_done"]:
+            msg = (
+                f"QTAIM CPprop.txt export never completed, so the parsed record "
+                f"is partial: {folder}"
+            )
+            if verbose:
+                print(msg)
+            if logger:
+                logger.error(msg)
+            return False
+
+        reported = status["reported_bcp"]
+        raw_deficit = reported - len(dict_bcps) if reported is not None else 0
+        # 0 < raw_deficit <= tolerance is deliberately silent. Those records are
+        # almost all schema-complete, and saying so would mean paying the
+        # CPprop.txt parse on the majority of folders just to emit a line.
+        if raw_deficit > bcp_tolerance:
+            # Only now is the exact storable count worth computing. Multiwfn's
+            # reported count is an upper bound on what the atom-pair-keyed
+            # schema can hold, so storable <= reported and the raw deficit is
+            # an upper bound on the real one -- if that already fits inside the
+            # tolerance, the real one does too. Checking it first is what keeps
+            # the common clean case from extracting CPprop.txt out of
+            # out_files.zip and reparsing every CP block.
+            storable = storable_bcp_count(folder)
+            expected = storable if storable is not None else reported
+            basis = "storable" if storable is not None else "reported (upper bound)"
+            deficit = expected - len(dict_bcps)
+
+            if deficit <= 0:
+                note = (
+                    f"QTAIM json holds {len(dict_bcps)} of {reported} reported "
+                    f"bond critical points; the rest have no storable atom pair, "
+                    f"so the record is complete for this schema ({qtaim_json_loc})"
+                )
+                if verbose:
+                    print(note)
+                if logger:
+                    logger.info(note)
+            elif deficit > bcp_tolerance:
+                msg = (
+                    f"QTAIM json holds {len(dict_bcps)} bond critical points but "
+                    f"{expected} are {basis} (of {reported} reported) -- "
+                    f"{deficit} lost, above the tolerance of {bcp_tolerance} "
+                    f"({qtaim_json_loc})"
+                )
+                if verbose:
+                    print(msg)
+                if logger:
+                    logger.error(msg)
+                return False
+            else:
+                # Within tolerance: almost certainly CPs with no traceable bond
+                # path. Failing here would queue a job that no rerun can fix.
+                msg = (
+                    f"QTAIM json is {deficit} bond critical point(s) short of "
+                    f"{expected} {basis}, within the tolerance of {bcp_tolerance} "
+                    f"({qtaim_json_loc})"
+                )
+                if verbose:
+                    print(msg)
+                if logger:
+                    logger.warning(msg)
+
     if verbose:
         print(f"Number of nuclear critical points: {len(dict_ncps)}")
         print(f"Number of bond critical points: {len(dict_bcps)}")
@@ -649,6 +946,9 @@ def validation_checks(
     move_results: bool = True,
     logger=None,
     check_orca: bool = False,
+    check_bcp_count: bool = False,
+    bcp_tolerance: int = DEFAULT_BCP_TOLERANCE,
+    require_qtaim_provenance: bool = False,
 ):
     """
     Run all validation checks on the json files in the given folder.
@@ -657,6 +957,17 @@ def validation_checks(
         verbose (bool): If True, print detailed validation messages.
         full_set (int): Level of calculation detail (0-baseline, 1-baseline, 2-full).
         move_results (bool): Adjust if files have been moved during cleaning.
+        bcp_tolerance (int): how many bond CPs may be missing before the record
+            is treated as defective. Guards against queueing jobs no rerun can
+            fix, since a CP with no traceable bond path has no storable atom
+            pair. Default DEFAULT_BCP_TOLERANCE.
+        require_qtaim_provenance (bool): fail records with no qtaim.out. Their
+            completeness is unverifiable rather than verified, and without this
+            the runner skips them while the audit selects them for rerun.
+        check_bcp_count (bool): cross-check qtaim.json's bond-CP count against
+            the count Multiwfn reported in qtaim.out, and reject records whose
+            critical points were lost between the search and the stored file.
+            Off by default: it needs qtaim.out, which older runs may not retain.
     Returns:
         bool: True if all validation checks pass, False otherwise.
     """
@@ -750,7 +1061,14 @@ def validation_checks(
         tf_cond = False
 
     if not validate_qtaim_dict(
-        qtaim_json_loc, n_atoms=n_atoms, verbose=verbose, logger=logger
+        qtaim_json_loc,
+        n_atoms=n_atoms,
+        verbose=verbose,
+        logger=logger,
+        folder=folder,
+        check_bcp_count=check_bcp_count,
+        bcp_tolerance=bcp_tolerance,
+        require_provenance=require_qtaim_provenance,
     ):
         if logger:
             logger.error(f"QTAIM json validation failed in folder: {folder}")
