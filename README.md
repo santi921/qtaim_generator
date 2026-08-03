@@ -181,6 +181,22 @@ multi-vertical-merge --config pipeline_config.json
 
 Three phases: Plan (validate + census + split assignment), Build (parallel graph construction per vertical/split), Scale (fit scaler on all train data, apply to all). See `qtaim_gen/source/scripts/helpers/configs_converter/multi_vertical_example.json`.
 
+### Pre-split single-vertical scaling
+
+For a single vertical whose `train`/`val`/`test`/holdouts splits already
+exist on disk (no census/split-assignment needed), shard and merge each
+split independently, then apply the train-fit scaler to the rest:
+
+```bash
+sbatch --array=0-N run_shard_array.sh train   # skip_scaling=false: fits + applies at merge
+sbatch --array=0-N run_shard_array.sh val     # skip_scaling=true: merges raw, scaled later
+sbatch apply_train_scaler.sh                  # applies train's scaler to val/test/holdouts
+```
+
+See `docs/OMOL4M_NODE_CHARGE_PIPELINE.md` for the full recipe, including
+why every target must share train's exact `element_set` and other gotchas
+this pipeline hit in practice. Scripts live in `examples/omol_full_charge/`.
+
 ### Reading the output graph LMDB
 
 ```python
