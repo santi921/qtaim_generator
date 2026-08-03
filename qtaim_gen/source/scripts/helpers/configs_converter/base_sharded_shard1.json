@@ -29,12 +29,12 @@
             "n_atoms"
         ]
     },
-    "lmdb_path": "/tmp/pytest-of-santiagovargas/pytest-92/test_config_builds_graphs_from1",
+    "lmdb_path": "/path/to/output/shard_1",
     "lmdb_name": "base_graphs.lmdb",
     "lmdb_locations": {
-        "geom_lmdb": "/home/santiagovargas/dev/qtaim_generator/tests/test_files/lmdb_tests/generator_lmdbs_merged/merged_geom.lmdb"
+        "geom_lmdb": "/path/to/source/geom.lmdb"
     },
-    "n_workers": 1,
+    "n_workers": 8,
     "batch_size": 500,
     "shard_index": 1,
     "total_shards": 2,

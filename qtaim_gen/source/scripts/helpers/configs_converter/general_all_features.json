@@ -96,15 +96,15 @@
             "orca_lumo_eh"
         ]
     },
-    "lmdb_path": "/tmp/pytest-of-santiagovargas/pytest-92/test_config_builds_graphs_from3",
+    "lmdb_path": "/path/to/output",
     "lmdb_name": "general_graphs.lmdb",
     "lmdb_locations": {
-        "geom_lmdb": "/home/santiagovargas/dev/qtaim_generator/tests/test_files/lmdb_tests/generator_lmdbs_merged/merged_geom.lmdb",
-        "charge_lmdb": "/home/santiagovargas/dev/qtaim_generator/tests/test_files/lmdb_tests/generator_lmdbs_merged/merged_charge.lmdb",
-        "fuzzy_lmdb": "/home/santiagovargas/dev/qtaim_generator/tests/test_files/lmdb_tests/generator_lmdbs_merged/merged_fuzzy.lmdb",
-        "bond_lmdb": "/home/santiagovargas/dev/qtaim_generator/tests/test_files/lmdb_tests/generator_lmdbs_merged/merged_bond.lmdb",
-        "qtaim_lmdb": "/home/santiagovargas/dev/qtaim_generator/tests/test_files/lmdb_tests/generator_lmdbs_merged/merged_qtaim.lmdb",
-        "orca_lmdb": "/tmp/pytest-of-santiagovargas/pytest-92/orca_lmdb_configs0/orca.lmdb"
+        "geom_lmdb": "/path/to/source/geom.lmdb",
+        "charge_lmdb": "/path/to/source/charge.lmdb",
+        "fuzzy_lmdb": "/path/to/source/fuzzy.lmdb",
+        "bond_lmdb": "/path/to/source/bond.lmdb",
+        "qtaim_lmdb": "/path/to/source/qtaim.lmdb",
+        "orca_lmdb": "/path/to/source/orca.lmdb"
     },
     "bonding_scheme": "bonding",
     "data_inputs": [
@@ -136,7 +136,7 @@
     "bond_cutoff": 0.3,
     "bond_list_definition": "fuzzy_bond",
     "missing_data_strategy": "skip",
-    "n_workers": 1,
+    "n_workers": 8,
     "batch_size": 500,
     "index_dict": {
         "include_locs": {

@@ -133,7 +133,13 @@ def test_every_config_is_strict_json():
 def test_config_builds_graphs_from_fixtures(name, tmp_path, orca_lmdb_path):
     cls = RUNNABLE_CONFIGS[name]
     config = _patched_config(name, tmp_path, orca_lmdb_path)
-    converter = cls(config, config_path=str(CONFIG_DIR / f"{name}.json"))
+    # config_path must NOT be the committed fixture: converters call
+    # overwrite_config() during process() for restart bookkeeping, which
+    # would clobber the tracked file with tmp_path-patched values.
+    config_path = tmp_path / f"{name}.json"
+    with open(config_path, "w") as f:
+        json.dump(config, f)
+    converter = cls(config, config_path=str(config_path))
     converter.process(return_info=True)
 
     # sharded runs name their outputs per shard/chunk, so glob rather than
