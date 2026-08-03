@@ -504,6 +504,20 @@ def audit_folder(folder: str, covalent_factor: float) -> dict:
         if reported is not None and row["n_bcp"] is not None
         else None
     )
+    # The raw shortfall is an upper bound on the real loss: CPs with no
+    # traceable bond path have no storable atom pair, so the runner's validator
+    # rescues them via storable_bcp_count. Classification (select/verify) must
+    # use the same basis, or the selector keeps picking jobs the runner accepts
+    # unchanged and they never leave the queue.
+    row["storable_bcp"] = None
+    row["bcp_shortfall_storable"] = row["bcp_shortfall"]
+    if row["bcp_shortfall"] is not None and row["bcp_shortfall"] > 0:
+        from qtaim_gen.source.utils.validation import storable_bcp_count
+
+        storable = storable_bcp_count(folder)
+        if storable is not None:
+            row["storable_bcp"] = storable
+            row["bcp_shortfall_storable"] = storable - row["n_bcp"]
 
     # Leading hypothesis for lost CPs is the QTAIM step being killed mid-write
     # (walltime/OOM), which would leave a partial CPprop.txt that still parses.
@@ -577,7 +591,8 @@ def _run_folder_mode(args) -> int:
 
     fields = [
         "vertical", "key", "folder", "n_atoms", "n_ncp", "n_bcp", "reported_bcp",
-        "bcp_shortfall", "have_qtaim_json", "have_qtaim_out",
+        "bcp_shortfall", "storable_bcp", "bcp_shortfall_storable",
+        "have_qtaim_json", "have_qtaim_out",
         "search_done", "export_done", "qtaim_time_s", "total_time_s",
         "n_cov_bonds", "n_components", "n_isolated_bonded",
         "isolated_bonded", "n_missing_cov_bonds", "missing_cov_bonds",

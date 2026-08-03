@@ -18,6 +18,7 @@ from qtaim_gen.source.core.horton import (
     merge_horton_into_charge_json,
     resolve_charge_json,
     run_horton_analysis,
+    schemes_covered,
     strip_edf,
 )
 from qtaim_gen.source.utils.io import find_wfx
@@ -188,22 +189,29 @@ class TestFindHortonJson:
 
 
 class TestResolveChargeJson:
-    def test_root_when_not_moved(self, tmp_path):
-        assert resolve_charge_json(str(tmp_path), False) == str(
-            tmp_path / "charge.json"
-        )
+    def test_root_when_only_root(self, tmp_path):
+        (tmp_path / "charge.json").write_text("{}")
+        assert resolve_charge_json(str(tmp_path)) == str(tmp_path / "charge.json")
 
-    def test_generator_when_moved_and_present(self, tmp_path):
+    def test_generator_found_without_any_flag(self, tmp_path):
+        """After move_results the file lives in generator/; a batch backfill
+        must find it there with no layout hint."""
         os.makedirs(tmp_path / "generator")
         (tmp_path / "generator" / "charge.json").write_text("{}")
-        assert resolve_charge_json(str(tmp_path), True) == str(
+        assert resolve_charge_json(str(tmp_path)) == str(
             tmp_path / "generator" / "charge.json"
         )
 
-    def test_root_when_moved_but_absent(self, tmp_path):
-        assert resolve_charge_json(str(tmp_path), True) == str(
-            tmp_path / "charge.json"
-        )
+    def test_root_wins_when_both_exist(self, tmp_path):
+        """Root is the fresher mid-run copy; move_results_to_folder merges it
+        into generator/ afterwards."""
+        os.makedirs(tmp_path / "generator")
+        (tmp_path / "charge.json").write_text("{}")
+        (tmp_path / "generator" / "charge.json").write_text("{}")
+        assert resolve_charge_json(str(tmp_path)) == str(tmp_path / "charge.json")
+
+    def test_root_path_when_neither_exists(self, tmp_path):
+        assert resolve_charge_json(str(tmp_path)) == str(tmp_path / "charge.json")
 
 
 class TestSkipPathStillMerges:
@@ -243,6 +251,141 @@ class TestSkipPathStillMerges:
     def test_corrupt_horton_json_reports_failure(self, tmp_path):
         (tmp_path / "horton.json").write_text("{not json")
         assert run_horton_analysis(str(tmp_path), "/nonexistent/python") is False
+
+    def test_non_dict_horton_json_reports_failure(self, tmp_path):
+        """Valid JSON that is not a dict must fail cleanly, not AttributeError:
+        one bad folder must never kill a whole horton-charges batch."""
+        (tmp_path / "horton.json").write_text("[1, 2]")
+        assert run_horton_analysis(str(tmp_path), "/nonexistent/python") is False
+
+    def test_readonly_folder_does_not_raise(self, tmp_path):
+        """The lock-file open fails with PermissionError in a read-only folder;
+        the never-raises contract requires False, not a crash."""
+        shutil.copy(HORTON_FIXTURE, tmp_path / "horton.json")
+        shutil.copy(CHARGE_FIXTURE, tmp_path / "charge.json")
+        tmp_path.chmod(0o555)
+        try:
+            assert run_horton_analysis(str(tmp_path), "/nonexistent/python") is False
+        finally:
+            tmp_path.chmod(0o755)
+
+    def test_partial_schemes_still_merge_when_wfx_gone(self, tmp_path):
+        """A partial horton.json whose wfx was since cleaned cannot recompute,
+        but its existing schemes must still reach charge.json."""
+        shutil.copy(CHARGE_FIXTURE, tmp_path / "charge.json")
+        (tmp_path / "horton.json").write_text(
+            json.dumps({"becke_horton": {"charge": {"1_O": -0.1}}, "_meta": {
+                "schemes_skipped": [
+                    {"scheme": "is", "reason": "RuntimeError: boom"}
+                ]
+            }})
+        )
+        assert (
+            run_horton_analysis(
+                str(tmp_path), "/nonexistent/python", schemes="becke,is"
+            )
+            is False
+        )
+        with open(tmp_path / "charge.json") as f:
+            assert "becke_horton" in json.load(f)
+
+    def test_merges_into_generator_layout(self, tmp_path):
+        """Regression: a moved folder (charge.json in generator/) processed by
+        the batch CLI must still receive the *_horton keys."""
+        os.makedirs(tmp_path / "generator")
+        shutil.copy(HORTON_FIXTURE, tmp_path / "generator" / "horton.json")
+        shutil.copy(CHARGE_FIXTURE, tmp_path / "generator" / "charge.json")
+        assert run_horton_analysis(str(tmp_path), "/nonexistent/python") is True
+        with open(tmp_path / "generator" / "charge.json") as f:
+            merged = json.load(f)
+        assert "becke_horton" in merged
+
+
+class TestSchemesCovered:
+    def test_all_present(self):
+        d = {"becke_horton": {}, "is_horton": {}}
+        assert schemes_covered(d, "becke,is")
+
+    def test_missing_scheme_not_covered(self):
+        d = {"becke_horton": {}, "_meta": {"schemes_skipped": []}}
+        assert not schemes_covered(d, "becke,is")
+
+    def test_permanent_skip_counts_as_covered(self):
+        d = {
+            "becke_horton": {},
+            "_meta": {
+                "schemes_skipped": [
+                    {"scheme": "hirshfeld", "reason": "ecp_atoms_present"}
+                ]
+            },
+        }
+        assert schemes_covered(d, "becke,hirshfeld")
+
+    def test_no_proatom_skip_counts_as_covered(self):
+        d = {
+            "becke_horton": {},
+            "_meta": {
+                "schemes_skipped": [
+                    {"scheme": "hirshfeld", "reason": "no_slater_proatom"}
+                ]
+            },
+        }
+        assert schemes_covered(d, "becke,hirshfeld")
+
+    def test_transient_failure_not_covered(self):
+        d = {
+            "becke_horton": {},
+            "_meta": {
+                "schemes_skipped": [
+                    {"scheme": "hirshfeld", "reason": "RuntimeError: download failed"}
+                ]
+            },
+        }
+        assert not schemes_covered(d, "becke,hirshfeld")
+
+    def test_legacy_file_without_meta(self):
+        assert schemes_covered({"becke_horton": {}}, "becke")
+        assert not schemes_covered({"becke_horton": {}}, "becke,is")
+
+
+class TestSkipPathSchemeCoverage:
+    """A partial horton.json (transient scheme failure on an earlier run) must
+    trigger a recompute, not freeze the gap forever."""
+
+    def test_incomplete_schemes_leave_skip_path(self, tmp_path):
+        (tmp_path / "horton.json").write_text(
+            json.dumps({"becke_horton": {"charge": {"1_O": -0.1}}, "_meta": {
+                "schemes_skipped": [
+                    {"scheme": "is", "reason": "RuntimeError: boom"}
+                ]
+            }})
+        )
+        # recompute path is entered and fails on the absent wfx -- proving the
+        # skip path (which would return True) was not taken
+        assert (
+            run_horton_analysis(
+                str(tmp_path), "/nonexistent/python", schemes="becke,is"
+            )
+            is False
+        )
+
+    def test_permanently_skipped_scheme_stays_on_skip_path(self, tmp_path):
+        shutil.copy(CHARGE_FIXTURE, tmp_path / "charge.json")
+        (tmp_path / "horton.json").write_text(
+            json.dumps({"becke_horton": {"charge": {"1_O": -0.1}}, "_meta": {
+                "schemes_skipped": [
+                    {"scheme": "hirshfeld", "reason": "ecp_atoms_present"}
+                ]
+            }})
+        )
+        assert (
+            run_horton_analysis(
+                str(tmp_path), "/nonexistent/python", schemes="becke,hirshfeld"
+            )
+            is True
+        )
+        with open(tmp_path / "charge.json") as f:
+            assert "becke_horton" in json.load(f)
 
 
 class TestWorkerTables:

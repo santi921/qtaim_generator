@@ -20,10 +20,17 @@ import json
 import logging
 import os
 import sys
+import tempfile
 
 import numpy as np
 
 NELEC_TOLERANCE = 0.01
+
+# qc-AtomDB's slater dataset ships no neutral-atom density for these elements
+# (see GROUND_STATE_MULT note below). A deterministic skip reason, so the
+# orchestrator's scheme-coverage gate treats it as permanent rather than
+# retrying hirshfeld on every pass.
+NO_SLATER_PROATOM = frozenset({58, 97, 101, 102, 103})  # Ce, Bk, Md, No, Lr
 PROATOM_RMIN = 1e-5
 PROATOM_RMAX = 20.0
 PROATOM_NPOINT = 300
@@ -313,11 +320,22 @@ def main(argv=None) -> int:
     result = {}
     skipped = []
     for scheme in requested:
-        if scheme == "hirshfeld" and has_ecp:
-            # all-electron proatoms vs valence-only molecular density
-            # would be inconsistent
-            skipped.append({"scheme": scheme, "reason": "ecp_atoms_present"})
-            continue
+        if scheme == "hirshfeld":
+            if has_ecp:
+                # all-electron proatoms vs valence-only molecular density
+                # would be inconsistent
+                skipped.append({"scheme": scheme, "reason": "ecp_atoms_present"})
+                continue
+            no_proatom = sorted(NO_SLATER_PROATOM & {int(n) for n in mol.atnums})
+            if no_proatom:
+                skipped.append(
+                    {
+                        "scheme": scheme,
+                        "reason": "no_slater_proatom",
+                        "elements": no_proatom,
+                    }
+                )
+                continue
         # One scheme failing must not discard the schemes that already
         # succeeded: record it and keep going.
         try:
@@ -356,10 +374,18 @@ def main(argv=None) -> int:
         },
     }
 
-    tmp = args.out + ".tmp"
-    with open(tmp, "w") as f:
+    # unique temp name: concurrent workers targeting one folder must not
+    # clobber each other's in-flight write
+    out_abs = os.path.abspath(args.out)
+    fd, tmp = tempfile.mkstemp(
+        dir=os.path.dirname(out_abs), prefix=os.path.basename(out_abs) + ".", suffix=".tmp"
+    )
+    # mkstemp creates 0600 and os.replace preserves it; horton.json must stay
+    # group-readable on shared cluster filesystems like the old plain open() was
+    os.fchmod(fd, 0o644)
+    with os.fdopen(fd, "w") as f:
         json.dump(result, f, indent=1)
-    os.replace(tmp, args.out)
+    os.replace(tmp, out_abs)
     return 0
 
 

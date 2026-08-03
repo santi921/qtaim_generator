@@ -1769,8 +1769,10 @@ def _qtaim_output_complete(
 
     Rejects (forcing a rerun) when the nuclear-CP count disagrees with the atom
     count, or a multi-atom system has no bond CPs. With check_bcp_count it also
-    consults qtaim.out, rejecting a run whose CPprop.txt export never finished
-    or whose stored bond-CP count falls short of what Multiwfn reported.
+    consults qtaim.out, rejecting a run whose CP search or CPprop.txt export
+    never finished or whose stored bond-CP count falls short of what Multiwfn
+    reported; conversely, an empty BCP set is then acceptable when a complete
+    run itself reported none (genuinely non-interacting fragments).
     """
     from qtaim_gen.source.utils.validation import qtaim_run_status
 
@@ -1790,16 +1792,38 @@ def _qtaim_output_complete(
         n_bcp = sum(1 for k in data if k != "_meta" and "_" in k)
         if n_atoms is not None and n_ncp != n_atoms:
             return False
+        status = None
         if (n_atoms if n_atoms is not None else 2) > 1 and n_bcp == 0:
-            return False
-        if require_qtaim_provenance and not qtaim_run_status(folder)["have_qtaim_out"]:
-            # no qtaim.out means completeness is unverifiable; must match the
-            # validator or the step is skipped and then fails validation
-            return False
-        if check_bcp_count:
+            # Under check_bcp_count, an empty BCP set backed by a *complete*
+            # run defers to the reported-count logic below: a run that itself
+            # found zero (or only unstorable) bond CPs is deterministic, and
+            # rerunning it forever cannot change the record (far-separated
+            # fragments legitimately have none). Must match the validator or
+            # the step reruns on every pass while validation keeps passing.
+            if not check_bcp_count:
+                return False
             status = qtaim_run_status(folder)
+            if not (
+                status["have_qtaim_out"]
+                and status["search_done"]
+                and status["export_done"]
+            ):
+                return False
+        if require_qtaim_provenance:
+            if status is None:
+                status = qtaim_run_status(folder)
+            if not status["have_qtaim_out"]:
+                # no qtaim.out means completeness is unverifiable; must match
+                # the validator or the step is skipped and then fails validation
+                return False
+        if check_bcp_count:
+            if status is None:
+                status = qtaim_run_status(folder)
             if status["have_qtaim_out"]:
-                if not status["export_done"]:
+                # search_done too, not just export_done: a qtaim.out with the
+                # export marker but no parseable CP count line fails the
+                # validator, so skipping here would be skip-then-fail forever
+                if not status["search_done"] or not status["export_done"]:
                     return False
                 # Must use the same tolerance the validator does, or the
                 # restart path reruns records validation is happy to accept --
@@ -2199,7 +2223,6 @@ def gbw_analysis(
                         folder=folder,
                         horton_python=horton_python,
                         subprocess_env=subprocess_env,
-                        move_results=move_results,
                         logger=logger,
                     )
                 logger.info("gbw_analysis completed in folder: {}".format(folder))
@@ -2237,7 +2260,6 @@ def gbw_analysis(
                             folder=folder,
                             horton_python=horton_python,
                             subprocess_env=subprocess_env,
-                            move_results=move_results,
                             logger=logger,
                         )
                     if move_results:
@@ -2301,7 +2323,6 @@ def gbw_analysis(
                                 folder=folder,
                                 horton_python=horton_python,
                                 subprocess_env=subprocess_env,
-                                move_results=move_results,
                                 logger=logger,
                             )
                         logger.info(
@@ -2363,7 +2384,6 @@ def gbw_analysis(
             folder=folder,
             horton_python=horton_python,
             subprocess_env=subprocess_env,
-            move_results=move_results,
             logger=logger,
         )
 

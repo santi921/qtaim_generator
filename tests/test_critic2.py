@@ -74,10 +74,14 @@ class TestWriteDeck:
         deck = write_critic2_deck("m.wfx")
         assert deck.index("pointprop") < deck.index("auto ")
 
-    def test_relative_paths_only(self):
-        """Deck is run with cwd=job folder, so no absolute paths may leak in."""
-        deck = write_critic2_deck("orca.wfx")
-        assert "/" not in deck.replace("$rho", "")
+    def test_no_absolute_paths(self):
+        """Deck is run with cwd=job folder, so relative subpaths (e.g.
+        generator/orca.wfx after move_results) are legitimate, but absolute
+        paths must never leak in."""
+        deck = write_critic2_deck("generator/orca.wfx")
+        assert "molecule generator/orca.wfx" in deck
+        for token in deck.split():
+            assert not os.path.isabs(token)
 
 
 class TestParseCpreportFixture:
@@ -177,10 +181,18 @@ class TestParseCpreportFixture:
     def test_meta_shape(self, parsed):
         meta = parsed["_meta"]
         assert meta["engine"] == "critic2"
-        assert set(meta["cp_counts"]) == {"nucleus", "bond", "ring", "cage"}
+        assert set(meta["cp_counts"]) == {
+            "nucleus",
+            "bond",
+            "ring",
+            "cage",
+            "degenerate",
+        }
+        assert meta["cp_counts"]["degenerate"] == 0
         assert meta["source_units"] == "bohr"
         assert isinstance(meta["poincare_hopf_ok"], bool)
         assert meta["nna_remapped"] == []
+        assert meta["bcps_dropped"] == []
 
     def test_poincare_hopf_from_counts(self, parsed):
         c = parsed["_meta"]["cp_counts"]
@@ -259,6 +271,148 @@ class TestNonNuclearAttractorRemap:
                 continue
             for idx in (int(x) for x in k.split("_")):
                 assert idx < n_atoms
+
+
+class TestDegenerateSignature:
+    """A rank-deficient CP (signature 0/+-2, possible near flat density) must
+    be counted, not abort the whole-job parse with a KeyError."""
+
+    def _fixture_with_degenerate_cp(self, tmp_path):
+        with open(CPREPORT_FIXTURE) as f:
+            data = json.load(f)
+        neq = data["critical_points"]["nonequivalent_cps"]
+        cell = data["critical_points"]["cell_cps"]
+        degen_id = max(c["id"] for c in neq) + 1
+        degen = dict(neq[0])
+        degen["id"] = degen_id
+        degen["signature"] = 0
+        neq.append(degen)
+        cell.append(
+            {
+                "id": degen_id,
+                "rank": 2,
+                "signature": 0,
+                "nonequivalent_id": degen_id,
+                "cartesian_coordinates": degen["cartesian_coordinates"],
+                "attractors": [],
+            }
+        )
+        path = tmp_path / "degenerate.json"
+        path.write_text(json.dumps(data))
+        return path
+
+    def test_parse_survives_and_counts_it(self, tmp_path):
+        path = self._fixture_with_degenerate_cp(tmp_path)
+        parsed = parse_critic2_cps(str(path))
+        baseline = parse_critic2_cps(CPREPORT_FIXTURE)
+        assert parsed["_meta"]["cp_counts"]["degenerate"] == 1
+        assert (
+            parsed["_meta"]["n_bcps_resolved"]
+            == baseline["_meta"]["n_bcps_resolved"]
+        )
+
+    def test_degenerate_cp_fails_poincare_hopf(self, tmp_path):
+        """PH assumes a nondegenerate field, so the check must flag the job."""
+        path = self._fixture_with_degenerate_cp(tmp_path)
+        assert not parse_critic2_cps(str(path))["_meta"]["poincare_hopf_ok"]
+
+
+class TestDroppedBcpsRecorded:
+    """A BCP that cannot be keyed must leave a trace in _meta.bcps_dropped, or
+    a BCP-set shortfall against Multiwfn is unattributable later."""
+
+    def test_missing_attractor_recorded(self, tmp_path):
+        with open(CPREPORT_FIXTURE) as f:
+            data = json.load(f)
+        cell = data["critical_points"]["cell_cps"]
+        bcp = next(c for c in cell if c["signature"] == -1)
+        bcp["attractors"] = bcp["attractors"][:1]
+        path = tmp_path / "one_attractor.json"
+        path.write_text(json.dumps(data))
+        parsed = parse_critic2_cps(str(path))
+        baseline = parse_critic2_cps(CPREPORT_FIXTURE)
+        assert (
+            parsed["_meta"]["n_bcps_resolved"]
+            == baseline["_meta"]["n_bcps_resolved"] - 1
+        )
+        assert parsed["_meta"]["bcps_dropped"] == [
+            {
+                "cell_id": bcp["id"],
+                "reason": "unresolved_attractors",
+                "pair": [bcp["attractors"][0]["cell_id"] - 1],
+            }
+        ]
+
+    def test_pair_collapse_after_remap_recorded(self, tmp_path):
+        """A phantom NNA sitting nearest the BCP's other atom collapses the
+        pair on remap; the drop must be recorded, not silent."""
+        with open(CPREPORT_FIXTURE) as f:
+            data = json.load(f)
+        neq = data["critical_points"]["nonequivalent_cps"]
+        cell = data["critical_points"]["cell_cps"]
+        bcp = next(c for c in cell if c["signature"] == -1)
+        other_atom = bcp["attractors"][1]["cell_id"] - 1
+        atom = data["structure"]["cell_atoms"][other_atom]
+        phantom_id = max(c["id"] for c in neq) + 1
+        phantom = dict(neq[0])
+        phantom["id"] = phantom_id
+        phantom["signature"] = -3
+        phantom["is_nucleus"] = False
+        phantom["cartesian_coordinates"] = [
+            c + 0.05 for c in atom["cartesian_coordinates"]
+        ]
+        neq.append(phantom)
+        bcp["attractors"][0]["cell_id"] = phantom_id
+        cell.append(
+            {
+                "id": phantom_id,
+                "rank": 3,
+                "signature": -3,
+                "nonequivalent_id": phantom_id,
+                "cartesian_coordinates": phantom["cartesian_coordinates"],
+                "attractors": [],
+            }
+        )
+        path = tmp_path / "collapsed.json"
+        path.write_text(json.dumps(data))
+        parsed = parse_critic2_cps(str(path))
+        dropped = parsed["_meta"]["bcps_dropped"]
+        assert len(dropped) == 1
+        assert dropped[0]["reason"] == "pair_collapsed_after_remap"
+        assert dropped[0]["pair"] == [other_atom, other_atom]
+
+
+class TestStaleCpreportRemoved:
+    """A cpreport left by a previous run must not be re-parsed when critic2
+    exits 0 without writing a fresh one (it can warn-and-continue past some
+    deck/field errors)."""
+
+    @staticmethod
+    def _job_with_fake_critic2(tmp_path, fake_body):
+        folder = tmp_path / "job"
+        folder.mkdir()
+        (folder / "orca.wfx").write_text("placeholder wfx\n")
+        fake = tmp_path / "fake_critic2"
+        fake.write_text(f"#!/bin/sh\n{fake_body}\n")
+        fake.chmod(0o755)
+        return folder, str(fake)
+
+    def test_run_fails_rather_than_parsing_stale(self, tmp_path):
+        folder, fake = self._job_with_fake_critic2(tmp_path, "exit 0")
+        stale = folder / "critic2_cps.json"
+        shutil.copy(CPREPORT_FIXTURE, stale)
+        assert run_critic2_analysis(str(folder), critic2_cmd=fake) is False
+        assert not stale.exists()
+        assert not (folder / "critic2.json").exists()
+
+    def test_fresh_cpreport_is_parsed(self, tmp_path):
+        folder, fake = self._job_with_fake_critic2(
+            tmp_path, f"cp {CPREPORT_FIXTURE} critic2_cps.json"
+        )
+        assert run_critic2_analysis(str(folder), critic2_cmd=fake) is True
+        result = json.loads((folder / "critic2.json").read_text())
+        assert result["_meta"]["engine"] == "critic2"
+        assert result["_meta"]["n_bcps_resolved"] > 0
 
 
 class TestPairValidation:

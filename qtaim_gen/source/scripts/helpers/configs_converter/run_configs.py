@@ -1,11 +1,15 @@
 """
-Test script for converter configs.
+Manual run harness for converter configs (NOT a pytest suite).
+
+Runs real converter jobs against the machine-local data paths inside each
+config. Hermetic pytest coverage of these configs lives in
+tests/test_converter_configs.py.
 
 Usage:
-    python test_configs.py --config base_unsharded
-    python test_configs.py --config qtaim_unsharded
-    python test_configs.py --config general_fuzzy_bonds
-    python test_configs.py --test-sharding  # Test sharded workflow
+    python run_configs.py --config base_unsharded
+    python run_configs.py --config qtaim_unsharded
+    python run_configs.py --config general_fuzzy_bonds
+    python run_configs.py --test-sharding  # Test sharded workflow
 """
 
 import os
@@ -34,7 +38,7 @@ def load_config(config_name):
     return config, str(config_path)
 
 
-def test_base_converter(config_name="base_unsharded"):
+def run_base_converter(config_name="base_unsharded"):
     """Test BaseConverter with a config."""
     print(f"\n{'='*60}")
     print(f"Testing BaseConverter with config: {config_name}")
@@ -56,7 +60,7 @@ def test_base_converter(config_name="base_unsharded"):
     return conv
 
 
-def test_qtaim_converter(config_name="qtaim_unsharded"):
+def run_qtaim_converter(config_name="qtaim_unsharded"):
     """Test QTAIMConverter with a config."""
     print(f"\n{'='*60}")
     print(f"Testing QTAIMConverter with config: {config_name}")
@@ -78,7 +82,7 @@ def test_qtaim_converter(config_name="qtaim_unsharded"):
     return conv
 
 
-def test_general_converter(config_name="general_fuzzy_bonds"):
+def run_general_converter(config_name="general_fuzzy_bonds"):
     """Test GeneralConverter with a config."""
     print(f"\n{'='*60}")
     print(f"Testing GeneralConverter with config: {config_name}")
@@ -100,7 +104,7 @@ def test_general_converter(config_name="general_fuzzy_bonds"):
     return conv
 
 
-def test_sharded_workflow():
+def run_sharded_workflow():
     """Test the full sharded workflow: shard -> merge."""
     print(f"\n{'='*60}")
     print(f"Testing Sharded Workflow")
@@ -174,19 +178,19 @@ def main():
 
     try:
         if args.test_sharding:
-            test_sharded_workflow()
+            run_sharded_workflow()
         elif args.all:
             # Test all configs
             print("\n" + "="*60)
             print("TESTING ALL CONFIGS")
             print("="*60)
 
-            test_base_converter("base_unsharded")
-            test_qtaim_converter("qtaim_unsharded")
-            test_general_converter("general_fuzzy_bonds")
-            test_general_converter("general_qtaim_bonds")
-            test_general_converter("general_with_global_dipoles")
-            test_sharded_workflow()
+            run_base_converter("base_unsharded")
+            run_qtaim_converter("qtaim_unsharded")
+            run_general_converter("general_fuzzy_bonds")
+            run_general_converter("general_qtaim_bonds")
+            run_general_converter("general_with_global_dipoles")
+            run_sharded_workflow()
 
             print("\n" + "="*60)
             print("✓ ALL TESTS PASSED!")
@@ -194,11 +198,11 @@ def main():
         elif args.config:
             # Detect converter type from config name
             if "qtaim" in args.config and "general" not in args.config:
-                test_qtaim_converter(args.config)
+                run_qtaim_converter(args.config)
             elif "general" in args.config:
-                test_general_converter(args.config)
+                run_general_converter(args.config)
             else:
-                test_base_converter(args.config)
+                run_base_converter(args.config)
         else:
             parser.print_help()
             print("\nAvailable configs:")

@@ -90,10 +90,26 @@ def classify_state(row: dict, bcp_tolerance: int = DEFAULT_BCP_TOLERANCE) -> str
     # so it cannot be called fixed -- the shortfall column is null, not zero.
     if as_tristate(row.get("have_qtaim_out")) is False:
         return "no_provenance"
+    # default 1: a row without the column must not read as mismatched
+    if as_int(row.get("ncp_matches_atoms"), 1) == 0:
+        return "ncp_mismatch"
     n_bcp = as_int(row.get("n_bcp"))
     if n_bcp == 0 and as_int(row.get("n_cov_bonds")) > 0:
+        # mirror the selector: the runner accepts a complete run that itself
+        # reported <= tolerance bond CPs, so this is deterministic residue a
+        # standard rerun cannot change, not an outstanding defect of the rerun
+        if (
+            as_tristate(row.get("search_done")) is True
+            and as_tristate(row.get("export_done")) is True
+            and as_int(row.get("reported_bcp"), 999) <= bcp_tolerance
+        ):
+            return "empty_bcp_complete"
         return "empty_bcp"
-    if as_int(row.get("bcp_shortfall")) > bcp_tolerance:
+    # storable basis when available, matching the validator and the selector
+    shortfall = as_int(
+        row.get("bcp_shortfall_storable"), as_int(row.get("bcp_shortfall"))
+    )
+    if shortfall > bcp_tolerance:
         return "shortfall"
     return "ok"
 
@@ -147,6 +163,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                 "n_bcp_after": after.get("n_bcp"),
                 "reported_after": after.get("reported_bcp"),
                 "shortfall_after": after.get("bcp_shortfall"),
+                "shortfall_storable_after": after.get("bcp_shortfall_storable"),
                 "export_done_after": after.get("export_done"),
                 "state_after": classify_state(after, args.bcp_tolerance),
                 "siblings_touched": " ".join(newer_siblings(folder)),
@@ -158,6 +175,11 @@ def main(argv: Optional[List[str]] = None) -> int:
             verdict = "control_unchanged" if not changed else "CONTROL_PERTURBED"
         elif rec["state_after"] == "ok":
             verdict = "fixed"
+        elif rec["state_after"] == "empty_bcp_complete":
+            # the runner's validator accepts this record, so it has left the
+            # queue; kept out of "fixed" because the physics disagreement
+            # (covalent contacts, zero reported BCPs) is unresolved
+            verdict = "accepted_residue"
         elif changed:
             verdict = "changed_still_broken"
         else:
@@ -169,7 +191,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     fields = [
         "verdict", "mode_before", "key", "n_bcp_before", "n_bcp_after",
         "reported_before", "reported_after", "shortfall_before", "shortfall_after",
-        "export_done_after", "state_after", "siblings_touched", "detail", "folder",
+        "shortfall_storable_after", "export_done_after", "state_after",
+        "siblings_touched", "detail", "folder",
     ]
     with open(args.out_csv, "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore")

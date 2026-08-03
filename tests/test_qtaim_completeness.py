@@ -233,6 +233,86 @@ class TestRestartSkipHonorsCompleteness:
         folder = self._job(tmp_path, "atom", n_atoms=1, n_bcp=0, with_out=False)
         assert _has_usable_step_output(str(folder), "qtaim", n_atoms=1)
 
+    def test_export_marker_without_count_is_not_skipped(self, tmp_path):
+        """The count regex missed (format drift) but the export marker matched:
+        the validator fails on search_done, so skipping here would be
+        skip-then-fail-validation forever."""
+        from qtaim_gen.source.core.omol import _has_usable_step_output
+
+        folder = self._job(tmp_path, "nocount", n_atoms=12, n_bcp=11, with_out=False)
+        (folder / "qtaim.out").write_text(EXPORT_LINE)  # no count line
+        assert not _has_usable_step_output(
+            str(folder), "qtaim", n_atoms=12, check_bcp_count=True
+        )
+
+
+ZERO_COUNT_LINE = " Number of (3,-1) CPs:     0    Generating topology paths...\n"
+
+
+class TestGenuinelyBondFreeSystems:
+    """Far-separated fragments legitimately have zero bond CPs. A complete run
+    that itself reported zero must validate and skip on restart -- the result
+    is deterministic, so failing it requeues a job no rerun can change. An
+    empty BCP set backed by anything less than a complete run stays fatal."""
+
+    def test_complete_zero_reported_passes_validation(self, tmp_path):
+        (tmp_path / "qtaim.out").write_text(ZERO_COUNT_LINE + EXPORT_LINE)
+        p = _write_qtaim_json(tmp_path / "qtaim.json", n_atoms=3, n_bcps=0)
+        assert validate_qtaim_dict(
+            str(p), n_atoms=3, folder=str(tmp_path), check_bcp_count=True
+        )
+
+    def test_zero_bcp_without_provenance_still_fails(self, tmp_path):
+        p = _write_qtaim_json(tmp_path / "qtaim.json", n_atoms=3, n_bcps=0)
+        assert not validate_qtaim_dict(
+            str(p), n_atoms=3, folder=str(tmp_path), check_bcp_count=True
+        )
+
+    def test_zero_bcp_with_incomplete_run_still_fails(self, tmp_path):
+        (tmp_path / "qtaim.out").write_text(ZERO_COUNT_LINE)  # no export marker
+        p = _write_qtaim_json(tmp_path / "qtaim.json", n_atoms=3, n_bcps=0)
+        assert not validate_qtaim_dict(
+            str(p), n_atoms=3, folder=str(tmp_path), check_bcp_count=True
+        )
+
+    def test_zero_bcp_with_large_positive_report_still_fails(self, tmp_path):
+        (tmp_path / "qtaim.out").write_text(QTAIM_OUT_LINE)  # 11 reported
+        p = _write_qtaim_json(tmp_path / "qtaim.json", n_atoms=12, n_bcps=0)
+        assert not validate_qtaim_dict(
+            str(p), n_atoms=12, folder=str(tmp_path), check_bcp_count=True
+        )
+
+    def test_zero_bcp_with_report_within_tolerance_passes(self, tmp_path):
+        """Reported 2, stored 0: the standard unstorable-tail tolerance."""
+        (tmp_path / "qtaim.out").write_text(
+            " Number of (3,-1) CPs:     2\n" + EXPORT_LINE
+        )
+        p = _write_qtaim_json(tmp_path / "qtaim.json", n_atoms=3, n_bcps=0)
+        assert validate_qtaim_dict(
+            str(p), n_atoms=3, folder=str(tmp_path), check_bcp_count=True
+        )
+
+    def test_gate_skips_complete_zero_reported(self, tmp_path):
+        from qtaim_gen.source.core.omol import _has_usable_step_output
+
+        folder = TestRestartSkipHonorsCompleteness._job(
+            tmp_path, "bondfree", n_atoms=3, n_bcp=0, with_out=False
+        )
+        (folder / "qtaim.out").write_text(ZERO_COUNT_LINE + EXPORT_LINE)
+        assert _has_usable_step_output(
+            str(folder), "qtaim", n_atoms=3, check_bcp_count=True
+        )
+
+    def test_gate_without_flag_still_reruns_zero_bcp(self, tmp_path):
+        """Without check_bcp_count the gate keeps its conservative default."""
+        from qtaim_gen.source.core.omol import _has_usable_step_output
+
+        folder = TestRestartSkipHonorsCompleteness._job(
+            tmp_path, "bondfree_noflag", n_atoms=3, n_bcp=0, with_out=False
+        )
+        (folder / "qtaim.out").write_text(ZERO_COUNT_LINE + EXPORT_LINE)
+        assert not _has_usable_step_output(str(folder), "qtaim", n_atoms=3)
+
 
 class TestCPpropArchived:
     """CPprop.txt must survive into out_files.zip.
@@ -440,9 +520,21 @@ class TestBcpTolerance:
                 check_bcp_count=True, bcp_tolerance=2,
             ), sub
 
-    def test_empty_bcp_set_ignores_tolerance(self, tmp_path):
-        """A multi-atom system with no bond CPs is broken regardless of slack."""
+    def test_empty_bcp_set_fails_at_default_tolerance(self, tmp_path):
+        """A complete run reporting 11 with none stored is a real loss; only
+        an operator explicitly raising the tolerance past the deficit could
+        accept it (the empty set follows the same arithmetic as any other
+        shortfall once the run is proven complete)."""
         p = self._job(tmp_path, n_bcp=0)
+        assert not validate_qtaim_dict(
+            str(p), n_atoms=12, folder=str(tmp_path), check_bcp_count=True,
+            bcp_tolerance=2,
+        )
+
+    def test_empty_bcp_set_without_provenance_ignores_tolerance(self, tmp_path):
+        """With nothing proving the run complete, an empty multi-atom BCP set
+        is broken regardless of slack."""
+        p = _write_qtaim_json(tmp_path / "qtaim.json", n_atoms=12, n_bcps=0)
         assert not validate_qtaim_dict(
             str(p), n_atoms=12, folder=str(tmp_path), check_bcp_count=True,
             bcp_tolerance=99,

@@ -125,22 +125,30 @@ def parse_critic2_cps(cpreport_path: str, validate_pairs: bool = True) -> dict:
     # 1:1 with nonequivalent_cps, but resolve it properly rather than assuming.
     cell_by_id = {c["id"]: c for c in cell}
 
-    counts = {"nucleus": 0, "bond": 0, "ring": 0, "cage": 0}
+    # Rank-deficient CPs (signature 0/+-2) can appear near flat density
+    # regions; count them rather than aborting the whole parse on a KeyError.
+    sig_names = {-3: "nucleus", -1: "bond", 1: "ring", 3: "cage"}
+    counts = {"nucleus": 0, "bond": 0, "ring": 0, "cage": 0, "degenerate": 0}
     for c in neq:
-        counts[{-3: "nucleus", -1: "bond", 1: "ring", 3: "cage"}[c["signature"]]] += 1
+        counts[sig_names.get(c["signature"], "degenerate")] += 1
     # Poincare-Hopf: must be 1 for a molecule; anything else flags a CP search
-    # that missed or invented critical points.
+    # that missed or invented critical points. A degenerate CP voids the
+    # theorem's nondegeneracy assumption, so it also fails the check.
     ph_sum = counts["nucleus"] - counts["bond"] + counts["ring"] - counts["cage"]
 
     result = {}
     nna_remapped = []
     collisions = []
     pair_corrections = []
+    bcps_dropped = []
     for c in cell:
         if c["signature"] != -1:
             continue
         props = by_id.get(c["nonequivalent_id"])
         if props is None:
+            bcps_dropped.append(
+                {"cell_id": c["id"], "reason": "missing_nonequivalent_props"}
+            )
             continue
 
         pair = []
@@ -172,6 +180,17 @@ def parse_critic2_cps(cpreport_path: str, validate_pairs: bool = True) -> dict:
                 }
             )
         if len(pair) != 2 or pair[0] == pair[1]:
+            # a BCP that cannot be keyed must still leave a trace, or a
+            # shortfall against Multiwfn's BCP set is unattributable later
+            bcps_dropped.append(
+                {
+                    "cell_id": c["id"],
+                    "reason": "pair_collapsed_after_remap"
+                    if len(pair) == 2
+                    else "unresolved_attractors",
+                    "pair": sorted(pair),
+                }
+            )
             continue
 
         cp_pos = np.array(_pos_ang(props, cv))
@@ -237,11 +256,12 @@ def parse_critic2_cps(cpreport_path: str, validate_pairs: bool = True) -> dict:
         "n_atoms": n_atoms,
         "cp_counts": counts,
         "poincare_hopf_sum": ph_sum,
-        "poincare_hopf_ok": ph_sum == 1,
+        "poincare_hopf_ok": ph_sum == 1 and counts["degenerate"] == 0,
         "n_bcps_resolved": sum(1 for k in result if k != "_meta"),
         "nna_remapped": nna_remapped,
         "pair_corrections": pair_corrections,
         "pair_collisions": collisions,
+        "bcps_dropped": bcps_dropped,
         "source_units": data.get("units"),
         "field_type": data.get("field", {}).get("type"),
     }
@@ -317,6 +337,15 @@ def run_critic2_analysis(
                     pointprops=pointprops,
                 )
             )
+
+        # A cpreport kept from a previous run (intermediates are kept by
+        # default) must not survive into this one: critic2 can warn-and-continue
+        # past a deck/field error and still exit 0, and the isfile check below
+        # would then silently parse stale CP data from an older wavefunction.
+        try:
+            os.remove(cpreport_path)
+        except FileNotFoundError:
+            pass
 
         result = subprocess.run(
             [critic2_cmd, DECK_NAME, CRO_NAME],

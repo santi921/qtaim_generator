@@ -99,13 +99,25 @@ def load_holdout_membership(holdout_dir):
 
 
 class SplitWriter:
-    """Streaming writer for one energy.lmdb, lazily opened per split/suite."""
+    """Streaming writer for one energy.lmdb, lazily opened per split/suite.
+
+    Builds into energy.lmdb.tmp and os.replace()s on close, so a crashed or
+    partial run never leaves a half-written file at the final path, and a
+    rerun starts from empty rather than appending into the previous output
+    (which would stamp `length` with only the new keys and silently truncate
+    the split for any consumer that trusts it).
+    """
 
     def __init__(self, out_dir, name):
         split_dir = os.path.join(out_dir, name)
         os.makedirs(split_dir, exist_ok=True)
+        self.final_path = os.path.join(split_dir, "energy.lmdb")
+        self.tmp_path = self.final_path + ".tmp"
+        for stale in (self.tmp_path, self.tmp_path + "-lock"):
+            if os.path.exists(stale):
+                os.remove(stale)
         self.db = lmdb.open(
-            os.path.join(split_dir, "energy.lmdb"),
+            self.tmp_path,
             map_size=int(1099511627776 * 2),
             subdir=False,
             meminit=False,
@@ -125,9 +137,16 @@ class SplitWriter:
 
     def close(self):
         with self.db.begin(write=True) as txn:
-            txn.put("length".encode("ascii"), pickle.dumps(self.count, protocol=-1))
+            # stamp length from the DB itself, not the put counter
+            n_records = txn.stat()["entries"]
+            txn.put("length".encode("ascii"), pickle.dumps(n_records, protocol=-1))
         self.db.sync()
         self.db.close()
+        os.replace(self.tmp_path, self.final_path)
+        try:
+            os.remove(self.tmp_path + "-lock")
+        except FileNotFoundError:
+            pass
 
 
 def merge(

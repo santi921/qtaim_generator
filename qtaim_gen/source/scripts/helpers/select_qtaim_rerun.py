@@ -49,6 +49,15 @@ def classify(row: dict, bcp_tolerance: int = DEFAULT_BCP_TOLERANCE) -> str:
         except ValueError:
             return 0
 
+    def as_opt_int(key):
+        v = row.get(key)
+        if v in (None, ""):
+            return None
+        try:
+            return int(v)
+        except ValueError:
+            return None
+
     # Absence first: these are not "clean", they are unexamined. A folder with
     # no qtaim.json never ran QTAIM (or lost the output); one with no qtaim.out
     # may hold a silently truncated CP set that nothing on disk can rule out.
@@ -66,9 +75,35 @@ def classify(row: dict, bcp_tolerance: int = DEFAULT_BCP_TOLERANCE) -> str:
         return "incomplete_run"
     if as_tristate(row.get("have_qtaim_out")) is False:
         return "no_provenance"
+    # Nuclear-CP/atom mismatch is fatal in validate_qtaim_dict regardless of
+    # flags, so the runner always reruns these: calling one a control would
+    # make verify condemn a safe remedy as CONTROL_PERTURBED.
+    ncp_matches = as_opt_int("ncp_matches_atoms")
+    if ncp_matches == 0:
+        return "ncp_mismatch"
     if as_int("n_bcp") == 0 and as_int("n_cov_bonds") > 0:
+        # A complete run that itself reported <= tolerance bond CPs is accepted
+        # by the runner's validator, so a standard rerun cannot change it --
+        # selecting it in the default modes would loop forever. It stays
+        # visible under its own mode for an exhaustive-search campaign
+        # (--exhaustive_qtaim is the only remedy for a Multiwfn search miss).
+        reported = as_opt_int("reported_bcp")
+        if (
+            as_tristate(row.get("search_done")) is True
+            and as_tristate(row.get("export_done")) is True
+            and reported is not None
+            and reported <= bcp_tolerance
+        ):
+            return "empty_bcp_complete"
         return "empty_bcp"
-    if as_int("bcp_shortfall") > bcp_tolerance:
+    # Storable basis when the audit provided it (older CSVs carry only the raw
+    # reported-minus-stored count): the validator rescues CPs with no storable
+    # atom pair, so classifying on the raw count selects jobs the runner
+    # accepts unchanged.
+    shortfall = as_opt_int("bcp_shortfall_storable")
+    if shortfall is None:
+        shortfall = as_int("bcp_shortfall")
+    if shortfall > bcp_tolerance:
         return "shortfall"
     n_atoms = as_int("n_atoms")
     if n_atoms and as_int("n_isolated_bonded") / n_atoms > 0.10:
@@ -141,14 +176,18 @@ def main(argv: Optional[List[str]] = None) -> int:
         "--modes",
         default=(
             "shortfall,incomplete_run,empty_bcp,severe_isolated,"
-            "no_qtaim_json,no_provenance"
+            "no_qtaim_json,no_provenance,ncp_mismatch"
         ),
         help=(
             "failure modes eligible for selection. no_qtaim_json and "
             "no_provenance are the absence modes: nothing on disk proves those "
             "records complete, so they rerun for uniformity. They dominate the "
             "count on verticals that were cleaned, so drop them from this list "
-            "to target proven defects only."
+            "to target proven defects only. empty_bcp_complete (deliberately "
+            "NOT in the default) marks covalently-bonded geometries whose "
+            "complete run reported <= tolerance bond CPs: the runner accepts "
+            "them and a standard rerun cannot change them, so select them only "
+            "for an --exhaustive_qtaim campaign."
         ),
     )
     args = parser.parse_args(argv)
@@ -221,7 +260,8 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     fields = [
         "_mode", "_bin", "_source", "vertical", "key", "folder", "n_atoms", "n_ncp",
-        "n_bcp", "reported_bcp", "bcp_shortfall", "have_qtaim_json",
+        "n_bcp", "reported_bcp", "bcp_shortfall", "storable_bcp",
+        "bcp_shortfall_storable", "ncp_matches_atoms", "have_qtaim_json",
         "have_qtaim_out", "search_done", "export_done",
         "n_cov_bonds", "n_isolated_bonded", "n_components", "qtaim_time_s",
     ]

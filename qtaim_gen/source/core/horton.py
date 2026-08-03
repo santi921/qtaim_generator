@@ -6,6 +6,7 @@ the main env) and merges the resulting *_horton charge schemes into charge.json,
 mirroring the ORCA post-step (_run_orca_parse / merge_orca_into_charge_json).
 """
 
+import fcntl
 import json
 import logging
 import os
@@ -18,6 +19,11 @@ from qtaim_gen.source.utils.atomic_write import atomic_json_write
 from qtaim_gen.source.utils.io import find_wfx
 
 HORTON_SCHEMES = ("becke", "hirshfeld", "is")
+
+# Worker skip reasons that are deterministic properties of the system, not
+# transient failures: a horton.json recording one of these for a scheme is
+# complete for that scheme and must not trigger a recompute.
+PERMANENT_SKIP_REASONS = ("ecp_atoms_present", "no_slater_proatom")
 
 EDF_TAG = "<Additional Electron Density Function (EDF)>"
 EDF_END = "</Additional Electron Density Function (EDF)>"
@@ -52,14 +58,46 @@ def find_horton_json(folder: str) -> Optional[str]:
     return None
 
 
-def resolve_charge_json(folder: str, move_results: bool) -> str:
-    """Charge.json path to merge into: generator/ when results were moved."""
-    charge_path = os.path.join(folder, "charge.json")
-    if move_results:
-        gen_charge = os.path.join(folder, "generator", "charge.json")
-        if os.path.isfile(gen_charge):
-            return gen_charge
-    return charge_path
+def resolve_charge_json(folder: str) -> str:
+    """Charge.json path to merge into: root wins, else the generator/ copy.
+
+    Both locations are checked unconditionally, mirroring find_wfx and
+    find_horton_json: after move_results_to_folder the file lives in
+    generator/, and a batch backfill has no way of knowing which layout it was
+    handed. Root wins when both exist -- it is the fresher mid-run copy, and
+    move_results_to_folder merges root into generator/ afterwards.
+    """
+    root_charge = os.path.join(folder, "charge.json")
+    if os.path.isfile(root_charge):
+        return root_charge
+    gen_charge = os.path.join(folder, "generator", "charge.json")
+    if os.path.isfile(gen_charge):
+        return gen_charge
+    return root_charge
+
+
+def schemes_covered(horton_dict: dict, schemes: str) -> bool:
+    """True when every requested scheme is either present in horton_dict or
+    recorded by the worker as permanently unobtainable for this system.
+
+    Transient failures (exception-text skip reasons) do not count as coverage,
+    so a later non-overwrite run recomputes instead of freezing a partial
+    result forever.
+    """
+    skipped = {
+        s.get("scheme"): s.get("reason", "")
+        for s in horton_dict.get("_meta", {}).get("schemes_skipped", [])
+        if isinstance(s, dict)
+    }
+    for scheme in (s.strip() for s in schemes.split(",")):
+        if not scheme:
+            continue
+        if f"{scheme}_horton" in horton_dict:
+            continue
+        if skipped.get(scheme) in PERMANENT_SKIP_REASONS:
+            continue
+        return False
+    return True
 
 
 def merge_horton_into_charge_json(horton_dict: dict, charge_json_path: str) -> None:
@@ -71,20 +109,28 @@ def merge_horton_into_charge_json(horton_dict: dict, charge_json_path: str) -> N
     if not os.path.isfile(charge_json_path):
         return
 
-    try:
-        with open(charge_json_path, "r") as f:
-            charge_data = json.load(f)
-    except (json.JSONDecodeError, OSError):
-        return
+    # Serialize the read-modify-write: two horton runs merging into the same
+    # charge.json concurrently would otherwise lose keys via last-writer-wins
+    # on a stale read. Advisory flock; the lock file stays behind (unlinking
+    # it would reopen the race). Writers outside this function do not take it.
+    lock_path = charge_json_path + ".lock"
+    with open(lock_path, "w") as lock_f:
+        fcntl.flock(lock_f, fcntl.LOCK_EX)
 
-    modified = False
-    for key, entry in horton_dict.items():
-        if key.endswith("_horton") and isinstance(entry, dict) and "charge" in entry:
-            charge_data[key] = entry
-            modified = True
+        try:
+            with open(charge_json_path, "r") as f:
+                charge_data = json.load(f)
+        except (json.JSONDecodeError, OSError):
+            return
 
-    if modified:
-        atomic_json_write(charge_json_path, charge_data)
+        modified = False
+        for key, entry in horton_dict.items():
+            if key.endswith("_horton") and isinstance(entry, dict) and "charge" in entry:
+                charge_data[key] = entry
+                modified = True
+
+        if modified:
+            atomic_json_write(charge_json_path, charge_data)
 
 
 def _write_horton_timing(folder: str, elapsed: float) -> None:
@@ -111,7 +157,6 @@ def run_horton_analysis(
     grid: str = "fine",
     timeout: int = 3600,
     subprocess_env: Optional[dict] = None,
-    move_results: bool = False,
     overwrite: bool = False,
     logger: Optional[logging.Logger] = None,
 ) -> bool:
@@ -128,19 +173,36 @@ def run_horton_analysis(
     horton_json_path = os.path.join(folder, "horton.json")
     existing = None if overwrite else find_horton_json(folder)
     if existing is not None:
-        # Skip the expensive recompute, but always (re)attempt the merge: it is
-        # cheap and idempotent, and a run interrupted between writing
-        # horton.json and merging would otherwise never integrate its results.
-        logger.info("horton.json already present in %s -- merging only", folder)
         try:
             with open(existing, "r") as f:
-                merge_horton_into_charge_json(
-                    json.load(f), resolve_charge_json(folder, move_results)
-                )
+                existing_dict = json.load(f)
         except (json.JSONDecodeError, OSError) as e:
             logger.error("Could not merge existing %s: %s", existing, e)
             return False
-        return True
+        if not isinstance(existing_dict, dict):
+            logger.error("Existing %s is not a dict -- ignoring", existing)
+            return False
+        # Merge whatever exists first (cheap, idempotent): a run interrupted
+        # between writing horton.json and merging must still integrate its
+        # results, and partial schemes must reach charge.json even when the
+        # recompute below cannot run (e.g. the wfx was since cleaned). This
+        # path must never raise -- one unwritable folder would kill a whole
+        # horton-charges batch.
+        try:
+            merge_horton_into_charge_json(
+                existing_dict, resolve_charge_json(folder)
+            )
+        except OSError as e:
+            logger.error("Could not merge existing %s: %s", existing, e)
+            return False
+        if schemes_covered(existing_dict, schemes):
+            logger.info("horton.json already present in %s -- merging only", folder)
+            return True
+        # A scheme failed transiently on an earlier run (or fewer schemes were
+        # requested then): the existing file must not freeze that gap forever.
+        logger.info(
+            "horton.json in %s lacks requested schemes -- recomputing", folder
+        )
 
     wfx_path = find_wfx(folder)
     if wfx_path is None:
@@ -197,9 +259,7 @@ def run_horton_analysis(
         with open(horton_json_path, "r") as f:
             horton_dict = json.load(f)
 
-        merge_horton_into_charge_json(
-            horton_dict, resolve_charge_json(folder, move_results)
-        )
+        merge_horton_into_charge_json(horton_dict, resolve_charge_json(folder))
 
         elapsed = round(time.time() - t_start, 2)
         _write_horton_timing(folder, elapsed)

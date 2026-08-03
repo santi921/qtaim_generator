@@ -703,10 +703,18 @@ def validate_qtaim_dict(
                     f"Number of nuclear critical points ({len(dict_ncps)}) does not match expected ({n_atoms})."
                 )
             return False
+    status = None
+    if folder is not None and (check_bcp_count or require_provenance):
+        status = qtaim_run_status(folder)
+
     # A bound multi-atom system must have at least one bond critical point.
     # Logged unconditionally (cheap, and this class of failure is otherwise
-    # invisible), but only fatal under check_bcp_count, since a genuinely
-    # non-interacting pair of atoms legitimately has none.
+    # invisible), and only fatal under check_bcp_count, since a genuinely
+    # non-interacting pair of atoms legitimately has none. Even then, an empty
+    # BCP set backed by a *complete* run defers to the reported/storable
+    # shortfall logic below: a run that itself found zero (or only unstorable)
+    # bond CPs is deterministic, and failing it would requeue a job that no
+    # rerun can change.
     if not dict_bcps and n_atoms is not None and n_atoms > 1:
         msg = (
             f"QTAIM json has no bond critical points for {n_atoms} atoms: "
@@ -717,7 +725,14 @@ def validate_qtaim_dict(
         if logger:
             logger.error(msg)
         if check_bcp_count:
-            return False
+            run_complete = (
+                status is not None
+                and status["have_qtaim_out"]
+                and status["search_done"]
+                and status["export_done"]
+            )
+            if not run_complete:
+                return False
 
     if require_provenance and folder is not None:
         # Absent qtaim.out means the record's completeness cannot be established
@@ -726,7 +741,7 @@ def validate_qtaim_dict(
         # passes and the runner skips the folder -- while the audit classifies it
         # no_provenance and selects it for rerun. This is what makes the two
         # agree, at the cost of rerunning records that may well be fine.
-        if not qtaim_run_status(folder)["have_qtaim_out"]:
+        if not status["have_qtaim_out"]:
             msg = (
                 f"No qtaim.out for {folder}, so the bond-CP count cannot be "
                 f"verified; treating as incomplete because --require_qtaim_"
@@ -739,7 +754,6 @@ def validate_qtaim_dict(
             return False
 
     if check_bcp_count and folder is not None:
-        status = qtaim_run_status(folder)
         # An incomplete run is a defect even when the counts happen to agree:
         # if the search or the export never finished, the record cannot be
         # complete regardless of what it contains.

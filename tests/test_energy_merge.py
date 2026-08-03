@@ -187,6 +187,48 @@ def test_merge_vertical_filter(fixture_dirs):
             assert omol_key not in _read_all(path)
 
 
+def test_merge_rerun_replaces_cleanly(fixture_dirs):
+    """Regression: rerunning into the same out_dir must rebuild from empty.
+    The old in-place writer counted already-present keys as duplicates and
+    stamped `length` with only the new-key count (0 on a full rerun), silently
+    truncating the split for any consumer that trusts `length`."""
+    aselmdb_dir, manifest_dir, holdout_dir, out_dir = fixture_dirs
+    kwargs = dict(
+        aselmdb_dirs=[aselmdb_dir],
+        manifest_dir=manifest_dir,
+        out_dir=out_dir,
+        holdout_dir=holdout_dir,
+    )
+    merge(**kwargs)
+    report = merge(**kwargs)
+    for name, stats in report["outputs"].items():
+        assert stats["written"] == stats["expected"], name
+        assert stats["duplicates"] == 0, name
+    h1 = _read_all(os.path.join(out_dir, "H1", "energy.lmdb"))
+    assert h1["length"] == 1
+    assert not os.path.exists(os.path.join(out_dir, "H1", "energy.lmdb.tmp"))
+
+
+def test_merge_discards_stale_partial_tmp(fixture_dirs):
+    """A tmp file left by a crashed run must not leak keys into the rebuild."""
+    aselmdb_dir, manifest_dir, holdout_dir, out_dir = fixture_dirs
+    os.makedirs(os.path.join(out_dir, "H1"), exist_ok=True)
+    stale = os.path.join(out_dir, "H1", "energy.lmdb.tmp")
+    env = lmdb.open(stale, subdir=False)
+    with env.begin(write=True) as txn:
+        txn.put(b"stale_key", pickle.dumps({}))
+    env.close()
+    merge(
+        aselmdb_dirs=[aselmdb_dir],
+        manifest_dir=manifest_dir,
+        out_dir=out_dir,
+        holdout_dir=holdout_dir,
+    )
+    h1 = _read_all(os.path.join(out_dir, "H1", "energy.lmdb"))
+    assert "stale_key" not in h1
+    assert h1["length"] == 1
+
+
 def test_merge_raises_on_zero_written(fixture_dirs, tmp_path):
     aselmdb_dir, _, _, out_dir = fixture_dirs
     empty_manifests = tmp_path / "empty_manifests"

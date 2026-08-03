@@ -1,0 +1,49 @@
+{
+  "chunk": -1,
+  "filter_list": ["length"],
+  "restart": false,
+  "allowed_ring_size": [3, 4, 5, 6, 7, 8],
+  "allowed_charges": null,
+  "allowed_spins": null,
+  "keys_target": {
+    "atom": [],
+    "bond": [],
+    "global": ["n_atoms"]
+  },
+  "keys_data": {
+    "atom": [],
+    "bond": [],
+    "global": ["n_atoms"]
+  },
+  "lmdb_path": "/path/to/output/shard_0",
+  "lmdb_name": "graphs.lmdb",
+  "lmdb_locations": {
+    "geom_lmdb": "/path/to/source/geom.lmdb"
+  },
+  "n_workers": 1,
+  "batch_size": 100,
+
+  "_comment_sharding": "=== SHARDING PARAMETERS (for parallel processing) ===",
+  "shard_index": 0,
+  "total_shards": 4,
+  "skip_scaling": true,
+  "save_unfinalized_scaler": true,
+  "auto_merge": false,
+
+  "_comment_usage": "=== USAGE ===",
+  "_usage_1": "Set shard_index to 0, 1, 2, 3 for each of 4 parallel processes",
+  "_usage_2": "Set total_shards to the number of parallel processes (e.g., 4)",
+  "_usage_3": "Set skip_scaling=true for sharded runs (scaling done after merge)",
+  "_usage_4": "Set save_unfinalized_scaler=true to save scalers for merging",
+  "_usage_5": "Set auto_merge=true ONLY on the last shard (shard_index=total_shards-1)",
+  "_usage_6": "Output will be named: {lmdb_name}_shard_{shard_index}.lmdb",
+
+  "_comment_auto_merge": "=== AUTO-MERGE (RECOMMENDED) ===",
+  "_auto_merge_1": "Set auto_merge=true on the LAST SHARD ONLY (e.g., shard_index=3 when total_shards=4)",
+  "_auto_merge_2": "The last shard will automatically merge all shards when it finishes",
+  "_auto_merge_3": "This eliminates the need for a separate merge step!",
+
+  "_comment_manual_merge": "=== MANUAL MERGE (if auto_merge not used) ===",
+  "_merge_python": "from qtaim_gen.source.core.converter import BaseConverter",
+  "_merge_code": "BaseConverter.merge_shards(shard_dirs=['shard_0/', 'shard_1/', 'shard_2/', 'shard_3/'], output_dir='merged/')"
+}
