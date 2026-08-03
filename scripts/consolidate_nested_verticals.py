@@ -90,6 +90,24 @@ def find_job_input(folder: str) -> Optional[str]:
     return None
 
 
+def resolve_family_file(folder: str, name: str) -> Optional[str]:
+    """Locate one descriptor JSON, root first then generator/.
+
+    Resolved per file rather than by picking a single base directory for the
+    whole folder. Choosing one base means detecting the layout from some
+    representative file, and then any copy missing *that* file is scored as
+    holding nothing -- including copies whose other five families are present
+    and valid. Real folders are also genuinely split (qtaim.json left at the
+    root by a partial re-run while the rest sits in generator/ from an earlier
+    move_results_to_folder), which no single base can represent.
+    """
+    for base in (folder, os.path.join(folder, "generator")):
+        p = os.path.join(base, name)
+        if os.path.isfile(p) and os.path.getsize(p) > 0:
+            return p
+    return None
+
+
 def find_duplicate_keys(root: str, vertical: str):
     """(shared, nested_only, top_only) keys for one vertical.
 
@@ -168,15 +186,6 @@ def score_folder(
     spin_tf = spin is not None and spin != 1
     out["n_atoms"], out["spin"] = n_atoms, spin
 
-    # descriptors live either in the folder root (mid-run) or generator/ (after
-    # move_results_to_folder); pick whichever holds them
-    base = folder
-    if not os.path.isfile(os.path.join(folder, "qtaim.json")) and os.path.isfile(
-        os.path.join(folder, "generator", "qtaim.json")
-    ):
-        base = os.path.join(folder, "generator")
-    out["layout"] = "generator" if base != folder else "root"
-
     checks = {
         "qtaim": lambda p: validate_qtaim_dict(
             p, n_atoms=n_atoms, folder=folder,
@@ -192,22 +201,25 @@ def score_folder(
         "other": lambda p: validate_other_dict(p, full_set=full_set),
         "orca": lambda p: validate_orca_dict(p, n_atoms=n_atoms),
     }
+    found, where = {}, set()
     for fam, name in FAMILY_FILES.items():
-        p = os.path.join(base, name)
-        if not (os.path.isfile(p) and os.path.getsize(p) > 0):
+        p = resolve_family_file(folder, name)
+        if p is None:
             continue
+        found[fam] = p
+        where.add("generator" if os.path.dirname(p).endswith("generator") else "root")
         try:
             out[fam] = bool(checks[fam](p))
         except Exception:
             out[fam] = False
 
-    mtimes = [
-        os.path.getmtime(os.path.join(base, n))
-        for n in FAMILY_FILES.values()
-        if os.path.isfile(os.path.join(base, n))
-    ]
-    if mtimes:
-        out["last_edit"] = int(max(mtimes))
+    # "split" is worth surfacing: it means a partial re-run left files in both
+    # places, which is how the single-base version misread these folders
+    out["layout"] = (
+        "split" if len(where) > 1 else (where.pop() if where else "none")
+    )
+    if found:
+        out["last_edit"] = int(max(os.path.getmtime(p) for p in found.values()))
     return out
 
 
