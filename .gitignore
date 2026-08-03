@@ -85,5 +85,8 @@ runs/
 !tests/test_files/**/*.txt
 !tests/test_files/**/*.lmdb
 !tests/test_files/**/*.lmdb-lock
+!tests/test_files/**/*.out
+!tests/test_files/**/*.gbw
+!tests/test_files/**/*.mfwn
 data/profiling_study/runs/
 data/profiling_study/logs/

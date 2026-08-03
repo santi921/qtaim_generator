@@ -1,0 +1,88 @@
+# Some display settings
+display projection Orthographic
+display nearclip set 0.000000
+light 0 on
+light 1 on
+color Element {H} silver
+color Element {C} black
+color Element {N} blue
+color Element {O} red
+color Element {F} green
+color Element {Ne} cyan
+color Element {Na} purple
+color Element {Al} iceblue
+color Element {Si} gray
+color Element {Bi} purple
+color Element {Se} orange3
+color Display {Background} white
+display depthcue off
+
+mol new phenol_phenol.xyz type xyz first 0 last -1 step 1 filebonds 0 autobonds 0 waitfor all
+
+set labx 0.05
+set laby 0.0
+label delete Atoms all
+color Labels Atoms blue
+label textthickness 2.5
+label textsize 0.75
+
+set sel [atomselect top "name \"Xn.*\""]
+$sel set type "1"
+set sel [atomselect top "name \"Xb.*\""]
+$sel set type "2"
+set sel [atomselect top "name \"Xr.*\""]
+$sel set type "3"
+set sel [atomselect top "name \"Xc.*\""]
+$sel set type "4"
+set sel [atomselect top "name \"Xz.*\""]
+$sel set type "5"
+
+color Type {1} green2
+color Type {2} orange3
+color Type {3} cyan
+color Type {4} red
+color Type {5} mauve
+
+mol delrep 0 top
+mol representation CPK 0.300000 0.000000 12.000000 12.000000
+mol color Type
+mol selection {type 1}
+mol material Opaque
+mol addrep top
+
+mol representation CPK 0.300000 0.000000 12.000000 12.000000
+mol color Type
+mol selection {type 2}
+mol material Opaque
+mol addrep top
+
+mol representation CPK 0.300000 0.000000 12.000000 12.000000
+mol color Type
+mol selection {type 3}
+mol material Opaque
+mol addrep top
+
+mol representation CPK 0.300000 0.000000 12.000000 12.000000
+mol color Type
+mol selection {type 4}
+mol material Opaque
+mol addrep top
+
+mol representation CPK 0.100000 0.000000 12.000000 12.000000
+mol color Type
+mol selection {type 5}
+mol material Opaque
+mol addrep top
+
+mol representation CPK 1.000000 0.300000 12.000000 12.000000
+mol color Element
+mol selection {not (type 1 or type 2 or type 3 or type 4 or type 5)}
+mol material Opaque
+mol addrep top
+
+set atomlist [[atomselect top "not (type 1 or type 2 or type 3 or type 4 or type 5)"] list]
+foreach {atom} $atomlist {
+  label add Atoms 0/$atom
+  label textformat Atoms $atom {%1i}
+  label textoffset Atoms $atom "$labx $laby"
+}

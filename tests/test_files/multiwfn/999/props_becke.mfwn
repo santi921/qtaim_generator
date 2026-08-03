@@ -1,0 +1,2 @@
+#!/bin/bash
+/home/santiagovargas/dev/Multiwfn_3.8_dev_bin_Linux_noGUI/Multiwfn_noGUI /home/santiagovargas/dev/qtaim_generator/tests/test_files/multiwfn/999/input.wfn < /home/santiagovargas/dev/qtaim_generator/tests/test_files/multiwfn/999/becke.txt | tee /home/santiagovargas/dev/qtaim_generator/tests/test_files/multiwfn/999/becke.out
