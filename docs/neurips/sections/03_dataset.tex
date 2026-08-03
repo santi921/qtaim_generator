@@ -63,7 +63,7 @@ SCF convergence metadata are parsed from the ORCA output file \citep{orca5,ORCA}
 \subsection{Storage Layout}
 \label{sec:storage}
 
-Each split folder contains eight LMDB files keyed on a single string identifier
+Each split folder contains \revised{nine} LMDB files keyed on a single string identifier
 $k = \texttt{relpath(folder, root).replace("/", "\_\_")}$. Keys for each structure
 are shared across all lmdbs and they each contain different datatypes:
 \begin{itemize}
@@ -75,6 +75,7 @@ are shared across all lmdbs and they each contain different datatypes:
 \item \texttt{other.lmdb}: molecular descriptors from ESP and ALIE surface analysis (volume, surface area, min/max, signed mean and variance, polarity index, internal charge separation) plus four polarity scalars (\texttt{mpp\_full}, \texttt{sdp\_full}, \texttt{mpp\_heavy}, \texttt{sdp\_heavy}).
 \item \texttt{orca.lmdb}: ORCA-derived globals (total energy, orbital energies, dipole, gradient, SCF metadata), filtered via \texttt{DEFAULT\_ORCA\_FILTER} when consumed by the converter.
 \item \texttt{timings.lmdb}: per-job step durations; provenance only.
+\item \revised{\texttt{energy.lmdb}: OMol25 reference labels aligned to the same key space --- total energy (eV), per-atom forces (eV/\AA), and the source OMol25 record identifier.}
 \end{itemize}
 
 
