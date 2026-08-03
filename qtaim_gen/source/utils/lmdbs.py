@@ -1,13 +1,16 @@
 import os
 import lmdb
 import json
+import logging
 import pickle
 from typing import Dict, List, Tuple, Any, Optional, Union
 from glob import glob
 from dataclasses import dataclass
-import numpy as np 
+import numpy as np
 from pymatgen.core import Molecule
 from pymatgen.analysis.graphs import MoleculeGraph
+
+logger = logging.getLogger(__name__)
 
 from qtaim_gen.source.utils.io import (
     get_bonds_from_coords,
@@ -17,6 +20,30 @@ from qtaim_gen.source.core.parse_qtaim import (
     get_spin_charge_from_orca_inp,
     orca_inp_to_dict,
 )
+
+
+def _derive_lmdb_key(folder_path: str, root_dir: str) -> str:
+    """Derive a deterministic LMDB key from a job folder path.
+
+    For folder-list mode: key = relpath(folder, root_dir) with os.sep replaced by '__'.
+    Falls back to the absolute path (encoded the same way, leading sep stripped) when
+    the folder is not under root_dir.
+
+    Examples:
+        root='/data/omol/', folder='/data/omol/sub/job/step0' -> 'sub__job__step0'
+        root='/data/foo/',  folder='/elsewhere/job'           -> 'elsewhere__job' (warns)
+    """
+    norm_root = os.path.normpath(root_dir)
+    norm_folder = os.path.normpath(folder_path)
+    rel = os.path.relpath(norm_folder, norm_root)
+    if rel == ".." or rel.startswith(".." + os.sep):
+        logger.warning(
+            "folder '%s' is not under root_dir '%s'; using absolute-path key fallback.",
+            folder_path,
+            root_dir,
+        )
+        rel = norm_folder.lstrip(os.sep)
+    return rel.replace(os.sep, "__")
 
 
 def convert_inp_to_xyz(orca_path, output_path):
@@ -214,10 +241,12 @@ def json_2_lmdbs(
     move_files: Optional[bool] = False,
     limit: Optional[int] = None,
     shard_folders: Optional[List[str]] = None,
+    folder_paths: Optional[List[str]] = None,
 ):
     """Converts folders of output json files to lmdb files.
     Args:
-        root_dir (str): Root directory containing the json files.
+        root_dir (str): Root directory containing the json files (also used as the
+            relpath prefix for key derivation in folder_paths mode).
         out_dir (str): Output directory for the lmdb files.
         data_type (str): Data type to convert. Options are "charge", "bond", "other", "qtaim".
         out_lmdb (str): Output lmdb file.
@@ -225,10 +254,25 @@ def json_2_lmdbs(
         clean (Optional[bool], optional): If True, delete the json files. Defaults to False.
         move_files (Optional[bool], optional): If files were moved into separate ./generator/ folders in each job
         limit (Optional[int], optional): Limit number of files to process (for debugging).
-        shard_folders (Optional[List[str]], optional): If set, only process these folder names (for sharding).
+        shard_folders (Optional[List[str]], optional): If set, only process these folder names (legacy flat-glob mode).
+        folder_paths (Optional[List[str]], optional): If set, iterate this explicit list of job folder
+            paths instead of globbing. LMDB keys are derived from each folder's relpath under root_dir
+            (os.sep replaced by '__'). Use this for jagged hierarchies. Mutually exclusive with shard_folders.
     """
+    if folder_paths is not None and shard_folders is not None:
+        raise ValueError("folder_paths and shard_folders are mutually exclusive")
+
     chunk_ind = 1
-    if shard_folders is not None:
+    if folder_paths is not None:
+        files_target = []
+        for folder in folder_paths:
+            if move_files:
+                candidate = os.path.join(folder, "generator", f"{data_type}.json")
+            else:
+                candidate = os.path.join(folder, f"{data_type}.json")
+            if os.path.exists(candidate):
+                files_target.append(candidate)
+    elif shard_folders is not None:
         # Only glob files from the assigned shard folders
         files_target = []
         for folder in shard_folders:
@@ -253,9 +297,15 @@ def json_2_lmdbs(
         for file in chunk:
             with open(file, "r") as f:
                 data = json.load(f)
-                # When move_files=True, path is root/job/generator/file.json -> use [-3]
-                # When move_files=False, path is root/job/file.json -> use [-2]
-                name = file.split("/")[-3] if move_files else file.split("/")[-2]
+                if folder_paths is not None:
+                    # Folder-list mode: key from full job-folder relpath under root_dir
+                    job_folder = os.path.dirname(os.path.dirname(file)) if move_files else os.path.dirname(file)
+                    name = _derive_lmdb_key(job_folder, root_dir)
+                else:
+                    # Legacy mode: leaf folder name
+                    # When move_files=True, path is root/job/generator/file.json -> use [-3]
+                    # When move_files=False, path is root/job/file.json -> use [-2]
+                    name = file.split("/")[-3] if move_files else file.split("/")[-2]
                 data_dict[name] = data
 
         write_lmdb(data_dict, out_dir, f"{data_type}_{chunk_ind}.lmdb")
@@ -287,20 +337,32 @@ def inp_files_2_lmdbs(
     merge: Optional[bool] = True,
     limit: Optional[int] = None,
     shard_folders: Optional[List[str]] = None,
+    folder_paths: Optional[List[str]] = None,
 ):
     """
     Converts orca inp files into lmdbs at scale.
     Args:
-        root_dir (str): Root directory containing the input files.
+        root_dir (str): Root directory containing the input files (also used as the
+            relpath prefix for key derivation in folder_paths mode).
         out_dir (str): Output directory for the lmdb files.
         out_lmdb (str): Output lmdb file.
         chunk_size (int): Size of the chunks to split the data into.
         clean (Optional[bool], optional): If True, delete the input files. Defaults to False.
         limit (Optional[int], optional): Limit number of files to process (for debugging).
         merge (Optional[bool], optional): If True, merge the lmdb files after creation. Defaults to True.
-        shard_folders (Optional[List[str]], optional): If set, only process these folder names (for sharding).
+        shard_folders (Optional[List[str]], optional): If set, only process these folder names (legacy flat-glob mode).
+        folder_paths (Optional[List[str]], optional): If set, iterate this explicit list of job folder
+            paths instead of globbing. LMDB keys are derived from each folder's relpath under root_dir.
+            Mutually exclusive with shard_folders.
     """
-    if shard_folders is not None:
+    if folder_paths is not None and shard_folders is not None:
+        raise ValueError("folder_paths and shard_folders are mutually exclusive")
+
+    if folder_paths is not None:
+        files = []
+        for folder in folder_paths:
+            files.extend(glob(os.path.join(folder, "*.inp")))
+    elif shard_folders is not None:
         files = []
         for folder in shard_folders:
             files.extend(glob(os.path.join(root_dir, folder, "*.inp")))
@@ -331,7 +393,10 @@ def inp_files_2_lmdbs(
 
             molecule_graph = MoleculeGraph.with_empty_graph(molecule)
 
-            identifier = file.split("/")[-2]
+            if folder_paths is not None:
+                identifier = _derive_lmdb_key(os.path.dirname(file), root_dir)
+            else:
+                identifier = file.split("/")[-2]
 
             # Get bonds directly from coords (no xyz file needed)
             bonds = get_bonds_from_coords(species, coords)
@@ -439,7 +504,6 @@ def parse_config_gen_to_embed(
         Dict[str, Any]]:
             - A dictionary containing the configuration parameters.
     """
-    lmdb_dict = {}
     with open(config_path, "r") as f:
         config_dict = json.load(f)
     config_dict["restart"] = restart
@@ -453,7 +517,21 @@ def parse_config_gen_to_embed(
     if "allowed_spins" not in config_dict.keys():
         config_dict["allowed_spins"] = None
 
-    # create config
+    # Split config defaults
+    if "split_method" not in config_dict:
+        config_dict["split_method"] = "random"
+    if "split_ratios" not in config_dict:
+        config_dict["split_ratios"] = [0.8, 0.1, 0.1]
+    if "split_seed" not in config_dict:
+        config_dict["split_seed"] = 42
+
+    # Validate split + sharding mutual exclusivity
+    total_shards = config_dict.get("total_shards", 1)
+    if total_shards > 1 and config_dict.get("_split_enabled", False):
+        raise ValueError(
+            "Splitting and sharding are mutually exclusive. "
+            f"Got total_shards={total_shards} with --split enabled."
+        )
 
     return config_dict
 
@@ -770,8 +848,10 @@ def parse_bond_data(
             if bond_key_tuple not in bond_feats:
                 bond_feats[bond_key_tuple] = {}
 
-            # store under the original section key (e.g., 'fuzzy' or 'ibsi_bond')
-            bond_feats[bond_key_tuple][k] = float(bond_value)
+            # Normalize key: strip _bond suffix for consistent naming
+            # (some LMDB sources store 'ibsi_bond' while others store 'ibsi')
+            normalized_k = k[:-5] if k.endswith("_bond") else k
+            bond_feats[bond_key_tuple][normalized_k] = float(bond_value)
 
     # If a cutoff is provided, or a bond_filter is provided, do a second pass
     # to filter bond_feats and bond_list based on the feature used to define
@@ -779,22 +859,9 @@ def parse_bond_data(
     # - cutoff (float): keep bonds where feature >= cutoff
     # - bond_filter (list): if cutoff is None, fall back to presence/non-zero behavior
     if cutoff is not None or bond_filter is not None:
-        # determine the actual key name used in the payload (could be 'fuzzy' or 'fuzzy_bond')
-        candidate_keys = [bond_list_definition, bond_list_definition + "_bond"]
-        filter_key = None
-        for ck in candidate_keys:
-            if ck in dict_bond:
-                filter_key = ck
-                break
-        # if still not found, try to find something from bond_filter
-        if filter_key is None and bond_filter is not None:
-            for ck in candidate_keys:
-                if ck in bond_filter:
-                    filter_key = ck
-                    break
-        # final fallback: if bond_filter explicitly provided, use its first element
-        if filter_key is None and bond_filter is not None and len(bond_filter) > 0:
-            filter_key = bond_filter[0]
+        # determine the filter key using the normalized form (without _bond suffix)
+        # since bond_feats keys are now normalized
+        filter_key = bond_list_definition  # already normalized (e.g. 'fuzzy', 'ibsi')
 
         allowed = set()
         for b in bond_list:
@@ -838,6 +905,215 @@ def parse_bond_data(
     
 
     return bond_feats, bond_list
+
+
+_ORCA_PER_ATOM_NAME_MAP = {
+    "mulliken_charges":  "orca_charge_mulliken",
+    "mulliken_spins":    "orca_spin_mulliken",
+    "loewdin_charges":   "orca_charge_loewdin",
+    "loewdin_spins":     "orca_spin_loewdin",
+    "mayer_charges":     "orca_charge_mayer",
+}
+# Per-atom keys whose values are nested dicts of named sub-features
+# (e.g. mayer_population emits {"va": ..., "bva": ...} per atom).
+_ORCA_PER_ATOM_NESTED = {
+    "mayer_population": ("orca_population_mayer", ("va", "bva")),
+}
+_ORCA_PER_BOND_NAME_MAP = {
+    "loewdin_bond_orders": "orca_bond_order_loewdin",
+    "mayer_bond_orders":   "orca_bond_order_mayer",
+}
+_ORCA_GLOBAL_SCALAR_KEYS = (
+    "scf_cycles", "n_alpha", "n_beta", "n_total", "n_electrons", "n_orbitals",
+    "s_squared", "final_energy_eh",
+    "homo_eh", "homo_ev", "lumo_eh", "lumo_ev", "homo_lumo_gap_eh",
+    "gradient_norm", "gradient_rms", "gradient_max", "dipole_magnitude_au",
+)
+_ORCA_GLOBAL_DICT_PREFIX = {
+    "energy_components": "energy",
+    "scf_convergence":   "scf",
+}
+_ORCA_GLOBAL_VECTOR_SUFFIXES = {
+    "dipole_au":                ("x", "y", "z"),
+    "rotational_constants_cm1": ("a", "b", "c"),
+    "quadrupole_au":            ("xx", "yy", "zz", "xy", "xz", "yz"),
+}
+
+DEFAULT_ORCA_FILTER = [
+    "final_energy_eh",
+    "homo_eh", "homo_ev", "lumo_eh", "lumo_ev", "homo_lumo_gap_eh",
+    "s_squared",
+    "dipole_magnitude_au",
+    "gradient_rms",
+    "energy_components",
+    "dipole_au",
+    "rotational_constants_cm1",
+    "quadrupole_au",
+]
+
+
+def _orca_clean_scalar(v, clean: bool = True) -> Optional[float]:
+    if v is None:
+        return None
+    try:
+        fv = float(v)
+    except (TypeError, ValueError):
+        return None
+    if clean and (np.isnan(fv) or np.isinf(fv)):
+        return 0.0
+    return fv
+
+
+def parse_orca_data(
+    dict_orca: dict,
+    n_atoms: int,
+    orca_filter: Optional[List[str]] = None,
+    clean: bool = True,
+) -> Tuple[
+    Dict[int, Dict[str, Any]],
+    Dict[Tuple[int, int], Dict[str, Any]],
+    Dict[str, float],
+]:
+    """
+    Parse orca.json into atom/bond/global feature dicts.
+
+    Takes:
+        dict_orca (dict): Parsed orca.json content.
+        n_atoms (int): Number of atoms in the structure.
+        orca_filter (Optional[List[str]]): Inclusive list of top-level orca.json
+            keys to surface. None falls back to DEFAULT_ORCA_FILTER (chemistry
+            globals only — per-atom and per-bond data are opt-in).
+        clean (bool): Coerce NaN/inf scalars to 0.0.
+
+    Returns:
+        atom_feats (Dict[int, Dict[str, Any]]): {atom_idx: {feat_name: value}}
+        bond_feats (Dict[Tuple[int, int], Dict[str, Any]]): {(i,j) sorted: {feat_name: value}}
+        global_feats (Dict[str, float]): {feat_name: value}
+    """
+    if orca_filter is None:
+        orca_filter = DEFAULT_ORCA_FILTER
+
+    atom_feats: Dict[int, Dict[str, Any]] = {i: {} for i in range(n_atoms)}
+    bond_feats: Dict[Tuple[int, int], Dict[str, Any]] = {}
+    global_feats: Dict[str, float] = {}
+
+    allowed = set(orca_filter)
+
+    # global scalars
+    for k in _ORCA_GLOBAL_SCALAR_KEYS:
+        if k not in allowed:
+            continue
+        if dict_orca.get(k) is None:
+            continue
+        cv = _orca_clean_scalar(dict_orca[k], clean=clean)
+        if cv is not None:
+            global_feats[f"orca_{k}"] = cv
+
+    # global nested dicts (energy_components -> orca_energy_*; scf_convergence -> orca_scf_*)
+    for top, prefix in _ORCA_GLOBAL_DICT_PREFIX.items():
+        if top not in allowed:
+            continue
+        sub = dict_orca.get(top)
+        if not isinstance(sub, dict):
+            continue
+        for sk, sv in sub.items():
+            cv = _orca_clean_scalar(sv, clean=clean)
+            if cv is not None:
+                global_feats[f"orca_{prefix}_{sk}"] = cv
+
+    # global vector lists
+    for top, suffixes in _ORCA_GLOBAL_VECTOR_SUFFIXES.items():
+        if top not in allowed:
+            continue
+        vec = dict_orca.get(top)
+        if not isinstance(vec, list) or len(vec) != len(suffixes):
+            continue
+        for s, v in zip(suffixes, vec):
+            cv = _orca_clean_scalar(v, clean=clean)
+            if cv is not None:
+                global_feats[f"orca_{top}_{s}"] = cv
+
+    # per-atom scalars
+    for top, feat_name in _ORCA_PER_ATOM_NAME_MAP.items():
+        if top not in allowed:
+            continue
+        d = dict_orca.get(top)
+        if not isinstance(d, dict) or not d:
+            continue  # skip empty (e.g. RKS spin dicts)
+        for k, v in d.items():
+            try:
+                idx = int(k.split("_")[0]) - 1
+            except (ValueError, IndexError, AttributeError):
+                continue
+            if 0 <= idx < n_atoms:
+                cv = _orca_clean_scalar(v, clean=clean)
+                if cv is not None:
+                    atom_feats[idx][feat_name] = cv
+
+    # per-atom nested dict (e.g. mayer_population -> {va, bva})
+    for top, (prefix, subkeys) in _ORCA_PER_ATOM_NESTED.items():
+        if top not in allowed:
+            continue
+        d = dict_orca.get(top)
+        if not isinstance(d, dict) or not d:
+            continue
+        for k, v in d.items():
+            try:
+                idx = int(k.split("_")[0]) - 1
+            except (ValueError, IndexError, AttributeError):
+                continue
+            if not (0 <= idx < n_atoms) or not isinstance(v, dict):
+                continue
+            for sk in subkeys:
+                if sk not in v:
+                    continue
+                cv = _orca_clean_scalar(v[sk], clean=clean)
+                if cv is not None:
+                    atom_feats[idx][f"{prefix}_{sk}"] = cv
+
+    # per-atom vector (gradient -> orca_gradient_x/y/z per atom)
+    if "gradient" in allowed:
+        d = dict_orca.get("gradient")
+        if isinstance(d, dict):
+            for k, v in d.items():
+                try:
+                    idx = int(k.split("_")[0]) - 1
+                except (ValueError, IndexError, AttributeError):
+                    continue
+                if not (0 <= idx < n_atoms):
+                    continue
+                if not isinstance(v, list) or len(v) != 3:
+                    continue
+                cleaned = [_orca_clean_scalar(c, clean=clean) for c in v]
+                if any(c is None for c in cleaned):
+                    continue
+                atom_feats[idx]["orca_gradient_x"] = cleaned[0]
+                atom_feats[idx]["orca_gradient_y"] = cleaned[1]
+                atom_feats[idx]["orca_gradient_z"] = cleaned[2]
+
+    # per-bond scalars
+    for top, feat_name in _ORCA_PER_BOND_NAME_MAP.items():
+        if top not in allowed:
+            continue
+        d = dict_orca.get(top)
+        if not isinstance(d, dict):
+            continue
+        for k, v in d.items():
+            try:
+                a_str, b_str = k.split("_to_")
+                a = int(a_str.split("_")[0]) - 1
+                b = int(b_str.split("_")[0]) - 1
+            except (ValueError, IndexError, AttributeError):
+                continue
+            if a == b or a < 0 or b < 0 or a >= n_atoms or b >= n_atoms:
+                continue
+            cv = _orca_clean_scalar(v, clean=clean)
+            if cv is None:
+                continue
+            key_conv = tuple(sorted([a, b]))
+            bond_feats.setdefault(key_conv, {})[feat_name] = cv
+
+    return atom_feats, bond_feats, global_feats
 
 
 def filter_bond_feats(

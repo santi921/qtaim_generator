@@ -13,6 +13,8 @@
 *ini
 *.lmdb
 *.lmdb-lock
+!tests/test_files/**/*.lmdb
+!tests/test_files/**/*.lmdb-lock
 *-lock
 *log
 *out
@@ -20,6 +22,7 @@
 *mfwn
 *out
 *png
+!assets/*.png
 *pkl
 *PKG-INFO*
 *pt 
@@ -36,5 +39,50 @@
 *wfx
 *xyz
 
+# working folders for dev
+examples/
+
 # W&B directories
 wandb/
+# internal planning/ai documents (not public)
+docs/plans/
+docs/solutions/
+docs/brainstorms/
+# neurips paper: track the LaTeX sources so the manuscript is version
+# controlled. Everything else under docs/neurips/ stays local: build artifacts,
+# figures (large binaries), and -- deliberately -- the confidential peer-review
+# material. This repo is PUBLIC and its URL is known to the reviewers, so the
+# reviews and our rebuttal strategy must never be pushed here.
+docs/neurips/*
+!docs/neurips/*.tex
+!docs/neurips/*.sty
+!docs/neurips/build.sh
+!docs/neurips/sections/
+docs/neurips/sections/*
+!docs/neurips/sections/*.tex
+!docs/neurips/bib/
+docs/neurips/bib/*
+!docs/neurips/bib/*.bib
+!docs/neurips/tables/
+docs/neurips/tables/*
+!docs/neurips/tables/*.tex
+# confidential -- peer review material and internal assessments, local only
+docs/neurips/neurips_reviews.md
+docs/neurips/neurips_rebuttals.md
+docs/neurips/neurips_status.md
+
+# experiment run outputs
+runs/
+
+# Always track test fixtures regardless of extension rules above
+!tests/test_files/
+!tests/test_files/*/
+!tests/test_files/**/
+!tests/test_files/**/*.inp
+!tests/test_files/**/*.in
+!tests/test_files/**/*.json
+!tests/test_files/**/*.txt
+!tests/test_files/**/*.lmdb
+!tests/test_files/**/*.lmdb-lock
+data/profiling_study/runs/
+data/profiling_study/logs/

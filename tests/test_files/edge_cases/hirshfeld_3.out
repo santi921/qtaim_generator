@@ -1,0 +1,415 @@
+ Multiwfn -- A Multifunctional Wavefunction Analyzer
+ Version 3.8(dev), update date: 2024-Oct-6
+ Developer: Tian Lu (Beijing Kein Research Center for Natural Sciences)
+ Multiwfn official website: http://sobereva.com/multiwfn
+ Multiwfn English forum: http://sobereva.com/wfnbbs
+ Multiwfn Chinese forum: http://bbs.keinsci.com/wfn
+ Both following papers ***MUST BE CITED IN MAIN TEXT*** if Multiwfn is used:
+          Tian Lu, Feiwu Chen, J. Comput. Chem., 33, 580-592 (2012)
+          Tian Lu, J. Chem. Phys., 161, 082503 (2024)
+ See "How to cite Multiwfn.pdf" in Multiwfn binary package for more information
+
+ ( Number of parallel threads:  10  Current date: 2026-04-01  Time: 15:11:28 )
+ 
+ Please wait...
+ 
+ Total energy:       0.000000000000 Hartree,   Virial ratio:  2.00000000
+ Total/Alpha/Beta electrons:    524.0000    262.0000    262.0000
+ Number of orbital:   262,  Atoms:    139,  GTFs:   4773
+ This is restricted closed-shell single-determinant wavefunction
+ 
+
+ Loaded /p/lustre5/vargas58/OMol4M/protein_core/6wkr_coreL340_-2_1/orca.wfx successfully!
+ 
+ Formula: H71 C41 N11 O16      Total atoms:     139
+ Molecule weight:       974.06818 Da
+ Point group: C1 
+ 
+ "q": Exit program gracefully          "r": Load a new file
+                    ************ Main function menu ************
+ 0 Show molecular structure and view orbitals
+ 1 Output all properties at a point       2 Topology analysis
+ 3 Output and plot specific property in a line
+ 4 Output and plot specific property in a plane
+ 5 Output and plot specific property within a spatial region (calc. grid data)
+ 6 Check & modify wavefunction
+ 7 Population analysis and calculation of atomic charges
+ 8 Orbital composition analysis           9 Bond order analysis
+ 10 Plot total DOS, PDOS, OPDOS, local DOS, COHP and photoelectron spectrum
+ 11 Plot IR/Raman/UV-Vis/ECD/VCD/ROA/NMR spectrum
+ 12 Quantitative analysis of molecular surface
+ 13 Process grid data (No grid data is presented currently)
+ 14 Adaptive natural density partitioning (AdNDP) analysis
+ 15 Fuzzy atomic space analysis
+ 16 Charge decomposition analysis (CDA) and plot orbital interaction diagram
+ 17 Basin analysis                       18 Electron excitation analysis
+ 19 Orbital localization analysis        20 Visual study of weak interaction
+ 21 Energy decomposition analysis        22 Conceptual DFT (CDFT) analysis
+ 23 ETS-NOCV analysis                    24 (Hyper)polarizability analysis
+ 25 Electron delocalization and aromaticity analyses
+ 26 Structure and geometry related analyses
+ 100 Other functions (Part 1)            200 Other functions (Part 2)
+ 300 Other functions (Part 3)
+ There is a nice reference comprehensively introducing atomic charges:
+ Tian Lu, Qinxue Chen, Partial Charges, In Exploring Chemical Concepts Through T
+ heory and Computation. WILEY-VCH GmbH: Weinheim (2024); pp. 161-187. DOI: 10.10
+ 02/9783527843435.ch6
+ 
+      ============== Population analysis and atomic charges ==============
+ -2 Calculate interaction energy between fragments based on atomic charges
+ -1 Define fragment
+ 0 Return
+ 1 Hirshfeld atomic charge
+ 2 Voronoi deformation density (VDD) atom population
+ 10 Becke atomic charge with atomic dipole moment correction
+ 11 Atomic dipole corrected Hirshfeld atomic charge (ADCH) (recommended)
+ 12 CHELPG ESP fitting atomic charge
+ 13 Merz-Kollmann (MK) ESP fitting atomic charge
+ 14 AIM atomic charge
+ 15 Hirshfeld-I atomic charge
+ 16 CM5 atomic charge    -16 Generate 1.2*CM5 atomic charge
+ 17 Electronegativity Equalization Method (EEM) atomic charge
+ 18 Restrained ElectroStatic Potential (RESP) atomic charge
+ 19 Gasteiger (PEOE) charge
+ 20 Minimal Basis Iterative Stockholder (MBIS) charge
+ Citation of Hirshfeld method: Theor. Chim. Acta. (Berl), 44, 129-138 (1977)
+ This task requests atomic densities, please select how to obtain them
+ 1 Use build-in sphericalized atomic densities in free-states (more convenient)
+ 2 Provide wavefunction file of involved elements by yourself or invoke Gaussian to automatically calculate them
+ Radial grids:   75    Angular grids:  434   Total:     32550
+ Calculating, please wait...
+ 
+ Hirshfeld charge of atom     1(C ) is -0.08207812
+ Hirshfeld charge of atom     2(C ) is  0.17347252
+ Hirshfeld charge of atom     3(O ) is -0.29876420
+ Hirshfeld charge of atom     4(H ) is  0.05017860
+ Hirshfeld charge of atom     5(H ) is  0.03800139
+ Hirshfeld charge of atom     6(H ) is  0.04404157
+ Hirshfeld charge of atom     7(N ) is -0.08808034
+ Hirshfeld charge of atom     8(C ) is  0.02631192
+ Hirshfeld charge of atom     9(C ) is  0.16956745
+ Hirshfeld charge of atom    10(O ) is -0.30032282
+ Hirshfeld charge of atom    11(C ) is -0.05293207
+ Hirshfeld charge of atom    12(C ) is -0.04285267
+ Hirshfeld charge of atom    13(C ) is -0.03979552
+ Hirshfeld charge of atom    14(C ) is  0.03517979
+ Hirshfeld charge of atom    15(N ) is  0.06713536
+ Hirshfeld charge of atom    16(H ) is  0.11638909
+ Hirshfeld charge of atom    17(H ) is  0.03670834
+ Hirshfeld charge of atom    18(H ) is  0.02731309
+ Hirshfeld charge of atom    19(H ) is  0.02702725
+ Hirshfeld charge of atom    20(H ) is  0.02864377
+ Hirshfeld charge of atom    21(H ) is  0.03981211
+ Hirshfeld charge of atom    22(H ) is  0.05510225
+ Hirshfeld charge of atom    23(H ) is  0.03592073
+ Hirshfeld charge of atom    24(H ) is  0.04887071
+ Hirshfeld charge of atom    25(H ) is  0.06233268
+ Hirshfeld charge of atom    26(H ) is  0.17588343
+ Hirshfeld charge of atom    27(H ) is  0.19660648
+ Hirshfeld charge of atom    28(H ) is  0.17258209
+ Hirshfeld charge of atom    29(H ) is  0.12519068
+ Hirshfeld charge of atom    30(N ) is -0.08824732
+ Hirshfeld charge of atom    31(C ) is -0.03044959
+ Hirshfeld charge of atom    32(H ) is  0.04342516
+ Hirshfeld charge of atom    33(H ) is  0.03064335
+ Hirshfeld charge of atom    34(H ) is  0.03357791
+ Hirshfeld charge of atom    35(C ) is -0.08891006
+ Hirshfeld charge of atom    36(C ) is  0.16696251
+ Hirshfeld charge of atom    37(O ) is -0.31477318
+ Hirshfeld charge of atom    38(H ) is  0.03839086
+ Hirshfeld charge of atom    39(H ) is  0.02193227
+ Hirshfeld charge of atom    40(H ) is  0.04066236
+ Hirshfeld charge of atom    41(N ) is -0.08639995
+ Hirshfeld charge of atom    42(C ) is  0.02075210
+ Hirshfeld charge of atom    43(C ) is  0.16309031
+ Hirshfeld charge of atom    44(O ) is -0.29387733
+ Hirshfeld charge of atom    45(C ) is -0.07743497
+ Hirshfeld charge of atom    46(C ) is  0.10002565
+ Hirshfeld charge of atom    47(O ) is -0.44006787
+ Hirshfeld charge of atom    48(O ) is -0.40538223
+ Hirshfeld charge of atom    49(H ) is  0.11241220
+ Hirshfeld charge of atom    50(H ) is  0.03764681
+ Hirshfeld charge of atom    51(H ) is  0.02639894
+ Hirshfeld charge of atom    52(H ) is  0.01919070
+ Hirshfeld charge of atom    53(H ) is  0.10310943
+ Hirshfeld charge of atom    54(N ) is -0.10380715
+ Hirshfeld charge of atom    55(C ) is -0.03822908
+ Hirshfeld charge of atom    56(H ) is  0.03870454
+ Hirshfeld charge of atom    57(H ) is  0.02107800
+ Hirshfeld charge of atom    58(H ) is  0.02118971
+ Hirshfeld charge of atom    59(C ) is -0.08060418
+ Hirshfeld charge of atom    60(C ) is  0.16612651
+ Hirshfeld charge of atom    61(O ) is -0.34099988
+ Hirshfeld charge of atom    62(H ) is  0.04054067
+ Hirshfeld charge of atom    63(H ) is  0.05229278
+ Hirshfeld charge of atom    64(H ) is  0.03594412
+ Hirshfeld charge of atom    65(N ) is -0.04620374
+ Hirshfeld charge of atom    66(C ) is  0.02385974
+ Hirshfeld charge of atom    67(C ) is  0.16666818
+ Hirshfeld charge of atom    68(O ) is -0.27714750
+ Hirshfeld charge of atom    69(C ) is -0.04959195
+ Hirshfeld charge of atom    70(C ) is -0.04652880
+ Hirshfeld charge of atom    71(C ) is -0.00051734
+ Hirshfeld charge of atom    72(H ) is  0.02727534
+ Hirshfeld charge of atom    73(H ) is  0.02931103
+ Hirshfeld charge of atom    74(H ) is  0.03735229
+ Hirshfeld charge of atom    75(H ) is  0.03895057
+ Hirshfeld charge of atom    76(H ) is  0.05033998
+ Hirshfeld charge of atom    77(H ) is  0.04985743
+ Hirshfeld charge of atom    78(H ) is  0.02338968
+ Hirshfeld charge of atom    79(H ) is  0.11375927
+ Hirshfeld charge of atom    80(N ) is -0.09624635
+ Hirshfeld charge of atom    81(C ) is -0.03158805
+ Hirshfeld charge of atom    82(H ) is  0.04786725
+ Hirshfeld charge of atom    83(H ) is  0.02446145
+ Hirshfeld charge of atom    84(H ) is  0.02816611
+ Hirshfeld charge of atom    85(C ) is -0.09055451
+ Hirshfeld charge of atom    86(C ) is  0.16369990
+ Hirshfeld charge of atom    87(O ) is -0.30185706
+ Hirshfeld charge of atom    88(H ) is  0.04132689
+ Hirshfeld charge of atom    89(H ) is  0.03144556
+ Hirshfeld charge of atom    90(H ) is  0.02540190
+ Hirshfeld charge of atom    91(N ) is -0.09470848
+ Hirshfeld charge of atom    92(C ) is  0.01655095
+ Hirshfeld charge of atom    93(C ) is  0.15073485
+ Hirshfeld charge of atom    94(O ) is -0.34773146
+ Hirshfeld charge of atom    95(C ) is -0.07226488
+ Hirshfeld charge of atom    96(C ) is  0.12884215
+ Hirshfeld charge of atom    97(O ) is -0.31700315
+ Hirshfeld charge of atom    98(O ) is -0.42699593
+ Hirshfeld charge of atom    99(H ) is  0.10588792
+ Hirshfeld charge of atom   100(H ) is  0.02836969
+ Hirshfeld charge of atom   101(H ) is  0.02110627
+ Hirshfeld charge of atom   102(H ) is  0.01936381
+ Hirshfeld charge of atom   103(N ) is -0.07983134
+ Hirshfeld charge of atom   104(C ) is  0.02285869
+ Hirshfeld charge of atom   105(C ) is  0.16313173
+ Hirshfeld charge of atom   106(O ) is -0.33700866
+ Hirshfeld charge of atom   107(C ) is -0.01307010
+ Hirshfeld charge of atom   108(C ) is -0.05138018
+ Hirshfeld charge of atom   109(C ) is -0.10446314
+ Hirshfeld charge of atom   110(C ) is -0.08840905
+ Hirshfeld charge of atom   111(H ) is  0.10187160
+ Hirshfeld charge of atom   112(H ) is  0.02347436
+ Hirshfeld charge of atom   113(H ) is  0.02966947
+ Hirshfeld charge of atom   114(H ) is  0.01630004
+ Hirshfeld charge of atom   115(H ) is  0.00588009
+ Hirshfeld charge of atom   116(H ) is  0.00596732
+ Hirshfeld charge of atom   117(H ) is  0.03783549
+ Hirshfeld charge of atom   118(H ) is  0.00699559
+ Hirshfeld charge of atom   119(H ) is  0.01004667
+ Hirshfeld charge of atom   120(H ) is  0.03182724
+ Hirshfeld charge of atom   121(H ) is  0.02808615
+ Hirshfeld charge of atom   122(N ) is -0.06590991
+ Hirshfeld charge of atom   123(C ) is  0.02108423
+ Hirshfeld charge of atom   124(C ) is  0.16875172
+ Hirshfeld charge of atom   125(O ) is -0.32642096
+ Hirshfeld charge of atom   126(C ) is -0.07196318
+ Hirshfeld charge of atom   127(C ) is  0.12012443
+ Hirshfeld charge of atom   128(O ) is -0.41122495
+ Hirshfeld charge of atom   129(O ) is -0.45035208
+ Hirshfeld charge of atom   130(H ) is  0.10054764
+ Hirshfeld charge of atom   131(H ) is  0.02760488
+ Hirshfeld charge of atom   132(H ) is  0.02264717
+ Hirshfeld charge of atom   133(H ) is  0.02944771
+ Hirshfeld charge of atom   134(H ) is  0.10557163
+ Hirshfeld charge of atom   135(N ) is -0.09238060
+ Hirshfeld charge of atom   136(C ) is -0.03902271
+ Hirshfeld charge of atom   137(H ) is  0.02792551
+ Hirshfeld charge of atom   138(H ) is  0.02176106
+ Hirshfeld charge of atom   139(H ) is  0.01669745
+ Summing up all charges:    -1.99792033
+ 
+ Total dipole moment from atomic charges: 1537.101194 a.u.
+ X/Y/Z of dipole moment vector: -922.036924 -656.383404-1040.042700 a.u.
+ 
+ Normalize sum of atomic populations to actual number of electrons...
+ 
+ Final atomic charges:
+ Atom    1(C ):    -0.08210226
+ Atom    2(C ):     0.17344940
+ Atom    3(O ):    -0.29879713
+ Atom    4(H ):     0.05017483
+ Atom    5(H ):     0.03799757
+ Atom    6(H ):     0.04403778
+ Atom    7(N ):    -0.08810847
+ Atom    8(C ):     0.02628821
+ Atom    9(C ):     0.16954431
+ Atom   10(O ):    -0.30035577
+ Atom   11(C ):    -0.05295609
+ Atom   12(C ):    -0.04287665
+ Atom   13(C ):    -0.03981949
+ Atom   14(C ):     0.03515612
+ Atom   15(N ):     0.06710784
+ Atom   16(H ):     0.11638558
+ Atom   17(H ):     0.03670452
+ Atom   18(H ):     0.02730923
+ Atom   19(H ):     0.02702339
+ Atom   20(H ):     0.02863992
+ Atom   21(H ):     0.03980830
+ Atom   22(H ):     0.05509850
+ Atom   23(H ):     0.03591690
+ Atom   24(H ):     0.04886694
+ Atom   25(H ):     0.06232896
+ Atom   26(H ):     0.17588016
+ Atom   27(H ):     0.19660329
+ Atom   28(H ):     0.17257880
+ Atom   29(H ):     0.12518720
+ Atom   30(N ):    -0.08827545
+ Atom   31(C ):    -0.03047352
+ Atom   32(H ):     0.04342136
+ Atom   33(H ):     0.03063950
+ Atom   34(H ):     0.03357408
+ Atom   35(C ):    -0.08893422
+ Atom   36(C ):     0.16693936
+ Atom   37(O ):    -0.31480618
+ Atom   38(H ):     0.03838704
+ Atom   39(H ):     0.02192839
+ Atom   40(H ):     0.04065855
+ Atom   41(N ):    -0.08642807
+ Atom   42(C ):     0.02072837
+ Atom   43(C ):     0.16306714
+ Atom   44(O ):    -0.29391025
+ Atom   45(C ):    -0.07745909
+ Atom   46(C ):     0.10000224
+ Atom   47(O ):    -0.44010137
+ Atom   48(O ):    -0.40541559
+ Atom   49(H ):     0.11240868
+ Atom   50(H ):     0.03764299
+ Atom   51(H ):     0.02639508
+ Atom   52(H ):     0.01918681
+ Atom   53(H ):     0.10310587
+ Atom   54(N ):    -0.10383534
+ Atom   55(C ):    -0.03825304
+ Atom   56(H ):     0.03870072
+ Atom   57(H ):     0.02107412
+ Atom   58(H ):     0.02118583
+ Atom   59(C ):    -0.08062831
+ Atom   60(C ):     0.16610335
+ Atom   61(O ):    -0.34103298
+ Atom   62(H ):     0.04053686
+ Atom   63(H ):     0.05228902
+ Atom   64(H ):     0.03594029
+ Atom   65(N ):    -0.04623170
+ Atom   66(C ):     0.02383603
+ Atom   67(C ):     0.16664503
+ Atom   68(O ):    -0.27718035
+ Atom   69(C ):    -0.04961596
+ Atom   70(C ):    -0.04655279
+ Atom   71(C ):    -0.00054115
+ Atom   72(H ):     0.02727148
+ Atom   73(H ):     0.02930718
+ Atom   74(H ):     0.03734847
+ Atom   75(H ):     0.03894675
+ Atom   76(H ):     0.05033621
+ Atom   77(H ):     0.04985365
+ Atom   78(H ):     0.02338581
+ Atom   79(H ):     0.11375576
+ Atom   80(N ):    -0.09627451
+ Atom   81(C ):    -0.03161199
+ Atom   82(H ):     0.04786347
+ Atom   83(H ):     0.02445757
+ Atom   84(H ):     0.02816225
+ Atom   85(C ):    -0.09057868
+ Atom   86(C ):     0.16367673
+ Atom   87(O ):    -0.30189001
+ Atom   88(H ):     0.04132308
+ Atom   89(H ):     0.03144171
+ Atom   90(H ):     0.02539803
+ Atom   91(N ):    -0.09473664
+ Atom   92(C ):     0.01652720
+ Atom   93(C ):     0.15071163
+ Atom   94(O ):    -0.34776459
+ Atom   95(C ):    -0.07228898
+ Atom   96(C ):     0.12881885
+ Atom   97(O ):    -0.31703616
+ Atom   98(O ):    -0.42702938
+ Atom   99(H ):     0.10588437
+ Atom  100(H ):     0.02836584
+ Atom  101(H ):     0.02110239
+ Atom  102(H ):     0.01935992
+ Atom  103(N ):    -0.07985944
+ Atom  104(C ):     0.02283496
+ Atom  105(C ):     0.16310856
+ Atom  106(O ):    -0.33704175
+ Atom  107(C ):    -0.01309397
+ Atom  108(C ):    -0.05140420
+ Atom  109(C ):    -0.10448736
+ Atom  110(C ):    -0.08843321
+ Atom  111(H ):     0.10186804
+ Atom  112(H ):     0.02347048
+ Atom  113(H ):     0.02966561
+ Atom  114(H ):     0.01629614
+ Atom  115(H ):     0.00587614
+ Atom  116(H ):     0.00596338
+ Atom  117(H ):     0.03783167
+ Atom  118(H ):     0.00699165
+ Atom  119(H ):     0.01004274
+ Atom  120(H ):     0.03182340
+ Atom  121(H ):     0.02808229
+ Atom  122(N ):    -0.06593796
+ Atom  123(C ):     0.02106050
+ Atom  124(C ):     0.16872858
+ Atom  125(O ):    -0.32645400
+ Atom  126(C ):    -0.07198728
+ Atom  127(C ):     0.12010109
+ Atom  128(O ):    -0.41125833
+ Atom  129(O ):    -0.45038561
+ Atom  130(H ):     0.10054407
+ Atom  131(H ):     0.02760102
+ Atom  132(H ):     0.02264329
+ Atom  133(H ):     0.02944385
+ Atom  134(H ):     0.10556808
+ Atom  135(N ):    -0.09240875
+ Atom  136(C ):    -0.03904668
+ Atom  137(H ):     0.02792165
+ Atom  138(H ):     0.02175718
+ Atom  139(H ):     0.01669355
+
+ Calculation took up      36 seconds wall clock time
+
+ If outputting atom coordinates with charges to orca.chg in current folder? (y/n)
+ 
+      ============== Population analysis and atomic charges ==============
+ -2 Calculate interaction energy between fragments based on atomic charges
+ -1 Define fragment
+ 0 Return
+ 1 Hirshfeld atomic charge
+ 2 Voronoi deformation density (VDD) atom population
+ 10 Becke atomic charge with atomic dipole moment correction
+ 11 Atomic dipole corrected Hirshfeld atomic charge (ADCH) (recommended)
+ 12 CHELPG ESP fitting atomic charge
+ 13 Merz-Kollmann (MK) ESP fitting atomic charge
+ 14 AIM atomic charge
+ 15 Hirshfeld-I atomic charge
+ 16 CM5 atomic charge    -16 Generate 1.2*CM5 atomic charge
+ 17 Electronegativity Equalization Method (EEM) atomic charge
+ 18 Restrained ElectroStatic Potential (RESP) atomic charge
+ 19 Gasteiger (PEOE) charge
+ 20 Minimal Basis Iterative Stockholder (MBIS) charge
+ 
+ "q": Exit program gracefully          "r": Load a new file
+                    ************ Main function menu ************
+ 0 Show molecular structure and view orbitals
+ 1 Output all properties at a point       2 Topology analysis
+ 3 Output and plot specific property in a line
+ 4 Output and plot specific property in a plane
+ 5 Output and plot specific property within a spatial region (calc. grid data)
+ 6 Check & modify wavefunction
+ 7 Population analysis and calculation of atomic charges
+ 8 Orbital composition analysis           9 Bond order analysis
+ 10 Plot total DOS, PDOS, OPDOS, local DOS, COHP and photoelectron spectrum
+ 11 Plot IR/Raman/UV-Vis/ECD/VCD/ROA/NMR spectrum
+ 12 Quantitative analysis of molecular surface
+ 13 Process grid data (No grid data is presented currently)
+ 14 Adaptive natural density partitioning (AdNDP) analysis
+ 15 Fuzzy atomic space analysis
+ 16 Charge decomposition analysis (CDA) and plot orbital interaction diagram
+ 17 Basin analysis                       18 Electron excitation analysis
+ 19 Orbital localization analysis        20 Visual study of weak interaction
+ 21 Energy decomposition analysis        22 Conceptual DFT (CDFT) analysis
+ 23 ETS-NOCV analysis                    24 (Hyper)polarizability analysis
+ 25 Electron delocalization and aromaticity analyses
+ 26 Structure and geometry related analyses
+ 100 Other functions (Part 1)            200 Other functions (Part 2)
+ 300 Other functions (Part 3)

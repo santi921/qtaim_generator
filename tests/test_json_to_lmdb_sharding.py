@@ -17,8 +17,40 @@ from pathlib import Path
 
 from qtaim_gen.source.scripts.json_to_lmdb import (
     partition_folders_by_shard,
+    partition_list_by_shard,
     merge_shards,
 )
+
+
+class TestPartitionListByShard:
+    """List-based shard partitioning (folder_list mode)."""
+
+    @classmethod
+    def setup_class(cls):
+        cls.logger = logging.getLogger("test_partition_list")
+        cls.logger.setLevel(logging.WARNING)
+
+    def test_partition_list_basic(self):
+        items = [f"/path/job_{i}" for i in range(10)]
+        s0 = partition_list_by_shard(items, 0, 3, self.logger)
+        s1 = partition_list_by_shard(items, 1, 3, self.logger)
+        s2 = partition_list_by_shard(items, 2, 3, self.logger)
+        assert s0 == [items[i] for i in [0, 3, 6, 9]]
+        assert s1 == [items[i] for i in [1, 4, 7]]
+        assert s2 == [items[i] for i in [2, 5, 8]]
+
+    def test_partition_list_full_coverage_no_overlap(self):
+        items = [f"/p/{i}" for i in range(50)]
+        n = 7
+        all_assigned = []
+        for shard in range(n):
+            all_assigned.extend(partition_list_by_shard(items, shard, n, self.logger))
+        assert sorted(all_assigned) == sorted(items)
+
+    def test_partition_list_no_sharding(self):
+        items = [f"/p/{i}" for i in range(5)]
+        out = partition_list_by_shard(items, 0, 1, self.logger)
+        assert out == items
 
 
 class TestSharding:

@@ -6,6 +6,38 @@ import numpy as np
 from datetime import datetime
 
 
+# Shared contract between validate_timing_dict (consumer) and
+# patch_timings_from_log in core/omol.py (producer). Keep in sync at one place
+# so a rename of either the marker key or the sentinel is a one-line change.
+TIMINGS_PATCHED_KEY = "_timings_patched"
+TIMING_PLACEHOLDER = -1.0
+
+
+def _safe_json_load(path: str, logger=None):
+    """Load JSON from *path*, returning None on missing/empty/malformed file.
+
+    Validators must surface bad-JSON as a False validation result, not raise
+    out of validation_checks -- otherwise a single corrupted file (e.g.
+    trailing-comma charge.json from a pre-atomic-write era) kills the
+    whole gbw_analysis caller and the folder loops on HPC.
+    """
+    if not os.path.isfile(path):
+        if logger:
+            logger.error("Missing JSON file: %s", path)
+        return None
+    try:
+        if os.path.getsize(path) == 0:
+            if logger:
+                logger.error("Empty JSON file: %s", path)
+            return None
+        with open(path, "r") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError) as e:
+        if logger:
+            logger.error("Cannot read JSON %s: %s", path, e)
+        return None
+
+
 def get_charge_spin_n_atoms_from_folder(
     folder: str, logger=None, verbose=False
 ) -> tuple:
@@ -58,6 +90,8 @@ def get_val_breakdown_from_folder(
         "val_bond": None,
         "val_fuzzy": None,
         "val_other": None,
+        "has_orca_json": False,
+        "val_orca": None,
     }
 
     # check timings
@@ -117,27 +151,26 @@ def get_val_breakdown_from_folder(
 
     # check orca (optional)
     orca_file = os.path.join(folder, "orca.json")
-    if os.path.exists(orca_file) and os.path.getsize(orca_file) > 0:
-        tf_orca = validate_orca_dict(orca_file, n_atoms=n_atoms, logger=None)
-        info["val_orca"] = tf_orca
+    if os.path.exists(orca_file):
+        info["has_orca_json"] = True
+        if os.path.getsize(orca_file) > 0:
+            info["val_orca"] = validate_orca_dict(orca_file, n_atoms=n_atoms, logger=None)
+        else:
+            info["val_orca"] = False
 
     return info
 
 
-def validate_timing_dict(
-    timing_json_loc: str,
-    verbose: bool = False,
-    full_set: int = 0,
-    spin_tf: bool = False,
-    logger: any = None
-):
-    """
-    Basic check that the timing json file has the expected structure.
-    Check that it has the keys 'total', 'qtaim', 'charge', 'bond', and 'fuzzy_full'.
-    """
-    with open(timing_json_loc, "r") as f:
-        timing_dict = json.load(f)
+def get_expected_timing_keys(full_set: int = 0, spin_tf: bool = False) -> tuple:
+    """Return (expected_keys, expected_spin_keys) for the given analysis level.
 
+    Single source of truth shared by validate_timing_dict (consumer) and
+    patch_timings_from_log (producer-side recovery in omol.py).
+
+    Note: 'other' in expected_keys is satisfied by either 'other' or
+    'other_alie' in the timings dict — see validate_timing_dict for that
+    aliasing logic.
+    """
     expected_keys = [
         "qtaim",
         "other",
@@ -149,8 +182,7 @@ def validate_timing_dict(
         "becke_fuzzy_density",
         "hirsh_fuzzy_density",
     ]
-
-    excepted_spin_keys = ["hirsh_fuzzy_spin", "becke_fuzzy_spin"]
+    expected_spin_keys = ["hirsh_fuzzy_spin", "becke_fuzzy_spin"]
 
     if full_set > 0:
         expected_keys += [
@@ -161,8 +193,7 @@ def validate_timing_dict(
             "elf_fuzzy",
             "mbis_fuzzy_density",
         ]
-
-        excepted_spin_keys += ["mbis_fuzzy_spin"]
+        expected_spin_keys += ["mbis_fuzzy_spin"]
 
     if full_set > 1:
         expected_keys += [
@@ -172,6 +203,36 @@ def validate_timing_dict(
             "laplacian_rho_fuzzy",
             "ESP_Volume",
         ]
+
+    if spin_tf:
+        expected_keys = expected_keys + expected_spin_keys
+
+    return expected_keys, expected_spin_keys
+
+
+def validate_timing_dict(
+    timing_json_loc: str,
+    verbose: bool = False,
+    full_set: int = 0,
+    spin_tf: bool = False,
+    logger: any = None,
+    n_atoms: int = None,
+):
+    """
+    Basic check that the timing json file has the expected structure.
+    Check that it has the keys 'total', 'qtaim', 'charge', 'bond', and 'fuzzy_full'.
+    """
+    timing_dict = _safe_json_load(timing_json_loc, logger=logger)
+    if timing_dict is None:
+        return False
+
+    expected_keys, excepted_spin_keys = get_expected_timing_keys(
+        full_set=full_set, spin_tf=False
+    )
+
+    # Keys patched by patch_timings_from_log carry a TIMING_PLACEHOLDER (-1.0)
+    # when log-scrape couldn't find them; accept those here so cleanup runs.
+    patched_keys = set((timing_dict.get(TIMINGS_PATCHED_KEY) or {}).keys())
 
     for key in expected_keys:
         if key not in timing_dict:
@@ -193,7 +254,25 @@ def validate_timing_dict(
                 return False
 
         # check that the times aren't tiny
+        # For small molecules (n_atoms <= 2), bond-related timings may be
+        # legitimately near-zero since there are few or no bonds to analyze
+        bond_related_keys = {
+            "fuzzy_bond", "ibsi_bond", "laplacian_bond",
+            "becke_fuzzy_density", "hirsh_fuzzy_density",
+            "elf_fuzzy", "mbis_fuzzy_density",
+            "grad_norm_rho_fuzzy", "laplacian_rho_fuzzy",
+        }
+        is_small_molecule = n_atoms is not None and n_atoms <= 2
         if timing_dict[key] < 1e-6 and key != "convert":
+            if is_small_molecule and key in bond_related_keys:
+                continue  # acceptable for small molecules
+            if key in patched_keys:
+                if logger:
+                    logger.warning(
+                        f"Timing for '{key}' is patched ({timing_dict[key]}); "
+                        "accepting via _timings_patched marker."
+                    )
+                continue
             if logger:
                 logger.error(
                     f"Timing for '{key}' is too small: {timing_dict[key]} seconds."
@@ -216,14 +295,19 @@ def validate_timing_dict(
 
 
 def validate_bond_dict(
-    bond_json_loc: str, verbose: bool = False, full_set: int = 0, logger: any = None
+    bond_json_loc: str, verbose: bool = False, full_set: int = 0, logger: any = None,
+    n_atoms: int = None,
 ):
     """
     Basic check that the bond json file has the expected structure.
     Check that it has the keys 'fuzzy_bond', 'ibsi_bond', and 'laplacian_bond'.
+
+    For small molecules (n_atoms <= 2), missing bond keys are acceptable
+    since there may be no bonds to analyze.
     """
-    with open(bond_json_loc, "r") as f:
-        bond_dict = json.load(f)
+    bond_dict = _safe_json_load(bond_json_loc, logger=logger)
+    if bond_dict is None:
+        return False
 
     expected_keys = ["fuzzy_bond"]
 
@@ -232,8 +316,12 @@ def validate_bond_dict(
     if full_set > 1:
         expected_keys += ["laplacian_bond"]
 
+    is_small_molecule = n_atoms is not None and n_atoms <= 2
+
     for key in expected_keys:
         if key not in bond_dict:
+            if is_small_molecule:
+                continue  # acceptable for small molecules
             if verbose:
                 print(f"Missing expected key '{key}' in bond json.")
             if logger:
@@ -258,8 +346,9 @@ def validate_fuzzy_dict(
     Basic check that the fuzzy json file has the expected structure.
     Check that it has the keys 'fuzzy', 'fuzzy_bonds', 'fuzzy_bcp', 'fuzzy_ncp'.
     """
-    with open(fuzzy_json_loc, "r") as f:
-        fuzzy_dict = json.load(f)
+    fuzzy_dict = _safe_json_load(fuzzy_json_loc, logger=logger)
+    if fuzzy_dict is None:
+        return False
 
     expected_keys = [
         "becke_fuzzy_density",
@@ -304,8 +393,9 @@ def validate_other_dict(other_dict_loc: str, verbose: bool = False, logger: any 
     Basic check that the other json file has the expected structure.
     Check that it has the keys 'atoms', 'bonds', 'charges', and 'fuzzy'.
     """
-    with open(other_dict_loc, "r") as f:
-        other_dict = json.load(f)
+    other_dict = _safe_json_load(other_dict_loc, logger=logger)
+    if other_dict is None:
+        return False
 
     expected_keys = [
         "mpp_full",
@@ -362,8 +452,9 @@ def validate_charge_dict(
     Check that it has the keys 'mbis', 'adch', 'chelpg', 'becke',  'hirshfeld', 'cm5', 'bader', 'vdd'
     Check each one of these keys has a key "charge" with n_atoms entries.
     """
-    with open(charge_json_loc, "r") as f:
-        charge_dict = json.load(f)
+    charge_dict = _safe_json_load(charge_json_loc, logger=logger)
+    if charge_dict is None:
+        return False
 
     expected_keys = ["adch", "becke", "hirshfeld", "cm5"]
 
@@ -415,8 +506,9 @@ def validate_qtaim_dict(
     If n_atoms is provided, check that the number of non-bonded critical points matches n_atoms.
     If harsh_check is True, also check that the number of nuclear critical points matches n_atoms.
     """
-    with open(qtaim_json_loc, "r") as f:
-        qtaim_dict = json.load(f)
+    qtaim_dict = _safe_json_load(qtaim_json_loc, logger=logger)
+    if qtaim_dict is None:
+        return False
     # check it isn't empty
     if not qtaim_dict:
         if verbose:
@@ -723,6 +815,8 @@ def get_information_from_job_folder(folder: str, full_set: int) -> dict:
         "val_bond": None,
         "val_fuzzy": None,
         "val_other": None,
+        "has_orca_json": False,
+        "val_orca": None,
         "n_atoms": None,
         "spin": None,
         "charge": None,

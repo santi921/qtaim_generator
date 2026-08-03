@@ -1,5 +1,5 @@
 from pathlib import Path
-import os, stat, json, time, logging
+import os, stat, json, time, logging, re
 from typing import Optional, Dict, Any, List
 import subprocess
 
@@ -9,6 +9,9 @@ from qtaim_gen.source.utils.validation import (
     validation_checks,
     get_val_breakdown_from_folder,
     get_charge_spin_n_atoms_from_folder,
+    get_expected_timing_keys,
+    TIMINGS_PATCHED_KEY,
+    TIMING_PLACEHOLDER,
 )
 
 from qtaim_gen.source.utils.io import check_results_exist
@@ -47,6 +50,7 @@ from qtaim_gen.source.utils.io import (
     pull_ecp_dict,
     overwrite_molden_w_ecp,
     check_spin,
+    merge_zip_into,
 )
 
 
@@ -486,6 +490,7 @@ def run_jobs(
     full_set: int = 0,
     move_results: bool = False,
     clean_jobs_tf: bool = False,
+    subprocess_env: Optional[dict] = None,
 ) -> None:
     """
     Run conversion and multiwfn jobs
@@ -502,14 +507,12 @@ def run_jobs(
     if logger is None:
         logger = logging.getLogger("gbw_analysis")
 
+    spin_tf = check_spin(folder)
+
     if separate:
-        # copy the ORDER_OF_OPERATIONS_separate list
         order_of_operations = ORDER_OF_OPERATIONS_separate.copy()
-        # order_of_operations = ORDER_OF_OPERATIONS_separate
-        # order_of_operations = ["qtaim"]
         charge_dict = charge_data_dict(full_set=full_set)
         bond_dict = bond_order_dict(full_set=full_set)
-        spin_tf = check_spin(folder)
         fuzzy_dict = fuzzy_data(spin=spin_tf, full_set=full_set)
         other_dict = other_data_dict(full_set=full_set)
         [order_of_operations.append(i) for i in charge_dict.keys()]
@@ -517,15 +520,15 @@ def run_jobs(
         [order_of_operations.append(i) for i in fuzzy_dict.keys()]
         [order_of_operations.append(i) for i in other_dict.keys()]
 
-        """# remove "charge_separate" and "bond_separate" from list
-        if "charge_separate" in order_of_operations:
-            order_of_operations.remove("charge_separate")
-        if "bond_separate" in order_of_operations:
-            order_of_operations.remove("bond_separate")
-        if "fuzzy_full" in order_of_operations:
-            order_of_operations.remove("fuzzy_full")"""
+        # Filter phantom keys that have no .mfwn files (used by create_jobs only)
+        _phantom_keys = {"charge_separate", "bond_separate", "other_separate", "fuzzy_full"}
+        order_of_operations = [o for o in order_of_operations if o not in _phantom_keys]
     else:
         order_of_operations = ORDER_OF_OPERATIONS
+        charge_dict = {}
+        bond_dict = {}
+        fuzzy_dict = {}
+        other_dict = {}
 
     if debug:
         order_of_operations = ["qtaim"]
@@ -547,7 +550,7 @@ def run_jobs(
 
         # run conversion script using subprocess with explicit cwd
         try:
-            subprocess.run(["bash", conv_file], cwd=folder, check=True)
+            subprocess.run(["bash", conv_file], cwd=folder, check=True, env=subprocess_env)
         except Exception as e:
             logger.error(f"Error running conversion script: {e}")
 
@@ -568,89 +571,119 @@ def run_jobs(
 
     # create a json file to store job status
 
+    # Maps each separate-mode operation → (compiled JSON filename, key to check).
+    # key=None for other_dict ops because other.json is built via dict.update()
+    # with scalar fields, not keyed by operation name.
+    # In non-separate mode all four dicts are empty so _compiled_map is empty;
+    # the {order}.json file check in the loop covers those ops by name.
+    _compiled_map: dict = {}
+    for _op in charge_dict:
+        # charge.json stores {"<op>": {"charge": {...}, "dipole": [...], ...}}
+        # so check the nested "charge" sub-key, not just the op-level dict
+        _compiled_map[_op] = ("charge.json", _op, "charge")
+    for _op in bond_dict:
+        _compiled_map[_op] = ("bond.json", _op)
+    for _op in fuzzy_dict:
+        _compiled_map[_op] = ("fuzzy_full.json", _op)
+    for _op in other_dict:
+        _compiled_map[_op] = ("other.json", None)
+
     timings = {}
-    # run multiwfn scripts
-    if move_results:
-        folder_check = os.path.join(folder, "generator")
+    # On restart, timings may be in generator/ (previous completed run) or
+    # job root (interrupted run before move_results_to_folder ran).
+    # Check generator/ first, fall back to job root.
+    gen_timings = os.path.join(folder, "generator", "timings.json")
+    root_timings = os.path.join(folder, "timings.json")
+    if os.path.exists(gen_timings):
+        timings_read_path = gen_timings
     else:
-        folder_check = folder
+        timings_read_path = root_timings
 
-    if os.path.exists(os.path.join(folder_check, "timings.json")):
+    if os.path.exists(timings_read_path):
+        if os.path.getsize(timings_read_path) > 0:
+            try:
+                with open(timings_read_path, "r") as f:
+                    timings = json.load(f)
+            except json.JSONDecodeError:
+                logger.warning(
+                    "Corrupted timings.json at %s -- starting fresh",
+                    timings_read_path,
+                )
+                timings = {}
 
-        with open(os.path.join(folder_check, "timings.json"), "r") as f:
-            # check that timings isn't empty
-            if os.path.getsize(os.path.join(folder_check, "timings.json")) > 0:
-                timings = json.load(f)
+    # Lazy log-scrape cache for backfill_skip_timing -- only the first
+    # missing-timing skip pays the parse cost.
+    _log_timings_cache: list = []  # 0- or 1-element box for lazy init
 
-        if restart:
-            dft_dict = get_charge_spin_n_atoms_from_folder(
-                folder, logger=None, verbose=False
-            )
-            n_atoms = len(dft_dict["mol"])
-            dict_val = get_val_breakdown_from_folder(
-                folder, n_atoms=n_atoms, full_set=full_set, spin_tf=spin_tf
-            )
+    # n_atoms enables length-aware completeness checks in _compiled_data_present.
+    # Without it a partial chelpg entry (e.g. 30 of 142 atoms) would be treated
+    # as "data verified" and skipped forever while validation keeps failing.
+    n_atoms_for_skip: Optional[int] = None
+    try:
+        from qtaim_gen.source.utils.validation import (
+            get_charge_spin_n_atoms_from_folder,
+        )
+        dft_dict = get_charge_spin_n_atoms_from_folder(folder, logger=logger)
+        if dft_dict and dft_dict.get("mol"):
+            n_atoms_for_skip = len(dft_dict["mol"])
+    except Exception as e:
+        logger.warning(
+            "Could not determine n_atoms for skip-completeness check: %s", e
+        )
+    _fuzzy_routine_set = set(fuzzy_dict.keys()) if separate else set()
 
     for order in order_of_operations:
-        # if restart, check if timing file exists
+        # Per-sub-job restart: data presence is the primary skip signal; timing
+        # is secondary. This handles cases where timings.json was reset/corrupted
+        # or a crash occurred between the mfwn script finishing and the timing write.
         if restart:
-            if order in timings.keys():
-                # now check if validation checks pass
-                if order == "qtaim":
-                    if dict_val["val_qtaim"]:
-                        logger.info(
-                            f"Skipping {order} in {folder}: already completed successfully."
+            has_files = _has_usable_step_output(folder, order)
+            if has_files or _compiled_data_present(
+                folder, order, _compiled_map,
+                n_atoms=n_atoms_for_skip,
+                fuzzy_routines=_fuzzy_routine_set,
+            ):
+                has_positive_timing = (
+                    order in timings
+                    and isinstance(timings[order], (int, float))
+                    and timings[order] > 0
+                )
+                if has_positive_timing:
+                    _timing_str = f", timing={timings[order]:.2f}s"
+                else:
+                    if not _log_timings_cache:
+                        _log_timings_cache.append(
+                            _parse_timings_from_log(
+                                os.path.join(folder, "gbw_analysis.log")
+                            )
                         )
-                        continue
+                    backfill_skip_timing(timings, order, _log_timings_cache[0], logger)
+                    atomic_json_write(
+                        os.path.join(folder, "timings.json"), timings
+                    )
+                    _timing_str = f", timing backfilled={timings[order]:.2f}s"
+                logger.info(
+                    f"Skipping {order} in {folder}: data verified{_timing_str}"
+                )
+                continue
+            if order in timings and timings[order] > 0:
+                logger.warning(
+                    f"Timing present for '{order}' in {folder} but output data not found — re-running"
+                )
 
-                elif order == "other":
-                    if dict_val["val_other"]:
-                        logger.info(
-                            f"Skipping {order} in {folder}: already completed successfully."
-                        )
-                        continue
-
-                elif order in charge_dict.keys():
-                    if dict_val.get(f"val_charge", False):
-                        logger.info(
-                            f"Skipping {order} in {folder}: already completed successfully."
-                        )
-                        continue
-
-                elif order in bond_dict.keys():
-                    if dict_val.get(f"val_bond", False):
-                        logger.info(
-                            f"Skipping {order} in {folder}: already completed successfully."
-                        )
-                        continue
-
-                elif order in other_dict.keys():
-                    if dict_val.get(f"val_other", False):
-                        logger.info(
-                            f"Skipping {order} in {folder}: already completed successfully."
-                        )
-                        continue
-
-                elif order in fuzzy_dict.keys():
-                    if dict_val.get(f"val_fuzzy", False):
-                        logger.info(
-                            f"Skipping {order} in {folder}: already completed successfully."
-                        )
-                        continue
-
-                elif order == "fuzzy_full":
-                    if dict_val.get(f"val_fuzzy", False):
-                        logger.info(
-                            f"Skipping {order} in {folder}: already completed successfully."
-                        )
-                        continue
-
-        else:
-            folder_check = folder
         if prof_mem:
             memory = {}
 
         mfwn_file = os.path.join(folder, "props_{}.mfwn".format(order))
+
+        # Precondition: non-convert multiwfn sub-jobs need a wavefunction file.
+        # Surfacing it here beats a downstream KeyError in parse_multiwfn.
+        if order != "convert" and not _wavefunction_present(folder):
+            logger.error(
+                f"No orca.wfn or orca.wfx in {folder}; cannot run {order}."
+            )
+            timings[order] = -1
+            continue
 
         try:
             logger.info(f"Running {mfwn_file}")
@@ -659,7 +692,7 @@ def run_jobs(
             # to replace
             # run the multiwfn wrapper script with explicit cwd to avoid depending on process CWD
             try:
-                subprocess.run(["bash", mfwn_file], cwd=folder, check=True)
+                subprocess.run(["bash", mfwn_file], cwd=folder, check=True, env=subprocess_env)
             except Exception as e:
                 logger.error(f"Error running {mfwn_file} via subprocess: {e}")
 
@@ -677,13 +710,21 @@ def run_jobs(
             logger.error(f"Error running {mfwn_file}: {e}")
             timings[order] = -1
 
-        # save timings to file in folder - at each step for check pointing
+        # save timings to job root — move_results_to_folder() relocates at the end
         try:
-            atomic_json_write(os.path.join(folder_check, "timings.json"), timings)
+            atomic_json_write(os.path.join(folder, "timings.json"), timings)
             logger.info(f"Saved timings.json in {folder}")
 
+            # Heartbeat: touch lock file to keep mtime fresh for stale detection
+            _lockfile = os.path.join(folder, ".processing.lock")
+            if os.path.exists(_lockfile):
+                try:
+                    os.utime(_lockfile, None)
+                except OSError:
+                    pass
+
             if prof_mem:
-                atomic_json_write(os.path.join(folder_check, "memory.json"), memory)
+                atomic_json_write(os.path.join(folder, "memory.json"), memory)
 
         except Exception as e:
             logger.error(f"Error saving timings.json: {e}")
@@ -738,7 +779,11 @@ def parse_multiwfn(
         if file.endswith(".out"):
             file_full_path = os.path.join(folder, file)
             for routine in routine_list:
-                if routine in file:
+                # Exact filename match: substring matching double-parsed
+                # becke_fuzzy_density.out under both 'becke' and
+                # 'becke_fuzzy_density' (same for mbis/*_spin variants),
+                # writing wrong-parser output that only list order corrected.
+                if file == routine + ".out":
                     json_file = file_full_path.replace(".out", ".json")
                     try:
                         if routine == "fuzzy_full":
@@ -851,8 +896,13 @@ def parse_multiwfn(
                         elif routine in list(fuzzy_dict.keys()):
                             data = parse_fuzzy_real_space(file_full_path)
 
-                        # elif routine == "qtaim":
-                        #    pass
+                        elif routine == "qtaim":
+                            # qtaim has its own parser invoked elsewhere; the
+                            # routine name appears in routine_list because
+                            # ORDER_OF_OPERATIONS_separate includes it, but
+                            # this charge/bond/fuzzy/other loop is not where
+                            # qtaim.out gets parsed. Silent skip.
+                            continue
 
                         else:
                             logger.warning(
@@ -927,18 +977,39 @@ def parse_multiwfn(
         for routine in combined_routines:
             # json name
             file = routine + ".json"
-            if file in directory_files:
-                if routine == file.split(".json")[0]:
-                    with open(os.path.join(folder, file), "r") as f:
-                        if routine in charge_routines:
-                            charge_dict_compiled[routine] = json.load(f)
-                        elif routine in bond_routines:
-                            bond_dict_compiled[routine] = json.load(f)
-                        elif routine in fuzzy_routines:
-                            fuzzy_dict_compiled[routine] = json.load(f)[routine]
-                        elif routine in other_routines:
-                            # json.load will returna. dict with several keys, we just want to update onto compiled 
-                            other_dict_compiled.update(json.load(f))
+            if file not in directory_files:
+                continue
+            if routine != file.split(".json")[0]:
+                continue
+            full_path = os.path.join(folder, file)
+            # Zero-byte or malformed intermediate (e.g. multiwfn crashed
+            # between opening the json and writing content) must not kill
+            # the compile loop -- the routine is just treated as missing.
+            try:
+                if os.path.getsize(full_path) == 0:
+                    logger.warning("Skipping empty intermediate %s", full_path)
+                    continue
+                with open(full_path, "r") as f:
+                    payload = json.load(f)
+            except (OSError, json.JSONDecodeError) as e:
+                logger.warning("Skipping unreadable intermediate %s: %s", full_path, e)
+                continue
+            if routine in charge_routines:
+                charge_dict_compiled[routine] = payload
+            elif routine in bond_routines:
+                bond_dict_compiled[routine] = payload
+            elif routine in fuzzy_routines:
+                try:
+                    fuzzy_dict_compiled[routine] = payload[routine]
+                except (KeyError, TypeError) as e:
+                    logger.warning(
+                        "Fuzzy intermediate %s missing top-level '%s' key: %s",
+                        full_path, routine, e,
+                    )
+                    continue
+            elif routine in other_routines:
+                if isinstance(payload, dict):
+                    other_dict_compiled.update(payload)
                             
                     # remove the file
                     # if os.path.exists(os.path.join(folder, file)):
@@ -1056,28 +1127,196 @@ def clean_jobs(
         except Exception as e:
             logger.info(f"Couldn't rm file {file}: {e}")
 
-    # zip all out files
+    # zip all out files - collect first, delete only after zip is safely merged
+    files_to_zip = [
+        f for f in os.listdir(folder)
+        if (f.endswith(".out") and f != "orca.out") or f.endswith("CPprop.txt")
+    ]
+    successfully_zipped = []
     with zipfile.ZipFile(zip_file_out, "w") as zipf:
-        for file in os.listdir(folder):
-            # skip orca.out 
-            if file.endswith(".out") and file != "orca.out":
+        for file in files_to_zip:
+            try:
                 zipf.write(os.path.join(folder, file), arcname=file)
-                os.remove(os.path.join(folder, file))
-                logger.info(f"Zipped and removed {file}")
-            if file.endswith("CPprop.txt"):
-                zipf.write(os.path.join(folder, file), arcname=file)
-                os.remove(os.path.join(folder, file))
-                logger.info(f"Zipped and removed {file}")
-        
-        if move_results:
-            results_folder = os.path.join(folder, "generator")
-            if not os.path.exists(results_folder):
-                os.mkdir(results_folder)
-            os.rename(
-                zip_file_out,
-                os.path.join(results_folder, "out_files.zip"),
+                successfully_zipped.append(file)
+                logger.info(f"Zipped {file}")
+            except Exception as e:
+                logger.info(f"Couldn't zip {file}: {e}")
+
+    if move_results:
+        results_folder = os.path.join(folder, "generator")
+        merge_zip_into(
+            zip_file_out,
+            os.path.join(results_folder, "out_files.zip"),
+            logger=logger,
+        )
+
+    # delete only files that were successfully written to the zip
+    for file in successfully_zipped:
+        fp = os.path.join(folder, file)
+        if os.path.exists(fp):
+            try:
+                os.remove(fp)
+                logger.info(f"Removed {file} after zip")
+            except Exception as e:
+                logger.info(f"Couldn't remove {file}: {e}")
+
+
+# Matches `Completed <key> in <s> seconds` lines emitted by
+# qtaim_gen.source.core.omol.gbw_analysis (see logger.info call there).
+_TIMING_LOG_PATTERN = re.compile(
+    r"Completed\s+(?P<key>[A-Za-z_][A-Za-z0-9_]*)\s+in\s+(?P<seconds>[-+]?\d*\.?\d+)\s+seconds"
+)
+
+
+def _parse_timings_from_log(log_path: str) -> dict:
+    """Extract `Completed <key> in <seconds> seconds` entries from a log file.
+
+    Returns a dict {key: seconds_float}. Last-occurrence wins (most recent run).
+    Missing/unreadable log returns {}.
+    """
+    results: dict = {}
+    if not os.path.isfile(log_path):
+        return results
+    try:
+        with open(log_path, "r") as f:
+            for line in f:
+                m = _TIMING_LOG_PATTERN.search(line)
+                if m:
+                    try:
+                        results[m.group("key")] = float(m.group("seconds"))
+                    except ValueError:
+                        continue
+    except OSError:
+        return {}
+    return results
+
+
+def backfill_skip_timing(
+    timings: dict,
+    order: str,
+    log_timings: dict,
+    logger: Optional[logging.Logger] = None,
+) -> None:
+    """Stamp a backfilled timing entry for a restart-skipped routine.
+
+    Used when the routine's data files exist on disk but its timing key is
+    absent from timings.json -- without this, the next validate_timing_dict
+    call fails on the missing key and the folder loops on HPC.
+
+    Strategy:
+      1. If `log_timings[order] > 0`, use that scraped value.
+      2. Otherwise stamp TIMING_PLACEHOLDER.
+    In both cases, record provenance under TIMINGS_PATCHED_KEY so the
+    validator accepts the sentinel and downstream aggregates can filter it.
+    Mutates *timings* in place. Caller is responsible for persisting.
+    """
+    log_val = log_timings.get(order)
+    if isinstance(log_val, (int, float)) and log_val > 0:
+        timings[order] = log_val
+        source, value = "log", log_val
+    else:
+        timings[order] = TIMING_PLACEHOLDER
+        source, value = "placeholder", TIMING_PLACEHOLDER
+    marker = timings.get(TIMINGS_PATCHED_KEY)
+    if not isinstance(marker, dict):
+        marker = {}
+    marker[order] = {"source": source, "value": value}
+    timings[TIMINGS_PATCHED_KEY] = marker
+    if logger:
+        logger.info(
+            "Backfilled missing timing for '%s' = %.2f (%s)", order, value, source,
+        )
+
+
+def patch_timings_from_log(
+    folder: str,
+    full_set: int = 0,
+    spin_tf: bool = False,
+    move_results: bool = True,
+    logger: Optional[logging.Logger] = None,
+) -> bool:
+    """Fill missing keys in timings.json by recovering values from gbw_analysis.log.
+
+    Strategy:
+      1. Load existing timings from generator/timings.json (if move_results) or
+         folder/timings.json.
+      2. Parse `Completed <key> in <s> seconds` lines from gbw_analysis.log.
+      3. For each expected key for the given full_set/spin_tf, if missing from
+         timings dict, fill with log value if found, otherwise -1.0 sentinel.
+         Validation accepts -1.0 only for keys listed in `_timings_patched`,
+         so synthetic timings remain loudly flagged in downstream aggregates.
+      4. Stamp a `_timings_patched` provenance marker listing patched keys and
+         their source (log vs placeholder) so downstream consumers can filter
+         out synthetic timings from aggregates.
+      5. Atomic-write back to the same file.
+
+    Returns True if any key was patched, False otherwise (including when file
+    does not exist).
+    """
+    if move_results:
+        timings_path = os.path.join(folder, "generator", "timings.json")
+    else:
+        timings_path = os.path.join(folder, "timings.json")
+
+    if not os.path.isfile(timings_path):
+        if logger:
+            logger.warning("patch_timings: %s not found, skipping", timings_path)
+        return False
+
+    try:
+        with open(timings_path, "r") as f:
+            timings = json.load(f)
+    except (OSError, json.JSONDecodeError) as e:
+        if logger:
+            logger.warning("patch_timings: cannot read %s: %s", timings_path, e)
+        return False
+
+    log_path = os.path.join(folder, "gbw_analysis.log")
+    log_timings = _parse_timings_from_log(log_path)
+
+    expected, _ = get_expected_timing_keys(full_set=full_set, spin_tf=spin_tf)
+    patched: dict = {}
+    for key in expected:
+        # validate_timing_dict accepts 'other' or 'other_alie'; if asked for
+        # 'other' but only 'other_alie' is present (or vice versa), don't patch
+        if key == "other" and ("other" in timings or "other_alie" in timings):
+            continue
+        existing = timings.get(key)
+        if isinstance(existing, (int, float)) and existing > 0:
+            continue
+        # 'other' is the canonical expected name; record it under 'other_alie'
+        # since that's the actual key written by the analysis pipeline
+        write_key = "other_alie" if key == "other" else key
+        if key in log_timings and log_timings[key] > 0:
+            timings[write_key] = log_timings[key]
+            patched[write_key] = {"source": "log", "value": log_timings[key]}
+        else:
+            timings[write_key] = TIMING_PLACEHOLDER
+            patched[write_key] = {"source": "placeholder", "value": TIMING_PLACEHOLDER}
+
+    if not patched:
+        if logger:
+            logger.info("patch_timings: nothing to patch in %s", timings_path)
+        return False
+
+    # Provenance marker so W&B / tracking_db / aggregates can filter synthetic timings
+    existing_marker = timings.get(TIMINGS_PATCHED_KEY) or {}
+    if not isinstance(existing_marker, dict):
+        existing_marker = {}
+    existing_marker.update(patched)
+    timings[TIMINGS_PATCHED_KEY] = existing_marker
+
+    atomic_json_write(timings_path, timings)
+    if logger:
+        for key, info in patched.items():
+            logger.info(
+                "patch_timings: %s = %.2f (%s)", key, info["value"], info["source"]
             )
-            logger.info(f"Moved zipped out files to results folder")
+        logger.info(
+            "patch_timings: wrote %d patched key(s) to %s", len(patched), timings_path
+        )
+    return True
+
 
 
 def setup_logger(folder: str, name: str = "gbw_analysis") -> logging.Logger:
@@ -1116,31 +1355,54 @@ def move_results_to_folder(
     ]
     results_folder = os.path.join(folder, "generator")
 
-    if not os.path.exists(results_folder):
-        os.mkdir(results_folder)
+    os.makedirs(results_folder, exist_ok=True)
 
     for file in os.listdir(folder):
         if file in results_list:
             # if file exists in results folder, merge the jsons
-            if os.path.exists(os.path.join(results_folder, file)):
+            existing_path = os.path.join(results_folder, file)
+            new_path = os.path.join(folder, file)
+            if os.path.exists(existing_path):
                 try:
-                    with open(os.path.join(folder, file), "r") as f:
+                    with open(new_path, "r") as f:
                         data_new = json.load(f)
-                    with open(os.path.join(results_folder, file), "r") as f:
-                        data_existing = json.load(f)
+                    try:
+                        with open(existing_path, "r") as f:
+                            data_existing = json.load(f)
+                    except (json.JSONDecodeError, OSError) as e:
+                        # Quarantine corrupted destination so the fresh data
+                        # can overwrite it. Without this, a malformed
+                        # generator/<file>.json (e.g. trailing-comma
+                        # charge.json from a pre-atomic-write era) is
+                        # immortal: the merge keeps failing and the fresh
+                        # data is silently dropped, so validation never recovers.
+                        corrupt_path = existing_path + ".corrupt"
+                        try:
+                            os.replace(existing_path, corrupt_path)
+                            logger.error(
+                                "Quarantined unreadable %s -> %s (%s); "
+                                "fresh data will overwrite",
+                                existing_path, corrupt_path, e,
+                            )
+                        except OSError as mv_err:
+                            logger.error(
+                                "Failed to quarantine %s: %s",
+                                existing_path, mv_err,
+                            )
+                        data_existing = {}
                     # merge the two dicts
                     if isinstance(data_existing, dict) and isinstance(data_new, dict):
 
                         data_merged = {**data_existing, **data_new}
                     else:
                         data_merged = data_new  # if not dict, just overwrite
-                    atomic_json_write(os.path.join(results_folder, file), data_merged)
+                    atomic_json_write(existing_path, data_merged)
 
                     logger.info(f"Merged {file} into results folder")
                     # remove the original file
 
                     if clean:
-                        os.remove(os.path.join(folder, file))
+                        os.remove(new_path)
                 except Exception as e:
                     logger.error(f"Error merging file {file}: {e}")
             else:
@@ -1163,11 +1425,17 @@ def _validate_parse_completeness(orca_dict: dict) -> bool:
 def _extract_orca_out_from_archive(folder: str, logger: logging.Logger) -> bool:
     """Try to extract just orca.out from orca.tar.zst in *folder*.
 
+    Tries `tar --zstd` first; on hosts whose tar lacks zstd support
+    (e.g. some HPC login nodes), falls back to two-step
+    `unzstd -k` + `tar -xf`. Leaves orca.tar.zst in place on success.
+
     Returns True if orca.out was successfully extracted.
     """
     tar_zst = os.path.join(folder, "orca.tar.zst")
     if not os.path.isfile(tar_zst):
         return False
+
+    out_path = os.path.join(folder, "orca.out")
 
     try:
         subprocess.run(
@@ -1176,13 +1444,71 @@ def _extract_orca_out_from_archive(folder: str, logger: logging.Logger) -> bool:
             check=True,
             capture_output=True,
         )
-        extracted = os.path.isfile(os.path.join(folder, "orca.out"))
-        if extracted:
+        if os.path.isfile(out_path):
             logger.info("Extracted orca.out from orca.tar.zst")
+            return True
+        # tar exited 0 but orca.out is not on disk: member missing from archive,
+        # not a tar capability problem. Don't try the fallback.
+        logger.warning(
+            "tar --zstd succeeded but orca.out not present in %s",
+            tar_zst,
+        )
+        return False
+    except FileNotFoundError as e:
+        logger.warning("tar not available: %s", e)
+        return False
+    except subprocess.CalledProcessError as e:
+        stderr_snip = (e.stderr or b"").decode(errors="replace")[:500]
+        logger.info(
+            "tar --zstd failed (exit %s): %s; falling back to unzstd+tar",
+            e.returncode,
+            stderr_snip.strip(),
+        )
+
+    tar_path = os.path.join(folder, "orca.tar")
+    if os.path.isfile(tar_path):
+        # Pre-existing orca.tar would be silently clobbered by `unzstd -k -f`.
+        # Refuse rather than risk overwriting unrelated user data.
+        logger.warning(
+            "Refusing fallback: %s already exists; not overwriting", tar_path
+        )
+        return False
+
+    created_tar = False
+    try:
+        subprocess.run(
+            ["unzstd", "-k", "-f", "orca.tar.zst"],
+            cwd=folder,
+            check=True,
+            capture_output=True,
+        )
+        created_tar = os.path.isfile(tar_path)
+        subprocess.run(
+            ["tar", "-xf", "orca.tar", "orca.out"],
+            cwd=folder,
+            check=True,
+            capture_output=True,
+        )
+        extracted = os.path.isfile(out_path)
+        if extracted:
+            logger.info("Extracted orca.out via unzstd+tar fallback")
         return extracted
     except (subprocess.CalledProcessError, FileNotFoundError) as e:
-        logger.warning("Could not extract orca.out from archive: %s", e)
+        stderr_snip = ""
+        if isinstance(e, subprocess.CalledProcessError):
+            stderr_snip = (e.stderr or b"").decode(errors="replace")[:500].strip()
+        logger.warning(
+            "Could not extract orca.out from archive (fallback failed): %s %s",
+            e,
+            stderr_snip,
+        )
         return False
+    finally:
+        if created_tar and os.path.isfile(tar_path):
+            try:
+                os.remove(tar_path)
+            except OSError as e:
+                logger.warning("Could not remove intermediate orca.tar: %s", e)
 
 
 def _run_orca_parse(
@@ -1261,17 +1587,29 @@ def _run_orca_parse(
         elapsed = round(time.time() - t_start, 2)
         logger.info("Parsed orca.out in %.2f s (%d keys)", elapsed, len(orca_dict))
 
-        # Write orca_parse timing into timings.json (atomic write for crash safety)
-        if move_results:
-            timings_path = os.path.join(folder, "generator", "timings.json")
-        else:
-            timings_path = os.path.join(folder, "timings.json")
+        # Write orca_parse timing into timings.json (atomic write for crash safety).
+        # Merge generator/ (prior-run keys) with root (current-run keys); root wins
+        # on conflict so a Level 1 restart doesn't lose newly-written L1 sub-job
+        # timings to a stale generator/timings.json.
+        gen_timings = os.path.join(folder, "generator", "timings.json")
+        root_timings = os.path.join(folder, "timings.json")
+        timings = {}
+        if os.path.isfile(gen_timings) and os.path.getsize(gen_timings) > 0:
+            try:
+                with open(gen_timings, "r") as f:
+                    timings.update(json.load(f))
+            except json.JSONDecodeError:
+                pass
+        if os.path.isfile(root_timings) and os.path.getsize(root_timings) > 0:
+            try:
+                with open(root_timings, "r") as f:
+                    timings.update(json.load(f))
+            except json.JSONDecodeError:
+                pass
 
-        if os.path.isfile(timings_path) and os.path.getsize(timings_path) > 0:
-            with open(timings_path, "r") as f:
-                timings = json.load(f)
+        if timings:
             timings["orca_parse"] = elapsed
-            atomic_json_write(timings_path, timings)
+            atomic_json_write(root_timings, timings)
 
         # Delete orca.out AFTER successful parse + merge + timing checkpoint.
         # Always clean up if we extracted it from the archive (archive still has it).
@@ -1290,6 +1628,231 @@ def _run_orca_parse(
                 os.remove(orca_out_path)
             except OSError:
                 pass
+
+
+# Multiwfn (v3.8) error signatures we want to catch. If multiwfn upgrades and
+# rephrases these strings, the .out file will start passing the substantive
+# check again — re-pin in tests when we update multiwfn.
+_MULTIWFN_ERROR_SIGNATURES = (
+    "Error:",                         # banner-line errors, e.g. "Error: Unable to find the input file"
+    "cannot be found, input again",   # stuck on interactive prompt loop
+)
+
+
+# Per-routine positive completion markers. Present in a .out only after the
+# routine finished writing its result section. Used to catch runs killed
+# mid-computation (walltime, OOM) whose .out has a clean banner + partial
+# progress but no result table — e.g. chelpg killed mid-LIBRETA-ESP.
+# Markers are strings the routine's own parser uses to locate the result
+# block, so by construction a parsed-without-error .out contains them.
+_STEP_COMPLETION_MARKERS = {
+    "chelpg": "Center       Charge",  # parse_charge_chelpg trigger
+}
+
+
+# Generic completion signal: multiwfn prints this banner once at startup and
+# once more when the .mfwn script's final "0" returns to the main menu before
+# "q". Every generated script is single-module (enter module -> compute ->
+# print results -> "0" -> "q"), so a second occurrence proves the routine
+# finished writing its results. A run killed mid-computation (walltime, OOM)
+# dies in a progress loop and never reaches the second print. Verified on
+# Multiwfn 3.8 noGUI: 12/12 complete .outs contain it twice, truncated .outs
+# once (see docs re: elytes 274-atom edge case, Jul 2026).
+_MULTIWFN_MENU_BANNER = b"Main function menu"
+_MENU_BANNER_REQUIRED_COUNT = 2
+
+
+def _is_substantive_step_out(path: str, order: str = None) -> bool:
+    """True if a multiwfn .out file looks like a successful run.
+
+    Rejects empty files and any file whose first 8 KB contains one of the
+    multiwfn error signatures. Both signatures appear early in the file
+    (banner + first prompt loop), so a single bounded read catches them.
+
+    Completion is detected generically via `_MULTIWFN_MENU_BANNER`: the
+    main-menu banner must appear at least `_MENU_BANNER_REQUIRED_COUNT`
+    times (startup print + the script's final return-to-main-menu). This
+    catches walltime-killed runs for every routine, whose head looks clean
+    but whose result section was never reached.
+
+    Routines in `_STEP_COMPLETION_MARKERS` must additionally contain their
+    positive result-section marker.
+    """
+    if not os.path.isfile(path):
+        return False
+    try:
+        size = os.path.getsize(path)
+        if size == 0:
+            return False
+        with open(path, "rb") as f:
+            head = f.read(8192).decode("utf-8", errors="replace")
+    except OSError:
+        return False
+    if any(sig in head for sig in _MULTIWFN_ERROR_SIGNATURES):
+        return False
+
+    marker = _STEP_COMPLETION_MARKERS.get(order)
+    marker_bytes = marker.encode("utf-8") if marker is not None else None
+
+    # Stream in 1 MB chunks with per-pattern carries. A carry of
+    # len(pattern)-1 bytes can never hold a complete occurrence, so
+    # prepending it to the next chunk catches boundary-spanning matches
+    # without double counting.
+    banner_count = 0
+    marker_found = marker_bytes is None
+    banner_carry = b""
+    marker_carry = b""
+    try:
+        with open(path, "rb") as f:
+            while True:
+                chunk = f.read(1 << 20)
+                if not chunk:
+                    return False
+                buf = banner_carry + chunk
+                banner_count += buf.count(_MULTIWFN_MENU_BANNER)
+                banner_carry = buf[len(buf) - (len(_MULTIWFN_MENU_BANNER) - 1):]
+                if not marker_found:
+                    mbuf = marker_carry + chunk
+                    if marker_bytes in mbuf:
+                        marker_found = True
+                    else:
+                        marker_carry = mbuf[len(mbuf) - (len(marker_bytes) - 1):]
+                if banner_count >= _MENU_BANNER_REQUIRED_COUNT and marker_found:
+                    return True
+    except OSError:
+        return False
+
+
+def _wavefunction_present(folder: str) -> bool:
+    """True if a non-empty orca.wfn or orca.wfx exists in folder/ or generator/."""
+    for base in (folder, os.path.join(folder, "generator")):
+        for ext in (".wfn", ".wfx"):
+            wf = os.path.join(base, f"orca{ext}")
+            try:
+                if os.path.isfile(wf) and os.path.getsize(wf) > 0:
+                    return True
+            except OSError:
+                continue
+    return False
+
+
+def _has_usable_step_output(folder: str, order: str) -> bool:
+    """Check whether a sub-job appears to have produced usable output on disk.
+
+    Primary signal: `.out` file must be substantive (see `_is_substantive_step_out`).
+    Fallback: if `.out` is absent (cleaned up after a prior successful run), a
+    non-empty per-step `.json` is accepted. A bad `.out` (error signature) blocks
+    the `.json` fallback — stale intermediate JSONs must not mask a failed run.
+
+    Special case for `convert`: this step has no analytical output — its
+    purpose is to produce `orca.wfn`/`orca.wfx` from `orca.molden.input`. Skip
+    only if a non-empty wavefunction file exists; otherwise re-run regardless
+    of whether `convert.out` looks substantive.
+    """
+    # TODO: if more side-effect steps are added (convert is the only one
+    # today), replace this branch with a {step: artifact} registry instead of
+    # accumulating elif's here.
+    if order == "convert":
+        return _wavefunction_present(folder)
+
+    for base in (folder, os.path.join(folder, "generator")):
+        out_path = os.path.join(base, f"{order}.out")
+        if os.path.isfile(out_path):
+            if _is_substantive_step_out(out_path, order=order):
+                return True
+            # .out present but bad — don't trust stale .json in this location
+        else:
+            # .out absent (cleaned up after a prior successful run) — .json is the only artifact
+            json_path = os.path.join(base, f"{order}.json")
+            try:
+                if os.path.isfile(json_path) and os.path.getsize(json_path) > 0:
+                    with open(json_path, "r") as _f:
+                        if json.load(_f):
+                            return True
+            except (OSError, json.JSONDecodeError):
+                pass
+    return False
+
+
+# Fuzzy compiled entries store n_atoms regular atoms plus two summary rows
+# ("sum" and "abs_sum"); validate_fuzzy_dict pins the count at n_atoms + 2.
+_FUZZY_EXTRA_ENTRIES = 2
+
+
+def _compiled_data_present(
+    folder: str,
+    order: str,
+    compiled_map: dict,
+    n_atoms: Optional[int] = None,
+    fuzzy_routines: Optional[set] = None,
+) -> bool:
+    """Return True if compiled JSON output for `order` exists and looks complete.
+
+    Checks both the job root (in-progress run) and the generator/ subfolder
+    (completed prior run after move_results_to_folder).
+
+    When `n_atoms` is supplied, the per-atom count is verified against the
+    same expectation the validator enforces (charge: exactly `n_atoms`;
+    fuzzy: exactly `n_atoms + _FUZZY_EXTRA_ENTRIES`). Without this length
+    check a partial write -- e.g. chelpg killed mid-table after writing 30
+    of 142 atoms -- would be treated as "data verified", the restart would
+    skip the routine, and the validator would fail forever on the next pass.
+
+    Args:
+        folder: Job folder path.
+        order: Operation name (e.g. 'hirshfeld', 'becke_fuzzy_density').
+        compiled_map: Maps operation name → (compiled_json_filename, key_or_None).
+            key=None for other_dict ops where other.json stores scalar fields
+            via dict.update(), not keyed by operation name.
+        n_atoms: Atom count from the input file; enables length-based
+            completeness checks. None falls back to legacy bool-only check.
+        fuzzy_routines: Set of routine names that go into fuzzy_full.json.
+            Required to apply the `n_atoms + 2` fuzzy length expectation
+            (compiled_map alone can't distinguish bond vs. fuzzy ops since
+            both use the `else` branch below).
+    """
+    if order not in compiled_map:
+        return False
+    entry = compiled_map[order]
+    json_name = entry[0]
+    key = entry[1]
+    sub_key = entry[2] if len(entry) > 2 else None
+    fuzzy_routines = fuzzy_routines or set()
+    for base in [folder, os.path.join(folder, "generator")]:
+        json_path = os.path.join(base, json_name)
+        if not os.path.exists(json_path) or os.path.getsize(json_path) == 0:
+            continue
+        try:
+            with open(json_path, "r") as f:
+                data = json.load(f)
+            if key is None:
+                # other ops: just verify the compiled JSON is non-empty
+                if data:
+                    return True
+            elif sub_key is not None:
+                # charge ops: {"<op>": {"charge": {...}, ...}} — check the nested sub-key
+                # avoids false-positive when op-level dict exists but charge dict is empty
+                charges = data.get(key, {}).get(sub_key)
+                if not charges:
+                    continue
+                if n_atoms is not None and len(charges) != n_atoms:
+                    continue  # partial entry — treat as missing, force rerun
+                return True
+            else:
+                # bond/fuzzy ops: key value is the data dict directly
+                payload = data.get(key)
+                if not payload:
+                    continue
+                if (
+                    n_atoms is not None
+                    and order in fuzzy_routines
+                    and len(payload) != n_atoms + _FUZZY_EXTRA_ENTRIES
+                ):
+                    continue  # partial fuzzy table — force rerun
+                return True
+        except (json.JSONDecodeError, OSError):
+            continue
+    return False
 
 
 def gbw_analysis(
@@ -1314,6 +1877,8 @@ def gbw_analysis(
     check_orca: bool = False,
     wfx: bool = False,
     exhaustive_qtaim: bool = False,
+    subprocess_env: Optional[dict] = None,
+    patch_timings: bool = False,
 ) -> None:
     """
     Run a full analysis on a folder of gbw files
@@ -1446,28 +2011,51 @@ def gbw_analysis(
                     except Exception as e:
                         logger.error(f"Error running unzstd for gbw {zstd_file}: {e}")
 
+            # Legacy orca5.* files are only safe to drop when the canonical
+            # orca.gbw is present (produced from orca.gbw.zstd0 above). If the
+            # folder only has orca5.gbw, removing it would strip the sole
+            # wavefunction source and brick downstream orca_2mkl/Multiwfn.
+            canonical_gbw_path = os.path.join(folder, "orca.gbw")
+            canonical_gbw_present = (
+                os.path.isfile(canonical_gbw_path)
+                and os.path.getsize(canonical_gbw_path) > 0
+            )
+            always_intermediate = [".tar", ".tar.zst", ".tgz", ".gbw.zstd0", ".zstd", ".npz"]
+            legacy_orca5 = ["orca5.gbw", "orca5.wfn", "orca5.wfx"]
             for file in os.listdir(folder):
-                # clean files ending in .tar, .tar.zst, .tgz, .gbw.zstd0, .zstd, .npz
-                check_list = [".tar", ".tar.zst", ".tgz", ".gbw.zstd0", ".zstd", ".npz", "orca5.gbw"]
-                if any(file.endswith(ext) for ext in check_list):
+                is_intermediate = any(file.endswith(ext) for ext in always_intermediate)
+                is_legacy_orca5 = file in legacy_orca5
+                if is_intermediate or (is_legacy_orca5 and canonical_gbw_present):
                     try:
                         os.remove(os.path.join(folder, file))
                         logger.info(f"Removed intermediate file: {file}")
                     except Exception as e:
                         logger.error(f"Error removing intermediate file {file}: {e}")
+                elif is_legacy_orca5 and not canonical_gbw_present:
+                    logger.warning(
+                        "Keeping legacy %s -- no canonical orca.gbw present in %s",
+                        file,
+                        folder,
+                    )
 
     if restart:
-        # check if the timings file exists
-        if move_results:
-            timings_path = os.path.join(folder, "generator", "timings.json")
-        else:
-            timings_path = os.path.join(folder, "timings.json")
+        # Check both locations: generator/ (previous completed run) and
+        # job root (interrupted run before move_results_to_folder ran)
+        gen_timings = os.path.join(folder, "generator", "timings.json")
+        root_timings = os.path.join(folder, "timings.json")
 
-        if not os.path.exists(timings_path) or os.path.getsize(timings_path) == 0:
+        if os.path.exists(gen_timings) and os.path.getsize(gen_timings) > 0:
+            timings_path = gen_timings
+        elif os.path.exists(root_timings) and os.path.getsize(root_timings) > 0:
+            timings_path = root_timings
+        else:
+            timings_path = None
+
+        if timings_path is None:
             logger.warning("No timings file found - starting from scratch!")
             restart = False
         else:
-            logger.info("Timings file found - restarting from last step.")
+            logger.info("Timings file found at %s - restarting.", timings_path)
 
     # check if output already exists
     if not overwrite:
@@ -1533,6 +2121,13 @@ def gbw_analysis(
                                 logger.info("Deleted %s after orca-only parse", orca_out_path)
                             except OSError as e:
                                 logger.warning("Could not delete %s: %s", orca_out_path, e)
+                        clean_jobs(
+                            folder,
+                            separate=separate,
+                            logger=logger,
+                            full_set=full_set,
+                            move_results=move_results,
+                        )
                     logger.info("gbw_analysis completed (orca-only) in folder: %s", folder)
                     return
 
@@ -1605,6 +2200,7 @@ def gbw_analysis(
             full_set=full_set,
             move_results=move_results,
             clean_jobs_tf=clean,
+            subprocess_env=subprocess_env,
         )
 
     print("... Parsing multiwfn output")
@@ -1629,6 +2225,34 @@ def gbw_analysis(
         logger=logger,
         check_orca=check_orca,
     )
+
+    # Optional repair pass: if validation failed and patch_timings is on,
+    # recover missing timing keys from gbw_analysis.log (or stamp -1.0
+    # placeholders). patch_timings_from_log only writes positive timing
+    # values, so if the only validation failure was missing/zero timing
+    # keys, the patch necessarily satisfies validate_timing_dict — skip
+    # the second full validation_checks pass. Other validation failures
+    # (missing JSONs, n_atoms mismatch) are not patched and remain failures.
+    if not tf_validation and patch_timings:
+        dft_dict = get_charge_spin_n_atoms_from_folder(
+            folder, logger=logger, verbose=False
+        )
+        if not dft_dict:
+            logger.warning(
+                "patch_timings: could not read charge/spin/n_atoms; "
+                "skipping spin keys"
+            )
+        spin_tf = bool(dft_dict and dft_dict.get("spin", 1) != 1)
+        did_patch = patch_timings_from_log(
+            folder,
+            full_set=full_set,
+            spin_tf=spin_tf,
+            move_results=move_results,
+            logger=logger,
+        )
+        if did_patch:
+            tf_validation = True
+
     logger.info("gbw_analysis completed in folder: {}".format(folder))
     logger.info("Validation status: {}".format(tf_validation))
     # move log file to results folder

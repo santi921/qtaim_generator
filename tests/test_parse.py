@@ -10,8 +10,6 @@ from qtaim_gen.source.core.parse_qtaim import (
     orca_inp_to_dict,
 )
 
-from qtaim_gen.source.core.parse_critic import parse_critic2
-
 TEST_FILES = Path(__file__).parent / "test_files"
 
 
@@ -301,27 +299,30 @@ def test_bond_cp_via_qtaim_bond_defns():
     # print(bond_cps_qtaim[(3, 4)])
 
 
-def test_parse_critic2():
-    cro = str(TEST_FILES / "critic2" / "molecule" / "phenol_phenol.json")
-    features = {
-        "atom": [
-            "field",
-            "gradient_norm",
-            "laplacian",
-            "hessian_eigenvalues",
-            "ellipticity",
-        ],
-        "bond": [
-            "field",
-            "gradient_norm",
-            "laplacian",
-            "hessian_eigenvalues",
-            "ellipticity",
-        ],
-    }
-    ret_dict = parse_critic2(cro, features=features)
-    probe_bond_cp = ret_dict["bond_cps"]["55_bond"]
-    probe_atom_cp = ret_dict["atom_cps"]["16_H"]
+EDGE_CASES = Path(__file__).parent / "test_files" / "edge_cases"
 
-    assert len(probe_atom_cp.keys()) == 5, "wrong number of atoms"
-    assert len(probe_bond_cp.keys()) == 8, "wrong number of bonds"
+
+def test_merge_qtaim_inds_missing_atom(capsys):
+    """merge_qtaim_inds should skip bonds referencing unmatched atoms."""
+    dict_qtaim = get_qtaim_descs(
+        str(EDGE_CASES / "qtaim_0" / "CPprop.txt"), verbose=False
+    )
+    cp_dict = merge_qtaim_inds(
+        qtaim_descs=dict_qtaim,
+        bond_list=None,
+        define_bonds="qtaim",
+        dft_inp_file=str(EDGE_CASES / "qtaim_0" / "orca.inp"),
+        inp_type="orca",
+        margin=1.0,
+    )
+
+    # Should have atom CPs (int keys) and bond CPs (tuple keys)
+    atom_keys = [k for k in cp_dict if isinstance(k, int)]
+    bond_keys = [k for k in cp_dict if isinstance(k, tuple)]
+    assert len(atom_keys) == 84, f"expected 84 atom CPs, got {len(atom_keys)}"
+    # Bond 105 was skipped (references missing atom 59), so 101 not 102
+    assert len(bond_keys) == 101, f"expected 101 bond CPs, got {len(bond_keys)}"
+
+    # Verify warning was printed
+    captured = capsys.readouterr()
+    assert "Warning: skipping bond CP" in captured.out

@@ -1,6 +1,57 @@
 # CLAUDE.md
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+## Agent Instructions
+
+- Research the codebase before editing. Never change code you haven't read. Also don't make changes to code without asking first. MAKE A PLAN BEFORE CHANGING CODE AT FIRST. 
+- DON'T MAKE CHANGES AFTER REVIEWS AUTOMATICALLY, LETS DISCUSS FIRST
+- No sycophantic openers or closing fluff.
+- Do not re-read files already read unless file may have changed.
+- Read the file before modifying it. Never edit blind.
+- No em dashes, smart quotes, or decorative Unicode symbols.
+- Plain hyphens and straight quotes only.
+- User instructions always override this file.
+
+### 
+    Coding
+
+- Test your code before declaring done.
+- Be concise in output but thorough in reasoning.
+- No inline prose. Use comments sparingly - only where logic is unclear.
+- No abstractions for single-use operations.
+- Three similar lines is better than a premature abstraction.
+- No error handling for scenarios that cannot happen.
+- Code output must be copy-paste safe.
+- No compliments on the code before or after the review.
+- State the bug. Show the fix. Stop.
+- Never speculate about a bug without reading the relevant code first.
+- State what you found, where, and the fix. One pass.
+- If bug cause is unclear: say so. Do not guess. We can iterate on finding the right cause.
+
+### 
+    Analysis
+
+* Reporting: Lead with the finding. Context and methodology after.
+* Reporting: Summary first (3 bullets max).
+* Reporting: Supporting data second.
+* Reporting: Caveats and limitations last.
+* Formatting: Safe for copy-paste into spreadsheets and documents.
+* Formatting: Tables use plain pipe characters.
+* Formatting: Numbers must include units. Never ambiguous values.
+* Distinguish clearly between what the data shows and what is inferred.
+* Label inferences explicitly: "Based on the trend..." not stated as fact.
+* Never fabricate data points, statistics, or citations.
+* If confidence is low: state it explicitly with a reason.
+
+
+## Shared Skills
+
+For available skills and tool guidance, read the relevant files in `/home/santiagovargas/dev/claude-skills/` as needed:
+- **Scientific** (PyG, PyTorch Lightning, RDKit, pymatgen, matplotlib, scikit-learn): `scientific/`
+- **Code review & planning** (multi-agent reviews, brainstorm/plan/work workflows): `compound/`
+- **Document processing** (PDF, XLSX): `documents/`
+
+Read the specific skill file when you need detailed API patterns or usage guidance for a task.
 
 ## Project Overview
 
@@ -34,8 +85,10 @@ qtaim_gen/source/
 │   ├── workflow.py      # Parsl task orchestration
 │   ├── parse_qtaim.py   # Critical point parsing from Multiwfn
 │   ├── parse_multiwfn.py# Charge/bond/fuzzy output parsing
-│   ├── parse_orca.py    # ORCA .out file parser (enum state machine, WIP on feat/orca-out-parser)
-│   └── parse_json.py    # JSON output merging/validation
+│   ├── parse_orca.py    # ORCA .out file parser (single-pass enum state machine → orca.json)
+│   ├── parse_json.py    # JSON output merging/validation
+│   ├── lmdb_analysis.py # LMDB descriptor analysis utilities (iter_lmdb, compute_stats, flatten_entry, etc.)
+│   └── lmdb_plots.py    # Plotting functions for lmdb_analysis (separated to allow headless import)
 ├── data/                # Multiwfn command helpers (charge_data, bond_order_data, etc.)
 ├── scripts/             # CLI entry points (defined in pyproject.toml)
 │   ├── create_files.py  # create-files: generate DFT/QTAIM inputs
@@ -48,13 +101,16 @@ qtaim_gen/source/
 │   │   ├── clean_omol.py        # Bulk cleanup of job folders (removes intermediate files)
 │   │   ├── debug_lmdb_contents.py # LMDB inspection/debugging utility
 │   │   ├── generator_to_embed.py  # generator-to-embed: run converter from JSON config
+│   │   ├── multi_vertical_merge.py # multi-vertical-merge: merge multiple dataset verticals with global split
 │   │   ├── refine_list_of_jobs.py # Filter/refine job lists for reprocessing
 │   │   ├── configs_converter/     # Validated JSON configs for different converter types
 │   │   └── ...                    # Other helpers (check_res_*, folder_*_to_pkl, etc.)
-│   └── old/             # Deprecated/archived scripts
 └── utils/               # Utilities
     ├── validation.py    # Job completeness validation
     ├── lmdbs.py         # LMDB read/write utilities (json_2_lmdbs, sharded writes, merge)
+    ├── splits.py        # Train/val/test splitting (SplitConfig, partition functions, formula-based splits)
+    ├── scaling.py       # Reusable scaler fit/apply/save for graph LMDBs
+    ├── multi_vertical.py # Multi-vertical pipeline config, validation, and plan phase
     ├── bonds.py         # Bond detection (RDKit-based and coordinate-based)
     ├── io.py            # Input file generation, format conversion, bond detection
     ├── aselmdb.py       # ASE LMDB format helpers
@@ -71,8 +127,11 @@ qtaim_gen/source/
 **Full analysis:** `full-runner`, `full-runner-parsl`, `full-runner-parsl-alcf`
 
 **JSON → LMDB → Graphs (ML pipeline):**
-1. `json-to-lmdb` → Convert parsed JSON outputs to typed LMDB files (structure, charge, qtaim, bond, fuzzy)
+1. `json-to-lmdb` → Convert parsed JSON outputs to typed LMDB files (structure, charge, qtaim, bond, fuzzy, other, orca, timings)
 2. `generator-to-embed` → Run a converter (Base/QTAIM/General) to build DGL graph LMDBs for `qtaim_embed`
+3. `generator-to-embed --split` → Optionally split output into train/val/test LMDBs with train-only scaler fitting
+
+**Jagged hierarchies (e.g. OMol4M):** datasets where job folders sit at variable depth under root must use `json-to-lmdb --folder_list FILE`, where FILE is one absolute job-folder path per line (blanks and `#` comments skipped). LMDB keys become `relpath(folder, root_dir).replace(os.sep, "__")` — e.g. `solvated_protein__outputs_240923__spf_1195777_0_1__step0`. Same key formula across every data type, so downstream LMDBs always join. Internal sharding by `--shard_index/--total_shards` partitions the list by line index modulo total — no external `split` needed. Mutually exclusive with the legacy flat-glob discovery.
 
 ## Converter System
 
@@ -87,13 +146,18 @@ Converters are driven by JSON config files (see `scripts/helpers/configs_convert
 
 Sharding is supported for large datasets — process in chunks, then merge. See `docs/SHARDING_GUIDE.md`.
 
+**Train/test splitting** is supported via `--split` flag on `generator-to-embed`. Supports random and composition-based (molecular formula) splitting. Scalers are fit on the train split only to prevent data leakage. Split config params (`split_method`, `split_ratios`, `split_seed`) go in the converter JSON config. Splitting and sharding are mutually exclusive. See `utils/splits.py` for the split logic.
+
+**Multi-vertical merge** (`multi-vertical-merge`) combines multiple dataset verticals (e.g. SPICE + QM9 + RMechDB) into per-vertical train/val/test graph LMDBs with global composition-consistent splitting and train-only scaler fitting across all verticals. Uses a pipeline JSON config (see `configs_converter/multi_vertical_example.json`). Three phases: Plan (validate + census + split assignment), Build (parallel sharded graph construction per vertical/split), Scale (fit scaler on all train shards, apply per-shard in parallel). Each split is built as a *directory* of shard LMDBs (`{output_dir}/{vertical}/{split}/shard_{i}.lmdb`) — qtaim_embed's `LMDBMoleculeDataset` consumes a shard directory directly, so there is no merge step; point training `src` at the split directory. Config knobs `n_shards_per_split` (shards per split = parallelism unit + restart granularity) and `build_max_workers` (concurrent shard jobs; effective CPU load is `build_max_workers * each converter config's n_workers`) are both live. Build runs each shard via the converter's `include_keys` filter on a pre-sliced disjoint key set; the existing `element_set` config key injects the unified element set. Scaling uses `utils/scaling.py` (`fit_scalers_on_lmdbs`/`apply_scalers_to_lmdb_inplace`); apply streams in batches and replaces atomically (temp + `os.replace`) so it is memory-bounded and resume-safe. Subprocesses use the `spawn` start method. See `utils/multi_vertical.py` and `scripts/helpers/multi_vertical_merge.py`.
+
 ## Job Folder Layout
 
 Scripts expect a two-level hierarchy: `root_dir/category/subset/job/`. Each job folder contains:
 - `input.inp` (ORCA input)
 - `*.wfn`/`*.gbw` (wavefunctions)
 - `charge.json`, `bond.json`, `qtaim.json` (outputs)
-- `timings.json`, `.processing.lock`
+- `orca.json` (ORCA .out parsed properties - energies, orbitals, charges, gradient, quality-filter fields). Converted to `orca.lmdb` by `json-to-lmdb` and consumed by `GeneralConverter` via `orca_lmdb` (data_input `"orca"`, optional `orca_filter`). See `parse_orca_data` in `utils/lmdbs.py` and `DEFAULT_ORCA_FILTER` for the conservative globals-only default.
+- `timings.json` (raw `{step: seconds}` dict; converted to `timings.lmdb` by `json-to-lmdb` as a provenance LMDB — not consumed by any converter), `.processing.lock`
 
 ## External Dependencies
 
@@ -108,7 +172,8 @@ Scripts expect a two-level hierarchy: `root_dir/category/subset/job/`. Each job 
 All commands defined in `pyproject.toml [project.scripts]`. Main ones:
 - `create-files`, `run-qtaim-gen`, `parse-data` (QTAIM workflow)
 - `json-to-lmdb` (JSON → LMDB conversion, supports sharding via `--sharded`)
-- `generator-to-embed` (LMDB → DGL graph LMDB via converter config)
+- `generator-to-embed` (LMDB → DGL graph LMDB via converter config, supports `--split` for train/val/test)
+- `multi-vertical-merge` (merge multiple dataset verticals with global composition-consistent splits and train-only scaler fitting)
 - `full-runner`, `full-runner-parsl`, `full-runner-parsl-alcf` (orchestrated full analysis)
 - `check-res-wfn`, `check-res-rxn-json` (validation helpers)
 - `folder-xyz-molecules-to-pkl`, `folder-orca-inp-to-pkl`, `outcar-seek-and-convert-xyz` (format conversion)
@@ -131,7 +196,7 @@ Run tests with `pytest -q` or specific files with `pytest tests/<file>.py -v`.
 |-----------|----------|
 | `test_parse.py` | QTAIM/DFT input parsing, critical point extraction |
 | `test_parse_multiwfn.py` | Multiwfn output parsing (charges, bonds, fuzzy) |
-| `test_parse_orca.py` | ORCA `.out` file parser (WIP) |
+| `test_parse_orca.py` | ORCA `.out` parser - 168 tests across energy, orbital, charges, gradient, quality filters, warnings block |
 | `test_bond_detection.py` | Bond detection from coordinates, ORCA input parsing |
 | `test_lmdb.py` | LMDB read/write, key normalization, serialization roundtrips |
 | `test_parse_json.py` | JSON output parsing and validation |
@@ -142,6 +207,8 @@ Run tests with `pytest -q` or specific files with `pytest tests/<file>.py -v`.
 | `test_sharded_converter.py` | Sharded converter processing and merge |
 | `test_json_to_lmdb_sharding.py` | json-to-lmdb sharding pipeline |
 | `test_scaler_merge.py` | Graph scaler merge behavior |
+| `test_train_test_split.py` | Train/val/test split logic, SplitConfig, LMDB partitioning |
+| `test_multi_vertical.py` | Multi-vertical pipeline config, plan phase, composition consistency |
 
 Test fixtures are in `tests/test_files/` with subdirectories for ORCA inputs, Multiwfn outputs, etc.
 
@@ -153,3 +220,4 @@ Additional docs in `docs/`:
 - `WANDB_INTEGRATION.md` — W&B tracking setup
 - `solutions/` — Documented solutions to past bugs (merge/scaling, file I/O, test improvements)
 - `brainstorms/` and `plans/` — Feature design documents
+- `plans/2026-03-23-feat-train-test-split-generator-to-embed-plan.md` — Train/test split feature plan

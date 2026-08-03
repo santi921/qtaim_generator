@@ -6,7 +6,6 @@ import argparse
 import parsl
 
 from typing import Optional, List
-import resource
 
 from qtaim_gen.source.core.workflow import run_folder_task
 from qtaim_gen.source.utils.parsl_configs import alcf_config, base_config
@@ -171,10 +170,20 @@ def main(argv: Optional[List[str]] = None) -> int:
         help="Use .wfx wavefunction format instead of .wfn (more stable for heavy atoms, Z > 36)",
     )
 
-    parser.add_argument(        
+    parser.add_argument(
         "--exhaustive_qtaim",
         action="store_true",
         help="use exhaustive QTAIM critical point search (spherical search around atoms)",
+    )
+
+    parser.add_argument(
+        "--patch_timings",
+        action="store_true",
+        help=(
+            "if timing-validation fails, recover missing timing keys from "
+            "gbw_analysis.log (or stamp -1.0 sentinels) and re-validate. "
+            "Records provenance under '_timings_patched' for downstream filtering."
+        ),
     )
 
     args = parser.parse_args(argv)
@@ -202,6 +211,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     clean_first: bool = bool(getattr(args, "clean_first", False))
     wfx: bool = bool(getattr(args, "wfx", False))
     exhaustive_qtaim: bool = bool(getattr(args, "exhaustive_qtaim", False))
+    patch_timings: bool = bool(getattr(args, "patch_timings", False))
 
     # parsl args
     type_runner: str = str(getattr(args, "type_runner", "local"))
@@ -236,7 +246,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     ####################
 
     # set env vars - this is only for the main process; workers set their own envs
-    if resource == "local":
+    if type_runner == "local":
         os.environ["OMP_NUM_THREADS"] = "{}".format(n_threads_per_job)
 
     # to handle early stops on the pilot job
@@ -260,7 +270,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     if not folders_run:
         print(f"No folders found in {job_file}")
-        return []
+        return 1
 
     # If dry-run requested, print a short plan and exit
     if dry_run:
@@ -292,6 +302,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             clean_first=clean_first,
             wfx=wfx,
             exhaustive_qtaim=exhaustive_qtaim,
+            patch_timings=patch_timings,
         )
         for f in folders_run
     ]

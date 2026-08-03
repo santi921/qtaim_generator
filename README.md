@@ -1,99 +1,312 @@
-# Generator
+# qtaim_generator
 
-<img src="https://github.com/santi921/qtaim_generator/blob/main/qtaim_gen/notebooks/TOC.png" width=50% height=50%>
+<img src="assets/TOC.png" width=50% height=50%>
 
-A package to perform post-processing on molecules, reactions, and (soon) periodic systems. It's a wrapper around Multiwfn that handles high-throughput workflows and can compute a rich set of descriptors including QTAIM, partial charges, several bonding schemes, etc. I am currently overhauling the package away from being QTAIM-first and instead integrating many descriptors in tandem. I will be sticking with the JSON file format for QTAIM and the "full" feature implementations so running calculations will remain the same, gathering and parsing utilities for ML, however, will change. Here's a quick status about what is available for QTAIM/full at the moment:
+A high-throughput post-processing package for quantum chemistry calculations. It wraps Multiwfn and ORCA to compute a rich set of descriptors - QTAIM critical points, partial charges (Hirshfeld, ADCH, CM5, Becke, Mulliken, Loewdin, Mayer), bond orders (fuzzy, IBSI, Laplacian, Mayer), and fuzzy atomic densities - and converts them into graph-based LMDB datasets for ML training with [qtaim_embed](https://github.com/santi921/qtaim_embed).
 
-### QTAIM
-- [x] Reaction-level feature generation and processing
-- [x] Molecule-level feature generation and processing
-- [x] Post-processing to LMDBs in DGL for ML
+## Install
 
-
-### Full
-- [x] Molecule-level feature generation and processing
-- [ ] Reaction-level feature generation and processing
-- [x] High-throughput runners using python MP
-- [x] High-throughput runners using parsl 
-- [ ] Post-processing to LMDBs for ML (ongoing)
-- [ ] Quacc integration (ongoing)
-
-
-Simply install this package by cloning the repo and running: 
-```
+```bash
+conda env create -f environment.yml
 pip install -e .
 ```
 
-# Overview - QTAIM Usage
+RDKit must be installed from conda-forge for full functionality. The `environment.yml` handles this.
 
-We can use QTAIM to define bonds in a system as well as define a rich set of descriptors for machine learning. With a few scripts you can get to generating QTAIM-informatics for analysis and machine learning tasks. Currently, this package supports BondNet(<a href="https://github.com/santi921/bondnet">BonDNet</a>) (for reaction-property predicton) and <a href="https://github.com/santi921/qtaim_embed">QTAIM-Embed</a> and ChemProp <a href="[https://github.com/santi921/qtaim_embed](https://github.com/chemprop/chemprop)">QTAIM-Embed</a> for molecular machine learning tasks. Note that the Chemprop implementation currently only supports atom-level QTAIM descriptors. 
+Optional extras:
+
+```bash
+pip install -e ".[parsl]"   # Parsl-based HPC runners
+pip install -e ".[wandb]"   # W&B tracking integration
+pip install -e ".[dev]"     # pytest, ruff
+```
 
 ## Overview
-To get started you will need to decide a few things: 
-1) DFT Software: We currently have input file writers for Orca though creating custom writers for other software should be easy to integrate. For ORCA, we add a few options such a relativistic corrections and atom-specific basis sets. See the <a href="[https://github.com/santi921/qtaim_generator/blob/main/qtaim_gen/source/scripts/options_qm.json]">example JSON</a>  for more options 
-2) QTAIM software: The implementation with Critic2 works but is relatively experimental and we suggest you use Multiwfn as it yields a richer set of QTAIM features. 
-3) Level of theory: QTAIM is pretty resistant to low levels of theory. Take care, however, when your dataset contains metals (especially heavy metals where this assertion is  less tested). 
 
+The package has two main workflows:
 
-## Usage
-Three scripts will be needed to generate QTAIM features readily formatted for your dataset. These scripts generate job files, run jobs, and parse outputs to a single json, respectively. For the following we will assume you have a properly formatted json/pickle/bson and will return to this later. 
+**QTAIM-only:** `create-files` -> `run-qtaim-gen` -> `parse-data`. Generates ORCA inputs, runs DFT + QTAIM analysis, parses outputs to JSON.
 
-1) <code> create_files.py </code> - generates input files for DFT and QTAIM jobs and has severate arguments:
-    - <code> -reaction </code> : specifies whether the dataframe 
-    - <code> -parser </code> Multiwfn or Critic2
-    - <code> -file </code> specifies the dataset file
-    - <code> -root </code> specifies where to write job files
-    - <code> -options_qm_file </code> options for your electronic structure job
-    - <code> --molden_sub </code> whether to use <code> orca_2mkl </code> to convert the a gbw to a .molden.input file prior to Multiwfn. Use this if you intend on using ECPs.
-2) <code> run.py </code> - runs DFT and QTAIM jobs in selected folder
-    - <code> -redo_qtaim </code> - whether to clear QTAIM results file and redo 
-    - <code> -just_dft </code> - whether to scriptly run DFT jobs
-    - <code> --reactions </code> : specifies whether the root folder contains reaction or molecule jobs
-    - <code> -dir_active </code> - root folder of QTAIM/DFT jobs
-    - <code> -orca_path </code> - path to ORCA executable
-    - <code> -num_threads </code> - number of threads for DFT jobs
-    - <code> -folders_to_crawl </code> - how many folders to check for complete jobs
-3) <code> parse_data.py </code> takes DFT/QTAIM output files and merges QTAIM data into a the original data structure:
-    - <code> --root </code> root folder of QTAIM/DFT jobs
-    - <code> --file_in </code> - input dataframe used to construct QTAIM/DFT jobs
-    - <code> --impute </code> - whether or not to fill in missing values with mean values from computed statistics
-    - <code> --file_out </code> - where to write to
-    - <code> --reaction </code> - where your data is a reaction dataset
-    - <code> --update_bonds_w_qtaim </code> -whether to overwrite existing bond definitions
-    - <code> -define_bonds </code> - method ("distances" or "qtaim") of determining bonds
-   
-## Extra Scripts
-1) <code> parse_stop.py </code> computes and prints statistics of QTAIM values in selected folder
-2) <code> check_res_rxn_json.py </code> checks the number of complete jobs for reaction QTAIM run
-3) <code> check_res_wfn.py </code> checks the number of complete jobs for molecular QTAIM run
-4) <code> folder_xyz_molecules_to_pkl.py </code> converts a folder of xyz files into a single dataset for subsequent QTAIM generation.
+**Full pipeline:** `json-to-lmdb` -> `generator-to-embed`. Converts parsed JSON to typed LMDBs, then builds graph LMDBs for ML training with `qtaim_embed`.
 
-## Data Structure
-Jsons, pkls, and bson can all be parsed. 
+For large datasets (e.g. OMol4M) with variable-depth job folder hierarchies, pass a flat list of absolute job paths to `json-to-lmdb --folder_list`. See `docs/SHARDING_GUIDE.md` for sharded conversion and `docs/JSON_TO_LMDB_SHARDING.md` for parallel shard processing.
 
+## Dataset
 
+OMol-Descriptors-4M, the dataset produced by this pipeline on the OMol25 4M public release, is hosted on Hugging Face: [santi921/OMol-Descriptors-4M](https://huggingface.co/datasets/santi921/OMol-Descriptors-4M). It ships six partial-charge schemes, four bond-order schemes, full QTAIM topology, fuzzy descriptors, and ORCA-derived globals across ~4M structures spanning 34 chemical verticals.
 
-# Overview - Full Usage
-# TODO
+---
 
+## Running at Scale
 
- ## Citation 
- If you use this package please cite the following, thanks!
- 
- @Article{D4DD00057A,
-author ="Vargas, Santiago and Gee, Winston and Alexandrova, Anastassia",
-title  ="High-throughput quantum theory of atoms in molecules (QTAIM) for geometric deep learning of molecular and reaction 
-properties",
-journal  ="Digital Discovery",
-year  ="2024",
-volume  ="3",
-issue  ="5",
-pages  ="987-998",
-publisher  ="RSC",
-doi  ="10.1039/D4DD00057A",
-url  ="http://dx.doi.org/10.1039/D4DD00057A"
+### HPC job execution (Parsl)
+
+For millions of structures on a cluster, use the Parsl-based runner. It manages job submission, restarts, and result collection across nodes.
+
+```bash
+# ALCF Polaris - 8 nodes, 220 threads, processing 15,000 folders per batch
+full-runner-parsl-alcf \
+  --num_folders 15000 \
+  --orca_2mkl_cmd $HOME/orca_6_0_0/orca_2mkl \
+  --multiwfn_cmd $HOME/Multiwfn_3_8/Multiwfn_noGUI \
+  --n_threads 220 --n_threads_per_job 1 --safety_factor 1.0 \
+  --timeout_hr 6 --queue workq-route \
+  --n_nodes 8 --type_runner hpc \
+  --job_file /path/to/job_list.txt \
+  --preprocess_compressed \
+  --root_omol_results /path/to/results/ \
+  --root_omol_inputs /path/to/inputs/ \
+  --restart --clean --move_results
+```
+
+Key flags:
+
+| Flag | Description |
+|------|-------------|
+| `--type_runner` | `local`, `hpc` (PBS/ALCF), or `flux` |
+| `--n_nodes` | Number of compute nodes to request |
+| `--n_threads` | Total worker threads across all nodes |
+| `--n_threads_per_job` | Threads per ORCA job (typically 1 for QTAIM-only) |
+| `--restart` | Resume a previously interrupted run |
+| `--num_folders` | Folders to process per batch (tune to walltime) |
+| `--job_file` | Flat list of absolute job folder paths, one per line |
+| `--preprocess_compressed` | Decompress `.zip` archives before processing |
+
+### Sharded JSON-to-LMDB conversion
+
+For datasets too large to convert in a single process, shard across SLURM array jobs:
+
+```bash
+#!/bin/bash
+#SBATCH --array=0-7
+#SBATCH --cpus-per-task=2
+#SBATCH --mem=16GB
+#SBATCH --time=04:00:00
+
+SHARD=$SLURM_ARRAY_TASK_ID
+TOTAL=8
+[ $SHARD -eq $((TOTAL - 1)) ] && MERGE="--auto_merge" || MERGE=""
+
+json-to-lmdb \
+  --folder_list /path/to/job_list.txt \
+  --out_dir /path/to/lmdbs/ \
+  --all \
+  --shard_index $SHARD \
+  --total_shards $TOTAL \
+  $MERGE
+```
+
+The last shard triggers an automatic merge into `lmdbs/merged/<type>.lmdb`. See `docs/JSON_TO_LMDB_SHARDING.md` for the full output layout and merge behavior.
+
+### Sharded graph conversion
+
+Once descriptor LMDBs are built, shard the graph converter similarly:
+
+```bash
+# Run N shards in parallel, each writing to its own output dir
+generator-to-embed --config shard_0.json   # shard_index=0, total_shards=N
+generator-to-embed --config shard_N-1.json  # auto_merge=true on last shard
+```
+
+Set `"shard_index"`, `"total_shards"`, and `"skip_scaling": true` in all but the last shard config. See `docs/SHARDING_GUIDE.md` for the full config reference.
+
+### Variable-depth folder hierarchies
+
+Datasets like OMol25 have job folders at irregular depths. Pass a flat job list instead of a root directory:
+
+```bash
+# Build the job list (one absolute path per line)
+find /path/to/omol25 -name "charge.json" -printf "%h\n" | sort > job_list.txt
+
+# Convert - keys become path-derived: parent__subdir__jobname
+json-to-lmdb --folder_list job_list.txt --out_dir ./lmdbs/ --all
+```
+
+LMDB keys are derived as `relpath(folder, root).replace("/", "__")`, so all descriptor types for the same job share an identical key for downstream joining.
+
+---
+
+## Graph LMDBs
+
+### Converter types
+
+| Converter | Use case | Required LMDBs |
+|-----------|----------|----------------|
+| `BaseConverter` | Structural info only | `geom_lmdb` |
+| `QTAIMConverter` | QTAIM bond paths + critical point properties | `geom_lmdb`, `qtaim_lmdb` |
+| `GeneralConverter` | Flexible: any combination of charge/bond/fuzzy/QTAIM/ORCA | `geom_lmdb` + any |
+| `ASELMDBConverter` | ASE-formatted LMDB input | ASE LMDB file |
+
+Config files live in `qtaim_gen/source/scripts/helpers/configs_converter/`. See that directory's `README.md` for field documentation.
+
+### Minimal config (BaseConverter)
+
+```json
+{
+  "chunk": -1,
+  "filter_list": ["length", "scaled"],
+  "restart": false,
+  "allowed_ring_size": [3, 4, 5, 6, 7, 8],
+  "keys_target": { "atom": [], "bond": [], "global": ["n_atoms"] },
+  "keys_data": { "atom": [], "bond": [], "global": ["n_atoms"] },
+  "lmdb_path": "/path/to/output_dir",
+  "lmdb_name": "graphs.lmdb",
+  "lmdb_locations": { "geom_lmdb": "/path/to/structure.lmdb" },
+  "n_workers": 8,
+  "batch_size": 500
 }
+```
 
+### GeneralConverter config reference
 
+| Key | Description |
+|-----|-------------|
+| `bonding_scheme` | `"structural"` (coordinate-based), `"bonding"` (bond orders), or `"qtaim"` (bond paths) |
+| `bond_list_definition` | Bond order type for the bond list: `"fuzzy"`, `"ibsi"`, `"laplacian"` |
+| `bond_cutoff` | Minimum bond order threshold (e.g. `0.3`) |
+| `bond_filter` | Bond features to include: `["fuzzy"]`, `["ibsi"]`, `["fuzzy", "ibsi"]` |
+| `charge_filter` | Charge schemes: `["hirshfeld", "adch", "cm5", "becke"]` |
+| `fuzzy_filter` | Fuzzy density features: `["becke_fuzzy_density", "hirsh_fuzzy_density"]` |
+| `orca_filter` | Keys from `orca.json` to surface as features (`null` = chemistry globals only) |
+| `missing_data_strategy` | `"skip"` or `"impute"` |
+| `allowed_charges` / `allowed_spins` | Filter by molecular charge/spin (`null` = no filter) |
 
-## install 
+### Multi-vertical merge
+
+For combining multiple dataset verticals into a unified train/val/test split:
+
+```bash
+multi-vertical-merge --config pipeline_config.json
+```
+
+Three phases: Plan (validate + census + split assignment), Build (parallel graph construction per vertical/split), Scale (fit scaler on all train data, apply to all). See `qtaim_gen/source/scripts/helpers/configs_converter/multi_vertical_example.json`.
+
+### Reading the output graph LMDB
+
+```python
+import lmdb, pickle
+from qtaim_embed.data.lmdb import load_graph_from_serialized
+
+env = lmdb.open("graphs.lmdb", readonly=True, subdir=False, lock=False)
+with env.begin() as txn:
+    value = txn.get(b"molecule_key")
+    graph = load_graph_from_serialized(pickle.loads(value))
+    print(graph.node_types)        # ['atom', 'bond', 'global']
+    print(graph['atom'].feat.shape)
+env.close()
+```
+
+---
+
+## Dataset Evaluation Pipeline
+
+Tools for building evaluation holdouts, splitting descriptor LMDBs, and auditing splits. These operate on raw descriptor LMDBs (before graph conversion) and produce the train/val/test partitions reported in the paper.
+
+### Compute transition-metal neighbor lists
+
+Required input for the H1 metal-ligand holdout:
+
+```bash
+tm-neighbor-lists --bond_root /path/to/bond_lmdbs --out_dir /path/to/output
+```
+
+### Build holdout filter CSVs
+
+Produces H1/H3/H6/H7/H8 evaluation holdout definitions:
+
+```bash
+build-holdout-csvs --manifest_dir /path/to/manifest --output_dir /path/to/filter_csvs
+```
+
+### Pull holdout records into separate LMDBs
+
+```bash
+pull-holdout-records \
+  --lmdb_root /path/to/descriptor_lmdbs \
+  --holdout_index /path/to/filter_csvs/INDEX.csv \
+  --out_dir /path/to/holdout_lmdbs
+```
+
+### Split descriptor LMDBs into train/val/test
+
+Composition-ordered split via deterministic key hashing:
+
+```bash
+split-descriptor-lmdbs \
+  --lmdb_root /path/to/descriptor_lmdbs \
+  --splits_dir /path/to/splits_output \
+  --holdout_parquet /path/to/manifest_holdout.parquet
+```
+
+### Merge per-vertical splits into combined LMDBs
+
+```bash
+merge-split-descriptors \
+  --splits_dir /path/to/splits_output \
+  --output_dir /path/to/merged
+```
+
+Output layout: `<output_dir>/train/<descriptor>.lmdb`, `val/`, `test/`.
+
+### Audit split integrity
+
+```bash
+audit-splits \
+  --splits_dir /path/to/splits_output \
+  --lmdb_root /path/to/descriptor_lmdbs
+```
+
+Reports HEALTHY / DRIFT / NEVER_SPLIT / SOURCE_BAD per vertical. DRIFT and NEVER_SPLIT verticals are printed as a rerun list.
+
+---
+
+## Analysis Tools
+
+All analysis commands correspond to sections in the accompanying paper.
+
+| Command | Paper section | Description |
+|---------|---------------|-------------|
+| `analysis-census` | Stream C / T1 | Per-vertical molecule counts, element coverage, ring statistics |
+| `analysis-charge-alignment` | Section 6.2 / B1 | Pairwise agreement between charge schemes |
+| `analysis-dipole-alignment` | Stream E2 / Section 6.7 | Cross-vertical dipole magnitude agreement |
+| `analysis-bond-agreement` | Stream D | Cross-vertical bond order agreement |
+| `analysis-noise-floors` | Stream F | Cross-method noise floor estimation |
+| `analysis-soap-featurize` | Stream G | SOAP descriptor computation for UMAP embedding |
+| `analysis-soap-umap` | Stream G | UMAP projection of SOAP-featurized structures |
+
+All commands accept `--help` for usage.
+
+---
+
+## Utility Reference
+
+```
+json-to-lmdb               Convert job JSON outputs to typed LMDBs (supports sharding)
+generator-to-embed         Build graph LMDBs from typed LMDBs via converter config
+multi-vertical-merge       Merge multiple dataset verticals with global splits and scaling
+build-manifest             Build a dataset manifest (molecule counts, element coverage)
+lmdb-status-audit          Audit LMDB completeness across verticals
+lmdb-filter-vertical       Filter records from a vertical LMDB by key list
+backfill-orca-into-json    Backfill parsed ORCA fields into existing charge.json files
+find-bad-json              Find invalid or empty JSON files in a job tree
+create-files               Generate ORCA + Multiwfn input files from a molecule dataset
+run-qtaim-gen              Run DFT + QTAIM jobs in a job folder tree
+parse-data                 Parse DFT/QTAIM outputs into a unified JSON/PKL
+full-runner                Orchestrated full analysis (threads)
+full-runner-parsl          Orchestrated full analysis (Parsl)
+full-runner-parsl-alcf     Orchestrated full analysis (Parsl, ALCF Polaris)
+check-res-wfn              Check job completion for molecular QTAIM runs
+check-res-rxn-json         Check job completion for reaction QTAIM runs
+folder-xyz-molecules-to-pkl  Convert a folder of XYZ files to a dataset PKL
+folder-orca-inp-to-pkl     Convert a folder of ORCA inputs to a dataset PKL
+```
+
+---
+
+## External Dependencies
+
+- **ORCA** (v5 or v6): DFT calculations
+- **Multiwfn**: QTAIM + descriptor analysis
+- **orca_2mkl**: Required for ECP jobs (converts `.gbw` to `.molden.input`)
+- **RDKit**: Install from conda-forge
+- **qtaim_embed**: Required for graph LMDB construction

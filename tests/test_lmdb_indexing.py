@@ -4,7 +4,7 @@ from copy import deepcopy
 from qtaim_gen.source.core.converter import BaseConverter
 
 
-def test_folder_indexing_maps_to_correct_env():
+def test_folder_indexing_maps_to_correct_env(tmp_path):
     base_tests = os.path.dirname(__file__)
     input_folder = os.path.join(
         base_tests, "test_files", "lmdb_tests", "generator_lmdbs"
@@ -19,7 +19,7 @@ def test_folder_indexing_maps_to_correct_env():
         "allowed_spins": None,
         "keys_target": {"atom": [], "bond": [], "global": ["n_atoms"]},
         "keys_data": {"atom": [], "bond": [], "global": ["n_atoms"]},
-        "lmdb_path": os.path.join(base_tests, "out_index_test"),
+        "lmdb_path": str(tmp_path / "out_index_test"),
         "lmdb_name": "graphs_index.lmdb",
         "lmdb_locations": {"geom_lmdb": input_folder},
     }

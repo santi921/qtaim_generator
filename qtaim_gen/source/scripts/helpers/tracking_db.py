@@ -117,8 +117,10 @@ def scan_and_store_parallel(
         "t_becke_fuzzy_density",
         "t_becke_fuzzy_spin",
         "t_bond",
-        "t_other_alie", 
-        "t_other_geometry"
+        "t_other_alie",
+        "t_other_geometry",
+        "has_orca_json",
+        "val_orca",
     ]
     columns = list(set(columns))  # ensure uniqueness
 
@@ -417,7 +419,25 @@ def print_summary(
             f"  {subset}: {get_tabs(subset)} {count_day} / {count_hr} / {dict_one_day_full_val.get(subset, 0)} / {dict_one_hour_full_val.get(subset, 0)}"
         )
 
-    # 7. print all counts from overall counts db
+    # 7. orca.json presence and validation per category
+    print("---" * 30)
+    print("orca.json presence and validation per category (subset):")
+    c.execute(
+        "SELECT subset, COUNT(DISTINCT job_id) FROM validation WHERE has_orca_json='True' GROUP BY subset"
+    )
+    orca_present = dict(c.fetchall())
+    c.execute(
+        "SELECT subset, COUNT(DISTINCT job_id) FROM validation WHERE val_orca='True' GROUP BY subset"
+    )
+    orca_valid = dict(c.fetchall())
+    for subset in sorted(set(list(orca_present.keys()) + list(orca_valid.keys()))):
+        present = orca_present.get(subset, 0)
+        valid = orca_valid.get(subset, 0)
+        total = counts_overall.get(subset, "N/A") if path_to_overall_counts_db else ""
+        total_str = f" / {total}" if total != "" else ""
+        print(f"  {subset}: {get_tabs(subset)} has={present}{total_str}  valid={valid}")
+
+    # 8. print all counts from overall counts db
     if path_to_overall_counts_db:
         print("---" * 30)
         print("Overall job counts per category (subset):")

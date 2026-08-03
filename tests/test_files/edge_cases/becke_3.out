@@ -1,0 +1,711 @@
+ Multiwfn -- A Multifunctional Wavefunction Analyzer
+ Version 3.8(dev), update date: 2024-Oct-6
+ Developer: Tian Lu (Beijing Kein Research Center for Natural Sciences)
+ Multiwfn official website: http://sobereva.com/multiwfn
+ Multiwfn English forum: http://sobereva.com/wfnbbs
+ Multiwfn Chinese forum: http://bbs.keinsci.com/wfn
+ Both following papers ***MUST BE CITED IN MAIN TEXT*** if Multiwfn is used:
+          Tian Lu, Feiwu Chen, J. Comput. Chem., 33, 580-592 (2012)
+          Tian Lu, J. Chem. Phys., 161, 082503 (2024)
+ See "How to cite Multiwfn.pdf" in Multiwfn binary package for more information
+
+ ( Number of parallel threads:  10  Current date: 2026-04-01  Time: 15:13:20 )
+ 
+ Please wait...
+ 
+ Total energy:       0.000000000000 Hartree,   Virial ratio:  2.00000000
+ Total/Alpha/Beta electrons:    524.0000    262.0000    262.0000
+ Number of orbital:   262,  Atoms:    139,  GTFs:   4773
+ This is restricted closed-shell single-determinant wavefunction
+ 
+
+ Loaded /p/lustre5/vargas58/OMol4M/protein_core/6wkr_coreL340_-2_1/orca.wfx successfully!
+ 
+ Formula: H71 C41 N11 O16      Total atoms:     139
+ Molecule weight:       974.06818 Da
+ Point group: C1 
+ 
+ "q": Exit program gracefully          "r": Load a new file
+                    ************ Main function menu ************
+ 0 Show molecular structure and view orbitals
+ 1 Output all properties at a point       2 Topology analysis
+ 3 Output and plot specific property in a line
+ 4 Output and plot specific property in a plane
+ 5 Output and plot specific property within a spatial region (calc. grid data)
+ 6 Check & modify wavefunction
+ 7 Population analysis and calculation of atomic charges
+ 8 Orbital composition analysis           9 Bond order analysis
+ 10 Plot total DOS, PDOS, OPDOS, local DOS, COHP and photoelectron spectrum
+ 11 Plot IR/Raman/UV-Vis/ECD/VCD/ROA/NMR spectrum
+ 12 Quantitative analysis of molecular surface
+ 13 Process grid data (No grid data is presented currently)
+ 14 Adaptive natural density partitioning (AdNDP) analysis
+ 15 Fuzzy atomic space analysis
+ 16 Charge decomposition analysis (CDA) and plot orbital interaction diagram
+ 17 Basin analysis                       18 Electron excitation analysis
+ 19 Orbital localization analysis        20 Visual study of weak interaction
+ 21 Energy decomposition analysis        22 Conceptual DFT (CDFT) analysis
+ 23 ETS-NOCV analysis                    24 (Hyper)polarizability analysis
+ 25 Electron delocalization and aromaticity analyses
+ 26 Structure and geometry related analyses
+ 100 Other functions (Part 1)            200 Other functions (Part 2)
+ 300 Other functions (Part 3)
+ There is a nice reference comprehensively introducing atomic charges:
+ Tian Lu, Qinxue Chen, Partial Charges, In Exploring Chemical Concepts Through T
+ heory and Computation. WILEY-VCH GmbH: Weinheim (2024); pp. 161-187. DOI: 10.10
+ 02/9783527843435.ch6
+ 
+      ============== Population analysis and atomic charges ==============
+ -2 Calculate interaction energy between fragments based on atomic charges
+ -1 Define fragment
+ 0 Return
+ 1 Hirshfeld atomic charge
+ 2 Voronoi deformation density (VDD) atom population
+ 10 Becke atomic charge with atomic dipole moment correction
+ 11 Atomic dipole corrected Hirshfeld atomic charge (ADCH) (recommended)
+ 12 CHELPG ESP fitting atomic charge
+ 13 Merz-Kollmann (MK) ESP fitting atomic charge
+ 14 AIM atomic charge
+ 15 Hirshfeld-I atomic charge
+ 16 CM5 atomic charge    -16 Generate 1.2*CM5 atomic charge
+ 17 Electronegativity Equalization Method (EEM) atomic charge
+ 18 Restrained ElectroStatic Potential (RESP) atomic charge
+ 19 Gasteiger (PEOE) charge
+ 20 Minimal Basis Iterative Stockholder (MBIS) charge
+ 
+                       ---------- Becke charge ----------
+ -1 Return
+ 0 Start calculation of Becke charge!
+ 1 Select the definition of atomic radii, current: Modified CSD
+ 2 Set the number of iterations for defining Becke atomic space, current: 3
+ 10 Read radii from external file
+ 11 Modify current radii by manual input
+ 12 Print current radii list
+ Radial grids:   75    Angular grids:  434   Total:     32550
+ Calculating, please wait...
+ 
+ Becke charge of atom     1(C ) is -0.45427843
+ Becke charge of atom     2(C ) is  0.13953917
+ Becke charge of atom     3(O ) is -0.50201411
+ Becke charge of atom     4(H ) is  0.23015429
+ Becke charge of atom     5(H ) is  0.20695441
+ Becke charge of atom     6(H ) is  0.21205540
+ Becke charge of atom     7(N ) is -0.38556594
+ Becke charge of atom     8(C ) is -0.13516734
+ Becke charge of atom     9(C ) is  0.17599157
+ Becke charge of atom    10(O ) is -0.49597908
+ Becke charge of atom    11(C ) is -0.37109685
+ Becke charge of atom    12(C ) is -0.38394535
+ Becke charge of atom    13(C ) is -0.38185627
+ Becke charge of atom    14(C ) is -0.30553435
+ Becke charge of atom    15(N ) is -0.43361007
+ Becke charge of atom    16(H ) is  0.35746608
+ Becke charge of atom    17(H ) is  0.28495999
+ Becke charge of atom    18(H ) is  0.21975132
+ Becke charge of atom    19(H ) is  0.23327018
+ Becke charge of atom    20(H ) is  0.24343111
+ Becke charge of atom    21(H ) is  0.24915456
+ Becke charge of atom    22(H ) is  0.24259874
+ Becke charge of atom    23(H ) is  0.20964247
+ Becke charge of atom    24(H ) is  0.22405431
+ Becke charge of atom    25(H ) is  0.23461066
+ Becke charge of atom    26(H ) is  0.39779908
+ Becke charge of atom    27(H ) is  0.37204056
+ Becke charge of atom    28(H ) is  0.34534038
+ Becke charge of atom    29(H ) is  0.32087551
+ Becke charge of atom    30(N ) is -0.39613725
+ Becke charge of atom    31(C ) is -0.38310507
+ Becke charge of atom    32(H ) is  0.26902564
+ Becke charge of atom    33(H ) is  0.19297659
+ Becke charge of atom    34(H ) is  0.19579464
+ Becke charge of atom    35(C ) is -0.45933429
+ Becke charge of atom    36(C ) is  0.15206227
+ Becke charge of atom    37(O ) is -0.48078531
+ Becke charge of atom    38(H ) is  0.21902433
+ Becke charge of atom    39(H ) is  0.18980261
+ Becke charge of atom    40(H ) is  0.21339578
+ Becke charge of atom    41(N ) is -0.40352372
+ Becke charge of atom    42(C ) is -0.11396594
+ Becke charge of atom    43(C ) is  0.18790558
+ Becke charge of atom    44(O ) is -0.51985225
+ Becke charge of atom    45(C ) is -0.30418640
+ Becke charge of atom    46(C ) is  0.18601929
+ Becke charge of atom    47(O ) is -0.58011201
+ Becke charge of atom    48(O ) is -0.60264640
+ Becke charge of atom    49(H ) is  0.32964215
+ Becke charge of atom    50(H ) is  0.31017883
+ Becke charge of atom    51(H ) is  0.26264940
+ Becke charge of atom    52(H ) is  0.22519452
+ Becke charge of atom    53(H ) is  0.33498339
+ Becke charge of atom    54(N ) is -0.40731124
+ Becke charge of atom    55(C ) is -0.38102219
+ Becke charge of atom    56(H ) is  0.26099618
+ Becke charge of atom    57(H ) is  0.18278926
+ Becke charge of atom    58(H ) is  0.18219469
+ Becke charge of atom    59(C ) is -0.45741762
+ Becke charge of atom    60(C ) is  0.17581835
+ Becke charge of atom    61(O ) is -0.46355930
+ Becke charge of atom    62(H ) is  0.22057913
+ Becke charge of atom    63(H ) is  0.22280253
+ Becke charge of atom    64(H ) is  0.20770145
+ Becke charge of atom    65(N ) is -0.28534794
+ Becke charge of atom    66(C ) is -0.11472781
+ Becke charge of atom    67(C ) is  0.17118532
+ Becke charge of atom    68(O ) is -0.44528509
+ Becke charge of atom    69(C ) is -0.33736231
+ Becke charge of atom    70(C ) is -0.38617673
+ Becke charge of atom    71(C ) is -0.28586686
+ Becke charge of atom    72(H ) is  0.24438244
+ Becke charge of atom    73(H ) is  0.20617404
+ Becke charge of atom    74(H ) is  0.23418847
+ Becke charge of atom    75(H ) is  0.21473104
+ Becke charge of atom    76(H ) is  0.24394385
+ Becke charge of atom    77(H ) is  0.24136847
+ Becke charge of atom    78(H ) is  0.21235839
+ Becke charge of atom    79(H ) is  0.31190509
+ Becke charge of atom    80(N ) is -0.40785351
+ Becke charge of atom    81(C ) is -0.38270516
+ Becke charge of atom    82(H ) is  0.26769676
+ Becke charge of atom    83(H ) is  0.18643934
+ Becke charge of atom    84(H ) is  0.18960991
+ Becke charge of atom    85(C ) is -0.45888808
+ Becke charge of atom    86(C ) is  0.15600286
+ Becke charge of atom    87(O ) is -0.44044158
+ Becke charge of atom    88(H ) is  0.21618657
+ Becke charge of atom    89(H ) is  0.20099205
+ Becke charge of atom    90(H ) is  0.19437415
+ Becke charge of atom    91(N ) is -0.37874105
+ Becke charge of atom    92(C ) is -0.12105724
+ Becke charge of atom    93(C ) is  0.19486957
+ Becke charge of atom    94(O ) is -0.50058757
+ Becke charge of atom    95(C ) is -0.31550969
+ Becke charge of atom    96(C ) is  0.18319118
+ Becke charge of atom    97(O ) is -0.66869914
+ Becke charge of atom    98(O ) is -0.55156382
+ Becke charge of atom    99(H ) is  0.31760119
+ Becke charge of atom   100(H ) is  0.26966796
+ Becke charge of atom   101(H ) is  0.23494070
+ Becke charge of atom   102(H ) is  0.21754582
+ Becke charge of atom   103(N ) is -0.36788220
+ Becke charge of atom   104(C ) is -0.11828077
+ Becke charge of atom   105(C ) is  0.17947488
+ Becke charge of atom   106(O ) is -0.52724227
+ Becke charge of atom   107(C ) is -0.24532290
+ Becke charge of atom   108(C ) is -0.41188500
+ Becke charge of atom   109(C ) is -0.56701947
+ Becke charge of atom   110(C ) is -0.54781511
+ Becke charge of atom   111(H ) is  0.41495940
+ Becke charge of atom   112(H ) is  0.26087402
+ Becke charge of atom   113(H ) is  0.23480088
+ Becke charge of atom   114(H ) is  0.24107155
+ Becke charge of atom   115(H ) is  0.17264483
+ Becke charge of atom   116(H ) is  0.24403566
+ Becke charge of atom   117(H ) is  0.27621759
+ Becke charge of atom   118(H ) is  0.30409265
+ Becke charge of atom   119(H ) is  0.16711169
+ Becke charge of atom   120(H ) is  0.22290350
+ Becke charge of atom   121(H ) is  0.20106227
+ Becke charge of atom   122(N ) is -0.41093639
+ Becke charge of atom   123(C ) is -0.10410326
+ Becke charge of atom   124(C ) is  0.20005538
+ Becke charge of atom   125(O ) is -0.54609915
+ Becke charge of atom   126(C ) is -0.30367235
+ Becke charge of atom   127(C ) is  0.19639811
+ Becke charge of atom   128(O ) is -0.71566981
+ Becke charge of atom   129(O ) is -0.55231587
+ Becke charge of atom   130(H ) is  0.41659050
+ Becke charge of atom   131(H ) is  0.32084237
+ Becke charge of atom   132(H ) is  0.26239085
+ Becke charge of atom   133(H ) is  0.26055106
+ Becke charge of atom   134(H ) is  0.36810502
+ Becke charge of atom   135(N ) is -0.40998090
+ Becke charge of atom   136(C ) is -0.37781628
+ Becke charge of atom   137(H ) is  0.25666997
+ Becke charge of atom   138(H ) is  0.18022112
+ Becke charge of atom   139(H ) is  0.17798001
+ Summing up all charges:    -1.99922719
+ 
+ Total dipole moment from atomic charges: 1538.678983 a.u.
+ X/Y/Z of dipole moment vector: -921.009611 -658.557122-1041.910181 a.u.
+ 
+ Atomic dipole moments (a.u.):
+ Atom     1(C ) in X/Y/Z:   0.213676   0.021254  -0.305561 Norm:   0.373465
+ Atom     2(C ) in X/Y/Z:   0.107369   0.045593  -0.203311 Norm:   0.234398
+ Atom     3(O ) in X/Y/Z:  -0.306417  -0.365341   0.162829 Norm:   0.503864
+ Atom     4(H ) in X/Y/Z:   0.011379  -0.128562  -0.115748 Norm:   0.173365
+ Atom     5(H ) in X/Y/Z:   0.188999   0.016314  -0.018412 Norm:   0.190593
+ Atom     6(H ) in X/Y/Z:  -0.022770   0.116649  -0.142608 Norm:   0.185641
+ Atom     7(N ) in X/Y/Z:   0.153345   0.203778  -0.158159 Norm:   0.300091
+ Atom     8(C ) in X/Y/Z:  -0.145042  -0.193630   0.192473 Norm:   0.309153
+ Atom     9(C ) in X/Y/Z:  -0.086099  -0.074595   0.014750 Norm:   0.114870
+ Atom    10(O ) in X/Y/Z:   0.317137   0.398632  -0.094687 Norm:   0.518121
+ Atom    11(C ) in X/Y/Z:  -0.134189   0.239740   0.152892 Norm:   0.314417
+ Atom    12(C ) in X/Y/Z:   0.026672  -0.203283  -0.154249 Norm:   0.256570
+ Atom    13(C ) in X/Y/Z:  -0.192268  -0.110008   0.088240 Norm:   0.238444
+ Atom    14(C ) in X/Y/Z:   0.250497   0.099575  -0.060713 Norm:   0.276315
+ Atom    15(N ) in X/Y/Z:  -0.183757   0.081254   0.012889 Norm:   0.201333
+ Atom    16(H ) in X/Y/Z:   0.060229   0.079628  -0.059114 Norm:   0.116028
+ Atom    17(H ) in X/Y/Z:  -0.025819  -0.130925   0.092207 Norm:   0.162204
+ Atom    18(H ) in X/Y/Z:  -0.097978   0.031558   0.173087 Norm:   0.201382
+ Atom    19(H ) in X/Y/Z:   0.015696   0.184345  -0.030342 Norm:   0.187484
+ Atom    20(H ) in X/Y/Z:   0.032170   0.005878  -0.171059 Norm:   0.174157
+ Atom    21(H ) in X/Y/Z:  -0.055915  -0.153915   0.035810 Norm:   0.167626
+ Atom    22(H ) in X/Y/Z:  -0.110200  -0.104547  -0.060001 Norm:   0.163322
+ Atom    23(H ) in X/Y/Z:  -0.093404   0.006287   0.181997 Norm:   0.204662
+ Atom    24(H ) in X/Y/Z:   0.105611   0.135185   0.065810 Norm:   0.183738
+ Atom    25(H ) in X/Y/Z:   0.074152   0.012196  -0.162597 Norm:   0.179123
+ Atom    26(H ) in X/Y/Z:  -0.047721  -0.036945  -0.021501 Norm:   0.064066
+ Atom    27(H ) in X/Y/Z:  -0.002385   0.065726  -0.050834 Norm:   0.083125
+ Atom    28(H ) in X/Y/Z:  -0.029060   0.059643   0.089852 Norm:   0.111693
+ Atom    29(H ) in X/Y/Z:  -0.066928  -0.099660   0.048392 Norm:   0.129435
+ Atom    30(N ) in X/Y/Z:  -0.119847  -0.186554   0.180147 Norm:   0.285690
+ Atom    31(C ) in X/Y/Z:   0.206824   0.152328   0.310536 Norm:   0.403005
+ Atom    32(H ) in X/Y/Z:   0.101573   0.114322   0.027634 Norm:   0.155403
+ Atom    33(H ) in X/Y/Z:   0.130167  -0.091677   0.111755 Norm:   0.194518
+ Atom    34(H ) in X/Y/Z:  -0.076541   0.078520   0.157342 Norm:   0.191782
+ Atom    35(C ) in X/Y/Z:   0.139531   0.312529  -0.192578 Norm:   0.392721
+ Atom    36(C ) in X/Y/Z:   0.083295   0.233687  -0.062442 Norm:   0.255825
+ Atom    37(O ) in X/Y/Z:   0.321495  -0.336752   0.205749 Norm:   0.509012
+ Atom    38(H ) in X/Y/Z:   0.176800   0.017772  -0.052825 Norm:   0.185376
+ Atom    39(H ) in X/Y/Z:   0.014670   0.198949   0.055881 Norm:   0.207168
+ Atom    40(H ) in X/Y/Z:  -0.042116   0.065960  -0.173680 Norm:   0.190497
+ Atom    41(N ) in X/Y/Z:  -0.108944   0.350497  -0.028830 Norm:   0.368168
+ Atom    42(C ) in X/Y/Z:   0.065752  -0.173373   0.072796 Norm:   0.199201
+ Atom    43(C ) in X/Y/Z:   0.064377   0.006789  -0.065390 Norm:   0.092013
+ Atom    44(O ) in X/Y/Z:  -0.399646  -0.191085   0.255324 Norm:   0.511293
+ Atom    45(C ) in X/Y/Z:  -0.316812   0.056997   0.091827 Norm:   0.334740
+ Atom    46(C ) in X/Y/Z:  -0.066402   0.037069   0.064979 Norm:   0.100028
+ Atom    47(O ) in X/Y/Z:   0.531812   0.035906  -0.174921 Norm:   0.560990
+ Atom    48(O ) in X/Y/Z:  -0.377004  -0.445213  -0.079510 Norm:   0.588785
+ Atom    49(H ) in X/Y/Z:  -0.065188   0.114928  -0.044309 Norm:   0.139360
+ Atom    50(H ) in X/Y/Z:   0.065418  -0.117743   0.072192 Norm:   0.152822
+ Atom    51(H ) in X/Y/Z:  -0.112718  -0.086570   0.068055 Norm:   0.157579
+ Atom    52(H ) in X/Y/Z:  -0.143839   0.138893  -0.060812 Norm:   0.208995
+ Atom    53(H ) in X/Y/Z:   0.092265   0.075046  -0.011129 Norm:   0.119452
+ Atom    54(N ) in X/Y/Z:   0.206418   0.216201  -0.013678 Norm:   0.299230
+ Atom    55(C ) in X/Y/Z:  -0.090505   0.182139   0.356229 Norm:   0.410201
+ Atom    56(H ) in X/Y/Z:  -0.107508  -0.018101   0.115657 Norm:   0.158941
+ Atom    57(H ) in X/Y/Z:  -0.053756   0.195553   0.030384 Norm:   0.205071
+ Atom    58(H ) in X/Y/Z:   0.117007   0.012768   0.168651 Norm:   0.205662
+ Atom    59(C ) in X/Y/Z:   0.227855   0.210372  -0.215308 Norm:   0.377534
+ Atom    60(C ) in X/Y/Z:   0.144569   0.144001  -0.087523 Norm:   0.222029
+ Atom    61(O ) in X/Y/Z:  -0.262809   0.253735   0.360005 Norm:   0.512888
+ Atom    62(H ) in X/Y/Z:   0.007346   0.182140   0.005936 Norm:   0.182385
+ Atom    63(H ) in X/Y/Z:  -0.004192   0.027290  -0.180649 Norm:   0.182747
+ Atom    64(H ) in X/Y/Z:   0.197601   0.019602   0.004280 Norm:   0.198617
+ Atom    65(N ) in X/Y/Z:   0.108113   0.018225   0.008644 Norm:   0.109979
+ Atom    66(C ) in X/Y/Z:   0.013085  -0.139496   0.371743 Norm:   0.397269
+ Atom    67(C ) in X/Y/Z:   0.054138  -0.093897   0.091154 Norm:   0.141621
+ Atom    68(O ) in X/Y/Z:  -0.266209   0.147088  -0.389302 Norm:   0.494022
+ Atom    69(C ) in X/Y/Z:   0.050978  -0.347425   0.195993 Norm:   0.402140
+ Atom    70(C ) in X/Y/Z:   0.085346  -0.235603  -0.295541 Norm:   0.387475
+ Atom    71(C ) in X/Y/Z:   0.361525   0.142381  -0.250865 Norm:   0.462500
+ Atom    72(H ) in X/Y/Z:   0.021233  -0.006730   0.194465 Norm:   0.195736
+ Atom    73(H ) in X/Y/Z:   0.134579  -0.088363   0.136435 Norm:   0.211031
+ Atom    74(H ) in X/Y/Z:  -0.062634  -0.176539   0.012849 Norm:   0.187760
+ Atom    75(H ) in X/Y/Z:   0.139988  -0.122366  -0.043427 Norm:   0.190934
+ Atom    76(H ) in X/Y/Z:  -0.091019  -0.054760  -0.146302 Norm:   0.180797
+ Atom    77(H ) in X/Y/Z:   0.021071   0.079137  -0.165876 Norm:   0.184991
+ Atom    78(H ) in X/Y/Z:   0.206512   0.021437   0.034761 Norm:   0.210512
+ Atom    79(H ) in X/Y/Z:   0.027033  -0.059639   0.120485 Norm:   0.137129
+ Atom    80(N ) in X/Y/Z:  -0.004718  -0.176595   0.255697 Norm:   0.310788
+ Atom    81(C ) in X/Y/Z:  -0.395835  -0.045817  -0.026951 Norm:   0.399388
+ Atom    82(H ) in X/Y/Z:  -0.113272   0.037625  -0.106097 Norm:   0.159696
+ Atom    83(H ) in X/Y/Z:  -0.143284   0.064944   0.125461 Norm:   0.201217
+ Atom    84(H ) in X/Y/Z:  -0.099144  -0.170433  -0.015122 Norm:   0.197751
+ Atom    85(C ) in X/Y/Z:  -0.356573   0.025217   0.159789 Norm:   0.391551
+ Atom    86(C ) in X/Y/Z:  -0.246105   0.022826   0.061542 Norm:   0.254708
+ Atom    87(O ) in X/Y/Z:   0.326409   0.285722   0.180741 Norm:   0.469944
+ Atom    88(H ) in X/Y/Z:  -0.028310   0.090522   0.160566 Norm:   0.186486
+ Atom    89(H ) in X/Y/Z:  -0.112960  -0.141750   0.085320 Norm:   0.200331
+ Atom    90(H ) in X/Y/Z:  -0.175501   0.082332  -0.063513 Norm:   0.203992
+ Atom    91(N ) in X/Y/Z:  -0.321114  -0.076091  -0.135992 Norm:   0.356928
+ Atom    92(C ) in X/Y/Z:   0.020779   0.205662  -0.193394 Norm:   0.283072
+ Atom    93(C ) in X/Y/Z:  -0.055372   0.034417  -0.061646 Norm:   0.089726
+ Atom    94(O ) in X/Y/Z:  -0.112239  -0.385088   0.397461 Norm:   0.564682
+ Atom    95(C ) in X/Y/Z:  -0.363287  -0.126237  -0.042296 Norm:   0.386914
+ Atom    96(C ) in X/Y/Z:  -0.127906  -0.042434   0.025877 Norm:   0.137224
+ Atom    97(O ) in X/Y/Z:   0.520817   0.299031   0.153340 Norm:   0.619825
+ Atom    98(O ) in X/Y/Z:  -0.143359  -0.376516  -0.424327 Norm:   0.585124
+ Atom    99(H ) in X/Y/Z:  -0.128255  -0.051597  -0.041840 Norm:   0.144438
+ Atom   100(H ) in X/Y/Z:   0.028855   0.162792  -0.062497 Norm:   0.176747
+ Atom   101(H ) in X/Y/Z:  -0.104508  -0.158631   0.036578 Norm:   0.193452
+ Atom   102(H ) in X/Y/Z:  -0.180308   0.046637  -0.095604 Norm:   0.209346
+ Atom   103(N ) in X/Y/Z:   0.101188   0.236848  -0.156966 Norm:   0.301620
+ Atom   104(C ) in X/Y/Z:   0.038645   0.081231   0.296194 Norm:   0.309552
+ Atom   105(C ) in X/Y/Z:   0.029288   0.068905   0.024937 Norm:   0.078914
+ Atom   106(O ) in X/Y/Z:   0.284511  -0.295489   0.402827 Norm:   0.574917
+ Atom   107(C ) in X/Y/Z:   0.022979   0.282417  -0.026851 Norm:   0.284620
+ Atom   108(C ) in X/Y/Z:   0.341232  -0.102271   0.004118 Norm:   0.356252
+ Atom   109(C ) in X/Y/Z:   0.189478  -0.066645  -0.292455 Norm:   0.354787
+ Atom   110(C ) in X/Y/Z:  -0.095996   0.107662   0.368516 Norm:   0.395740
+ Atom   111(H ) in X/Y/Z:   0.027365   0.105244  -0.016147 Norm:   0.109936
+ Atom   112(H ) in X/Y/Z:  -0.020217   0.023198   0.178296 Norm:   0.180932
+ Atom   113(H ) in X/Y/Z:  -0.041176   0.195473   0.017680 Norm:   0.200544
+ Atom   114(H ) in X/Y/Z:   0.116107  -0.139109   0.029857 Norm:   0.183640
+ Atom   115(H ) in X/Y/Z:   0.196802   0.099002  -0.030190 Norm:   0.222360
+ Atom   116(H ) in X/Y/Z:   0.123879   0.040245  -0.029981 Norm:   0.133658
+ Atom   117(H ) in X/Y/Z:  -0.047412   0.052013  -0.109761 Norm:   0.130386
+ Atom   118(H ) in X/Y/Z:   0.053688  -0.058149  -0.005556 Norm:   0.079338
+ Atom   119(H ) in X/Y/Z:   0.157791  -0.025445   0.151767 Norm:   0.220405
+ Atom   120(H ) in X/Y/Z:  -0.118902  -0.066638   0.097157 Norm:   0.167385
+ Atom   121(H ) in X/Y/Z:  -0.023439   0.185205   0.022945 Norm:   0.188087
+ Atom   122(N ) in X/Y/Z:  -0.196747   0.151100  -0.231851 Norm:   0.339552
+ Atom   123(C ) in X/Y/Z:   0.166554  -0.166162   0.057955 Norm:   0.242299
+ Atom   124(C ) in X/Y/Z:   0.051751   0.036351   0.021869 Norm:   0.066917
+ Atom   125(O ) in X/Y/Z:  -0.005752  -0.512657  -0.244793 Norm:   0.568132
+ Atom   126(C ) in X/Y/Z:  -0.181433  -0.141432  -0.274683 Norm:   0.358290
+ Atom   127(C ) in X/Y/Z:  -0.090470  -0.052508  -0.069906 Norm:   0.125813
+ Atom   128(O ) in X/Y/Z:   0.409001   0.143094   0.574857 Norm:   0.719874
+ Atom   129(O ) in X/Y/Z:   0.159092   0.124192  -0.565231 Norm:   0.600183
+ Atom   130(H ) in X/Y/Z:  -0.025513   0.015130  -0.045280 Norm:   0.054131
+ Atom   131(H ) in X/Y/Z:   0.079472  -0.085924   0.075990 Norm:   0.139546
+ Atom   132(H ) in X/Y/Z:   0.019478  -0.130335  -0.103082 Norm:   0.167309
+ Atom   133(H ) in X/Y/Z:  -0.100528   0.045221  -0.117756 Norm:   0.161299
+ Atom   134(H ) in X/Y/Z:  -0.037257   0.054771   0.055385 Norm:   0.086345
+ Atom   135(N ) in X/Y/Z:  -0.164679   0.200996   0.143076 Norm:   0.296630
+ Atom   136(C ) in X/Y/Z:  -0.342884  -0.269661   0.061438 Norm:   0.440523
+ Atom   137(H ) in X/Y/Z:  -0.058523  -0.154854  -0.038739 Norm:   0.170016
+ Atom   138(H ) in X/Y/Z:  -0.196980   0.047290  -0.059329 Norm:   0.211086
+ Atom   139(H ) in X/Y/Z:  -0.079264  -0.069040   0.183776 Norm:   0.211714
+ Total atomic dipole moment:    1.536806 a.u.
+ X/Y/Z of total atomic dipole:   -0.266392    0.638005    1.372500 a.u.
+ 
+ Calculating atomic dipole moment corrected charge...
+ 
+       ---------- Atomic dipole moment corrected (ADC) charges ----------
+ Atom:    1C   Corrected charge:   -0.268378  Before:   -0.454278
+ Atom:    2C   Corrected charge:    0.513671  Before:    0.139539
+ Atom:    3O   Corrected charge:   -0.688507  Before:   -0.502014
+ Atom:    4H   Corrected charge:    0.136437  Before:    0.230154
+ Atom:    5H   Corrected charge:    0.080104  Before:    0.206954
+ Atom:    6H   Corrected charge:    0.079005  Before:    0.212055
+ Atom:    7N   Corrected charge:   -0.283676  Before:   -0.385566
+ Atom:    8C   Corrected charge:    0.069768  Before:   -0.135167
+ Atom:    9C   Corrected charge:    0.474278  Before:    0.175992
+ Atom:   10O   Corrected charge:   -0.664889  Before:   -0.495979
+ Atom:   11C   Corrected charge:   -0.150476  Before:   -0.371097
+ Atom:   12C   Corrected charge:   -0.149666  Before:   -0.383945
+ Atom:   13C   Corrected charge:   -0.158051  Before:   -0.381856
+ Atom:   14C   Corrected charge:   -0.037046  Before:   -0.305534
+ Atom:   15N   Corrected charge:   -0.291372  Before:   -0.433610
+ Atom:   16H   Corrected charge:    0.212562  Before:    0.357466
+ Atom:   17H   Corrected charge:    0.162250  Before:    0.284960
+ Atom:   18H   Corrected charge:    0.060266  Before:    0.219751
+ Atom:   19H   Corrected charge:    0.106872  Before:    0.233270
+ Atom:   20H   Corrected charge:    0.134474  Before:    0.243431
+ Atom:   21H   Corrected charge:    0.132491  Before:    0.249155
+ Atom:   22H   Corrected charge:    0.123674  Before:    0.242599
+ Atom:   23H   Corrected charge:    0.079897  Before:    0.209642
+ Atom:   24H   Corrected charge:    0.087323  Before:    0.224054
+ Atom:   25H   Corrected charge:    0.114779  Before:    0.234611
+ Atom:   26H   Corrected charge:    0.367331  Before:    0.397799
+ Atom:   27H   Corrected charge:    0.317465  Before:    0.372041
+ Atom:   28H   Corrected charge:    0.272943  Before:    0.345340
+ Atom:   29H   Corrected charge:    0.183786  Before:    0.320876
+ Atom:   30N   Corrected charge:   -0.211370  Before:   -0.396137
+ Atom:   31C   Corrected charge:   -0.155669  Before:   -0.383105
+ Atom:   32H   Corrected charge:    0.185351  Before:    0.269026
+ Atom:   33H   Corrected charge:    0.043329  Before:    0.192977
+ Atom:   34H   Corrected charge:    0.050236  Before:    0.195795
+ Atom:   35C   Corrected charge:   -0.311164  Before:   -0.459334
+ Atom:   36C   Corrected charge:    0.549903  Before:    0.152062
+ Atom:   37O   Corrected charge:   -0.638798  Before:   -0.480785
+ Atom:   38H   Corrected charge:    0.118786  Before:    0.219024
+ Atom:   39H   Corrected charge:    0.015318  Before:    0.189803
+ Atom:   40H   Corrected charge:    0.114473  Before:    0.213396
+ Atom:   41N   Corrected charge:   -0.265473  Before:   -0.403524
+ Atom:   42C   Corrected charge:    0.044190  Before:   -0.113966
+ Atom:   43C   Corrected charge:    0.445044  Before:    0.187906
+ Atom:   44O   Corrected charge:   -0.699729  Before:   -0.519852
+ Atom:   45C   Corrected charge:   -0.130277  Before:   -0.304186
+ Atom:   46C   Corrected charge:    0.800162  Before:    0.186019
+ Atom:   47O   Corrected charge:   -0.797583  Before:   -0.580112
+ Atom:   48O   Corrected charge:   -0.848428  Before:   -0.602646
+ Atom:   49H   Corrected charge:    0.161875  Before:    0.329642
+ Atom:   50H   Corrected charge:    0.184563  Before:    0.310179
+ Atom:   51H   Corrected charge:    0.128449  Before:    0.262649
+ Atom:   52H   Corrected charge:    0.070985  Before:    0.225195
+ Atom:   53H   Corrected charge:    0.208819  Before:    0.334983
+ Atom:   54N   Corrected charge:   -0.214407  Before:   -0.407311
+ Atom:   55C   Corrected charge:   -0.152931  Before:   -0.381022
+ Atom:   56H   Corrected charge:    0.177732  Before:    0.260996
+ Atom:   57H   Corrected charge:    0.022366  Before:    0.182789
+ Atom:   58H   Corrected charge:    0.031301  Before:    0.182195
+ Atom:   59C   Corrected charge:   -0.320341  Before:   -0.457418
+ Atom:   60C   Corrected charge:    0.529970  Before:    0.175818
+ Atom:   61O   Corrected charge:   -0.642800  Before:   -0.463559
+ Atom:   62H   Corrected charge:    0.107387  Before:    0.220579
+ Atom:   63H   Corrected charge:    0.118571  Before:    0.222803
+ Atom:   64H   Corrected charge:    0.064905  Before:    0.207701
+ Atom:   65N   Corrected charge:   -0.000736  Before:   -0.285348
+ Atom:   66C   Corrected charge:    0.081433  Before:   -0.114728
+ Atom:   67C   Corrected charge:    0.459645  Before:    0.171185
+ Atom:   68O   Corrected charge:   -0.600310  Before:   -0.445285
+ Atom:   69C   Corrected charge:   -0.194454  Before:   -0.337362
+ Atom:   70C   Corrected charge:   -0.111093  Before:   -0.386177
+ Atom:   71C   Corrected charge:   -0.080547  Before:   -0.285867
+ Atom:   72H   Corrected charge:    0.044934  Before:    0.244382
+ Atom:   73H   Corrected charge:    0.042647  Before:    0.206174
+ Atom:   74H   Corrected charge:    0.104055  Before:    0.234188
+ Atom:   75H   Corrected charge:    0.048428  Before:    0.214731
+ Atom:   76H   Corrected charge:    0.132363  Before:    0.243944
+ Atom:   77H   Corrected charge:    0.102234  Before:    0.241368
+ Atom:   78H   Corrected charge:    0.027837  Before:    0.212358
+ Atom:   79H   Corrected charge:    0.163098  Before:    0.311905
+ Atom:   80N   Corrected charge:   -0.209303  Before:   -0.407854
+ Atom:   81C   Corrected charge:   -0.144178  Before:   -0.382705
+ Atom:   82H   Corrected charge:    0.191855  Before:    0.267697
+ Atom:   83H   Corrected charge:    0.036750  Before:    0.186439
+ Atom:   84H   Corrected charge:    0.032232  Before:    0.189610
+ Atom:   85C   Corrected charge:   -0.292575  Before:   -0.458888
+ Atom:   86C   Corrected charge:    0.537917  Before:    0.156003
+ Atom:   87O   Corrected charge:   -0.597596  Before:   -0.440442
+ Atom:   88H   Corrected charge:    0.118232  Before:    0.216187
+ Atom:   89H   Corrected charge:    0.079845  Before:    0.200992
+ Atom:   90H   Corrected charge:    0.036831  Before:    0.194374
+ Atom:   91N   Corrected charge:   -0.246068  Before:   -0.378741
+ Atom:   92C   Corrected charge:   -0.537379  Before:   -0.121057
+ Atom:   93C   Corrected charge:    2.342936  Before:    0.194870
+ Atom:   94O   Corrected charge:   -1.388631  Before:   -0.500588
+ Atom:   95C   Corrected charge:   -0.178323  Before:   -0.315510
+ Atom:   96C   Corrected charge:    0.697388  Before:    0.183191
+ Atom:   97O   Corrected charge:   -0.772265  Before:   -0.668699
+ Atom:   98O   Corrected charge:   -0.782057  Before:   -0.551564
+ Atom:   99H   Corrected charge:    0.153926  Before:    0.317601
+ Atom:  100H   Corrected charge:    0.093367  Before:    0.269668
+ Atom:  101H   Corrected charge:    0.086750  Before:    0.234941
+ Atom:  102H   Corrected charge:    0.035717  Before:    0.217546
+ Atom:  103N   Corrected charge:   -0.750544  Before:   -0.367882
+ Atom:  104C   Corrected charge:    0.014438  Before:   -0.118281
+ Atom:  105C   Corrected charge:    0.298606  Before:    0.179475
+ Atom:  106O   Corrected charge:   -0.632113  Before:   -0.527242
+ Atom:  107C   Corrected charge:    0.043500  Before:   -0.245323
+ Atom:  108C   Corrected charge:   -0.106695  Before:   -0.411885
+ Atom:  109C   Corrected charge:   -0.421877  Before:   -0.567019
+ Atom:  110C   Corrected charge:   -0.283880  Before:   -0.547815
+ Atom:  111H   Corrected charge:    0.216704  Before:    0.414959
+ Atom:  112H   Corrected charge:    0.089256  Before:    0.260874
+ Atom:  113H   Corrected charge:    0.064246  Before:    0.234801
+ Atom:  114H   Corrected charge:    0.130725  Before:    0.241072
+ Atom:  115H   Corrected charge:   -0.017240  Before:    0.172645
+ Atom:  116H   Corrected charge:    0.075403  Before:    0.244036
+ Atom:  117H   Corrected charge:    0.235363  Before:    0.276218
+ Atom:  118H   Corrected charge:    0.226988  Before:    0.304093
+ Atom:  119H   Corrected charge:    0.014152  Before:    0.167112
+ Atom:  120H   Corrected charge:    0.113381  Before:    0.222903
+ Atom:  121H   Corrected charge:    0.094265  Before:    0.201062
+ Atom:  122N   Corrected charge:   -0.170401  Before:   -0.410936
+ Atom:  123C   Corrected charge:    0.071566  Before:   -0.104103
+ Atom:  124C   Corrected charge:    0.501202  Before:    0.200055
+ Atom:  125O   Corrected charge:   -0.755935  Before:   -0.546099
+ Atom:  126C   Corrected charge:   -0.161368  Before:   -0.303672
+ Atom:  127C   Corrected charge:    0.731573  Before:    0.196398
+ Atom:  128O   Corrected charge:   -0.924361  Before:   -0.715670
+ Atom:  129O   Corrected charge:   -0.795328  Before:   -0.552316
+ Atom:  130H   Corrected charge:    0.301740  Before:    0.416590
+ Atom:  131H   Corrected charge:    0.146869  Before:    0.320842
+ Atom:  132H   Corrected charge:    0.100649  Before:    0.262391
+ Atom:  133H   Corrected charge:    0.134883  Before:    0.260551
+ Atom:  134H   Corrected charge:    0.261662  Before:    0.368105
+ Atom:  135N   Corrected charge:   -0.217066  Before:   -0.409981
+ Atom:  136C   Corrected charge:   -0.144938  Before:   -0.377816
+ Atom:  137H   Corrected charge:    0.155766  Before:    0.256670
+ Atom:  138H   Corrected charge:    0.020408  Before:    0.180221
+ Atom:  139H   Corrected charge:    0.022214  Before:    0.177980
+ Summing up all corrected charges:  -1.9992272
+ Note: The values shown after "Corrected charge" are atomic dipole moment corrected Becke charges, the ones after "Before" are normal Becke charges
+ 
+ Total dipole from ADC charges (a.u.)1537.7637936  Error:   0.1273912
+ X/Y/Z of dipole moment from the charge (a.u.) -921.361692 -657.908738-1040.656624
+ 
+ Normalize sum of atomic populations to actual number of electrons...
+ 
+ Final atomic charges:
+ Atom    1(C ):    -0.26838710
+ Atom    2(C ):     0.51366340
+ Atom    3(O ):    -0.68851977
+ Atom    4(H ):     0.13643558
+ Atom    5(H ):     0.08010249
+ Atom    6(H ):     0.07900352
+ Atom    7(N ):    -0.28368707
+ Atom    8(C ):     0.06975900
+ Atom    9(C ):     0.47426968
+ Atom   10(O ):    -0.66490212
+ Atom   11(C ):    -0.15048462
+ Atom   12(C ):    -0.14967465
+ Atom   13(C ):    -0.15805984
+ Atom   14(C ):    -0.03705454
+ Atom   15(N ):    -0.29138238
+ Atom   16(H ):     0.21256119
+ Atom   17(H ):     0.16224889
+ Atom   18(H ):     0.06026417
+ Atom   19(H ):     0.10687034
+ Atom   20(H ):     0.13447278
+ Atom   21(H ):     0.13248938
+ Atom   22(H ):     0.12367268
+ Atom   23(H ):     0.07989556
+ Atom   24(H ):     0.08732121
+ Atom   25(H ):     0.11477796
+ Atom   26(H ):     0.36732968
+ Atom   27(H ):     0.31746398
+ Atom   28(H ):     0.27294150
+ Atom   29(H ):     0.18378522
+ Atom   30(N ):    -0.21138052
+ Atom   31(C ):    -0.15567773
+ Atom   32(H ):     0.18535021
+ Atom   33(H ):     0.04332714
+ Atom   34(H ):     0.05023508
+ Atom   35(C ):    -0.31117372
+ Atom   36(C ):     0.54989484
+ Atom   37(O ):    -0.63881115
+ Atom   38(H ):     0.11878481
+ Atom   39(H ):     0.01531618
+ Atom   40(H ):     0.11447189
+ Atom   41(N ):    -0.26548412
+ Atom   42(C ):     0.04418089
+ Atom   43(C ):     0.44503576
+ Atom   44(O ):    -0.69974228
+ Atom   45(C ):    -0.13028563
+ Atom   46(C ):     0.80015418
+ Atom   47(O ):    -0.79759621
+ Atom   48(O ):    -0.84844130
+ Atom   49(H ):     0.16187396
+ Atom   50(H ):     0.18456212
+ Atom   51(H ):     0.12844746
+ Atom   52(H ):     0.07098361
+ Atom   53(H ):     0.20881770
+ Atom   54(N ):    -0.21441758
+ Atom   55(C ):    -0.15293978
+ Atom   56(H ):     0.17773067
+ Atom   57(H ):     0.02236492
+ Atom   58(H ):     0.03129939
+ Atom   59(C ):    -0.32035015
+ Atom   60(C ):     0.52996164
+ Atom   61(O ):    -0.64281234
+ Atom   62(H ):     0.10738585
+ Atom   63(H ):     0.11857007
+ Atom   64(H ):     0.06490391
+ Atom   65(N ):    -0.00074668
+ Atom   66(C ):     0.08142468
+ Atom   67(C ):     0.45963701
+ Atom   68(O ):    -0.60032287
+ Atom   69(C ):    -0.19446299
+ Atom   70(C ):    -0.11110245
+ Atom   71(C ):    -0.08055550
+ Atom   72(H ):     0.04493220
+ Atom   73(H ):     0.04264581
+ Atom   74(H ):     0.10405366
+ Atom   75(H ):     0.04842649
+ Atom   76(H ):     0.13236173
+ Atom   77(H ):     0.10223250
+ Atom   78(H ):     0.02783531
+ Atom   79(H ):     0.16309660
+ Atom   80(N ):    -0.20931343
+ Atom   81(C ):    -0.14418682
+ Atom   82(H ):     0.19185395
+ Atom   83(H ):     0.03674819
+ Atom   84(H ):     0.03223016
+ Atom   85(C ):    -0.29258477
+ Atom   86(C ):     0.53790911
+ Atom   87(O ):    -0.59760848
+ Atom   88(H ):     0.11823020
+ Atom   89(H ):     0.07984394
+ Atom   90(H ):     0.03682979
+ Atom   91(N ):    -0.24607913
+ Atom   92(C ):    -0.53738854
+ Atom   93(C ):     2.34293068
+ Atom   94(O ):    -1.38864475
+ Atom   95(C ):    -0.17833236
+ Atom   96(C ):     0.69738013
+ Atom   97(O ):    -0.77227784
+ Atom   98(O ):    -0.78207008
+ Atom   99(H ):     0.15392433
+ Atom  100(H ):     0.09336608
+ Atom  101(H ):     0.08674845
+ Atom  102(H ):     0.03571552
+ Atom  103(N ):    -0.75055567
+ Atom  104(C ):     0.01442889
+ Atom  105(C ):     0.29859784
+ Atom  106(O ):    -0.63212585
+ Atom  107(C ):     0.04349139
+ Atom  108(C ):    -0.10670445
+ Atom  109(C ):    -0.42188678
+ Atom  110(C ):    -0.28388888
+ Atom  111(H ):     0.21670241
+ Atom  112(H ):     0.08925420
+ Atom  113(H ):     0.06424483
+ Atom  114(H ):     0.13072327
+ Atom  115(H ):    -0.01724111
+ Atom  116(H ):     0.07540123
+ Atom  117(H ):     0.23536173
+ Atom  118(H ):     0.22698695
+ Atom  119(H ):     0.01415087
+ Atom  120(H ):     0.11337923
+ Atom  121(H ):     0.09426334
+ Atom  122(N ):    -0.17041183
+ Atom  123(C ):     0.07155700
+ Atom  124(C ):     0.50119402
+ Atom  125(O ):    -0.75594750
+ Atom  126(C ):    -0.16137675
+ Atom  127(C ):     0.73156509
+ Atom  128(O ):    -0.92437446
+ Atom  129(O ):    -0.79534107
+ Atom  130(H ):     0.30173879
+ Atom  131(H ):     0.14686746
+ Atom  132(H ):     0.10064724
+ Atom  133(H ):     0.13488193
+ Atom  134(H ):     0.26166087
+ Atom  135(N ):    -0.21707650
+ Atom  136(C ):    -0.14494725
+ Atom  137(H ):     0.15576494
+ Atom  138(H ):     0.02040637
+ Atom  139(H ):     0.02221250
+
+ Calculation took up      61 seconds wall clock time
+
+ If outputting atom coordinates with charges to orca.chg in current folder? (y/n)
+ 
+      ============== Population analysis and atomic charges ==============
+ -2 Calculate interaction energy between fragments based on atomic charges
+ -1 Define fragment
+ 0 Return
+ 1 Hirshfeld atomic charge
+ 2 Voronoi deformation density (VDD) atom population
+ 10 Becke atomic charge with atomic dipole moment correction
+ 11 Atomic dipole corrected Hirshfeld atomic charge (ADCH) (recommended)
+ 12 CHELPG ESP fitting atomic charge
+ 13 Merz-Kollmann (MK) ESP fitting atomic charge
+ 14 AIM atomic charge
+ 15 Hirshfeld-I atomic charge
+ 16 CM5 atomic charge    -16 Generate 1.2*CM5 atomic charge
+ 17 Electronegativity Equalization Method (EEM) atomic charge
+ 18 Restrained ElectroStatic Potential (RESP) atomic charge
+ 19 Gasteiger (PEOE) charge
+ 20 Minimal Basis Iterative Stockholder (MBIS) charge
+ 
+ "q": Exit program gracefully          "r": Load a new file
+                    ************ Main function menu ************
+ 0 Show molecular structure and view orbitals
+ 1 Output all properties at a point       2 Topology analysis
+ 3 Output and plot specific property in a line
+ 4 Output and plot specific property in a plane
+ 5 Output and plot specific property within a spatial region (calc. grid data)
+ 6 Check & modify wavefunction
+ 7 Population analysis and calculation of atomic charges
+ 8 Orbital composition analysis           9 Bond order analysis
+ 10 Plot total DOS, PDOS, OPDOS, local DOS, COHP and photoelectron spectrum
+ 11 Plot IR/Raman/UV-Vis/ECD/VCD/ROA/NMR spectrum
+ 12 Quantitative analysis of molecular surface
+ 13 Process grid data (No grid data is presented currently)
+ 14 Adaptive natural density partitioning (AdNDP) analysis
+ 15 Fuzzy atomic space analysis
+ 16 Charge decomposition analysis (CDA) and plot orbital interaction diagram
+ 17 Basin analysis                       18 Electron excitation analysis
+ 19 Orbital localization analysis        20 Visual study of weak interaction
+ 21 Energy decomposition analysis        22 Conceptual DFT (CDFT) analysis
+ 23 ETS-NOCV analysis                    24 (Hyper)polarizability analysis
+ 25 Electron delocalization and aromaticity analyses
+ 26 Structure and geometry related analyses
+ 100 Other functions (Part 1)            200 Other functions (Part 2)
+ 300 Other functions (Part 3)

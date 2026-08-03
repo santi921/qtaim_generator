@@ -4,7 +4,6 @@ import os
 import lmdb
 import json
 import pickle as pkl
-import numpy as np
 from copy import deepcopy
 from glob import glob
 from qtaim_gen.source.utils.lmdbs import json_2_lmdbs, inp_files_2_lmdbs, filter_bond_feats
@@ -19,18 +18,18 @@ from qtaim_gen.source.utils.lmdbs import (
     parse_qtaim_data,
     parse_bond_data,
     parse_fuzzy_data,
+    parse_orca_data,
+    DEFAULT_ORCA_FILTER,
     gather_structure_info
 )
 from qtaim_gen.source.scripts.json_to_lmdb import (
     partition_folders_by_shard,
     merge_shards,
-    convert_json_with_stats,
 )
 import logging
 import shutil
 import tempfile
 
-import pytest
 
 
 class TestLMDB:
@@ -40,19 +39,19 @@ class TestLMDB:
     base_tests = Path(__file__).parent
 
     # json_2_lmdbs and write_lmdb expect directory paths that end with a separator
+    # dir_data is the committed, read-only source of JSON fixtures
     dir_data = str(base_tests / "test_files" / "lmdb_tests") + os.sep
-    dir_active = (
-        str(base_tests / "test_files" / "lmdb_tests" / "generator_lmdbs") + os.sep
-    )
-    dir_active_merged = (
-        str(base_tests / "test_files" / "lmdb_tests" / "generator_lmdbs_merged")
-        + os.sep
-    )
 
     chunk_size = 2
 
     @classmethod
     def setup_class(cls):
+        # write generated LMDBs to temp dirs so committed fixtures stay pristine
+        cls._tmp_active = tempfile.mkdtemp(prefix="generator_lmdbs_")
+        cls._tmp_active_merged = tempfile.mkdtemp(prefix="generator_lmdbs_merged_")
+        cls.dir_active = cls._tmp_active + os.sep
+        cls.dir_active_merged = cls._tmp_active_merged + os.sep
+
         # create folder if it doesn't exist
         os.makedirs(cls.dir_active, exist_ok=True)
         os.makedirs(cls.dir_active_merged, exist_ok=True)
@@ -176,6 +175,11 @@ class TestLMDB:
             merge=merge,
         )
 
+    @classmethod
+    def teardown_class(cls):
+        shutil.rmtree(cls._tmp_active, ignore_errors=True)
+        shutil.rmtree(cls._tmp_active_merged, ignore_errors=True)
+
     def read_helper(self, file, lookup):
         env = lmdb.open(
             file,
@@ -196,21 +200,11 @@ class TestLMDB:
     def test_write_read(self):
         base = self.base_tests / "test_files"
 
-        charge_lmdb = str(
-            base / "lmdb_tests" / "generator_lmdbs_merged" / "merged_charge.lmdb"
-        )
-        bond_lmdb = str(
-            base / "lmdb_tests" / "generator_lmdbs_merged" / "merged_bond.lmdb"
-        )
-        other_lmdb = str(
-            base / "lmdb_tests" / "generator_lmdbs_merged" / "merged_other.lmdb"
-        )
-        qtaim_lmdb = str(
-            base / "lmdb_tests" / "generator_lmdbs_merged" / "merged_qtaim.lmdb"
-        )
-        fuzzy_lmdb = str(
-            base / "lmdb_tests" / "generator_lmdbs_merged" / "merged_fuzzy.lmdb"
-        )
+        charge_lmdb = os.path.join(self.dir_active_merged, "merged_charge.lmdb")
+        bond_lmdb = os.path.join(self.dir_active_merged, "merged_bond.lmdb")
+        other_lmdb = os.path.join(self.dir_active_merged, "merged_other.lmdb")
+        qtaim_lmdb = os.path.join(self.dir_active_merged, "merged_qtaim.lmdb")
+        fuzzy_lmdb = os.path.join(self.dir_active_merged, "merged_fuzzy.lmdb")
 
         orca5_rks_bond = str(base / "lmdb_tests" / "orca5_rks" / "bond.json")
         orca5_qtaim = str(base / "lmdb_tests" / "orca5" / "qtaim.json")
@@ -254,26 +248,12 @@ class TestLMDB:
         ), f"Expected {orca5_rks_fuzzy_json['mbis_fuzzy_density']['45_Cl'] }, got {dict_orca5_fuzzy['mbis_fuzzy_density']['45_Cl'] }"
 
     def test_merge(self):
-        base = self.base_tests / "test_files"
-
-        charge_lmdb = str(
-            base / "lmdb_tests" / "generator_lmdbs_merged" / "merged_charge.lmdb"
-        )
-        bond_lmdb = str(
-            base / "lmdb_tests" / "generator_lmdbs_merged" / "merged_bond.lmdb"
-        )
-        other_lmdb = str(
-            base / "lmdb_tests" / "generator_lmdbs_merged" / "merged_other.lmdb"
-        )
-        qtaim_lmdb = str(
-            base / "lmdb_tests" / "generator_lmdbs_merged" / "merged_qtaim.lmdb"
-        )
-        geom_lmdb = str(
-            base / "lmdb_tests" / "generator_lmdbs_merged" / "merged_geom.lmdb"
-        )
-        fuzzy_lmdb = str(
-            base / "lmdb_tests" / "generator_lmdbs_merged" / "merged_fuzzy.lmdb"
-        )
+        charge_lmdb = os.path.join(self.dir_active_merged, "merged_charge.lmdb")
+        bond_lmdb = os.path.join(self.dir_active_merged, "merged_bond.lmdb")
+        other_lmdb = os.path.join(self.dir_active_merged, "merged_other.lmdb")
+        qtaim_lmdb = os.path.join(self.dir_active_merged, "merged_qtaim.lmdb")
+        geom_lmdb = os.path.join(self.dir_active_merged, "merged_geom.lmdb")
+        fuzzy_lmdb = os.path.join(self.dir_active_merged, "merged_fuzzy.lmdb")
 
         for lmdb_file in [
             charge_lmdb,
@@ -410,6 +390,18 @@ class TestConverters:
 
     @classmethod
     def setup_class(cls):
+        # redirect converter outputs to a temp dir; inputs stay on committed fixtures
+        cls._tmp_out = tempfile.mkdtemp(prefix="converter_out_")
+        cls.config_baseline["lmdb_path"] = os.path.join(cls._tmp_out, "baseline_converter")
+        cls.config_folder["lmdb_path"] = os.path.join(cls._tmp_out, "baseline_converter_folder")
+        cls.config_qtaim["lmdb_path"] = os.path.join(cls._tmp_out, "qtaim_converter")
+        cls.config_qtaim_folder["lmdb_path"] = os.path.join(cls._tmp_out, "qtaim_converter_folder")
+        cls.config_general["lmdb_path"] = os.path.join(cls._tmp_out, "qtaim_converter")
+        cls.config_path = os.path.join(cls._tmp_out, "config.json")
+        cls.config_folder_path = os.path.join(cls._tmp_out, "config_folder.json")
+        cls.config_qtaim_path = os.path.join(cls._tmp_out, "config_qtaim.json")
+        cls.config_qtaim_folder_path = os.path.join(cls._tmp_out, "config_qtaim_folder.json")
+
         # instantiate converters during test class setup (avoid running at import)
         cls.converter_baseline = BaseConverter(
             cls.config_baseline, config_path=cls.config_path
@@ -456,6 +448,10 @@ class TestConverters:
             cls.info_scale_qtaim_folder_restart,
             cls.first_graph_pre_qtaim_folder_post,
         ) = get_benchmark_info(cls.converter_qtaim_folder)
+
+    @classmethod
+    def teardown_class(cls):
+        shutil.rmtree(cls._tmp_out, ignore_errors=True)
 
     def test_restarts(self):
         # assert all the restart are None:
@@ -830,7 +826,7 @@ class TestConverters:
         filtered_bond_feats_qtaim = _check_filter_bond_feats(connected_bond_paths, normalized_connected_paths)
         filtered_bond_feats_fuzzy = _check_filter_bond_feats(bond_list_fuzzy, normalized_fuzzy)
         filtered_bond_feats_ibsi = _check_filter_bond_feats(bond_list_ibsi, normalized_ibsi)
-        filtered_bond_feats_struct = _check_filter_bond_feats(bond_list, normalized_struct)
+        _check_filter_bond_feats(bond_list, normalized_struct)
 
 
         # check the number of features of each bond that is filtered 
@@ -1018,11 +1014,12 @@ class TestSharding:
                 txn.put("length".encode(), pkl.dumps(5))
             env.close()
 
-        # Merge shards
+        # Merge shards — returns (path, count) tuple
         merged_path = os.path.join(self.temp_dir, "merged.lmdb")
-        result_path = merge_shards(shard_paths, merged_path, self.logger)
+        result_path, merged_count = merge_shards(shard_paths, merged_path, self.logger)
 
         assert result_path == merged_path, "merge_shards should return the output path"
+        assert merged_count == 15, f"Expected 15 merged entries, got {merged_count}"
         assert os.path.exists(merged_path), "Merged LMDB should exist"
 
         # Verify merged data
@@ -1072,9 +1069,10 @@ class TestSharding:
         merged_path = os.path.join(self.temp_dir, "merged_missing.lmdb")
 
         # Should not raise, but warn
-        result_path = merge_shards(shard_paths, merged_path, self.logger)
+        result_path, merged_count = merge_shards(shard_paths, merged_path, self.logger)
 
         assert os.path.exists(result_path), "Merged LMDB should still be created"
+        assert merged_count == 1, f"Expected 1 merged entry, got {merged_count}"
 
         # Verify it contains data from the existing shard
         env = lmdb.open(merged_path, subdir=False, readonly=True, lock=False)
@@ -1120,7 +1118,6 @@ class TestSharding:
         os.makedirs(test_out_dir, exist_ok=True)
 
         # Simulate the naming scheme used in json_to_lmdb.py
-        total_shards = 2
         shard_index = 0
 
         # With sharding, output goes to subdirectory
@@ -1139,6 +1136,510 @@ class TestSharding:
         # These should not conflict
         assert os.path.dirname(chunk1_path) == os.path.dirname(merged_path)
         assert os.path.basename(chunk1_path) != os.path.basename(merged_path)
+
+
+class TestParseOrcaData:
+    """Unit tests for parse_orca_data covering full schema, RKS, filtering, and double-dip."""
+
+    from pathlib import Path
+    base = Path(__file__).parent / "test_files" / "lmdb_tests"
+
+    @classmethod
+    def setup_class(cls):
+        with open(cls.base / "orca5" / "orca.json") as f:
+            cls.orca_uks_with_spins = json.load(f)
+        with open(cls.base / "orca5_rks" / "orca.json") as f:
+            cls.orca_rks = json.load(f)
+        with open(cls.base / "orca6_rks" / "orca.json") as f:
+            cls.orca_v6 = json.load(f)
+
+    def test_default_filter_globals_only(self):
+        atom, bond, glob = parse_orca_data(self.orca_v6, n_atoms=53)
+        assert all(not v for v in atom.values()), "default filter must not surface per-atom features"
+        assert len(bond) == 0, "default filter must not surface per-bond features"
+        # RKS fixtures have s_squared=None (skipped); use UKS for that one
+        for k in ("orca_final_energy_eh", "orca_homo_eh", "orca_lumo_eh", "orca_homo_lumo_gap_eh", "orca_dipole_magnitude_au", "orca_gradient_rms"):
+            assert k in glob, f"missing default global key: {k}"
+        for vec_key in ("orca_dipole_au_x", "orca_dipole_au_y", "orca_dipole_au_z"):
+            assert vec_key in glob
+        for rot in ("orca_rotational_constants_cm1_a", "orca_rotational_constants_cm1_b", "orca_rotational_constants_cm1_c"):
+            assert rot in glob
+        for q in ("orca_quadrupole_au_xx", "orca_quadrupole_au_yy", "orca_quadrupole_au_zz", "orca_quadrupole_au_xy", "orca_quadrupole_au_xz", "orca_quadrupole_au_yz"):
+            assert q in glob
+        assert any(k.startswith("orca_energy_") for k in glob), "energy_components should flatten"
+        # excluded by default
+        assert "orca_scf_cycles" not in glob
+        assert not any(k.startswith("orca_scf_") for k in glob), "scf_convergence excluded by default"
+        assert "orca_gradient_norm" not in glob
+        assert "orca_gradient_max" not in glob
+
+    def test_opt_in_per_atom_and_per_bond(self):
+        n_atoms = 53
+        atom, bond, glob = parse_orca_data(
+            self.orca_v6, n_atoms=n_atoms,
+            orca_filter=["mulliken_charges", "mayer_population", "loewdin_bond_orders", "gradient"],
+        )
+        assert atom[0].get("orca_charge_mulliken") is not None
+        assert atom[0].get("orca_population_mayer_va") is not None
+        for axis in ("orca_gradient_x", "orca_gradient_y", "orca_gradient_z"):
+            assert axis in atom[0]
+        assert len(bond) > 0
+        sample = next(iter(bond.values()))
+        assert "orca_bond_order_loewdin" in sample
+        # globals are excluded since the filter doesn't include them
+        assert glob == {}
+
+    def test_rks_skips_empty_spin_dicts(self):
+        # RKS calc: mulliken_spins / loewdin_spins are empty
+        atom, _, _ = parse_orca_data(
+            self.orca_rks, n_atoms=61,
+            orca_filter=["mulliken_charges", "mulliken_spins", "loewdin_charges", "loewdin_spins"],
+        )
+        # charges present on at least one atom
+        assert any("orca_charge_mulliken" in a for a in atom.values())
+        # spins not surfaced anywhere (empty dict was skipped)
+        assert not any("orca_spin_mulliken" in a or "orca_spin_loewdin" in a for a in atom.values())
+
+    def test_uks_with_spins(self):
+        atom, _, _ = parse_orca_data(
+            self.orca_uks_with_spins, n_atoms=118,
+            orca_filter=["mulliken_spins"],
+        )
+        # UKS fixture has 118 mulliken_spins entries
+        n_with_spin = sum("orca_spin_mulliken" in a for a in atom.values())
+        assert n_with_spin == 118
+
+    def test_uks_default_filter_includes_s_squared(self):
+        # s_squared is null in RKS calcs; use UKS to verify default filter surfaces it
+        _, _, glob = parse_orca_data(self.orca_uks_with_spins, n_atoms=118)
+        assert "orca_s_squared" in glob
+
+    def test_mayer_population_flattens_to_va_and_bva(self):
+        atom, _, _ = parse_orca_data(
+            self.orca_v6, n_atoms=53,
+            orca_filter=["mayer_population"],
+        )
+        # mayer_population is per-atom dict-of-dicts {atom_id: {"va": float, "bva": float}}
+        for axis in ("orca_population_mayer_va", "orca_population_mayer_bva"):
+            assert axis in atom[0], f"missing flattened sub-feature: {axis}"
+
+    def test_bond_keys_are_canonical_sorted_tuples(self):
+        _, bond, _ = parse_orca_data(
+            self.orca_v6, n_atoms=53, orca_filter=["loewdin_bond_orders"],
+        )
+        for k in bond:
+            assert isinstance(k, tuple) and len(k) == 2
+            assert k[0] < k[1], f"bond key {k} not sorted (i<j)"
+            assert 0 <= k[0] and k[1] < 53
+
+    def test_clean_handles_nan_inf(self):
+        nan_doc = {
+            "final_energy_eh": float("nan"),
+            "homo_eh": float("inf"),
+            "dipole_au": [1.0, float("nan"), 3.0],
+        }
+        _, _, glob = parse_orca_data(
+            nan_doc, n_atoms=1,
+            orca_filter=["final_energy_eh", "homo_eh", "dipole_au"],
+            clean=True,
+        )
+        assert glob["orca_final_energy_eh"] == 0.0
+        assert glob["orca_homo_eh"] == 0.0
+        assert glob["orca_dipole_au_x"] == 1.0
+        assert glob["orca_dipole_au_y"] == 0.0
+        assert glob["orca_dipole_au_z"] == 3.0
+
+    def test_default_filter_contents(self):
+        # guard against silent regressions on the default
+        assert "final_energy_eh" in DEFAULT_ORCA_FILTER
+        assert "energy_components" in DEFAULT_ORCA_FILTER
+        assert "quadrupole_au" in DEFAULT_ORCA_FILTER
+        # excluded by design
+        for excluded in ("mulliken_charges", "loewdin_bond_orders", "scf_convergence", "scf_cycles", "gradient", "gradient_norm", "gradient_max"):
+            assert excluded not in DEFAULT_ORCA_FILTER, f"{excluded} must not be in default filter"
+
+
+class TestJsonToLmdbOrca:
+    """Smoke test: json_2_lmdbs produces orca.lmdb keyed by folder name."""
+
+    from pathlib import Path
+    src_root = Path(__file__).parent / "test_files" / "lmdb_tests"
+
+    def test_json_2_lmdbs_orca_smoke(self, tmp_path):
+        # Stage two job folders that contain orca.json
+        staging = tmp_path / "jobs"
+        staging.mkdir()
+        for name in ("orca5_rks", "orca6_rks"):
+            dst = staging / name
+            dst.mkdir()
+            shutil.copy(self.src_root / name / "orca.json", dst / "orca.json")
+
+        out_dir = tmp_path / "out"
+        out_dir.mkdir()
+
+        json_2_lmdbs(
+            root_dir=str(staging) + os.sep,
+            out_dir=str(out_dir) + os.sep,
+            data_type="orca",
+            out_lmdb="orca.lmdb",
+            chunk_size=10,
+            clean=True,
+            merge=True,
+            move_files=False,
+        )
+
+        lmdb_path = out_dir / "orca.lmdb"
+        assert lmdb_path.exists(), "orca.lmdb was not produced"
+        env = lmdb.open(str(lmdb_path), subdir=False, readonly=True, lock=False)
+        with env.begin() as txn:
+            keys = sorted(k.decode() for k, _ in txn.cursor() if k.decode() != "length")
+            assert keys == ["orca5_rks", "orca6_rks"], f"unexpected keys: {keys}"
+            sample = pkl.loads(txn.get(b"orca5_rks"))
+            assert "final_energy_eh" in sample
+        env.close()
+
+
+class TestJsonToLmdbTimings:
+    """Smoke test: json_2_lmdbs produces timings.lmdb keyed by folder name with raw dicts."""
+
+    from pathlib import Path
+    src_root = Path(__file__).parent / "test_files" / "lmdb_tests"
+
+    def test_json_2_lmdbs_timings_smoke(self, tmp_path):
+        staging = tmp_path / "jobs"
+        staging.mkdir()
+        for name in ("orca5_rks", "orca6_rks"):
+            dst = staging / name
+            dst.mkdir()
+            shutil.copy(self.src_root / name / "timings.json", dst / "timings.json")
+
+        out_dir = tmp_path / "out"
+        out_dir.mkdir()
+
+        json_2_lmdbs(
+            root_dir=str(staging) + os.sep,
+            out_dir=str(out_dir) + os.sep,
+            data_type="timings",
+            out_lmdb="timings.lmdb",
+            chunk_size=10,
+            clean=True,
+            merge=True,
+            move_files=False,
+        )
+
+        lmdb_path = out_dir / "timings.lmdb"
+        assert lmdb_path.exists(), "timings.lmdb was not produced"
+        env = lmdb.open(str(lmdb_path), subdir=False, readonly=True, lock=False)
+        with env.begin() as txn:
+            keys = sorted(k.decode() for k, _ in txn.cursor() if k.decode() != "length")
+            assert keys == ["orca5_rks", "orca6_rks"], f"unexpected keys: {keys}"
+            sample = pkl.loads(txn.get(b"orca5_rks"))
+            assert isinstance(sample, dict), f"expected dict payload, got {type(sample)}"
+            assert "qtaim" in sample, f"expected 'qtaim' key in timings dict, got {list(sample.keys())}"
+            assert isinstance(sample["qtaim"], (int, float)), \
+                f"expected numeric value for 'qtaim', got {type(sample['qtaim'])}"
+        env.close()
+
+
+class TestOrcaDoubleDipWarning:
+    """Ensure GeneralConverter warns when both charge_filter and orca_filter are set."""
+
+    from pathlib import Path
+    base = Path(__file__).parent / "test_files" / "lmdb_tests"
+    merged = base / "generator_lmdbs_merged"
+
+    @classmethod
+    def _stage_lmdbs(cls, dst_dir):
+        """Copy the merged geom+charge fixtures and build a real orca.lmdb keyed identically."""
+        dst_dir.mkdir(parents=True, exist_ok=True)
+        # Copy geom and charge merged LMDBs (and their lock files) so converter init succeeds.
+        for fname in ("merged_geom.lmdb", "merged_charge.lmdb"):
+            shutil.copy(cls.merged / fname, dst_dir / fname)
+        # Build a tiny orca.lmdb with the same job folder keys as the merged fixtures
+        # by staging orca.json files into a synthetic root and running json_2_lmdbs.
+        # The merged fixtures use orca5/orca5_rks/orca5_uks/orca6_rks as keys.
+        staging = dst_dir / "_orca_staging"
+        staging.mkdir()
+        for name in ("orca5", "orca5_rks", "orca5_uks", "orca6_rks"):
+            sub = staging / name
+            sub.mkdir()
+            shutil.copy(cls.base / name / "orca.json", sub / "orca.json")
+        json_2_lmdbs(
+            root_dir=str(staging) + os.sep,
+            out_dir=str(dst_dir) + os.sep,
+            data_type="orca",
+            out_lmdb="orca.lmdb",
+            chunk_size=10,
+            clean=True,
+            merge=True,
+            move_files=False,
+        )
+
+    def _base_config(self, lmdb_dir, lmdb_path, with_charge_filter, with_orca_filter):
+        cfg = {
+            "chunk": -1,
+            "filter_list": ["length", "scaled"],
+            "restart": False,
+            "allowed_ring_size": [3, 4, 5, 6, 7, 8],
+            "allowed_charges": None,
+            "allowed_spins": None,
+            "keys_target": {"atom": [], "bond": [], "global": ["n_atoms"]},
+            "keys_data": {"atom": [], "bond": [], "global": ["n_atoms"]},
+            "lmdb_path": str(lmdb_path),
+            "lmdb_name": "graphs.lmdb",
+            "lmdb_locations": {
+                "geom_lmdb": str(lmdb_dir),
+                "charge_lmdb": str(lmdb_dir),
+                "orca_lmdb": str(lmdb_dir),
+            },
+            "data_inputs": ["geom", "charge", "orca"],
+            "missing_data_strategy": "skip",
+            "n_workers": 1,
+            "batch_size": 1,
+            "bonding_scheme": "structural",
+        }
+        if with_charge_filter:
+            cfg["charge_filter"] = ["hirshfeld"]
+        if with_orca_filter:
+            cfg["orca_filter"] = ["final_energy_eh"]
+        return cfg
+
+    def test_warning_fires_when_both_filters_set(self, tmp_path, caplog):
+        lmdb_dir = tmp_path / "lmdbs"
+        self._stage_lmdbs(lmdb_dir)
+        cfg = self._base_config(lmdb_dir, tmp_path / "out_both", True, True)
+        with caplog.at_level(logging.WARNING):
+            GeneralConverter(cfg)
+        assert any(
+            "Both charge_filter and orca_filter are set" in rec.getMessage()
+            for rec in caplog.records
+        ), "double-dip warning was not emitted"
+
+    def test_warning_silent_when_only_one_set(self, tmp_path, caplog):
+        lmdb_dir = tmp_path / "lmdbs"
+        self._stage_lmdbs(lmdb_dir)
+        cfg = self._base_config(lmdb_dir, tmp_path / "out_one", True, False)
+        with caplog.at_level(logging.WARNING):
+            GeneralConverter(cfg)
+        assert not any(
+            "Both charge_filter and orca_filter are set" in rec.getMessage()
+            for rec in caplog.records
+        )
+
+
+class TestFolderListMode:
+    """folder_paths mode: jagged hierarchies, __-joined relpath keys."""
+
+    from pathlib import Path
+    src_root = Path(__file__).parent / "test_files" / "lmdb_tests"
+
+    @staticmethod
+    def _build_jagged_tree(root):
+        """Create 4 job folders at mixed depths under root, each with timings.json + orca.inp."""
+        layout = [
+            ("metal_organics/restart5to6/job_aaa",),
+            ("solvated_protein/outputs_240923/spf_111/step0",),
+            ("solvated_protein/outputs_240923/spf_111/step1",),
+            ("electrolytes/md_based/outputs_241029/sample_xyz/step2",),
+        ]
+        folders = []
+        for (relpath,) in layout:
+            d = root / relpath
+            d.mkdir(parents=True)
+            (d / "timings.json").write_text(json.dumps({"qtaim": 1.5, "other": 2.5}))
+            shutil.copy(
+                TestFolderListMode.src_root / "orca5_rks" / "orca.inp",
+                d / "orca.inp",
+            )
+            folders.append(str(d))
+        return folders
+
+    def test_json_2_lmdbs_with_folder_paths_jagged(self, tmp_path):
+        root = tmp_path / "root"
+        root.mkdir()
+        folders = self._build_jagged_tree(root)
+        out_dir = tmp_path / "out"
+        out_dir.mkdir()
+
+        json_2_lmdbs(
+            root_dir=str(root) + os.sep,
+            out_dir=str(out_dir) + os.sep,
+            data_type="timings",
+            out_lmdb="timings.lmdb",
+            chunk_size=10,
+            clean=True,
+            merge=True,
+            move_files=False,
+            folder_paths=folders,
+        )
+
+        lmdb_path = out_dir / "timings.lmdb"
+        assert lmdb_path.exists()
+        env = lmdb.open(str(lmdb_path), subdir=False, readonly=True, lock=False)
+        with env.begin() as txn:
+            keys = sorted(k.decode() for k, _ in txn.cursor() if k.decode() != "length")
+        env.close()
+
+        expected = sorted([
+            "metal_organics__restart5to6__job_aaa",
+            "solvated_protein__outputs_240923__spf_111__step0",
+            "solvated_protein__outputs_240923__spf_111__step1",
+            "electrolytes__md_based__outputs_241029__sample_xyz__step2",
+        ])
+        assert keys == expected, f"unexpected keys: {keys}"
+
+    def test_inp_files_2_lmdbs_with_folder_paths_jagged(self, tmp_path):
+        root = tmp_path / "root"
+        root.mkdir()
+        folders = self._build_jagged_tree(root)
+        out_dir = tmp_path / "out"
+        out_dir.mkdir()
+
+        inp_files_2_lmdbs(
+            root_dir=str(root) + os.sep,
+            out_dir=str(out_dir) + os.sep,
+            out_lmdb="structure.lmdb",
+            chunk_size=10,
+            clean=True,
+            merge=True,
+            folder_paths=folders,
+        )
+
+        lmdb_path = out_dir / "structure.lmdb"
+        assert lmdb_path.exists()
+        env = lmdb.open(str(lmdb_path), subdir=False, readonly=True, lock=False)
+        with env.begin() as txn:
+            keys = sorted(k.decode() for k, _ in txn.cursor() if k.decode() != "length")
+            sample = pkl.loads(txn.get(b"metal_organics__restart5to6__job_aaa"))
+        env.close()
+
+        assert "metal_organics__restart5to6__job_aaa" in keys
+        assert "solvated_protein__outputs_240923__spf_111__step0" in keys
+        assert "solvated_protein__outputs_240923__spf_111__step1" in keys
+        assert "molecule" in sample
+        assert sample["ids"] == "metal_organics__restart5to6__job_aaa"
+
+    def test_derive_lmdb_key_handles_path_outside_root(self):
+        from qtaim_gen.source.utils.lmdbs import _derive_lmdb_key
+
+        key = _derive_lmdb_key("/abs/elsewhere/job", "/different/root")
+        assert "__" in key
+        assert "elsewhere" in key
+        assert "job" in key
+
+    def test_folder_paths_and_shard_folders_mutually_exclusive(self, tmp_path):
+        with pytest.raises(ValueError, match="mutually exclusive"):
+            json_2_lmdbs(
+                root_dir=str(tmp_path) + os.sep,
+                out_dir=str(tmp_path) + os.sep,
+                data_type="timings",
+                out_lmdb="x.lmdb",
+                chunk_size=10,
+                folder_paths=["/a"],
+                shard_folders=["b"],
+            )
+
+    def test_inp_files_mutual_exclusion(self, tmp_path):
+        with pytest.raises(ValueError, match="mutually exclusive"):
+            inp_files_2_lmdbs(
+                root_dir=str(tmp_path) + os.sep,
+                out_dir=str(tmp_path) + os.sep,
+                out_lmdb="x.lmdb",
+                chunk_size=10,
+                folder_paths=["/a"],
+                shard_folders=["b"],
+            )
+
+    def test_json_2_lmdbs_with_folder_paths_move_files(self, tmp_path):
+        """folder_paths + move_files=True: timings.json lives under <folder>/generator/."""
+        root = tmp_path / "root"
+        root.mkdir()
+        layout = [
+            "metal_organics/restart5to6/job_aaa",
+            "solvated_protein/outputs_240923/spf_111/step0",
+        ]
+        folders = []
+        for relpath in layout:
+            d = root / relpath
+            (d / "generator").mkdir(parents=True)
+            (d / "generator" / "timings.json").write_text(
+                json.dumps({"qtaim": 1.0, "other": 2.0})
+            )
+            folders.append(str(d))
+
+        out_dir = tmp_path / "out"
+        out_dir.mkdir()
+
+        json_2_lmdbs(
+            root_dir=str(root) + os.sep,
+            out_dir=str(out_dir) + os.sep,
+            data_type="timings",
+            out_lmdb="timings.lmdb",
+            chunk_size=10,
+            clean=True,
+            merge=True,
+            move_files=True,
+            folder_paths=folders,
+        )
+
+        env = lmdb.open(str(out_dir / "timings.lmdb"), subdir=False, readonly=True, lock=False)
+        with env.begin() as txn:
+            keys = sorted(k.decode() for k, _ in txn.cursor() if k.decode() != "length")
+            sample = pkl.loads(txn.get(b"metal_organics__restart5to6__job_aaa"))
+        env.close()
+
+        assert keys == sorted([
+            "metal_organics__restart5to6__job_aaa",
+            "solvated_protein__outputs_240923__spf_111__step0",
+        ])
+        assert sample == {"qtaim": 1.0, "other": 2.0}
+
+
+class TestReadFolderList:
+    """read_folder_list: file-format edge cases."""
+
+    @classmethod
+    def setup_class(cls):
+        cls.logger = logging.getLogger("test_read_folder_list")
+        cls.logger.setLevel(logging.WARNING)
+
+    def test_skips_blanks_and_comments(self, tmp_path):
+        from qtaim_gen.source.scripts.json_to_lmdb import read_folder_list
+
+        d1 = tmp_path / "a"
+        d2 = tmp_path / "b"
+        d1.mkdir()
+        d2.mkdir()
+        list_file = tmp_path / "jobs.txt"
+        list_file.write_text(
+            f"# header comment\n\n{d1}\n   \n# another comment\n{d2}\n\n"
+        )
+        out = read_folder_list(str(list_file), self.logger)
+        assert sorted(out) == sorted([str(d1), str(d2)])
+
+    def test_missing_file_raises(self, tmp_path):
+        from qtaim_gen.source.scripts.json_to_lmdb import read_folder_list
+
+        with pytest.raises(FileNotFoundError):
+            read_folder_list(str(tmp_path / "nope.txt"), self.logger)
+
+    def test_all_blank_or_comments_raises(self, tmp_path):
+        from qtaim_gen.source.scripts.json_to_lmdb import read_folder_list
+
+        list_file = tmp_path / "jobs.txt"
+        list_file.write_text("# only comments\n\n\n# more\n")
+        with pytest.raises(ValueError, match="no usable paths"):
+            read_folder_list(str(list_file), self.logger)
+
+    def test_all_paths_missing_raises(self, tmp_path):
+        from qtaim_gen.source.scripts.json_to_lmdb import read_folder_list
+
+        list_file = tmp_path / "jobs.txt"
+        list_file.write_text(
+            f"{tmp_path}/does_not_exist_1\n{tmp_path}/does_not_exist_2\n"
+        )
+        with pytest.raises(ValueError, match="No valid"):
+            read_folder_list(str(list_file), self.logger)
 
 
 # create dummy to just run test_parsers and setups

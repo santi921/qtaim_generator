@@ -1,0 +1,4 @@
+! a stray inp inside a job dir; walker must NOT pick this up
+*xyz 99 99
+He 0 0 0
+*

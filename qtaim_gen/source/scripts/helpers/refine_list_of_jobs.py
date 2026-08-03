@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
 import os
+import logging
 import argparse
 from typing import Optional, List
 from qtaim_gen.source.utils.io import get_folders_from_file
 
 should_stop = False
 
+logger = logging.getLogger("refine_list_of_jobs")
 
-def handle_signal(signum, frame):
+
+def handle_signal(signum, _frame):
     global should_stop
     print(f"Received signal {signum}, initiating graceful shutdown...")
     should_stop = True
@@ -93,17 +96,47 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
 
     parser.add_argument(
+        "--log_file",
+        type=str,
+        default=None,
+        help="path to log file; if set, logger writes to file instead of stdout",
+    )
+
+    parser.add_argument(
+        "--quiet",
+        action="store_true",
+        help="suppress all log output",
+    )
+
+    parser.add_argument(
         "--check_ecp",
         action="store_true",
         help="filter out jobs where ECP loaded successfully; keep only ECP_FAILED and ECP_NO_ZIP jobs",
     )
 
+    parser.add_argument(
+        "--n_workers",
+        type=int,
+        default=8,
+        help="number of parallel workers for pre-validation (default: 8)",
+    )
+
     args = parser.parse_args(argv)
-    # print(args)
+
+    log_file: Optional[str] = getattr(args, "log_file", None)
+    quiet: bool = bool(getattr(args, "quiet", False))
+    if quiet:
+        handler = logging.NullHandler()
+    elif log_file:
+        handler = logging.FileHandler(log_file)
+        handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
+    else:
+        handler = logging.StreamHandler()
+        handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
+    logging.basicConfig(level=logging.INFO, handlers=[handler])
+
     for key, value in vars(args).items():
-        print(f"{key}: {value}")
-    # Safely extract boolean flags and other values using getattr
-    # overrun_running: bool = bool(getattr(args, "overrun_running", False))
+        logger.info(f"{key}: {value}")
 
     full_set: int = int(getattr(args, "full_set", 0))
     move_results: bool = bool(getattr(args, "move_results", False))
@@ -111,6 +144,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     orphaned_check: bool = bool(getattr(args, "check_orphaned", False))
     check_orca: bool = bool(getattr(args, "check_orca", False))
     check_ecp: bool = bool(getattr(args, "check_ecp", False))
+    n_workers: int = int(getattr(args, "n_workers", 8))
     refined_job_file: str = getattr(args, "refined_job_file", "refined_jobs.txt")
     root_omol_results: Optional[str] = getattr(args, "root_omol_results", None)
     root_omol_inputs: Optional[str] = getattr(args, "root_omol_inputs", None)
@@ -121,10 +155,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         with open(job_file, "r") as f:
             num_folders = sum(1 for _ in f)
 
-    # set mem
     # Basic static checks before launching heavy work
     if not os.path.exists(job_file):
-        print(f"Error: job_file '{job_file}' does not exist")
+        logger.error(f"job_file '{job_file}' does not exist")
         return 2
 
     folders_run = get_folders_from_file(
@@ -137,11 +170,19 @@ def main(argv: Optional[List[str]] = None) -> int:
         full_set=full_set,
         check_orca=check_orca,
         check_ecp=check_ecp,
+        logger=logger,
+        max_workers=n_workers,
     )
 
     if not folders_run:
-        print(f"No folders found in {job_file}")
+        msg = f"No folders found in {job_file}"
+        logger.info(msg)
+        print(msg)
         return []
+
+    summary = f"{len(folders_run)} folders remaining after refinement -> {refined_job_file}"
+    logger.info(summary)
+    print(summary)
 
     # save refined job file
     with open(refined_job_file, "w") as f:
@@ -165,70 +206,17 @@ def main(argv: Optional[List[str]] = None) -> int:
             if os.path.exists(folder_outputs):
                 # check if there is no wavefunction file in the folder and that there is no gbw_analysis.log file
                 from qtaim_gen.source.utils.io import has_wavefunction_file
+
                 if not has_wavefunction_file(folder_outputs) and os.path.exists(
                     os.path.join(folder_outputs, "gbw_analysis.log")
                 ):
-                    print(
+                    logger.info(
                         f"Orphaned job detected: {folder_outputs} missing wfn/wfx w log present"
                     )
                     count_orphaned += 1
 
-                # num_files = len(os.listdir(folder_outputs))
-                # if num_files > 3:
-                #    print(f"Orphaned job detected: {folder_outputs} with {num_files} files")
-                #    count_orphaned += 1
-
-        print(f"Total orphaned jobs detected: {count_orphaned}")
+        logger.info(f"Total orphaned jobs detected: {count_orphaned}")
 
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
-"""
-stragglers nakb, dna, droplet, mo_hydrides
-
-
-# qtaim edge cases - no CPs detected so no CPprop.txt files is produced
-
-python refine_list_of_jobs.py --root_omol_inputs /lus/eagle/projects/OMol25/ \
---job_file /lus/eagle/projects/generator/jobs_by_topdir/spice_refined.txt --move_results \
---refined_job_file /lus/eagle/projects/generator/jobs_by_topdir/spice_refined.txt \
-    --full_set 0 --root_omol_results /lus/eagle/projects/generator/OMol25_postprocessing/ 
-
-
-# tuo
-python refine_list_of_jobs.py --root_omol_inputs /p/lustre5/bennion1/Omol2025-4M-DiversitySet/ \
---job_file /p/lustre5/vargas58/generator_working/job_lists/ml_mo_refined.txt --move_results \
---refined_job_file /p/lustre5/vargas58/generator_working/job_lists/ml_mo_refined.txt \
-    --full_set 0 --root_omol_results /p/lustre5/vargas58/OMol4M/
-
-
-
-cat pmechdb_refined.txt >> packaged_together.txt
-cat rmechdb_refined.txt >> packaged_together.txt
-cat electrolytes_scaled_sep_refined.txt >> packaged_together.txt
-cat electrolytes_reactivity_refined.txt >> packaged_together.txt
-cat rgd_uks_refined.txt >> packaged_together.txt
-cat rpmd_refined.txt >> packaged_together.txt
-cat pdb_fragments_300K_refined.txt >> packaged_together.txt
-cat pdb_pockets_400K_refined.txt >> packaged_together.txt
-cat low_spin_23_refined.txt >> packaged_together.txt
-cat pdb_fragments_400K_refined.txt >> packaged_together.txt
-cat rna_refined.txt >> packaged_together.txt
-cat tm_react_refined.txt >> packaged_together.txt
-cat scaled_separations_exp_refined.txt >> packaged_together.txt
-
-
-full-runner-parsl-alcf --num_folders 1 --orca_2mkl_cmd $HOME/orca_6_0_0/orca_2mkl \
-     --multiwfn_cmd $HOME/Multiwfn_3_8/Multiwfn_noGUI --full_set 0 --type_runner local \
-    --n_threads 220 --safety_factor 1.0 --move_results --preprocess_compressed --timeout_hr 12 \
-    --queue workq-route  --restart  --n_nodes 1 --job_file ../jobs_by_topdir/spice_test.txt  --n_threads_per_job 10 \
-    --preprocess_compressed --root_omol_results /lus/eagle/projects/generator/OMol25_postprocessing/ --root_omol_inputs /lus/eagle/projects/OMol25/
-
-
-
-python refine_list_of_jobs.py --root_omol_inputs /p/lustre5/bennion1/Omol2025-4M-DiversitySet/ \
---job_file /p/lustre5/vargas58/validate/low_spin_23_heavy_tuo.txt --move_results \
---refined_job_file /p/lustre5/vargas58/validate/low_spin_23_heavy_tuo_refined.txt \
-    --full_set 0 --root_omol_results /p/lustre5/vargas58/OMol4M/ --check_ecp
-"""
