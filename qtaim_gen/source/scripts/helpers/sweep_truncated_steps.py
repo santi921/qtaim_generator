@@ -147,7 +147,9 @@ def classify_folder(
     rerun_steps: List[str] = []
     truncated_steps: List[str] = []
     for op in order:
-        will_skip = _has_usable_step_output(folder, op) or _compiled_data_present(
+        will_skip = _has_usable_step_output(
+            folder, op, n_atoms=n_atoms, fuzzy_routines=fuzzy_routines
+        ) or _compiled_data_present(
             folder,
             op,
             compiled_map,

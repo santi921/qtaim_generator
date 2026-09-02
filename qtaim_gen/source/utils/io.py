@@ -369,11 +369,13 @@ def merge_zip_into(
 ) -> None:
     """Move src_zip to dest_zip, merging if dest already exists.
 
-    On filename collision, keeps whichever entry has the larger uncompressed
-    size (preserves the richest available output). On equal size, keeps the
-    existing dest entry. The merge is written to a temp file and atomically
-    replaces dest, so a failure mid-merge cannot corrupt dest. src_zip is
-    removed on success.
+    On filename collision the src entry (the run that just finished) wins.
+    Entries only in dest are kept. Size is deliberately not a tiebreaker: a
+    walltime-killed qtaim.out full of progress-bar frames is larger than a
+    complete one, and "larger wins" kept resurrecting the truncated file so
+    the folder failed validation on every pass. The merge is written to a
+    temp file and atomically replaces dest, so a failure mid-merge cannot
+    corrupt dest. src_zip is removed on success.
     """
     import shutil as _shutil
 
@@ -415,12 +417,8 @@ def merge_zip_into(
                     if in_dest and in_src:
                         d_sz = dest_infos[name].file_size
                         s_sz = src_infos[name].file_size
-                        if s_sz > d_sz:
-                            out_zf.writestr(src_infos[name], src_zf.read(name))
-                            replaced.append((name, d_sz, s_sz))
-                        else:
-                            out_zf.writestr(dest_infos[name], dest_zf.read(name))
-                            kept.append(name)
+                        out_zf.writestr(src_infos[name], src_zf.read(name))
+                        replaced.append((name, d_sz, s_sz))
                     elif in_dest:
                         out_zf.writestr(dest_infos[name], dest_zf.read(name))
                         kept.append(name)
@@ -435,7 +433,7 @@ def merge_zip_into(
         if logger is not None:
             logger.info(
                 f"Merged {src_zip} into {dest_zip}: "
-                f"{len(added)} added, {len(replaced)} replaced by larger, "
+                f"{len(added)} added, {len(replaced)} replaced by fresh run, "
                 f"{len(kept)} kept from existing"
             )
             if replaced:

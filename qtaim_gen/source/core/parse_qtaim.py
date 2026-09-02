@@ -382,22 +382,49 @@ def find_cp_map(dft_dict, atom_cp_dict, margin=0.5):
     ret_dict, qtaim_to_dft = {}, {}
     missing_atoms = []
     available_cps = dict(atom_cp_dict)  # mutable copy — remove CPs once matched
+
+    # Pass 1: exact CPprop index + element match for every atom. This has to
+    # finish before any distance matching starts: find_cp returns the first
+    # same-element CP inside the margin, so with two H atoms 0.99 A apart
+    # (compressed electrolytes_scaled_sep geometries) atom 59 grabbed NCP
+    # 172_H before its own 59_H was reached, atom 171 ended up unmatched, and
+    # every bond CP touching atom 172 was dropped from qtaim.json -- a
+    # shortfall no rerun could fix.
+    unmatched = []
     for k, v in dft_dict.items():
-        v_send = {"element": v["element"], "pos": v["pos"], "ind": k}
+        exact_key = f"{k + 1}_{v['element']}"
+        cp = available_cps.get(exact_key)
+        if cp is not None:
+            ret_dict[k] = cp
+            qtaim_to_dft[k] = {"key": exact_key, "pos": cp["pos_ang"]}
+            del available_cps[exact_key]
+        else:
+            unmatched.append(k)
 
-        # finds cp by distance and naming scheme from CPprop.txt
-        ret_key, dict_ret = find_cp(
-            v_send, available_cps, margin=margin
-        )  # find_cp returns cp_key, cp_dict
-        if ret_key != False:
-            ret_dict[k] = dict_ret
-            qtaim_to_dft[k] = {"key": ret_key, "pos": dict_ret["pos_ang"]}
-            del available_cps[ret_key]  # prevent double-matching
-
+    # Pass 2: nearest same-element CP inside the margin, leftovers only.
+    for k in unmatched:
+        v = dft_dict[k]
+        pos = np.array(v["pos"])
+        best_key, best_dist = None, margin
+        for cp_key, cp in available_cps.items():
+            if cp["element"] != v["element"]:
+                continue
+            dist = np.linalg.norm(np.array(cp["pos_ang"]) - pos)
+            if dist < best_dist:
+                best_key, best_dist = cp_key, dist
+        if best_key is not None:
+            cp = available_cps.pop(best_key)
+            ret_dict[k] = cp
+            qtaim_to_dft[k] = {"key": best_key, "pos": cp["pos_ang"]}
         else:
             ret_dict[k] = {}
             qtaim_to_dft[k] = {"key": -1, "pos": []}
             missing_atoms.append(k)
+
+    # dft order, so callers iterating the maps see atoms in input order
+    ret_dict = {k: ret_dict[k] for k in dft_dict}
+    qtaim_to_dft = {k: qtaim_to_dft[k] for k in dft_dict}
+    missing_atoms = sorted(missing_atoms)
 
     return ret_dict, qtaim_to_dft, missing_atoms
 

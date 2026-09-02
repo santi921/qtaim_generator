@@ -181,6 +181,9 @@ def write_multiwfn_exe(
     if (not completed_tf) or overwrite:
         with open(out_file, "w") as f:
             f.write("#!/bin/bash\n")
+            # Without pipefail the script's exit status is tee's (always 0), so
+            # a Multiwfn crash or OOM kill was logged as "Completed" upstream.
+            f.write("set -o pipefail\n")
             if convert_gbw:
                 f.write("orca_2mkl '" + str(Path.home().joinpath(out_folder)) + "'\n")
 
@@ -623,6 +626,8 @@ def run_jobs(
     # Without it a partial chelpg entry (e.g. 30 of 142 atoms) would be treated
     # as "data verified" and skipped forever while validation keeps failing.
     n_atoms_for_skip: Optional[int] = None
+    charge_for_skip: Optional[int] = None
+    dft_dict = None
     try:
         from qtaim_gen.source.utils.validation import (
             get_charge_spin_n_atoms_from_folder,
@@ -630,11 +635,37 @@ def run_jobs(
         dft_dict = get_charge_spin_n_atoms_from_folder(folder, logger=logger)
         if dft_dict and dft_dict.get("mol"):
             n_atoms_for_skip = len(dft_dict["mol"])
+            if dft_dict.get("charge") is not None:
+                charge_for_skip = int(dft_dict["charge"])
     except Exception as e:
         logger.warning(
             "Could not determine n_atoms for skip-completeness check: %s", e
         )
     _fuzzy_routine_set = set(fuzzy_dict.keys()) if separate else set()
+
+    # A wavefunction exported from a truncated molden (orca_2mkl killed
+    # mid-write) loads cleanly in Multiwfn with a fraction of the orbitals and
+    # every downstream step then computes garbage that still looks
+    # "substantive". Two protein_core jobs ran 108-atom systems on a 53-orbital
+    # wfx for two months. Check the electron count once, up front.
+    if restart and dft_dict:
+        wf_path = _wavefunction_path(folder)
+        expected_e = _expected_electrons(dft_dict)
+        observed_e = _wavefunction_electrons(wf_path) if wf_path else None
+        if (
+            expected_e is not None
+            and observed_e is not None
+            and abs(observed_e - expected_e) > 0.5
+        ):
+            logger.error(
+                "%s declares %.1f electrons but the input implies %d; discarding "
+                "it and every step output, rerunning all steps",
+                wf_path,
+                observed_e,
+                expected_e,
+            )
+            _discard_wavefunction_and_step_outputs(folder, order_of_operations, logger)
+            restart = False
 
     for order in order_of_operations:
         # Per-sub-job restart: data presence is the primary skip signal; timing
@@ -648,6 +679,8 @@ def run_jobs(
                 check_bcp_count=check_bcp_count,
                 bcp_tolerance=bcp_tolerance,
                 require_qtaim_provenance=require_qtaim_provenance,
+                charge=charge_for_skip,
+                fuzzy_routines=_fuzzy_routine_set,
             )
             if has_files or _compiled_data_present(
                 folder, order, _compiled_map,
@@ -696,30 +729,32 @@ def run_jobs(
             timings[order] = -1
             continue
 
+        logger.info(f"Running {mfwn_file}")
+        start = time.time()
+        step_failure = None
         try:
-            logger.info(f"Running {mfwn_file}")
-            start = time.time()
-
-            # to replace
-            # run the multiwfn wrapper script with explicit cwd to avoid depending on process CWD
-            try:
-                subprocess.run(["bash", mfwn_file], cwd=folder, check=True, env=subprocess_env)
-            except Exception as e:
-                logger.error(f"Error running {mfwn_file} via subprocess: {e}")
-
-            end = time.time()
-            # remove the .mfwn file after running
-            if os.path.exists(mfwn_file):
-                logger.info(f"Removing file: {mfwn_file}")
-                if clean_jobs_tf:
-                    os.remove(mfwn_file)
-
-            timings[order] = end - start
-            logger.info(f"Completed {order} in {end - start:.2f} seconds")
-
+            # explicit cwd so the run does not depend on the process CWD
+            subprocess.run(["bash", mfwn_file], cwd=folder, check=True, env=subprocess_env)
+        except subprocess.CalledProcessError as e:
+            step_failure = f"exit status {e.returncode}"
         except Exception as e:
-            logger.error(f"Error running {mfwn_file}: {e}")
+            step_failure = str(e)
+        elapsed = time.time() - start
+
+        if clean_jobs_tf and os.path.exists(mfwn_file):
+            logger.info(f"Removing file: {mfwn_file}")
+            os.remove(mfwn_file)
+
+        if step_failure is None:
+            timings[order] = elapsed
+            logger.info(f"Completed {order} in {elapsed:.2f} seconds")
+        else:
+            # A -1 timing fails validate_timing_dict, so the step is redone on
+            # the next pass instead of its partial .out being parsed as a result.
             timings[order] = -1
+            logger.error(
+                f"Failed {order} after {elapsed:.2f} seconds ({step_failure}): {mfwn_file}"
+            )
 
         # save timings to job root — move_results_to_folder() relocates at the end
         try:
@@ -739,6 +774,56 @@ def run_jobs(
 
         except Exception as e:
             logger.error(f"Error saving timings.json: {e}")
+
+
+def _parse_routine_out(
+    routine: str, path: str, fuzzy_routines: Optional[set] = None
+) -> Optional[dict]:
+    """Parse one Multiwfn `<routine>.out` into the dict parse_multiwfn writes
+    to `<routine>.json`. Returns None for a routine with no parser. Raises
+    whatever the underlying parser raises, so callers decide what a failure
+    means (parse_multiwfn logs it; the restart gate treats it as "rerun").
+    """
+    fuzzy_routines = fuzzy_routines or set()
+    if routine == "fuzzy_full":
+        return parse_fuzzy_doc(path)
+    if routine in ("fuzzy_bond", "fuzzy"):
+        return parse_bond_order_fuzzy(path)
+    if routine == "ibsi_bond":
+        return parse_bond_order_ibsi(path)
+    if routine == "laplacian_bond":
+        return parse_bond_order_laplace(path)
+    if routine == "other":
+        return parse_other_doc(path)
+    if routine == "other_esp":
+        return parse_other_doc_esp(path, ind_surface_prefix="ESP")
+    if routine == "other_alie":
+        return parse_other_doc_esp(path, ind_surface_prefix="ALIE")
+    if routine == "other_geometry":
+        return parse_other_doc_geometry(path)
+    if routine == "charge":
+        charges, atomic_dipoles, dipole_info = parse_charge_doc(path)
+        return {"charge": charges, "dipole": dipole_info, "atomic_dipole": atomic_dipoles}
+    if routine in ("hirshfeld", "vdd", "cm5"):
+        charges, dipole_info = parse_charge_base(path, corrected=False)
+        return {"charge": charges, "dipole": dipole_info}
+    if routine == "mbis":
+        charges = parse_charge_base(path, corrected=False, dipole=False)
+        return {"charge": charges}
+    if routine == "bader":
+        charges, spin_info = parse_charge_doc_bader(path)
+        return {"charge": charges, "spin": spin_info}
+    if routine == "adch":
+        charges, atomic_dipoles, dipole_info = parse_charge_doc_adch(path)
+        return {"charge": charges, "dipole": dipole_info, "atomic_dipole": atomic_dipoles}
+    if routine == "becke":
+        charges, atomic_dipoles, dipole_info = parse_charge_becke(path)
+        return {"charge": charges, "dipole": dipole_info, "atomic_dipole": atomic_dipoles}
+    if routine == "chelpg":
+        return {"charge": parse_charge_chelpg(path)}
+    if routine in fuzzy_routines:
+        return parse_fuzzy_real_space(path)
+    return None
 
 
 def parse_multiwfn(
@@ -771,17 +856,11 @@ def parse_multiwfn(
         [routine_list.append(i) for i in bond_dict.keys()]
         [routine_list.append(i) for i in fuzzy_dict.keys()]
         [routine_list.append(i) for i in other_dict.keys()]
-        # print("routine_list: {}".format(routine_list))
-
-        # if "charge_separate" in routine_list:
-        #    routine_list.remove("charge_separate")
-        # if "bond_separate" in routine_list:
-        #    routine_list.remove("bond_separate")
-        # if "fuzzy_full" in routine_list:
-        #    routine_list.remove("fuzzy_full")
+        fuzzy_routines = set(fuzzy_dict.keys())
 
     else:
         routine_list = ORDER_OF_OPERATIONS
+        fuzzy_routines = set()
 
     if debug:
         routine_list = ["qtaim"]
@@ -795,146 +874,43 @@ def parse_multiwfn(
                 # 'becke_fuzzy_density' (same for mbis/*_spin variants),
                 # writing wrong-parser output that only list order corrected.
                 if file == routine + ".out":
+                    if routine == "qtaim":
+                        # qtaim.out is provenance only; qtaim.json is built
+                        # from CPprop.txt below.
+                        continue
                     json_file = file_full_path.replace(".out", ".json")
                     try:
-                        if routine == "fuzzy_full":
-                            data = parse_fuzzy_doc(file_full_path)
-
-                        elif routine == "fuzzy_bond":
-                            data = parse_bond_order_fuzzy(file_full_path)
-
-                        elif routine == "ibsi_bond":
-                            data = parse_bond_order_ibsi(file_full_path)
-
-                        elif routine == "laplacian_bond":
-                            data = parse_bond_order_laplace(file_full_path)
-
-                        elif routine == "fuzzy":
-                            data = parse_bond_order_fuzzy(file_full_path)
-
-                        elif routine == "other":
-                            data = parse_other_doc(file_full_path)
-
-                        elif routine == "other_esp":
-                            data = parse_other_doc_esp(file_full_path, ind_surface_prefix="ESP")
-
-                        elif routine == "other_alie":
-                            data = parse_other_doc_esp(file_full_path, ind_surface_prefix="ALIE")
-
-                        elif routine == "other_geometry":
-                            data = parse_other_doc_geometry(file_full_path)
-
-                        elif routine == "charge":
-                            (
-                                charge_dict_overall,
-                                atomic_dipole_dict_overall,
-                                dipole_info,
-                            ) = parse_charge_doc(file_full_path)
-
-                            data = {
-                                "charge": charge_dict_overall,
-                                "dipole": dipole_info,
-                                "atomic_dipole": atomic_dipole_dict_overall,
-                            }
-
-                        elif routine == "hirshfeld":
-                            charge_dict_overall, dipole_info = parse_charge_base(
-                                file_full_path, corrected=False
-                            )
-                            data = {
-                                "charge": charge_dict_overall,
-                                "dipole": dipole_info,
-                            }
-
-                        elif routine == "vdd":
-                            charge_dict_overall, dipole_info = parse_charge_base(
-                                file_full_path, corrected=False
-                            )
-                            data = {
-                                "charge": charge_dict_overall,
-                                "dipole": dipole_info,
-                            }
-
-                        elif routine == "mbis":
-                            charge_dict_overall = parse_charge_base(
-                                file_full_path, corrected=False, dipole=False
-                            )
-                            data = {"charge": charge_dict_overall}
-
-                        elif routine == "bader":
-                            charge_dict_overall, spin_info = parse_charge_doc_bader(
-                                file_full_path
-                            )
-                            data = {"charge": charge_dict_overall, "spin": spin_info}
-
-                        elif routine == "cm5":
-                            charge_dict_overall, dipole_info = parse_charge_base(
-                                file_full_path, corrected=False
-                            )
-                            data = {
-                                "charge": charge_dict_overall,
-                                "dipole": dipole_info,
-                            }
-
-                        elif routine == "adch":
-                            (
-                                charge_dict_overall,
-                                atomic_dipole_dict_overall,
-                                dipole_info,
-                            ) = parse_charge_doc_adch(file_full_path)
-                            data = {
-                                "charge": charge_dict_overall,
-                                "dipole": dipole_info,
-                                "atomic_dipole": atomic_dipole_dict_overall,
-                            }
-
-                        elif routine == "becke":
-                            (
-                                charge_dict_overall,
-                                atomic_dipole_dict_overall,
-                                dipole_info,
-                            ) = parse_charge_becke(file_full_path)
-                            data = {
-                                "charge": charge_dict_overall,
-                                "dipole": dipole_info,
-                                "atomic_dipole": atomic_dipole_dict_overall,
-                            }
-
-                        elif routine == "chelpg":
-                            charge_dict_overall = parse_charge_chelpg(file_full_path)
-                            data = {"charge": charge_dict_overall}
-
-                        elif routine in list(fuzzy_dict.keys()):
-                            data = parse_fuzzy_real_space(file_full_path)
-
-                        elif routine == "qtaim":
-                            # qtaim has its own parser invoked elsewhere; the
-                            # routine name appears in routine_list because
-                            # ORDER_OF_OPERATIONS_separate includes it, but
-                            # this charge/bond/fuzzy/other loop is not where
-                            # qtaim.out gets parsed. Silent skip.
-                            continue
-
-                        else:
-                            logger.warning(
-                                f"Unknown routine '{routine}' in file {file_full_path}"
-                            )
-                            continue
-
-                        atomic_json_write(json_file, data)
-                        logger.info(f"Parsed {routine} output to {json_file}")
-
+                        data = _parse_routine_out(routine, file_full_path, fuzzy_routines)
                     except Exception as e:
-                        if routine == "qtaim":
-                            pass
-                        else:
-                            logger.error(
-                                f"Error parsing {routine} in {file_full_path}: {e}"
-                            )
+                        logger.error(
+                            f"Error parsing {routine} in {file_full_path}: {e}"
+                        )
+                        continue
+                    if data is None:
+                        logger.warning(
+                            f"Unknown routine '{routine}' in file {file_full_path}"
+                        )
+                        continue
+                    atomic_json_write(json_file, data)
+                    logger.info(f"Parsed {routine} output to {json_file}")
 
         elif "CPprop.txt" in file and "qtaim" in routine_list:
             json_file = os.path.join(folder, "qtaim.json")
             cp_prop_path = os.path.join(folder, file)
+
+            # A walltime kill during the CPprop.txt export leaves a partial
+            # file. Parsing it here (the "reparse before rerun" path) replaced
+            # a complete qtaim.json with a truncated one on every pass.
+            from qtaim_gen.source.utils.validation import qtaim_run_status
+
+            _qstat = qtaim_run_status(folder)
+            if _qstat["have_qtaim_out"] and not _qstat["export_done"]:
+                logger.error(
+                    f"Skipping qtaim parse in {folder}: qtaim.out shows the "
+                    f"CPprop.txt export never completed, so CPprop.txt is partial"
+                )
+                continue
+
             inp_loc = None
             inp_orca = None
             for file2 in os.listdir(folder):
@@ -946,15 +922,7 @@ def parse_multiwfn(
                     inp_loc = os.path.join(folder, file2)
                     inp_orca = False
 
-            qtaim_dict = parse_qtaim(
-                cprop_file=cp_prop_path, inp_loc=inp_loc, orca_tf=inp_orca
-            )
-
             try:
-                # print(cp_prop_path)
-                # print(inp_loc)
-                # print(inp_orca)
-
                 qtaim_dict = parse_qtaim(
                     cprop_file=cp_prop_path, inp_loc=inp_loc, orca_tf=inp_orca
                 )
@@ -1738,17 +1706,85 @@ def _is_substantive_step_out(path: str, order: str = None) -> bool:
         return False
 
 
-def _wavefunction_present(folder: str) -> bool:
-    """True if a non-empty orca.wfn or orca.wfx exists in folder/ or generator/."""
+def _wavefunction_path(folder: str) -> Optional[str]:
+    """Path of a non-empty orca.wfn or orca.wfx in folder/ or generator/, or None."""
     for base in (folder, os.path.join(folder, "generator")):
         for ext in (".wfn", ".wfx"):
             wf = os.path.join(base, f"orca{ext}")
             try:
                 if os.path.isfile(wf) and os.path.getsize(wf) > 0:
-                    return True
+                    return wf
             except OSError:
                 continue
-    return False
+    return None
+
+
+def _wavefunction_present(folder: str) -> bool:
+    """True if a non-empty orca.wfn or orca.wfx exists in folder/ or generator/."""
+    return _wavefunction_path(folder) is not None
+
+
+def _expected_electrons(dft_dict: dict) -> Optional[int]:
+    """sum(Z) - net charge from the parsed input file, or None."""
+    try:
+        from rdkit import Chem
+
+        table = Chem.GetPeriodicTable()
+        z = sum(table.GetAtomicNumber(a["element"]) for a in dft_dict["mol"].values())
+        return z - int(dft_dict.get("charge", 0))
+    except Exception:
+        return None
+
+
+def _wavefunction_electrons(path: str) -> Optional[float]:
+    """Electron count a .wfx declares: <Number of Electrons> plus <Number of
+    Core Electrons> (Multiwfn 3.8 writes both, the latter non-zero for ECP
+    systems). Stops at the nuclear-names block, so only the header is read.
+    .wfn carries no core count, so it is not judged. None if unreadable."""
+    if not path.endswith(".wfx"):
+        return None
+    total = 0.0
+    found = False
+    tag = None
+    try:
+        with open(path, "r", errors="replace") as f:
+            for line in f:
+                s = line.strip()
+                if tag is not None:
+                    total += float(s.split()[0])
+                    found = True
+                    tag = None
+                    continue
+                if s in ("<Number of Electrons>", "<Number of Core Electrons>"):
+                    tag = s
+                    continue
+                if s.startswith("<Nuclear Names>") or s.startswith("<Primitive Centers>"):
+                    break
+    except (OSError, ValueError, IndexError):
+        return None
+    return total if found else None
+
+
+def _discard_wavefunction_and_step_outputs(
+    folder: str, orders: list, logger: logging.Logger
+) -> None:
+    """Remove the wavefunction and every per-step artifact in the job root so
+    the whole analysis is recomputed from the .gbw."""
+    targets = []
+    for base in (folder, os.path.join(folder, "generator")):
+        targets += [os.path.join(base, f"orca{ext}") for ext in (".wfn", ".wfx")]
+    for order in orders:
+        if order == "convert":
+            continue
+        targets += [os.path.join(folder, f"{order}.out"), os.path.join(folder, f"{order}.json")]
+    targets += [os.path.join(folder, "CPprop.txt"), os.path.join(folder, "qtaim.json")]
+    for path in targets:
+        if os.path.isfile(path):
+            try:
+                os.remove(path)
+                logger.info("Removed %s: derived from a wavefunction with the wrong electron count", path)
+            except OSError as e:
+                logger.warning("Could not remove %s: %s", path, e)
 
 
 def _qtaim_output_complete(
@@ -1841,7 +1877,89 @@ def _qtaim_output_complete(
                     if expected - n_bcp > bcp_tolerance:
                         return False
         return True
-    return False
+
+    # No usable qtaim.json. parse_multiwfn only writes it after every step has
+    # run, so a job killed between the qtaim step and the final parse holds a
+    # complete qtaim.out + CPprop.txt and no json. Treating that as "not done"
+    # made a 235-atom job redo its 10.5 ks qtaim step on four consecutive
+    # restarts and never get past it inside the walltime.
+    return _qtaim_raw_output_complete(folder, n_atoms=n_atoms)
+
+
+def _qtaim_raw_output_complete(folder: str, n_atoms: Optional[int] = None) -> bool:
+    """Root qtaim.out carries both completion markers and root CPprop.txt holds
+    one nuclear CP per atom, so parse_multiwfn can build qtaim.json from it."""
+    from qtaim_gen.source.utils.validation import qtaim_run_status
+    from qtaim_gen.source.core.parse_qtaim import get_qtaim_descs, only_atom_cps
+
+    cpprop = os.path.join(folder, "CPprop.txt")
+    qtaim_out = os.path.join(folder, "qtaim.out")
+    try:
+        if not (
+            os.path.isfile(qtaim_out)
+            and os.path.isfile(cpprop)
+            and os.path.getsize(cpprop) > 0
+        ):
+            return False
+    except OSError:
+        return False
+    # qtaim_run_status reads the root qtaim.out first, which is the one that
+    # exists here, so the status describes the same run as CPprop.txt.
+    status = qtaim_run_status(folder)
+    if not (status["search_done"] and status["export_done"]):
+        return False
+    if n_atoms is None:
+        return True
+    try:
+        atoms, _ = only_atom_cps(get_qtaim_descs(cpprop))
+    except Exception:
+        return False
+    return len(atoms) == n_atoms
+
+
+# |sum(atomic charges) - net charge| above this means the run did not see the
+# full electron density (e.g. a wavefunction exported from a truncated molden:
+# Hirshfeld "charges" of 3.7 on carbon summing to hundreds). Grid partitions
+# normally close to within 0.01 e.
+_CHARGE_SUM_TOLERANCE = 0.5
+
+
+def _step_out_parses(
+    path: str,
+    order: str,
+    fuzzy_routines: Optional[set] = None,
+    n_atoms: Optional[int] = None,
+    charge: Optional[int] = None,
+) -> bool:
+    """Whether a banner-complete `.out` actually yields usable data.
+
+    The menu-banner check only proves Multiwfn reached the end of the script.
+    A run against a broken wavefunction gets there too, printing overflowed
+    `************` fields that fail to parse or populations that sum to
+    hundreds; skipping such a step as "data verified" meant the folder failed
+    validation on every pass while nothing was ever recomputed.
+    """
+    try:
+        data = _parse_routine_out(order, path, fuzzy_routines)
+    except Exception:
+        return False
+    if data is None:
+        return True  # no parser for this routine; the banner check is all we have
+    if not data:
+        return False
+    charges = data.get("charge") if isinstance(data, dict) else None
+    if not isinstance(charges, dict):
+        return True
+    if n_atoms is not None and len(charges) != n_atoms:
+        return False
+    if charge is not None:
+        try:
+            total = sum(float(v) for v in charges.values())
+        except (TypeError, ValueError):
+            return False
+        if abs(total - charge) > _CHARGE_SUM_TOLERANCE:
+            return False
+    return True
 
 
 def _has_usable_step_output(
@@ -1851,6 +1969,8 @@ def _has_usable_step_output(
     check_bcp_count: bool = False,
     bcp_tolerance: int = 2,
     require_qtaim_provenance: bool = False,
+    charge: Optional[int] = None,
+    fuzzy_routines: Optional[set] = None,
 ) -> bool:
     """Check whether a sub-job appears to have produced usable output on disk.
 
@@ -1883,7 +2003,13 @@ def _has_usable_step_output(
     for base in (folder, os.path.join(folder, "generator")):
         out_path = os.path.join(base, f"{order}.out")
         if os.path.isfile(out_path):
-            if _is_substantive_step_out(out_path, order=order):
+            if _is_substantive_step_out(out_path, order=order) and _step_out_parses(
+                out_path,
+                order,
+                fuzzy_routines=fuzzy_routines,
+                n_atoms=n_atoms,
+                charge=charge,
+            ):
                 return True
             # .out present but bad — don't trust stale .json in this location
         else:
