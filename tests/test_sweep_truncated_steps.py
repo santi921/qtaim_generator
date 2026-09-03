@@ -122,11 +122,16 @@ class TestClassifyFolder:
         assert "hirshfeld" not in rec["truncated_steps"]
 
     def test_complete_out_not_rerun(self, tmp_path):
-        """A .out with two banners is trusted; the step is skipped."""
+        """A .out with two banners and a parseable, full charge table is
+        trusted; the step is skipped."""
         folder = _make_started_folder(tmp_path)
         (folder / "hirshfeld.out").write_text(
             _MULTIWFN_HEAD
             + " Final atomic charges:\n"
+            + " Atom    1(C ):   0.10000000\n"
+            + " Atom    2(O ):  -0.20000000\n"
+            + " Atom    3(H ):   0.10000000\n"
+            + "\n"
             + _MULTIWFN_MENU_TAIL
         )
         rec = sweep.classify_folder(
@@ -134,6 +139,18 @@ class TestClassifyFolder:
         )
         assert rec["class"] == "needs_rerun"
         assert "hirshfeld" not in rec["rerun_steps"]
+
+    def test_banner_complete_but_empty_table_reruns(self, tmp_path):
+        """Two banners are no longer enough: a charge table with no rows (or
+        overflowed values) is what a run on a broken wavefunction leaves."""
+        folder = _make_started_folder(tmp_path)
+        (folder / "hirshfeld.out").write_text(
+            _MULTIWFN_HEAD + " Final atomic charges:\n" + _MULTIWFN_MENU_TAIL
+        )
+        rec = sweep.classify_folder(
+            str(folder), None, None, full_set=1, move_results=False
+        )
+        assert "hirshfeld" in rec["rerun_steps"]
 
     def test_timings_sum_reported(self, tmp_path):
         folder = _make_started_folder(tmp_path)

@@ -1,0 +1,319 @@
+ Multiwfn -- A Multifunctional Wavefunction Analyzer
+ Version 3.8(dev), update date: 2024-Oct-6
+ Developer: Tian Lu (Beijing Kein Research Center for Natural Sciences)
+ Multiwfn official website: http://sobereva.com/multiwfn
+ Multiwfn English forum: http://sobereva.com/wfnbbs
+ Multiwfn Chinese forum: http://bbs.keinsci.com/wfn
+ Both following papers ***MUST BE CITED IN MAIN TEXT*** if Multiwfn is used:
+          Tian Lu, Feiwu Chen, J. Comput. Chem., 33, 580-592 (2012)
+          Tian Lu, J. Chem. Phys., 161, 082503 (2024)
+ See "How to cite Multiwfn.pdf" in Multiwfn binary package for more information
+
+ ( Number of parallel threads:   4  Current date: 2026-07-17  Time: 22:26:58 )
+ 
+ Please wait...
+ 
+ Total energy:       0.000000000000 Hartree,   Virial ratio:  2.00000000
+ Total/Alpha/Beta electrons:     20.0000     10.0000     10.0000
+ Number of orbital:    10,  Atoms:    150,  GTFs:   5185
+ This is restricted closed-shell single-determinant wavefunction
+ 
+
+ Loaded orca.wfx successfully!
+ 
+ Formula: H76 C46 N15 O12 S1      Total atoms:     150
+ Molecule weight:      1063.25554 Da
+ Point group: C1 
+ 
+ "q": Exit program gracefully          "r": Load a new file
+                    ************ Main function menu ************
+ 0 Show molecular structure and view orbitals
+ 1 Output all properties at a point       2 Topology analysis
+ 3 Output and plot specific property in a line
+ 4 Output and plot specific property in a plane
+ 5 Output and plot specific property within a spatial region (calc. grid data)
+ 6 Check & modify wavefunction
+ 7 Population analysis and calculation of atomic charges
+ 8 Orbital composition analysis           9 Bond order analysis
+ 10 Plot total DOS, PDOS, OPDOS, local DOS, COHP and photoelectron spectrum
+ 11 Plot IR/Raman/UV-Vis/ECD/VCD/ROA/NMR spectrum
+ 12 Quantitative analysis of molecular surface
+ 13 Process grid data (No grid data is presented currently)
+ 14 Adaptive natural density partitioning (AdNDP) analysis
+ 15 Fuzzy atomic space analysis
+ 16 Charge decomposition analysis (CDA) and plot orbital interaction diagram
+ 17 Basin analysis                       18 Electron excitation analysis
+ 19 Orbital localization analysis        20 Visual study of weak interaction
+ 21 Energy decomposition analysis        22 Conceptual DFT (CDFT) analysis
+ 23 ETS-NOCV analysis                    24 (Hyper)polarizability analysis
+ 25 Electron delocalization and aromaticity analyses
+ 26 Structure and geometry related analyses
+ 100 Other functions (Part 1)            200 Other functions (Part 2)
+ 300 Other functions (Part 3)
+ There is a nice reference comprehensively introducing atomic charges:
+ Tian Lu, Qinxue Chen, Partial Charges, In Exploring Chemical Concepts Through T
+ heory and Computation. WILEY-VCH GmbH: Weinheim (2024); pp. 161-187. DOI: 10.10
+ 02/9783527843435.ch6
+ 
+      ============== Population analysis and atomic charges ==============
+ -2 Calculate interaction energy between fragments based on atomic charges
+ -1 Define fragment
+ 0 Return
+ 1 Hirshfeld atomic charge
+ 2 Voronoi deformation density (VDD) atom population
+ 10 Becke atomic charge with atomic dipole moment correction
+ 11 Atomic dipole corrected Hirshfeld atomic charge (ADCH) (recommended)
+ 12 CHELPG ESP fitting atomic charge
+ 13 Merz-Kollmann (MK) ESP fitting atomic charge
+ 14 AIM atomic charge
+ 15 Hirshfeld-I atomic charge
+ 16 CM5 atomic charge    -16 Generate 1.2*CM5 atomic charge
+ 17 Electronegativity Equalization Method (EEM) atomic charge
+ 18 Restrained ElectroStatic Potential (RESP) atomic charge
+ 19 Gasteiger (PEOE) charge
+ 20 Minimal Basis Iterative Stockholder (MBIS) charge
+ 
+             ------------ Calculation of CHELPG charges ------------
+ -3 Toggle using atomic charges in external file, current: No
+ -2 Toggle loading additional fitting centers from external file, current: No
+ -1 Toggle using fitting points in external file, current: No
+ 0 Return
+ 1 Start calculation!
+ 2 Set grid spacing, current:  0.567 Bohr (  0.300 Angstrom)
+ 3 Set box extension, current:  5.291 Bohr (  2.800 Angstrom)
+ 4 Choose the atoms used for generating fitting points, current: All atoms
+ 5 Choose ESP type, current: Nuclear + Electronic
+ 6 Toggle if exporting fitting points with ESP after the task, current: No
+ 7 Toggle if reading fitting points and ESP values from Gaussian output file of pop=MK/CHELPG task with IOp(6/33=2), current: No
+ 10 Choose the atomic radii used in fitting, current: Automatic
+ Atomic radii used:
+ Element:H      vdW radius (Angstrom): 1.450
+ Element:C      vdW radius (Angstrom): 1.500
+ Element:N      vdW radius (Angstrom): 1.700
+ Element:O      vdW radius (Angstrom): 1.700
+ Element:S      vdW radius (Angstrom): 2.000
+ 
+ Number of CHELPG fitting points used:     65274
+ Calculating ESP at fitting points, please wait...
+ 
+ Initializing LIBRETA library (fast version) for ESP evaluation ...
+ LIBRETA library has been successfully initialized!
+
+ NOTE: The ESP evaluation code based on LIBRETA library is being used. Please cite Multiwfn original papers (J. Comput. Chem., 33, 580-592 (2012) and J. Chem. Phys., 161, 082503 (2024)) and the paper describing the efficient ESP evaluation algorithm adopted by Multiwfn (Phys. Chem. Chem. Phys., 23, 20323 (2021))
+ 
+ Progress: [--------------------------------------------------]     0.0 %     - Progress: [--------------------------------------------------]     0.0 %     \ Progress: [--------------------------------------------------]     1.0 %     | Progress: [#-------------------------------------------------]     2.0 %     / Progress: [#-------------------------------------------------]     3.0 %     - Progress: [##------------------------------------------------]     4.0 %     \ Progress: [##------------------------------------------------]     5.0 %     | Progress: [###-----------------------------------------------]     6.0 %     / Progress: [###-----------------------------------------------]     7.0 %     - Progress: [####----------------------------------------------]     8.0 %     \ Progress: [####----------------------------------------------]     9.0 %     | Progress: [#####---------------------------------------------]    10.0 %     / Progress: [#####---------------------------------------------]    11.0 %     - Progress: [######--------------------------------------------]    12.0 %     \ Progress: [######--------------------------------------------]    13.0 %     | Progress: [#######-------------------------------------------]    14.0 %     / Progress: [#######-------------------------------------------]    15.0 %     - Progress: [########------------------------------------------]    16.0 %     \ Progress: [########------------------------------------------]    17.0 %     | Progress: [#########-----------------------------------------]    18.0 %     / Progress: [#########-----------------------------------------]    19.0 %     - Progress: [##########----------------------------------------]    20.0 %     \ Progress: [##########----------------------------------------]    21.0 %     | Progress: [###########---------------------------------------]    22.0 %     / Progress: [###########---------------------------------------]    23.0 %     - Progress: [############--------------------------------------]    24.0 %     \ Progress: [############--------------------------------------]    25.0 %     | Progress: [#############-------------------------------------]    26.0 %     / Progress: [#############-------------------------------------]    27.0 %     - Progress: [##############------------------------------------]    28.0 %     \ Progress: [##############------------------------------------]    29.0 %     | Progress: [###############-----------------------------------]    30.0 %     / Progress: [###############-----------------------------------]    31.0 %     - Progress: [################----------------------------------]    32.0 %     \ Progress: [################----------------------------------]    33.0 %     | Progress: [#################---------------------------------]    34.0 %     / Progress: [#################---------------------------------]    35.0 %     - Progress: [##################--------------------------------]    36.0 %     \ Progress: [##################--------------------------------]    37.0 %     | Progress: [###################-------------------------------]    38.0 %     / Progress: [###################-------------------------------]    39.0 %     - Progress: [####################------------------------------]    40.0 %     \ Progress: [####################------------------------------]    41.0 %     | Progress: [#####################-----------------------------]    42.0 %     / Progress: [#####################-----------------------------]    43.0 %     - Progress: [######################----------------------------]    44.0 %     \ Progress: [######################----------------------------]    45.0 %     | Progress: [#######################---------------------------]    46.0 %     / Progress: [#######################---------------------------]    47.0 %     - Progress: [########################--------------------------]    48.0 %     \ Progress: [########################--------------------------]    49.0 %     | Progress: [#########################-------------------------]    50.0 %     / Progress: [#########################-------------------------]    51.0 %     - Progress: [##########################------------------------]    52.0 %     \ Progress: [##########################------------------------]    53.0 %     | Progress: [###########################-----------------------]    54.0 %     / Progress: [###########################-----------------------]    55.0 %     - Progress: [############################----------------------]    56.0 %     \ Progress: [############################----------------------]    57.0 %     | Progress: [############################----------------------]    58.0 %     / Progress: [#############################---------------------]    59.0 %     - Progress: [##############################--------------------]    60.0 %     \ Progress: [##############################--------------------]    61.0 %     | Progress: [###############################-------------------]    62.0 %     / Progress: [###############################-------------------]    63.0 %     - Progress: [################################------------------]    64.0 %     \ Progress: [################################------------------]    65.0 %     | Progress: [#################################-----------------]    66.0 %     / Progress: [#################################-----------------]    67.0 %     - Progress: [##################################----------------]    68.0 %     \ Progress: [##################################----------------]    69.0 %     | Progress: [###################################---------------]    70.0 %     / Progress: [###################################---------------]    71.0 %     - Progress: [####################################--------------]    72.0 %     \ Progress: [####################################--------------]    73.0 %     | Progress: [#####################################-------------]    74.0 %     / Progress: [#####################################-------------]    75.0 %     - Progress: [######################################------------]    76.0 %     \ Progress: [######################################------------]    77.0 %     | Progress: [#######################################-----------]    78.0 %     / Progress: [#######################################-----------]    79.0 %     - Progress: [########################################----------]    80.0 %     \ Progress: [########################################----------]    81.0 %     | Progress: [#########################################---------]    82.0 %     / Progress: [#########################################---------]    83.0 %     - Progress: [##########################################--------]    84.0 %     \ Progress: [##########################################--------]    85.0 %     | Progress: [###########################################-------]    86.0 %     / Progress: [###########################################-------]    87.0 %     - Progress: [############################################------]    88.0 %     \ Progress: [############################################------]    89.0 %     | Progress: [#############################################-----]    90.0 %     / Progress: [#############################################-----]    91.0 %     - Progress: [##############################################----]    92.0 %     \ Progress: [##############################################----]    93.0 %     | Progress: [###############################################---]    94.0 %     / Progress: [###############################################---]    95.0 %     - Progress: [################################################--]    96.0 %     \ Progress: [################################################--]    97.0 %     | Progress: [#################################################-]    98.0 %     / Progress: [#################################################-]    99.0 %     - Progress: [##################################################]   100.0 %     \ 
+ Calculation of ESP took up wall clock time    -74865 s
+ 
+   Center       Charge
+     1(C )-205.7990054130
+     2(C ) -37.3272476754
+     3(O )  53.3599831651
+     4(H )  88.3585643092
+     5(H )  70.4787624425
+     6(H )  59.3305177212
+     7(N )  43.3704673285
+     8(C ) -18.2069206918
+     9(C )   6.8797446893
+    10(O )  14.5411300598
+    11(C ) -37.1620433688
+    12(C ) -10.9218588281
+    13(C )  -4.5123383173
+    14(C )-108.9220807545
+    15(N )-223.1330540402
+    16(H )  -1.9756110722
+    17(H )  13.3717120729
+    18(H )  11.8591661439
+    19(H )  15.9052221975
+    20(H )  29.4010414426
+    21(H )   3.0810292501
+    22(H )  27.7178098082
+    23(H )  10.4828337322
+    24(H )  52.2319140392
+    25(H )  41.2001738525
+    26(H )  49.9543680769
+    27(H ) 100.1831656490
+    28(H )  91.6687899956
+    29(H ) -10.3622596751
+    30(N )   4.1083825335
+    31(C )  23.4960303621
+    32(H )  -9.3048399340
+    33(H )  -3.2560490405
+    34(H )   2.0870045511
+    35(C )-360.8424770343
+    36(C )  66.3234984399
+    37(O )  28.4807625691
+    38(H ) 119.1309834313
+    39(H ) 109.9064770928
+    40(H ) 119.0213570185
+    41(N ) -64.9427503622
+    42(C )  66.3673595509
+    43(C ) -73.9507081900
+    44(O )  47.6964923844
+    45(C ) -80.6029721997
+    46(C )  51.6802509862
+    47(C )  20.6827604699
+    48(O )  -2.8551528247
+    49(N ) -71.6753758837
+    50(H )  21.0128281362
+    51(H )   1.8035932946
+    52(H )  24.7439309895
+    53(H )  26.2291653541
+    54(H )   1.9142556580
+    55(H ) -23.2846266792
+    56(H )  46.9844629454
+    57(H )  24.3366555143
+    58(H ) -10.7161936034
+    59(N )  59.3571884610
+    60(C )-138.2780696044
+    61(H )  26.5824636852
+    62(H )  57.1842011849
+    63(H )  28.6129056133
+    64(C )-146.1795990028
+    65(C )   7.7797336139
+    66(O )  38.2500194144
+    67(H )  51.7942764752
+    68(H )  48.0737962539
+    69(H )  35.6623149828
+    70(N )   0.0762093239
+    71(C ) -87.5175489381
+    72(C )  42.2975859835
+    73(O )   6.9540796063
+    74(C ) -74.2206613825
+    75(C )  71.6536401974
+    76(C )  12.8723397333
+    77(C ) -25.0929992320
+    78(C ) -59.8372640230
+    79(C )  41.4699219429
+    80(C ) -21.3717694713
+    81(H )  33.4262505671
+    82(H )   5.1417331037
+    83(H )   2.7698431878
+    84(H )   4.8842546247
+    85(H )  -9.2658683450
+    86(H )   3.0334573447
+    87(H )  41.1783121731
+    88(H ) -19.9720125010
+    89(H )  28.6145435201
+    90(H )  13.5568415317
+    91(N ) -23.1342113335
+    92(C )-208.8828525031
+    93(H )  62.3563620237
+    94(H )  60.4448383613
+    95(H )  99.4120001241
+    96(C ) -87.2001568174
+    97(C ) -21.9669948094
+    98(O )  31.2524591580
+    99(H )  49.9540137557
+   100(H )  20.7474774692
+   101(H )   9.8584259839
+   102(N ) 106.2250509815
+   103(C )-149.1751086896
+   104(C ) -19.9098143876
+   105(C )-263.2352681799
+   106(S ) 157.6319202092
+   107(C )  61.4953731258
+   108(O )   3.0730812250
+   109(C )-229.6160640969
+   110(C )  -3.3760541447
+   111(O )  35.8276724990
+   112(C )-105.2153514168
+   113(O )  44.0304655470
+   114(C ) -53.6389437652
+   115(O )  40.8246095926
+   116(C )  53.9951948126
+   117(N ) -19.1110950423
+   118(C )  11.5676443534
+   119(N )  29.2642205141
+   120(C ) -47.7785574677
+   121(C )  56.2965709432
+   122(N ) -45.4582166726
+   123(N ) -24.0203348021
+   124(C )  13.0327529476
+   125(N )  -4.3266286055
+   126(C )  41.0694621708
+   127(H ) -18.0005588446
+   128(H )  48.2917942445
+   129(H )  24.8995544389
+   130(H )  40.3022009782
+   131(H ) 102.6315438492
+   132(H )  75.3342980311
+   133(H )  79.7904555468
+   134(H )  75.2546124250
+   135(H )   6.4899218861
+   136(H )  48.2989984820
+   137(H )  26.1549465606
+   138(H )  32.2274647371
+   139(H ) -19.9980144502
+   140(H ) -15.1756696519
+   141(H ) -15.1809757567
+   142(H )   7.1457503110
+   143(H )  28.3472386747
+   144(H )   7.4825979561
+   145(H )  12.0466629102
+   146(N )  15.6346158290
+   147(C )-336.0063712941
+   148(H )  93.2200538947
+   149(H ) 119.8297672490
+   150(H ) 118.5459672234
+ Sum of charges: 548.9999999879
+ RMSE:    4.921274   RRMSE:    0.166341
+
+ If outputting atom coordinates with charges to orca.chg in current folder? (y/n)
+ 
+             ------------ Calculation of CHELPG charges ------------
+ -3 Toggle using atomic charges in external file, current: No
+ -2 Toggle loading additional fitting centers from external file, current: No
+ -1 Toggle using fitting points in external file, current: No
+ 0 Return
+ 1 Start calculation!
+ 2 Set grid spacing, current:  0.567 Bohr (  0.300 Angstrom)
+ 3 Set box extension, current:  5.291 Bohr (  2.800 Angstrom)
+ 4 Choose the atoms used for generating fitting points, current: All atoms
+ 5 Choose ESP type, current: Nuclear + Electronic
+ 6 Toggle if exporting fitting points with ESP after the task, current: No
+ 7 Toggle if reading fitting points and ESP values from Gaussian output file of pop=MK/CHELPG task with IOp(6/33=2), current: No
+ 10 Choose the atomic radii used in fitting, current: Automatic
+ 
+      ============== Population analysis and atomic charges ==============
+ -2 Calculate interaction energy between fragments based on atomic charges
+ -1 Define fragment
+ 0 Return
+ 1 Hirshfeld atomic charge
+ 2 Voronoi deformation density (VDD) atom population
+ 10 Becke atomic charge with atomic dipole moment correction
+ 11 Atomic dipole corrected Hirshfeld atomic charge (ADCH) (recommended)
+ 12 CHELPG ESP fitting atomic charge
+ 13 Merz-Kollmann (MK) ESP fitting atomic charge
+ 14 AIM atomic charge
+ 15 Hirshfeld-I atomic charge
+ 16 CM5 atomic charge    -16 Generate 1.2*CM5 atomic charge
+ 17 Electronegativity Equalization Method (EEM) atomic charge
+ 18 Restrained ElectroStatic Potential (RESP) atomic charge
+ 19 Gasteiger (PEOE) charge
+ 20 Minimal Basis Iterative Stockholder (MBIS) charge
+ 
+ "q": Exit program gracefully          "r": Load a new file
+                    ************ Main function menu ************
+ 0 Show molecular structure and view orbitals
+ 1 Output all properties at a point       2 Topology analysis
+ 3 Output and plot specific property in a line
+ 4 Output and plot specific property in a plane
+ 5 Output and plot specific property within a spatial region (calc. grid data)
+ 6 Check & modify wavefunction
+ 7 Population analysis and calculation of atomic charges
+ 8 Orbital composition analysis           9 Bond order analysis
+ 10 Plot total DOS, PDOS, OPDOS, local DOS, COHP and photoelectron spectrum
+ 11 Plot IR/Raman/UV-Vis/ECD/VCD/ROA/NMR spectrum
+ 12 Quantitative analysis of molecular surface
+ 13 Process grid data (No grid data is presented currently)
+ 14 Adaptive natural density partitioning (AdNDP) analysis
+ 15 Fuzzy atomic space analysis
+ 16 Charge decomposition analysis (CDA) and plot orbital interaction diagram
+ 17 Basin analysis                       18 Electron excitation analysis
+ 19 Orbital localization analysis        20 Visual study of weak interaction
+ 21 Energy decomposition analysis        22 Conceptual DFT (CDFT) analysis
+ 23 ETS-NOCV analysis                    24 (Hyper)polarizability analysis
+ 25 Electron delocalization and aromaticity analyses
+ 26 Structure and geometry related analyses
+ 100 Other functions (Part 1)            200 Other functions (Part 2)
+ 300 Other functions (Part 3)

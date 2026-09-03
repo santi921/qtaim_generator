@@ -302,8 +302,10 @@ def test_bond_cp_via_qtaim_bond_defns():
 EDGE_CASES = Path(__file__).parent / "test_files" / "edge_cases"
 
 
-def test_merge_qtaim_inds_missing_atom(capsys):
-    """merge_qtaim_inds should skip bonds referencing unmatched atoms."""
+def test_merge_qtaim_inds_close_same_element_atoms(capsys):
+    """qtaim_0 has H atoms 43 and 60 about 1.0 A apart. First-match-within-
+    margin mapping let atom 43 take NCP 60_H, left atom 60 unmatched and
+    dropped bond CP 105. Exact-index matching first keeps all 102 bond CPs."""
     dict_qtaim = get_qtaim_descs(
         str(EDGE_CASES / "qtaim_0" / "CPprop.txt"), verbose=False
     )
@@ -316,13 +318,48 @@ def test_merge_qtaim_inds_missing_atom(capsys):
         margin=1.0,
     )
 
-    # Should have atom CPs (int keys) and bond CPs (tuple keys)
     atom_keys = [k for k in cp_dict if isinstance(k, int)]
     bond_keys = [k for k in cp_dict if isinstance(k, tuple)]
     assert len(atom_keys) == 84, f"expected 84 atom CPs, got {len(atom_keys)}"
-    # Bond 105 was skipped (references missing atom 59), so 101 not 102
-    assert len(bond_keys) == 101, f"expected 101 bond CPs, got {len(bond_keys)}"
+    assert len(bond_keys) == 102, f"expected 102 bond CPs, got {len(bond_keys)}"
+    assert all(cp_dict[k] for k in atom_keys), "every atom should map to a CP"
 
-    # Verify warning was printed
     captured = capsys.readouterr()
-    assert "Warning: skipping bond CP" in captured.out
+    assert "Warning: skipping bond CP" not in captured.out
+
+
+def test_find_cp_map_exact_index_beats_nearby_same_element():
+    # Two H atoms 0.99 A apart, each with its own NCP 0.01 A away. CP order
+    # puts the wrong one first, which is what the old first-match code took.
+    dft = {
+        0: {"element": "H", "pos": [0.0, 0.0, 0.0]},
+        1: {"element": "H", "pos": [0.99, 0.0, 0.0]},
+        2: {"element": "O", "pos": [5.0, 0.0, 0.0]},
+    }
+    cps = {
+        "2_H": {"element": "H", "pos_ang": [0.99, 0.0, 0.01]},
+        "1_H": {"element": "H", "pos_ang": [0.0, 0.0, 0.01]},
+        "3_O": {"element": "O", "pos_ang": [5.0, 0.0, 0.0]},
+    }
+    ret, q2d, missing = find_cp_map(dft, cps, margin=1.0)
+    assert missing == []
+    assert [q2d[i]["key"] for i in range(3)] == ["1_H", "2_H", "3_O"]
+    assert ret[1]["pos_ang"] == [0.99, 0.0, 0.01]
+
+
+def test_find_cp_map_distance_fallback_takes_nearest():
+    # Multiwfn renumbered the CPs, so no exact match; the nearest same-element
+    # CP inside the margin must win, not the first one encountered.
+    dft = {
+        0: {"element": "C", "pos": [0.0, 0.0, 0.0]},
+        1: {"element": "C", "pos": [0.8, 0.0, 0.0]},
+    }
+    cps = {
+        "7_C": {"element": "C", "pos_ang": [0.8, 0.0, 0.0]},
+        "9_C": {"element": "C", "pos_ang": [0.0, 0.0, 0.0]},
+        "5_N": {"element": "N", "pos_ang": [0.1, 0.0, 0.0]},
+    }
+    _, q2d, missing = find_cp_map(dft, cps, margin=1.0)
+    assert missing == []
+    assert q2d[0]["key"] == "9_C"
+    assert q2d[1]["key"] == "7_C"

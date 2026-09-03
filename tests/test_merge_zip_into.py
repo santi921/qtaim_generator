@@ -53,7 +53,7 @@ def test_merge_adds_missing_entries():
         }
 
 
-def test_collision_prefers_larger():
+def test_collision_prefers_fresh_src_regardless_of_size():
     with tempfile.TemporaryDirectory() as tmp:
         src = os.path.join(tmp, "src.zip")
         dest = os.path.join(tmp, "dest.zip")
@@ -64,10 +64,10 @@ def test_collision_prefers_larger():
 
         merged = _read_zip(dest)
         assert merged["adch.out"] == b"richer adch content here"
-        assert merged["cm5.out"] == b"rich cm5 content"
+        assert merged["cm5.out"] == b"x"
 
 
-def test_collision_equal_size_keeps_existing():
+def test_collision_equal_size_prefers_src():
     with tempfile.TemporaryDirectory() as tmp:
         src = os.path.join(tmp, "src.zip")
         dest = os.path.join(tmp, "dest.zip")
@@ -76,7 +76,74 @@ def test_collision_equal_size_keeps_existing():
 
         merge_zip_into(src, dest)
 
-        assert _read_zip(dest) == {"a.out": b"XXXXX"}
+        assert _read_zip(dest) == {"a.out": b"YYYYY"}
+
+
+def test_killed_qtaim_out_does_not_displace_complete_rerun():
+    # A walltime-killed qtaim.out is mostly progress-bar frames and is larger
+    # than a complete one. The rerun's complete file must win the collision,
+    # otherwise the folder fails "search never completed" on every pass.
+    with tempfile.TemporaryDirectory() as tmp:
+        src = os.path.join(tmp, "src.zip")
+        dest = os.path.join(tmp, "dest.zip")
+        killed = b" Progress: [----]  0.0 %\r" * 5000
+        complete = (
+            b" Number of (3,-1) CPs:   24    Generating topology paths...\n"
+            b" Done! The results have been outputted to CPprop.txt in current folder\n"
+        )
+        assert len(killed) > len(complete)
+        _make_zip(dest, {"qtaim.out": killed})
+        _make_zip(src, {"qtaim.out": complete})
+
+        merge_zip_into(src, dest)
+
+        assert _read_zip(dest)["qtaim.out"] == complete
+
+
+BANNER = b" ************ Main function menu ************\n"
+COMPLETE_OUT = BANNER + b" Final atomic charges:\n Atom 1(C): 0.1\n\n" + BANNER
+KILLED_OUT = BANNER + b" Progress: [##--------]  20.0 %\r" * 300
+
+
+def test_killed_src_out_does_not_displace_complete_dest():
+    # A rerun killed mid-step leaves a one-banner .out in the job root; a later
+    # pass that skips the step still zips it. The archived complete copy must
+    # survive that merge.
+    with tempfile.TemporaryDirectory() as tmp:
+        src = os.path.join(tmp, "src.zip")
+        dest = os.path.join(tmp, "dest.zip")
+        _make_zip(dest, {"adch.out": COMPLETE_OUT})
+        _make_zip(src, {"adch.out": KILLED_OUT})
+
+        merge_zip_into(src, dest)
+
+        assert _read_zip(dest)["adch.out"] == COMPLETE_OUT
+
+
+def test_complete_src_out_replaces_killed_dest():
+    with tempfile.TemporaryDirectory() as tmp:
+        src = os.path.join(tmp, "src.zip")
+        dest = os.path.join(tmp, "dest.zip")
+        _make_zip(dest, {"adch.out": KILLED_OUT})
+        _make_zip(src, {"adch.out": COMPLETE_OUT})
+
+        merge_zip_into(src, dest)
+
+        assert _read_zip(dest)["adch.out"] == COMPLETE_OUT
+
+
+def test_cpprop_follows_qtaim_out_verdict():
+    with tempfile.TemporaryDirectory() as tmp:
+        src = os.path.join(tmp, "src.zip")
+        dest = os.path.join(tmp, "dest.zip")
+        _make_zip(dest, {"qtaim.out": COMPLETE_OUT, "CPprop.txt": b"full table"})
+        _make_zip(src, {"qtaim.out": KILLED_OUT, "CPprop.txt": b"partial"})
+
+        merge_zip_into(src, dest)
+
+        merged = _read_zip(dest)
+        assert merged["qtaim.out"] == COMPLETE_OUT
+        assert merged["CPprop.txt"] == b"full table"
 
 
 def test_missing_src_is_noop():
@@ -107,9 +174,9 @@ def test_dest_corrupt_raises_and_preserves_dest():
         assert not os.path.exists(dest + ".merge.tmp")
 
 
-def test_simulated_rerun_preserves_original_entries():
-    # Simulate first full run producing many .out files, then a parse_only
-    # rerun producing only a subset - merged zip should retain everything.
+def test_simulated_rerun_keeps_untouched_entries_and_takes_rerun_ones():
+    # First full run produced many .out files; a rerun redid only adch. The
+    # entries the rerun did not touch survive, the one it did is replaced.
     with tempfile.TemporaryDirectory() as tmp:
         dest = os.path.join(tmp, "out_files.zip")
         first_run = {
@@ -128,5 +195,6 @@ def test_simulated_rerun_preserves_original_entries():
 
         merged = _read_zip(dest)
         assert set(merged) == set(first_run)
-        for k, v in first_run.items():
-            assert merged[k] == v
+        assert merged["adch.out"] == b"short rerun"
+        for k in ("cm5.out", "hirshfeld.out", "fuzzy_full.out"):
+            assert merged[k] == first_run[k]

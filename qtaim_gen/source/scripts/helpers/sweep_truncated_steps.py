@@ -35,6 +35,7 @@ from tqdm import tqdm
 
 from qtaim_gen.source.core.omol import (
     _compiled_data_present,
+    _has_ecp_atoms,
     _has_usable_step_output,
     _is_substantive_step_out,
     _wavefunction_present,
@@ -103,12 +104,15 @@ def classify_folder(
         return rec
 
     n_atoms = None
+    charge = None
     spin_tf = False
     try:
         dft_dict = get_charge_spin_n_atoms_from_folder(folder)
         if dft_dict and dft_dict.get("mol"):
             n_atoms = len(dft_dict["mol"])
             spin_tf = dft_dict.get("spin", 1) != 1
+            if dft_dict.get("charge") is not None and not _has_ecp_atoms(dft_dict):
+                charge = int(dft_dict["charge"])
     except Exception:
         pass
     rec["n_atoms"] = n_atoms
@@ -147,12 +151,16 @@ def classify_folder(
     rerun_steps: List[str] = []
     truncated_steps: List[str] = []
     for op in order:
-        will_skip = _has_usable_step_output(folder, op) or _compiled_data_present(
+        # same operand order as run_jobs: cheap compiled-JSON check first
+        will_skip = _compiled_data_present(
             folder,
             op,
             compiled_map,
             n_atoms=n_atoms,
             fuzzy_routines=fuzzy_routines,
+            charge=charge,
+        ) or _has_usable_step_output(
+            folder, op, n_atoms=n_atoms, charge=charge, fuzzy_routines=fuzzy_routines
         )
         if will_skip:
             continue

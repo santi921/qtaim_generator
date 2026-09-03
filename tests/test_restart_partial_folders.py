@@ -1134,17 +1134,15 @@ class TestSubstantiveStepOut:
     def test_second_banner_spanning_chunk_boundary_accepted(self, tmp_path):
         """A second banner that straddles the 1 MB read boundary is found
         via the carry, not double counted, and accepted."""
-        from qtaim_gen.source.core.omol import (
-            _MULTIWFN_MENU_BANNER,
-            _is_substantive_step_out,
-        )
+        from qtaim_gen.source.core.omol import _is_substantive_step_out
+        from qtaim_gen.source.utils.io import MULTIWFN_MENU_BANNER
 
         path = tmp_path / "mbis_fuzzy_density.out"
         head = _MULTIWFN_HEAD.encode()
         # Banner is 18 bytes; start it 9 bytes before the 1 MB boundary so
         # it spans the first and second read chunks.
         pad = b"x" * ((1 << 20) - 9 - len(head))
-        path.write_bytes(head + pad + _MULTIWFN_MENU_BANNER + b"\n")
+        path.write_bytes(head + pad + MULTIWFN_MENU_BANNER + b"\n")
         assert _is_substantive_step_out(str(path), order="mbis_fuzzy_density")
 
     def test_error_signature_still_rejected(self, tmp_path):
