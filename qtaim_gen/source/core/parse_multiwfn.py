@@ -63,6 +63,26 @@ def _split_fortran_floats(tokens: list) -> list:
     return result
 
 
+# One row of a Multiwfn per-atom charge table, in either layout:
+#   " Atom   87(Mg):     1.90845634"      (Final atomic charges:)
+#   "    87(Mg)   1.1514104986"           (Center       Charge, ESP fitting)
+_CHARGE_ROW_RE = re.compile(
+    r"^\s*(?:Atom\s+)?(\d+)\(\s*([A-Za-z]{1,2})\s*\):?\s+(\S+)\s*$"
+)
+
+
+def _charge_table_row(line: str):
+    """('87_Mg', 1.15) for a charge-table row, None for any other line.
+
+    Raises ValueError when the value overflowed to '****' so callers see a
+    corrupt file instead of a short table.
+    """
+    m = _CHARGE_ROW_RE.match(line)
+    if m is None:
+        return None
+    return f"{m.group(1)}_{m.group(2)}", float(m.group(3))
+
+
 def parse_charge_doc(charge_out_txt):
     """
     Method to parse the charge out from multiwfn
@@ -104,14 +124,7 @@ def parse_charge_doc(charge_out_txt):
         trigger_dipole = False
         for line in f:
             if line == "\n" or len(line) < 3:
-                if trigger or trigger2:
-                    trigger, trigger2 = False, False
-                    charge_dict_overall[charge_ordering[charge_dict_index]] = (
-                        charge_dict
-                    )
-                    charge_dict_index += 1
-
-                elif trigger_dipole:
+                if trigger_dipole:
                     trigger_dipole = False
                     atomic_dipole_dict_overall[
                         atomic_dipole_order[atomic_dipole_index]
@@ -119,18 +132,18 @@ def parse_charge_doc(charge_out_txt):
                     atomic_dipole_index += 1
 
             if trigger or trigger2:
-                if line.split()[0] == "Atom":
-                    ind, element = line.split()[1].split("(")
-                    if "):" in element:
-                        element = element[:-2]
-                    # print(ind, element)
-                elif line.strip()[0].isnumeric():
-                    ind, element = line.split()[0].split("(")
-                    if "):" in element:
-                        element = element[:-2]
-                    # print(ind, element)
-                value = float(line.split()[-1])
-                charge_dict[ind + "_" + element] = value
+                # ESP-fitting tables end with "Sum of charges:" and "RMSE:"
+                # lines before the blank, so the first non-row line closes
+                # the table rather than the blank line.
+                row = _charge_table_row(line)
+                if row is None:
+                    trigger, trigger2 = False, False
+                    charge_dict_overall[charge_ordering[charge_dict_index]] = (
+                        charge_dict
+                    )
+                    charge_dict_index += 1
+                else:
+                    charge_dict[row[0]] = row[1]
 
             if trigger_dipole:
                 # print(len(line) < 3)
@@ -319,26 +332,13 @@ def parse_charge_chelpg(charge_out_txt):
         trigger2 = False
 
         for line in f:
-            if line == "\n" or len(line) < 3:
-                if trigger2:
+            if trigger2:
+                row = _charge_table_row(line)
+                if row is None:
                     trigger2 = False
                     charge_dict_overall = charge_dict
-
-            if trigger2:
-                if line.split()[0] == "Atom":
-                    ind, element = line.split()[1].split("(")
-                    if "):" in element:
-                        element = element[:-2]
-                    # print(ind, element)
-                elif line.strip()[0].isnumeric():
-                    ind, element = line.split()[0].split("(")
-                    if "):" in element:
-                        element = element[:-2]
-                    if ")" in element:
-                        element = element[:-1]
-                    # print(ind, element)
-                value = float(line.split()[-1])
-                charge_dict[ind + "_" + element] = value
+                else:
+                    charge_dict[row[0]] = row[1]
 
             if charge_key_3 in line:
                 trigger2 = True
