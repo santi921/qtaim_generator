@@ -22,12 +22,15 @@ WFN_EXTENSIONS = (".wfx", ".wfn")
 
 # Multiwfn prints this once at startup and once more when a script's final
 # "0" returns to the main menu before "q"; a .out holding it twice ran to the
-# end. Shared by the restart gate (core/omol.py) and the zip merge below.
+# end, one killed mid-computation dies in a progress loop and holds it once
+# (verified on Multiwfn 3.8 noGUI, 12/12 complete .outs vs truncated ones).
+# Shared by the restart gate (core/omol.py) and the zip merge below.
 MULTIWFN_MENU_BANNER = b"Main function menu"
+MENU_BANNER_REQUIRED_COUNT = 2
 
 
 def multiwfn_out_complete(data: bytes) -> bool:
-    return data.count(MULTIWFN_MENU_BANNER) >= 2
+    return data.count(MULTIWFN_MENU_BANNER) >= MENU_BANNER_REQUIRED_COUNT
 
 
 def find_wavefunction_file(folder: str) -> Optional[str]:

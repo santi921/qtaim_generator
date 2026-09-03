@@ -18,7 +18,9 @@ import zipfile
 from pathlib import Path
 
 from qtaim_gen.source.core.omol import (
+    _compiled_data_present,
     _expected_electrons,
+    _has_ecp_atoms,
     _has_usable_step_output,
     _qtaim_output_complete,
     _reject_wavefunction_with_wrong_electron_count,
@@ -187,6 +189,16 @@ class TestWavefunctionElectronCount:
         assert _wavefunction_electrons(_write_wfx(tmp_path / "orca.wfx", 106)) == 106
         assert _wavefunction_electrons(_write_wfx(tmp_path / "orca.wfx", 106, core=28)) == 134
 
+    def test_orca_native_layout_counts_after_nuclear_names(self, tmp_path):
+        p = tmp_path / "orca.wfx"
+        p.write_text(
+            "<Number of Nuclei>\n 3\n</Number of Nuclei>\n"
+            "<Nuclear Names>\nO1\nH2\nH3\n</Nuclear Names>\n"
+            "<Number of Electrons>\n 10\n</Number of Electrons>\n"
+            "<Primitive Centers>\n1 1 1\n"
+        )
+        assert _wavefunction_electrons(str(p)) == 10
+
     def test_wfn_is_not_judged(self, tmp_path):
         p = tmp_path / "orca.wfn"
         p.write_text("GAUSSIAN 1 MOL ORBITALS\n")
@@ -204,14 +216,16 @@ class TestWavefunctionElectronCount:
         # library loaded, so the check would misfire on a correct wfx.
         dft = {"mol": {0: {"element": "I"}, 1: {"element": "H"}}, "charge": 0}
         assert _expected_electrons(dft) is None
+        assert _has_ecp_atoms(dft)
+        assert not _has_ecp_atoms({"mol": {0: {"element": "Br"}}, "charge": 0})
 
 
 class TestRejectBadWavefunction:
-    def _folder(self, tmp_path, electrons, with_gbw=True):
+    def _folder(self, tmp_path, electrons, with_gbw=True, gbw_name="orca.gbw"):
         (tmp_path / "orca.inp").write_text(WATER_INP)
         _write_wfx(tmp_path / "orca.wfx", electrons)
         if with_gbw:
-            (tmp_path / "orca.gbw.zstd0").write_bytes(b"zstd")
+            (tmp_path / gbw_name).write_bytes(b"gbw")
         (tmp_path / "orca.molden.input").write_text("[Molden]\n")
         (tmp_path / "hirshfeld.out").write_text(BANNER + BANNER)
         (tmp_path / "hirshfeld.json").write_text("{}")
@@ -236,8 +250,20 @@ class TestRejectBadWavefunction:
         ]
         for rel in gone:
             assert not os.path.exists(os.path.join(folder, rel)), rel
-        for rel in ("orca.inp", "orca.json", "timings.json", "orca.gbw.zstd0"):
+        for rel in ("orca.inp", "orca.json", "timings.json", "orca.gbw"):
             assert os.path.exists(os.path.join(folder, rel)), rel
+
+    def test_compressed_gbw_counts_only_with_preprocessing(self, tmp_path):
+        # Without preprocessing nothing would extract the .gbw again, so the
+        # wfx must stay; with it the folder can be regenerated.
+        log = logging.getLogger("t")
+        folder = self._folder(tmp_path, electrons=4, gbw_name="orca.gbw.zstd0")
+        assert not _reject_wavefunction_with_wrong_electron_count(folder, log)
+        assert os.path.exists(os.path.join(folder, "orca.wfx"))
+        assert _reject_wavefunction_with_wrong_electron_count(
+            folder, log, preprocess_compressed=True
+        )
+        assert not os.path.exists(os.path.join(folder, "orca.wfx"))
 
     def test_matching_count_leaves_folder_alone(self, tmp_path):
         folder = self._folder(tmp_path, electrons=10)
@@ -249,6 +275,26 @@ class TestRejectBadWavefunction:
         folder = self._folder(tmp_path, electrons=4, with_gbw=False)
         assert not _reject_wavefunction_with_wrong_electron_count(folder, logging.getLogger("t"))
         assert os.path.exists(os.path.join(folder, "orca.wfx"))
+
+
+class TestCompiledChargeSum:
+    MAP = {"hirshfeld": ("charge.json", "hirshfeld", "charge")}
+
+    def _write(self, tmp_path, charges):
+        (tmp_path / "charge.json").write_text(
+            json.dumps({"hirshfeld": {"charge": charges}})
+        )
+        return str(tmp_path)
+
+    def test_garbage_sum_is_not_verified(self, tmp_path):
+        folder = self._write(tmp_path, {"1_O": 200.0, "2_H": 90.0, "3_H": 94.0})
+        assert not _compiled_data_present(folder, "hirshfeld", self.MAP, n_atoms=3, charge=0)
+        assert _compiled_data_present(folder, "hirshfeld", self.MAP, n_atoms=3)
+
+    def test_good_sum_is_verified(self, tmp_path):
+        folder = self._write(tmp_path, {"1_O": -0.6, "2_H": 0.3, "3_H": 0.3})
+        assert _compiled_data_present(folder, "hirshfeld", self.MAP, n_atoms=3, charge=0)
+        assert not _compiled_data_present(folder, "hirshfeld", self.MAP, n_atoms=3, charge=2)
 
 
 def test_multiwfn_wrapper_sets_pipefail(tmp_path):

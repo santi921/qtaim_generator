@@ -345,7 +345,7 @@ def find_cp_map(dft_dict, atom_cp_dict, margin=0.5):
     """
     ret_dict, qtaim_to_dft = {}, {}
     missing_atoms = []
-    available_cps = dict(atom_cp_dict)  # mutable copy — remove CPs once matched
+    available_cps = dict(atom_cp_dict)  # mutable copy - remove CPs once matched
 
     # Pass 1: exact CPprop index + element match for every atom, finished
     # before any distance matching so a same-element neighbour inside the

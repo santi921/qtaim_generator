@@ -47,6 +47,7 @@ from qtaim_gen.source.core.parse_multiwfn import (
     parse_charge_chelpg,
     parse_fuzzy_real_space,
 )
+from qtaim_gen.source.core.parse_qtaim import get_qtaim_descs, only_atom_cps
 
 from qtaim_gen.source.utils.io import (
     pull_ecp_dict,
@@ -54,6 +55,8 @@ from qtaim_gen.source.utils.io import (
     check_spin,
     merge_zip_into,
     MULTIWFN_MENU_BANNER,
+    MENU_BANNER_REQUIRED_COUNT,
+    _PERIODIC_TABLE,
 )
 
 
@@ -637,7 +640,7 @@ def run_jobs(
         dft_dict = get_charge_spin_n_atoms_from_folder(folder, logger=logger)
         if dft_dict and dft_dict.get("mol"):
             n_atoms_for_skip = len(dft_dict["mol"])
-            if dft_dict.get("charge") is not None:
+            if dft_dict.get("charge") is not None and not _has_ecp_atoms(dft_dict):
                 charge_for_skip = int(dft_dict["charge"])
     except Exception as e:
         logger.warning(
@@ -656,6 +659,7 @@ def run_jobs(
                 folder, order, _compiled_map,
                 n_atoms=n_atoms_for_skip,
                 fuzzy_routines=_fuzzy_routine_set,
+                charge=charge_for_skip,
             ) or _has_usable_step_output(
                 folder,
                 order,
@@ -692,7 +696,7 @@ def run_jobs(
                 continue
             if order in timings and timings[order] > 0:
                 logger.warning(
-                    f"Timing present for '{order}' in {folder} but output data not found — re-running"
+                    f"Timing present for '{order}' in {folder} but output data not found - re-running"
                 )
 
         if prof_mem:
@@ -736,7 +740,7 @@ def run_jobs(
                 f"Failed {order} after {elapsed:.2f} seconds ({step_failure}): {mfwn_file}"
             )
 
-        # save timings to job root — move_results_to_folder() relocates at the end
+        # save timings to job root - move_results_to_folder() relocates at the end
         try:
             atomic_json_write(os.path.join(folder, "timings.json"), timings)
             logger.info(f"Saved timings.json in {folder}")
@@ -1378,7 +1382,7 @@ def move_results_to_folder(
 
 
 def _validate_parse_completeness(orca_dict: dict) -> bool:
-    """Thin wrapper — canonical implementation lives in parse_orca."""
+    """Thin wrapper - canonical implementation lives in parse_orca."""
     from qtaim_gen.source.core.parse_orca import validate_parse_completeness
     return validate_parse_completeness(orca_dict)
 
@@ -1523,7 +1527,7 @@ def _run_orca_parse(
             )
             # Still write partial orca.json (partial data better than none)
             write_orca_json(folder, orca_dict)
-            # Clean up extracted file — archive still has it for retry
+            # Clean up extracted file - archive still has it for retry
             if extracted_from_archive:
                 try:
                     os.remove(orca_out_path)
@@ -1593,7 +1597,7 @@ def _run_orca_parse(
 
 # Multiwfn (v3.8) error signatures we want to catch. If multiwfn upgrades and
 # rephrases these strings, the .out file will start passing the substantive
-# check again — re-pin in tests when we update multiwfn.
+# check again - re-pin in tests when we update multiwfn.
 _MULTIWFN_ERROR_SIGNATURES = (
     "Error:",                         # banner-line errors, e.g. "Error: Unable to find the input file"
     "cannot be found, input again",   # stuck on interactive prompt loop
@@ -1603,24 +1607,12 @@ _MULTIWFN_ERROR_SIGNATURES = (
 # Per-routine positive completion markers. Present in a .out only after the
 # routine finished writing its result section. Used to catch runs killed
 # mid-computation (walltime, OOM) whose .out has a clean banner + partial
-# progress but no result table — e.g. chelpg killed mid-LIBRETA-ESP.
+# progress but no result table - e.g. chelpg killed mid-LIBRETA-ESP.
 # Markers are strings the routine's own parser uses to locate the result
 # block, so by construction a parsed-without-error .out contains them.
 _STEP_COMPLETION_MARKERS = {
     "chelpg": "Center       Charge",  # parse_charge_chelpg trigger
 }
-
-
-# Generic completion signal: multiwfn prints this banner once at startup and
-# once more when the .mfwn script's final "0" returns to the main menu before
-# "q". Every generated script is single-module (enter module -> compute ->
-# print results -> "0" -> "q"), so a second occurrence proves the routine
-# finished writing its results. A run killed mid-computation (walltime, OOM)
-# dies in a progress loop and never reaches the second print. Verified on
-# Multiwfn 3.8 noGUI: 12/12 complete .outs contain it twice, truncated .outs
-# once (see docs re: elytes 274-atom edge case, Jul 2026).
-_MULTIWFN_MENU_BANNER = MULTIWFN_MENU_BANNER
-_MENU_BANNER_REQUIRED_COUNT = 2
 
 
 def _is_substantive_step_out(path: str, order: str = None) -> bool:
@@ -1630,8 +1622,8 @@ def _is_substantive_step_out(path: str, order: str = None) -> bool:
     multiwfn error signatures. Both signatures appear early in the file
     (banner + first prompt loop), so a single bounded read catches them.
 
-    Completion is detected generically via `_MULTIWFN_MENU_BANNER`: the
-    main-menu banner must appear at least `_MENU_BANNER_REQUIRED_COUNT`
+    Completion is detected generically via `MULTIWFN_MENU_BANNER`: the
+    main-menu banner must appear at least `MENU_BANNER_REQUIRED_COUNT`
     times (startup print + the script's final return-to-main-menu). This
     catches walltime-killed runs for every routine, whose head looks clean
     but whose result section was never reached.
@@ -1670,15 +1662,15 @@ def _is_substantive_step_out(path: str, order: str = None) -> bool:
                 if not chunk:
                     return False
                 buf = banner_carry + chunk
-                banner_count += buf.count(_MULTIWFN_MENU_BANNER)
-                banner_carry = buf[len(buf) - (len(_MULTIWFN_MENU_BANNER) - 1):]
+                banner_count += buf.count(MULTIWFN_MENU_BANNER)
+                banner_carry = buf[len(buf) - (len(MULTIWFN_MENU_BANNER) - 1):]
                 if not marker_found:
                     mbuf = marker_carry + chunk
                     if marker_bytes in mbuf:
                         marker_found = True
                     else:
                         marker_carry = mbuf[len(mbuf) - (len(marker_bytes) - 1):]
-                if banner_count >= _MENU_BANNER_REQUIRED_COUNT and marker_found:
+                if banner_count >= MENU_BANNER_REQUIRED_COUNT and marker_found:
                     return True
     except OSError:
         return False
@@ -1708,15 +1700,26 @@ def _wavefunction_present(folder: str) -> bool:
 _FIRST_ECP_Z = 37
 
 
+def _has_ecp_atoms(dft_dict: dict) -> bool:
+    """True if any atom of the parsed input sits at or beyond _FIRST_ECP_Z.
+    Such systems are exempt from electron-count and charge-sum checks: both
+    are off by the core count whenever Multiwfn ran without the EDF library."""
+    try:
+        return any(
+            _PERIODIC_TABLE.GetAtomicNumber(a["element"]) >= _FIRST_ECP_Z
+            for a in dft_dict["mol"].values()
+        )
+    except Exception:
+        return False
+
+
 def _expected_electrons(dft_dict: dict) -> Optional[int]:
     """sum(Z) - net charge from the parsed input file; None when it cannot be
     computed or when any atom carries an ECP."""
+    if _has_ecp_atoms(dft_dict):
+        return None
     try:
-        from qtaim_gen.source.utils.io import _PERIODIC_TABLE
-
         zs = [_PERIODIC_TABLE.GetAtomicNumber(a["element"]) for a in dft_dict["mol"].values()]
-        if any(z >= _FIRST_ECP_Z for z in zs):
-            return None
         return sum(zs) - int(dft_dict.get("charge", 0))
     except Exception:
         return None
@@ -1725,7 +1728,8 @@ def _expected_electrons(dft_dict: dict) -> Optional[int]:
 def _wavefunction_electrons(path: str) -> Optional[float]:
     """Electron count a .wfx declares: <Number of Electrons> plus <Number of
     Core Electrons> (Multiwfn 3.8 writes both, the latter non-zero for ECP
-    systems). Stops at the nuclear-names block, so only the header is read.
+    systems). Stops at <Primitive Centers>, so only the header is read; ORCA's
+    own writer places the counts after <Nuclear Names>, Multiwfn's before.
     .wfn carries no core count, so it is not judged. None if unreadable."""
     if not path.endswith(".wfx"):
         return None
@@ -1744,7 +1748,7 @@ def _wavefunction_electrons(path: str) -> Optional[float]:
                 if s in ("<Number of Electrons>", "<Number of Core Electrons>"):
                     tag = s
                     continue
-                if s.startswith("<Nuclear Names>") or s.startswith("<Primitive Centers>"):
+                if s.startswith("<Primitive Centers>"):
                     break
     except (OSError, ValueError, IndexError):
         return None
@@ -1752,7 +1756,10 @@ def _wavefunction_electrons(path: str) -> Optional[float]:
 
 
 _KEEP_ON_WAVEFUNCTION_DISCARD = {"orca.out", "output.out", "orca.json", "timings.json", "memory.json"}
-_COMPILED_JSONS = ("charge.json", "bond.json", "fuzzy_full.json", "other.json", "qtaim.json")
+_COMPILED_JSONS = ("charge.json", "bond.json", "fuzzy_full.json", "other.json", "qtaim.json", "horton.json")
+_DISCARD_SUFFIXES_ROOT = (".wfn", ".wfx", ".molden.input", ".out", ".json")
+_DISCARD_SUFFIXES_GEN = (".wfn", ".wfx", ".out")
+_DISCARD_NAMES_GEN = set(_COMPILED_JSONS) | {"out_files.zip", "CPprop.txt"}
 
 
 def _discard_wavefunction_derived_outputs(folder: str, logger: logging.Logger) -> None:
@@ -1765,11 +1772,11 @@ def _discard_wavefunction_derived_outputs(folder: str, logger: logging.Logger) -
     for name in os.listdir(folder):
         if name in _KEEP_ON_WAVEFUNCTION_DISCARD:
             continue
-        if name.endswith((".wfn", ".wfx", ".molden.input", ".out", ".json")) or name == "CPprop.txt":
+        if name.endswith(_DISCARD_SUFFIXES_ROOT) or name == "CPprop.txt":
             targets.append(os.path.join(folder, name))
     if os.path.isdir(gen):
         for name in os.listdir(gen):
-            if name in _COMPILED_JSONS or name == "out_files.zip" or name.endswith((".wfn", ".wfx", ".out")) or name == "CPprop.txt":
+            if name in _DISCARD_NAMES_GEN or name.endswith(_DISCARD_SUFFIXES_GEN):
                 targets.append(os.path.join(gen, name))
     for path in targets:
         try:
@@ -1780,7 +1787,7 @@ def _discard_wavefunction_derived_outputs(folder: str, logger: logging.Logger) -
 
 
 def _reject_wavefunction_with_wrong_electron_count(
-    folder: str, logger: logging.Logger
+    folder: str, logger: logging.Logger, preprocess_compressed: bool = False
 ) -> bool:
     """Before any restart decision: if the wavefunction on disk declares a
     different electron count than the input implies, discard it and every
@@ -1790,7 +1797,8 @@ def _reject_wavefunction_with_wrong_electron_count(
     Must run before compressed-input preprocessing and create_jobs: with the
     wfx gone, preprocessing extracts the .gbw again and create_jobs writes the
     conversion script. Skipped when no .gbw source is present, since nothing
-    could regenerate the wavefunction.
+    could regenerate the wavefunction; a compressed .gbw.zstd0 counts only
+    when preprocess_compressed is set, otherwise nothing would extract it.
     """
     wf_path = _wavefunction_path(folder)
     if wf_path is None:
@@ -1806,7 +1814,9 @@ def _reject_wavefunction_with_wrong_electron_count(
     if expected is None or observed is None or abs(observed - expected) <= 0.5:
         return False
     has_gbw_source = any(
-        name.endswith((".gbw", ".gbw.zstd0")) for name in os.listdir(folder)
+        name.endswith(".gbw")
+        or (preprocess_compressed and name.endswith(".gbw.zstd0"))
+        for name in os.listdir(folder)
     )
     if not has_gbw_source:
         logger.error(
@@ -1922,8 +1932,6 @@ def _qtaim_output_complete(
 def _qtaim_raw_output_complete(folder: str, n_atoms: Optional[int] = None) -> bool:
     """Root qtaim.out carries both completion markers and root CPprop.txt holds
     one nuclear CP per atom, so parse_multiwfn can build qtaim.json from it."""
-    from qtaim_gen.source.core.parse_qtaim import get_qtaim_descs, only_atom_cps
-
     cpprop = os.path.join(folder, "CPprop.txt")
     qtaim_out = os.path.join(folder, "qtaim.out")
     try:
@@ -2014,12 +2022,14 @@ def _has_usable_step_output(
 ) -> bool:
     """Check whether a sub-job appears to have produced usable output on disk.
 
-    Primary signal: `.out` file must be substantive (see `_is_substantive_step_out`).
+    Primary signal: `.out` file must be substantive (see `_is_substantive_step_out`)
+    and must parse into usable data: right atom count, charges summing to the
+    net charge (see `_step_out_parses`).
     Fallback: if `.out` is absent (cleaned up after a prior successful run), a
     non-empty per-step `.json` is accepted. A bad `.out` (error signature) blocks
-    the `.json` fallback — stale intermediate JSONs must not mask a failed run.
+    the `.json` fallback - stale intermediate JSONs must not mask a failed run.
 
-    Special case for `convert`: this step has no analytical output — its
+    Special case for `convert`: this step has no analytical output - its
     purpose is to produce `orca.wfn`/`orca.wfx` from `orca.molden.input`. Skip
     only if a non-empty wavefunction file exists; otherwise re-run regardless
     of whether `convert.out` looks substantive.
@@ -2051,9 +2061,9 @@ def _has_usable_step_output(
                 charge=charge,
             ):
                 return True
-            # .out present but bad — don't trust stale .json in this location
+            # .out present but bad - don't trust stale .json in this location
         else:
-            # .out absent (cleaned up after a prior successful run) — .json is the only artifact
+            # .out absent (cleaned up after a prior successful run) - .json is the only artifact
             json_path = os.path.join(base, f"{order}.json")
             try:
                 if os.path.isfile(json_path) and os.path.getsize(json_path) > 0:
@@ -2076,6 +2086,7 @@ def _compiled_data_present(
     compiled_map: dict,
     n_atoms: Optional[int] = None,
     fuzzy_routines: Optional[set] = None,
+    charge: Optional[int] = None,
 ) -> bool:
     """Return True if compiled JSON output for `order` exists and looks complete.
 
@@ -2101,6 +2112,9 @@ def _compiled_data_present(
             Required to apply the `n_atoms + 2` fuzzy length expectation
             (compiled_map alone can't distinguish bond vs. fuzzy ops since
             both use the `else` branch below).
+        charge: Net charge from the input file; a compiled charge table whose
+            values do not sum to it within _CHARGE_SUM_TOLERANCE is treated
+            as missing, the same test `_step_out_parses` applies to the .out.
     """
     if order not in compiled_map:
         return False
@@ -2121,13 +2135,20 @@ def _compiled_data_present(
                 if data:
                     return True
             elif sub_key is not None:
-                # charge ops: {"<op>": {"charge": {...}, ...}} — check the nested sub-key
+                # charge ops: {"<op>": {"charge": {...}, ...}} - check the nested sub-key
                 # avoids false-positive when op-level dict exists but charge dict is empty
                 charges = data.get(key, {}).get(sub_key)
                 if not charges:
                     continue
                 if n_atoms is not None and len(charges) != n_atoms:
-                    continue  # partial entry — treat as missing, force rerun
+                    continue  # partial entry - treat as missing, force rerun
+                if charge is not None:
+                    try:
+                        total = sum(float(v) for v in charges.values())
+                    except (TypeError, ValueError):
+                        continue
+                    if abs(total - charge) > _CHARGE_SUM_TOLERANCE:
+                        continue  # garbage wavefunction run - force rerun
                 return True
             else:
                 # bond/fuzzy ops: key value is the data dict directly
@@ -2139,7 +2160,7 @@ def _compiled_data_present(
                     and order in fuzzy_routines
                     and len(payload) != n_atoms + _FUZZY_EXTRA_ENTRIES
                 ):
-                    continue  # partial fuzzy table — force rerun
+                    continue  # partial fuzzy table - force rerun
                 return True
         except (json.JSONDecodeError, OSError):
             continue
@@ -2219,7 +2240,9 @@ def gbw_analysis(
         return
 
     if restart and not parse_only:
-        if _reject_wavefunction_with_wrong_electron_count(folder, logger):
+        if _reject_wavefunction_with_wrong_electron_count(
+            folder, logger, preprocess_compressed=preprocess_compressed
+        ):
             restart = False
 
     # check if there is a .wfn or .gbw file in the folder. If there is an
@@ -2401,7 +2424,7 @@ def gbw_analysis(
 
             # attempt to reparse if output exists but validation failed
             else:
-                # Check if orca.json is the ONLY missing piece — if so, just
+                # Check if orca.json is the ONLY missing piece - if so, just
                 # run _run_orca_parse without parse_multiwfn (which would try
                 # to read .txt files that may have been cleaned up already)
                 try:
@@ -2420,7 +2443,7 @@ def gbw_analysis(
                     tf_without_orca = False
 
                 if tf_without_orca:
-                    # Everything passes except orca — orca-only reparse
+                    # Everything passes except orca - orca-only reparse
                     logger.info(
                         "Validation passes without orca check - running orca-only parse"
                     )
@@ -2578,7 +2601,7 @@ def gbw_analysis(
     # recover missing timing keys from gbw_analysis.log (or stamp -1.0
     # placeholders). patch_timings_from_log only writes positive timing
     # values, so if the only validation failure was missing/zero timing
-    # keys, the patch necessarily satisfies validate_timing_dict — skip
+    # keys, the patch necessarily satisfies validate_timing_dict - skip
     # the second full validation_checks pass. Other validation failures
     # (missing JSONs, n_atoms mismatch) are not patched and remain failures.
     if not tf_validation and patch_timings:
