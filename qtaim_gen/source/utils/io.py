@@ -20,6 +20,15 @@ _PERIODIC_TABLE = Chem.GetPeriodicTable()
 # Wavefunction file extensions, ordered by preference (.wfx preferred over .wfn)
 WFN_EXTENSIONS = (".wfx", ".wfn")
 
+# Multiwfn prints this once at startup and once more when a script's final
+# "0" returns to the main menu before "q"; a .out holding it twice ran to the
+# end. Shared by the restart gate (core/omol.py) and the zip merge below.
+MULTIWFN_MENU_BANNER = b"Main function menu"
+
+
+def multiwfn_out_complete(data: bytes) -> bool:
+    return data.count(MULTIWFN_MENU_BANNER) >= 2
+
 
 def find_wavefunction_file(folder: str) -> Optional[str]:
     """Find a wavefunction file (.wfx or .wfn) in folder.
@@ -369,12 +378,13 @@ def merge_zip_into(
 ) -> None:
     """Move src_zip to dest_zip, merging if dest already exists.
 
-    On filename collision the src entry (the run that just finished) wins.
-    Entries only in dest are kept. Size is deliberately not a tiebreaker: a
-    walltime-killed qtaim.out full of progress-bar frames is larger than a
-    complete one, and "larger wins" kept resurrecting the truncated file so
-    the folder failed validation on every pass. The merge is written to a
-    temp file and atomically replaces dest, so a failure mid-merge cannot
+    On filename collision the src entry (the run that just finished) wins,
+    unless src holds a Multiwfn `.out` that never reached its final menu
+    (walltime kill) while dest's copy did; then dest is kept. CPprop.txt
+    follows the verdict on src's qtaim.out, since the two are written by the
+    same step. Size is never a tiebreaker: a killed qtaim.out full of
+    progress-bar frames is larger than a complete one. The merge is written
+    to a temp file and atomically replaces dest, so a failure mid-merge cannot
     corrupt dest. src_zip is removed on success.
     """
     import shutil as _shutil
@@ -410,15 +420,30 @@ def merge_zip_into(
             added: List[str] = []
             replaced: List[Tuple[str, int, int]] = []
             kept: List[str] = []
+
+            def _src_beats_dest(name: str) -> bool:
+                probe = "qtaim.out" if name == "CPprop.txt" else name
+                if not probe.endswith(".out") or probe not in src_infos:
+                    return True
+                if multiwfn_out_complete(src_zf.read(probe)):
+                    return True
+                return probe not in dest_infos or not multiwfn_out_complete(
+                    dest_zf.read(probe)
+                )
+
             with zipfile.ZipFile(tmp_dest, "w", zipfile.ZIP_DEFLATED) as out_zf:
                 for name in sorted(names):
                     in_dest = name in dest_infos
                     in_src = name in src_infos
                     if in_dest and in_src:
-                        d_sz = dest_infos[name].file_size
-                        s_sz = src_infos[name].file_size
-                        out_zf.writestr(src_infos[name], src_zf.read(name))
-                        replaced.append((name, d_sz, s_sz))
+                        if _src_beats_dest(name):
+                            out_zf.writestr(src_infos[name], src_zf.read(name))
+                            replaced.append(
+                                (name, dest_infos[name].file_size, src_infos[name].file_size)
+                            )
+                        else:
+                            out_zf.writestr(dest_infos[name], dest_zf.read(name))
+                            kept.append(name)
                     elif in_dest:
                         out_zf.writestr(dest_infos[name], dest_zf.read(name))
                         kept.append(name)

@@ -330,42 +330,6 @@ def only_atom_cps(qtaim_descs: dict) -> tuple:
     return ret_dict, ret_dict_bonds
 
 
-def find_cp(atom_dict: dict, atom_cp_dict: dict, margin: float = 0.5) -> tuple:
-    """
-    From a dictionary of atom ind, position, and element, find the corresponding cp in the atom_cp_dict
-    Takes:
-        atom_dict: dict
-            dictionary of atom ind, position, and element
-        atom_cp_dict: dict
-            dictionary of cp ind, position, and element
-    Returns:
-        cp_key: str
-            key of cp_dict
-        cp_dict: dict
-            dictionary of cp values matching atom
-    """
-
-    for k, v in atom_cp_dict.items():
-        if (
-            int(k.split("_")[0]) == atom_dict["ind"] + 1
-            and v["element"] == atom_dict["element"]
-        ):
-            return k, v
-
-        else:
-            element_cond = v["element"] == atom_dict["element"]
-            # print(v["element"], atom_dict["element"])
-            if element_cond:
-                distance = np.linalg.norm(
-                    np.array(v["pos_ang"]) - np.array(atom_dict["pos"])
-                )
-                dist_cond = distance < margin
-                if dist_cond:
-                    return k, v
-
-    return False, {}
-
-
 def find_cp_map(dft_dict, atom_cp_dict, margin=0.5):
     """
     Iterate through dft dict corresponding cp in atom_cp_dict
@@ -383,13 +347,9 @@ def find_cp_map(dft_dict, atom_cp_dict, margin=0.5):
     missing_atoms = []
     available_cps = dict(atom_cp_dict)  # mutable copy — remove CPs once matched
 
-    # Pass 1: exact CPprop index + element match for every atom. This has to
-    # finish before any distance matching starts: find_cp returns the first
-    # same-element CP inside the margin, so with two H atoms 0.99 A apart
-    # (compressed electrolytes_scaled_sep geometries) atom 59 grabbed NCP
-    # 172_H before its own 59_H was reached, atom 171 ended up unmatched, and
-    # every bond CP touching atom 172 was dropped from qtaim.json -- a
-    # shortfall no rerun could fix.
+    # Pass 1: exact CPprop index + element match for every atom, finished
+    # before any distance matching so a same-element neighbour inside the
+    # margin cannot claim another atom's nuclear CP first.
     unmatched = []
     for k, v in dft_dict.items():
         exact_key = f"{k + 1}_{v['element']}"

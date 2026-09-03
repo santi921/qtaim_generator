@@ -1,6 +1,6 @@
 """Restart-gate fixes for the Aug 2026 OMol4M stall loops.
 
-Four ways a folder was re-queued forever:
+Ways a folder was re-queued forever:
 - qtaim finished but qtaim.json was never written (killed before the final
   parse), so the gate redid the whole qtaim step on every restart;
 - the "reparse before rerun" path parsed a partial CPprop.txt over a good
@@ -10,36 +10,54 @@ Four ways a folder was re-queued forever:
 - a Multiwfn crash was masked by tee and logged as "Completed".
 """
 
+import json
 import logging
 import os
 import shutil
+import zipfile
 from pathlib import Path
 
 from qtaim_gen.source.core.omol import (
     _expected_electrons,
     _has_usable_step_output,
     _qtaim_output_complete,
+    _reject_wavefunction_with_wrong_electron_count,
     _step_out_parses,
     _wavefunction_electrons,
     parse_multiwfn,
     write_multiwfn_exe,
 )
-from qtaim_gen.source.core.parse_multiwfn import parse_charge_base
+from qtaim_gen.source.core.parse_multiwfn import parse_charge_base, parse_charge_doc
 from qtaim_gen.source.core.parse_qtaim import get_qtaim_descs, only_atom_cps
 
 TEST_FILES = Path(__file__).parent / "test_files"
 CPPROP_FIXTURE = TEST_FILES / "CPprop_w_bond_paths.txt"
 INP_FIXTURE = TEST_FILES / "input_bond_paths.in"
 HIRSHFELD_FIXTURE = TEST_FILES / "multiwfn" / "hirshfeld.out"
+CHARGE_DOC_FIXTURE = TEST_FILES / "multiwfn" / "charge.out"
 
 COUNT_LINE = " Number of (3,-1) CPs:    13    Generating topology paths...\n"
 EXPORT_LINE = " Done! The results have been outputted to CPprop.txt in current folder\n"
 BANNER = "                   ************ Main function menu ************\n"
 
+WATER_INP = "! B3LYP def2-SVP\n*xyz 0 1\nO 0.0 0.0 0.0\nH 0.0 0.0 0.96\nH 0.93 0.0 -0.24\n*\n"
+
 
 def _n_atoms_in_fixture() -> int:
     atoms, _ = only_atom_cps(get_qtaim_descs(str(CPPROP_FIXTURE)))
     return len(atoms)
+
+
+def _write_wfx(path, electrons, core=None):
+    lines = [
+        "<Number of Nuclei>", "   3", "</Number of Nuclei>",
+        "<Number of Electrons>", f"   {electrons}", "</Number of Electrons>",
+    ]
+    if core is not None:
+        lines += ["<Number of Core Electrons>", f"   {core}", "</Number of Core Electrons>"]
+    lines += ["<Nuclear Names>", "O1", "H2", "H3", "</Nuclear Names>", "<Primitive Centers>"]
+    Path(path).write_text("\n".join(lines) + "\n")
+    return str(path)
 
 
 class TestQtaimRawOutputAcceptedWithoutJson:
@@ -135,23 +153,26 @@ class TestStepOutMustParse:
         p.write_text("anything")
         assert _step_out_parses(str(p), "nonesuch")
 
+    def test_empty_bond_table_only_for_tiny_systems(self, tmp_path):
+        # Same exemption validate_bond_dict grants: no pairs is fine for 1-2
+        # atoms, suspicious for anything larger.
+        p = tmp_path / "fuzzy_bond.out"
+        p.write_text(BANNER + BANNER)
+        assert _step_out_parses(str(p), "fuzzy_bond", n_atoms=2)
+        assert not _step_out_parses(str(p), "fuzzy_bond", n_atoms=5)
+        assert not _step_out_parses(str(p), "fuzzy_bond", n_atoms=None)
+
+    def test_nested_charge_routine_checks_each_scheme_length(self):
+        schemes, _, _ = parse_charge_doc(str(CHARGE_DOC_FIXTURE))
+        n = len(next(iter(schemes.values())))
+        assert _step_out_parses(str(CHARGE_DOC_FIXTURE), "charge", n_atoms=n, charge=2)
+        assert not _step_out_parses(str(CHARGE_DOC_FIXTURE), "charge", n_atoms=n + 1)
+
 
 class TestWavefunctionElectronCount:
-    def _wfx(self, tmp_path, electrons, core=None):
-        lines = [
-            "<Number of Nuclei>", "   3", "</Number of Nuclei>",
-            "<Number of Electrons>", f"   {electrons}", "</Number of Electrons>",
-        ]
-        if core is not None:
-            lines += ["<Number of Core Electrons>", f"   {core}", "</Number of Core Electrons>"]
-        lines += ["<Nuclear Names>", "O1", "H2", "H3", "</Nuclear Names>", "<Primitive Centers>"]
-        p = tmp_path / "orca.wfx"
-        p.write_text("\n".join(lines) + "\n")
-        return str(p)
-
     def test_reads_valence_plus_core(self, tmp_path):
-        assert _wavefunction_electrons(self._wfx(tmp_path, 106)) == 106
-        assert _wavefunction_electrons(self._wfx(tmp_path, 106, core=28)) == 134
+        assert _wavefunction_electrons(_write_wfx(tmp_path / "orca.wfx", 106)) == 106
+        assert _wavefunction_electrons(_write_wfx(tmp_path / "orca.wfx", 106, core=28)) == 134
 
     def test_wfn_is_not_judged(self, tmp_path):
         p = tmp_path / "orca.wfn"
@@ -164,6 +185,57 @@ class TestWavefunctionElectronCount:
             "charge": -1,
         }
         assert _expected_electrons(dft) == 11
+
+    def test_ecp_systems_are_not_judged(self):
+        # def2 ECPs start at Rb; the wfx core count depends on whether the EDF
+        # library loaded, so the check would misfire on a correct wfx.
+        dft = {"mol": {0: {"element": "I"}, 1: {"element": "H"}}, "charge": 0}
+        assert _expected_electrons(dft) is None
+
+
+class TestRejectBadWavefunction:
+    def _folder(self, tmp_path, electrons, with_gbw=True):
+        (tmp_path / "orca.inp").write_text(WATER_INP)
+        _write_wfx(tmp_path / "orca.wfx", electrons)
+        if with_gbw:
+            (tmp_path / "orca.gbw.zstd0").write_bytes(b"zstd")
+        (tmp_path / "orca.molden.input").write_text("[Molden]\n")
+        (tmp_path / "hirshfeld.out").write_text(BANNER + BANNER)
+        (tmp_path / "hirshfeld.json").write_text("{}")
+        (tmp_path / "CPprop.txt").write_text("cp")
+        (tmp_path / "orca.json").write_text("{}")
+        (tmp_path / "timings.json").write_text(json.dumps({"hirshfeld": 1.0}))
+        gen = tmp_path / "generator"
+        gen.mkdir()
+        (gen / "charge.json").write_text("{}")
+        (gen / "qtaim.json").write_text("{}")
+        with zipfile.ZipFile(gen / "out_files.zip", "w") as zf:
+            zf.writestr("adch.out", "x")
+        return str(tmp_path)
+
+    def test_mismatch_discards_everything_derived(self, tmp_path):
+        folder = self._folder(tmp_path, electrons=4)  # water has 10
+        assert _reject_wavefunction_with_wrong_electron_count(folder, logging.getLogger("t"))
+        gone = [
+            "orca.wfx", "orca.molden.input", "hirshfeld.out", "hirshfeld.json",
+            "CPprop.txt", "generator/charge.json", "generator/qtaim.json",
+            "generator/out_files.zip",
+        ]
+        for rel in gone:
+            assert not os.path.exists(os.path.join(folder, rel)), rel
+        for rel in ("orca.inp", "orca.json", "timings.json", "orca.gbw.zstd0"):
+            assert os.path.exists(os.path.join(folder, rel)), rel
+
+    def test_matching_count_leaves_folder_alone(self, tmp_path):
+        folder = self._folder(tmp_path, electrons=10)
+        assert not _reject_wavefunction_with_wrong_electron_count(folder, logging.getLogger("t"))
+        assert os.path.exists(os.path.join(folder, "orca.wfx"))
+        assert os.path.exists(os.path.join(folder, "generator", "charge.json"))
+
+    def test_no_gbw_source_leaves_folder_alone(self, tmp_path):
+        folder = self._folder(tmp_path, electrons=4, with_gbw=False)
+        assert not _reject_wavefunction_with_wrong_electron_count(folder, logging.getLogger("t"))
+        assert os.path.exists(os.path.join(folder, "orca.wfx"))
 
 
 def test_multiwfn_wrapper_sets_pipefail(tmp_path):

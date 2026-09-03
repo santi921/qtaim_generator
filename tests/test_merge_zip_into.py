@@ -100,6 +100,52 @@ def test_killed_qtaim_out_does_not_displace_complete_rerun():
         assert _read_zip(dest)["qtaim.out"] == complete
 
 
+BANNER = b" ************ Main function menu ************\n"
+COMPLETE_OUT = BANNER + b" Final atomic charges:\n Atom 1(C): 0.1\n\n" + BANNER
+KILLED_OUT = BANNER + b" Progress: [##--------]  20.0 %\r" * 300
+
+
+def test_killed_src_out_does_not_displace_complete_dest():
+    # A rerun killed mid-step leaves a one-banner .out in the job root; a later
+    # pass that skips the step still zips it. The archived complete copy must
+    # survive that merge.
+    with tempfile.TemporaryDirectory() as tmp:
+        src = os.path.join(tmp, "src.zip")
+        dest = os.path.join(tmp, "dest.zip")
+        _make_zip(dest, {"adch.out": COMPLETE_OUT})
+        _make_zip(src, {"adch.out": KILLED_OUT})
+
+        merge_zip_into(src, dest)
+
+        assert _read_zip(dest)["adch.out"] == COMPLETE_OUT
+
+
+def test_complete_src_out_replaces_killed_dest():
+    with tempfile.TemporaryDirectory() as tmp:
+        src = os.path.join(tmp, "src.zip")
+        dest = os.path.join(tmp, "dest.zip")
+        _make_zip(dest, {"adch.out": KILLED_OUT})
+        _make_zip(src, {"adch.out": COMPLETE_OUT})
+
+        merge_zip_into(src, dest)
+
+        assert _read_zip(dest)["adch.out"] == COMPLETE_OUT
+
+
+def test_cpprop_follows_qtaim_out_verdict():
+    with tempfile.TemporaryDirectory() as tmp:
+        src = os.path.join(tmp, "src.zip")
+        dest = os.path.join(tmp, "dest.zip")
+        _make_zip(dest, {"qtaim.out": COMPLETE_OUT, "CPprop.txt": b"full table"})
+        _make_zip(src, {"qtaim.out": KILLED_OUT, "CPprop.txt": b"partial"})
+
+        merge_zip_into(src, dest)
+
+        merged = _read_zip(dest)
+        assert merged["qtaim.out"] == COMPLETE_OUT
+        assert merged["CPprop.txt"] == b"full table"
+
+
 def test_missing_src_is_noop():
     with tempfile.TemporaryDirectory() as tmp:
         src = os.path.join(tmp, "missing.zip")
