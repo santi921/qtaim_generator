@@ -35,6 +35,7 @@ CPPROP_FIXTURE = TEST_FILES / "CPprop_w_bond_paths.txt"
 INP_FIXTURE = TEST_FILES / "input_bond_paths.in"
 HIRSHFELD_FIXTURE = TEST_FILES / "multiwfn" / "hirshfeld.out"
 CHARGE_DOC_FIXTURE = TEST_FILES / "multiwfn" / "charge.out"
+CHELPG_GLUED_FIXTURE = TEST_FILES / "multiwfn" / "chelpg_glued_overflow.out"
 
 COUNT_LINE = " Number of (3,-1) CPs:    13    Generating topology paths...\n"
 EXPORT_LINE = " Done! The results have been outputted to CPprop.txt in current folder\n"
@@ -162,11 +163,23 @@ class TestStepOutMustParse:
         assert not _step_out_parses(str(p), "fuzzy_bond", n_atoms=5)
         assert not _step_out_parses(str(p), "fuzzy_bond", n_atoms=None)
 
-    def test_nested_charge_routine_checks_each_scheme_length(self):
+    def test_nested_charge_routine_checks_each_scheme(self):
         schemes, _, _ = parse_charge_doc(str(CHARGE_DOC_FIXTURE))
         n = len(next(iter(schemes.values())))
         assert _step_out_parses(str(CHARGE_DOC_FIXTURE), "charge", n_atoms=n, charge=2)
         assert not _step_out_parses(str(CHARGE_DOC_FIXTURE), "charge", n_atoms=n + 1)
+        assert not _step_out_parses(str(CHARGE_DOC_FIXTURE), "charge", charge=5)
+
+    def test_glued_overflow_charges_rerun(self):
+        # Values of |q| >= 100 parse (glued to the paren) but cannot sum to
+        # the net charge; the gate must not need n_atoms to reject them.
+        assert not _step_out_parses(str(CHELPG_GLUED_FIXTURE), "chelpg", charge=1)
+        assert not _step_out_parses(str(CHELPG_GLUED_FIXTURE), "chelpg", n_atoms=150, charge=1)
+
+    def test_truncated_charge_row_reruns(self, tmp_path):
+        p = tmp_path / "chelpg.out"
+        p.write_text("   Center       Charge\n     1(C )  -0.67\n     2(C\n")
+        assert not _step_out_parses(str(p), "chelpg")
 
 
 class TestWavefunctionElectronCount:

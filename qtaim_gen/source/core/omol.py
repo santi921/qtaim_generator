@@ -1984,9 +1984,7 @@ def _step_out_parses(
             return True
         return n_atoms is not None and n_atoms <= 2
     charges = data["charge"]
-    # The non-separate "charge" routine nests one table per scheme. Its parser
-    # (parse_charge_doc) misreads the CM5 block of the combined output, so only
-    # the row count is checked there; the sum test applies to flat tables.
+    # The non-separate "charge" routine nests one table per scheme.
     nested = bool(charges) and all(isinstance(v, dict) for v in charges.values())
     tables = list(charges.values()) if nested else [charges]
     for table in tables:
@@ -1994,7 +1992,7 @@ def _step_out_parses(
             return False
         if n_atoms is not None and len(table) != n_atoms:
             return False
-        if charge is not None and not nested:
+        if charge is not None:
             try:
                 total = sum(float(v) for v in table.values())
             except (TypeError, ValueError):

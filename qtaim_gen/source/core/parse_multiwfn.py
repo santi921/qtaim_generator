@@ -2,6 +2,7 @@ from qtaim_gen.source.core.parse_qtaim import get_qtaim_descs, merge_qtaim_inds
 
 
 import re
+from typing import Optional, Tuple
 
 # Regex for splitting Fortran-overflowed numeric tokens like '-990.879181-1009.749968'
 # Matches a float (with optional sign) followed by another float starting with '-'
@@ -66,19 +67,26 @@ def _split_fortran_floats(tokens: list) -> list:
 # One row of a Multiwfn per-atom charge table, in either layout:
 #   " Atom   87(Mg):     1.90845634"      (Final atomic charges:)
 #   "    87(Mg)   1.1514104986"           (Center       Charge, ESP fitting)
+# The value is a fixed-width Fortran field: a value of 100 or more fills it
+# and is glued to the paren ("1(C )-205.7990054130"), beyond that it prints
+# as asterisks.
+_CHARGE_ROW_START_RE = re.compile(r"^\s*(?:Atom\s+)?\d+\(")
 _CHARGE_ROW_RE = re.compile(
-    r"^\s*(?:Atom\s+)?(\d+)\(\s*([A-Za-z]{1,2})\s*\):?\s+(\S+)\s*$"
+    r"^\s*(?:Atom\s+)?(\d+)\(\s*([A-Za-z]{1,2})\s*\):?\s*(\S+)\s*$"
 )
 
 
-def _charge_table_row(line: str):
+def _charge_table_row(line: str) -> Optional[Tuple[str, float]]:
     """('87_Mg', 1.15) for a charge-table row, None for any other line.
 
-    Raises ValueError when the value overflowed to '****' so callers see a
-    corrupt file instead of a short table.
+    A line that starts like a row but has no parseable value (truncated file,
+    '****' overflow) raises ValueError so callers see a corrupt file instead
+    of a short table.
     """
     m = _CHARGE_ROW_RE.match(line)
     if m is None:
+        if _CHARGE_ROW_START_RE.match(line):
+            raise ValueError(f"unparseable charge row: {line.rstrip()!r}")
         return None
     return f"{m.group(1)}_{m.group(2)}", float(m.group(3))
 
@@ -106,7 +114,8 @@ def parse_charge_doc(charge_out_txt):
     dipole_key = "Total dipole moment from atomic charges:"
     dipole_xyz_key = "X/Y/Z of dipole moment vector:"
 
-    # charge_ordering = ["hirshfeld", "vdd", "becke", "adch", "chelpg", "mk", "cm5", "resp", "peoe", "mbis"]
+    # Positional: charge_data() runs Multiwfn options 1, 2, 10, 11, 13, 20.
+    # Slot 5 is therefore Merz-Kollmann (13), kept under the legacy key "cm5".
     charge_ordering = ["hirshfeld", "vdd", "becke", "adch", "cm5", "mbis"]
     dipole_order = ["hirshfeld", "vdd", "becke", "hirshfeld"]
     atomic_dipole_order = ["becke", "adch"]
@@ -143,7 +152,8 @@ def parse_charge_doc(charge_out_txt):
                     )
                     charge_dict_index += 1
                 else:
-                    charge_dict[row[0]] = row[1]
+                    key, value = row
+                    charge_dict[key] = value
 
             if trigger_dipole:
                 # print(len(line) < 3)
@@ -338,7 +348,8 @@ def parse_charge_chelpg(charge_out_txt):
                     trigger2 = False
                     charge_dict_overall = charge_dict
                 else:
-                    charge_dict[row[0]] = row[1]
+                    key, value = row
+                    charge_dict[key] = value
 
             if charge_key_3 in line:
                 trigger2 = True

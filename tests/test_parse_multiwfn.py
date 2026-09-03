@@ -3,6 +3,7 @@ import tempfile
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from qtaim_gen.source.core.parse_multiwfn import (
     _extract_au_float,
@@ -150,9 +151,9 @@ class TestMultiwfnParser:
             charge_dict_overall["becke"]["9_C"], 0.66429787, atol=1e-3
         ), "becke charge is not right"
 
-        # ESP-fitting table: two-letter element and the trailing
-        # "Sum of charges" / "RMSE" lines must not corrupt the last row
-        assert "87_Mg)" not in charge_dict_overall["cm5"]
+        # Slot 5 of the combined run is Merz-Kollmann, stored under "cm5".
+        # Its table is the ESP-fitting layout: two-letter element and the
+        # trailing "Sum of charges" / "RMSE" lines must not corrupt the last row
         assert np.isclose(charge_dict_overall["cm5"]["87_Mg"], 1.1514104986)
         for scheme, charges in charge_dict_overall.items():
             assert np.isclose(sum(charges.values()), 2.0, atol=2e-2), scheme
@@ -203,21 +204,35 @@ class TestMultiwfnParser:
         ), "becke dipole is not right"
 
     def test_parse_charge_chelpg_esp_table(self):
-        # Separate-mode ESP-fitting output: the "Center Charge" table is
-        # followed by "Sum of charges:" and "RMSE:" before the blank line.
-        lines = (TEST_FILES / "multiwfn" / "charge.out").read_text().splitlines()
-        start = next(i for i, ln in enumerate(lines) if "Center       Charge" in ln)
-        end = next(i for i in range(start, len(lines)) if not lines[i].strip())
-        table = "\n".join(lines[start : end + 1]) + "\n"
-        with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "chelpg.out"
-            path.write_text(table)
-            charges = parse_charge_chelpg(str(path))
+        # "Center Charge" table followed by "Sum of charges:" and "RMSE:"
+        # before the blank line; charge.out holds one such table.
+        charges = parse_charge_chelpg(str(TEST_FILES / "multiwfn" / "charge.out"))
 
         assert len(charges) == 87
         assert np.isclose(charges["1_C"], -0.6725424206)
         assert np.isclose(charges["87_Mg"], 1.1514104986)
         assert np.isclose(sum(charges.values()), 2.0, atol=1e-6)
+
+    def test_parse_charge_chelpg_glued_overflow(self):
+        # Broken-wavefunction run: |q| >= 100 fills the Fortran field and is
+        # glued to the paren. The value is still read; the restart gate
+        # rejects the file on its charge sum.
+        path = str(TEST_FILES / "multiwfn" / "chelpg_glued_overflow.out")
+        charges = parse_charge_chelpg(path)
+
+        assert len(charges) == 150
+        assert np.isclose(charges["1_C"], -205.7990054130)
+        assert np.isclose(charges["15_N"], -223.1330540402)
+
+    def test_charge_row_without_value_raises(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            for tail in ("Atom    2(C ):***************", "    2(C )  ", "    2(C"):
+                path = Path(tmp) / "chelpg.out"
+                path.write_text(
+                    "   Center       Charge\n     1(C )  -0.6725424206\n" + tail + "\n"
+                )
+                with pytest.raises(ValueError):
+                    parse_charge_chelpg(str(path))
 
     def test_fuzzy_parse(self):
         file_fuzzy_info = str(TEST_FILES / "multiwfn" / "fuzzy_full.out")
