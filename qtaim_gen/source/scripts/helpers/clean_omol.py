@@ -62,16 +62,19 @@ STATIC_SUFFIXES = (
     "orca.gbw.zstd0",
 )
 
-# Heavy ORCA artifacts that process_folder_alcf copies from the source tree
-# into the results tree and re-copies whenever the destination is missing.
-# Only deleted with --purge-orca, and only when the source copy still exists.
-PURGE_ORCA_NAMES = (
-    "orca.out",
-    "orca.wfx",
-    "orca.wfn",
-    "orca.tar.zst",
-    "density_mat.npz",
-)
+# Heavy ORCA artifacts in a results tree, mapped to the source-tree files that
+# regenerate them on the next process_folder_alcf pass: the compressed inputs
+# are copied over, orca.out is untarred from orca.tar.zst, and the wfx/wfn is
+# converted from orca.gbw.zstd0. Only deleted with --purge-orca, and only when
+# one of the listed source files exists non-empty in the mirrored source folder.
+PURGE_SOURCES = {
+    "orca.out": ("orca.out", "orca.tar.zst"),
+    "orca.wfx": ("orca.wfx", "orca.gbw.zstd0", "orca.gbw"),
+    "orca.wfn": ("orca.wfn", "orca.gbw.zstd0", "orca.gbw"),
+    "orca.tar.zst": ("orca.tar.zst",),
+    "density_mat.npz": ("density_mat.npz",),
+}
+PURGE_ORCA_NAMES = tuple(PURGE_SOURCES)
 
 # Matches acquire_lock's stale threshold in core/workflow.py (_LOCK_MAX_AGE_S).
 LOCK_MAX_AGE_S = 28800.0
@@ -98,13 +101,15 @@ def folder_is_live(path: str, lock_max_age: float) -> bool:
     return age < lock_max_age
 
 
-def source_mirror_ok(path: str, root: str, source_root: str) -> bool:
-    """True if the same relative path exists non-empty under source_root."""
-    rel = os.path.relpath(path, root)
-    try:
-        return os.path.getsize(os.path.join(source_root, rel)) > 0
-    except OSError:
-        return False
+def source_can_regenerate(source_folder: str, name: str) -> bool:
+    """True if source_folder holds a non-empty file that regenerates `name`."""
+    for src_name in PURGE_SOURCES[name]:
+        try:
+            if os.path.getsize(os.path.join(source_folder, src_name)) > 0:
+                return True
+        except OSError:
+            continue
+    return False
 
 
 def _safe_scandir(path):
@@ -142,10 +147,12 @@ def _entry_is_file(entry):
 def iter_files(root, purge_orca=False, source_root=None, lock_max_age=LOCK_MAX_AGE_S, skips=None):
     """Generator yielding files to delete as they are discovered.
 
-    With purge_orca, folders holding a live .processing.lock are skipped
-    entirely, and PURGE_ORCA_NAMES are yielded only when a non-empty copy
-    exists at the same relative path under source_root. Skipped items are
-    appended to skips["locked"] / skips["no_mirror"] when a dict is given.
+    Without purge_orca this yields plain paths, as before. With purge_orca,
+    folders holding a live .processing.lock are skipped entirely (recorded in
+    skips["locked"] when a dict is given) and PURGE_ORCA_NAMES are yielded as
+    (path, source_folder, name) tuples; the source check happens in the
+    worker (process_item) so its source-tree stats run in parallel and a hung
+    stat cannot stall the scan.
     """
     stack = [root]
 
@@ -155,6 +162,9 @@ def iter_files(root, purge_orca=False, source_root=None, lock_max_age=LOCK_MAX_A
             if skips is not None:
                 skips["locked"].append(path)
             continue
+        source_folder = None
+        if purge_orca:
+            source_folder = os.path.join(source_root, os.path.relpath(path, root))
         it = _safe_scandir(path)
         if it is None:
             continue
@@ -173,11 +183,8 @@ def iter_files(root, purge_orca=False, source_root=None, lock_max_age=LOCK_MAX_A
                     elif _entry_is_file(entry):
                         if should_delete(entry.name):
                             yield entry.path
-                        elif purge_orca and entry.name in PURGE_ORCA_NAMES:
-                            if source_mirror_ok(entry.path, root, source_root):
-                                yield entry.path
-                            elif skips is not None:
-                                skips["no_mirror"].append(entry.path)
+                        elif purge_orca and entry.name in PURGE_SOURCES:
+                            yield (entry.path, source_folder, entry.name)
         except OSError as e:
             print(f"[warn] scandir context failed for {path}: {e}", file=sys.stderr)
 
@@ -195,6 +202,21 @@ def delete_file(path, dry_run=False):
         return 0
 
 
+def process_item(item, dry_run=False):
+    """Pool worker. Returns (path, deleted_count, no_mirror_flag).
+
+    A plain path is deleted unconditionally. A (path, source_folder, name)
+    tuple from --purge-orca is deleted only if source_can_regenerate holds;
+    otherwise it is reported back with no_mirror_flag set.
+    """
+    if isinstance(item, str):
+        return item, delete_file(item, dry_run=dry_run), False
+    path, source_folder, name = item
+    if not source_can_regenerate(source_folder, name):
+        return path, 0, True
+    return path, delete_file(path, dry_run=dry_run), False
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("root", help="Root directory")
@@ -204,8 +226,10 @@ def main():
         "--purge-orca",
         action="store_true",
         help="Also delete orca.out, orca.wfx/.wfn, orca.tar.zst and density_mat.npz "
-        "from a results tree, but only where a non-empty copy exists under --source-root. "
-        "Folders with a live .processing.lock are skipped.",
+        "from a results tree, but only where the mirrored folder under --source-root still "
+        "holds the file or the compressed input that regenerates it (orca.tar.zst for "
+        "orca.out, orca.gbw.zstd0 for the wfx/wfn). Folders with a live .processing.lock "
+        "are skipped.",
     )
     parser.add_argument(
         "--source-root",
@@ -241,40 +265,39 @@ def main():
         skips=skips,
     )
 
+    worker = partial(process_item, dry_run=args.dry_run)
+    names = set()
+    deleted = 0
+
+    with Pool(args.jobs) as p:
+        for path, count, no_mirror in tqdm(
+            p.imap_unordered(worker, files, chunksize=64),
+            desc="Scanning" if args.dry_run else "Processing",
+            unit="files",
+        ):
+            if no_mirror:
+                skips["no_mirror"].append(path)
+                continue
+            deleted += count
+            if args.dry_run:
+                names.add(os.path.basename(path))
+
     if args.dry_run:
-        names = set()
-        deleted = 0
-        for path in tqdm(files, desc="Scanning", unit="files"):
-            names.add(os.path.basename(path))
-            deleted += 1
         print(f"Total files that would be deleted: {deleted}")
         print(f"Unique filenames ({len(names)}):")
         for name in sorted(names):
             print(f"  {name}")
-        if args.purge_orca:
-            print(f"Folders skipped (live lock): {len(skips['locked'])}")
-            for path in sorted(skips["locked"])[:20]:
-                print(f"  {path}")
-            print(f"Files skipped (no source mirror): {len(skips['no_mirror'])}")
-            for path in sorted(skips["no_mirror"])[:20]:
-                print(f"  {path}")
-        return
+    else:
+        print(f"Total files processed: {deleted}")
 
-    worker = partial(delete_file, dry_run=args.dry_run)
-    deleted = 0
-
-    with Pool(args.jobs) as p:
-        for result in tqdm(
-            p.imap_unordered(worker, files, chunksize=64),
-            desc="Processing",
-            unit="files",
-        ):
-            deleted += result
-
-    print(f"Total files processed: {deleted}")
     if args.purge_orca:
         print(f"Folders skipped (live lock): {len(skips['locked'])}")
-        print(f"Files skipped (no source mirror): {len(skips['no_mirror'])}")
+        print(f"Files skipped (no source to regenerate from): {len(skips['no_mirror'])}")
+        if args.dry_run:
+            for path in sorted(skips["locked"])[:20]:
+                print(f"  locked    {path}")
+            for path in sorted(skips["no_mirror"])[:20]:
+                print(f"  no-source {path}")
 
 
 if __name__ == "__main__":
