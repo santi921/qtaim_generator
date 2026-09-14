@@ -139,8 +139,9 @@ class TestCreateJobsWfxMode:
         """No convert.txt when .wfn already present."""
         from qtaim_gen.source.core.omol import create_jobs
 
-        # Create a .wfn file so conversion is skipped
-        open(os.path.join(self.tmpdir, "orca.wfn"), "w").close()
+        # Must be non-empty: an empty file is not a usable wavefunction
+        with open(os.path.join(self.tmpdir, "orca.wfn"), "w") as f:
+            f.write("wfn\n")
 
         create_jobs(
             folder=self.tmpdir,
@@ -158,8 +159,9 @@ class TestCreateJobsWfxMode:
         """No convert.txt when .wfx already present."""
         from qtaim_gen.source.core.omol import create_jobs
 
-        # Create a .wfx file so conversion is skipped
-        open(os.path.join(self.tmpdir, "orca.wfx"), "w").close()
+        # Must be non-empty: an empty file is not a usable wavefunction
+        with open(os.path.join(self.tmpdir, "orca.wfx"), "w") as f:
+            f.write("wfx\n")
 
         create_jobs(
             folder=self.tmpdir,
@@ -172,6 +174,64 @@ class TestCreateJobsWfxMode:
 
         convert_txt = os.path.join(self.tmpdir, "convert.txt")
         assert not os.path.exists(convert_txt), "convert.txt should NOT be created when .wfx exists"
+
+    def test_create_jobs_converts_when_wavefunction_is_empty(self):
+        """A zero-byte wavefunction is not usable, so conversion still runs."""
+        from qtaim_gen.source.core.omol import create_jobs
+
+        open(os.path.join(self.tmpdir, "orca.wfn"), "w").close()
+
+        create_jobs(
+            folder=self.tmpdir,
+            multiwfn_cmd="/usr/bin/Multiwfn",
+            orca_2mkl_cmd="/usr/bin/orca_2mkl",
+            separate=False,
+            debug=True,
+            wfx=False,
+        )
+
+        assert os.path.exists(os.path.join(self.tmpdir, "convert.txt"))
+
+    def test_create_jobs_renames_legacy_wavefunction(self):
+        """A legacy orca5.wfn is renamed to orca.wfn instead of being ignored."""
+        from qtaim_gen.source.core.omol import create_jobs
+
+        with open(os.path.join(self.tmpdir, "orca5.wfn"), "w") as f:
+            f.write("legacy wfn\n")
+
+        create_jobs(
+            folder=self.tmpdir,
+            multiwfn_cmd="/usr/bin/Multiwfn",
+            orca_2mkl_cmd="/usr/bin/orca_2mkl",
+            separate=False,
+            debug=True,
+            wfx=False,
+        )
+
+        assert os.path.exists(os.path.join(self.tmpdir, "orca.wfn"))
+        assert not os.path.exists(os.path.join(self.tmpdir, "orca5.wfn"))
+        assert not os.path.exists(os.path.join(self.tmpdir, "convert.txt"))
+
+    def test_convert_targets_canonical_name_for_legacy_gbw(self):
+        """convert.txt exports orca.wfn even when the .gbw is orca5.gbw."""
+        from qtaim_gen.source.core.omol import create_jobs
+
+        os.remove(self.gbw_path)
+        open(os.path.join(self.tmpdir, "orca5.gbw"), "w").close()
+
+        create_jobs(
+            folder=self.tmpdir,
+            multiwfn_cmd="/usr/bin/Multiwfn",
+            orca_2mkl_cmd="/usr/bin/orca_2mkl",
+            separate=False,
+            debug=True,
+            wfx=False,
+        )
+
+        with open(os.path.join(self.tmpdir, "convert.txt")) as f:
+            content = f.read()
+        assert "orca.wfn" in content
+        assert "orca5.wfn" not in content
 
 
 class TestCleanJobsWfx:

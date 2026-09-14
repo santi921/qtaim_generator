@@ -200,7 +200,7 @@ def process_folder(
         subprocess_env = {**os.environ, "OMP_STACKSIZE": omp_stacksize}
 
         t0: float = time.time()
-        gbw_analysis(
+        tf_validation = gbw_analysis(
             folder=folder,
             orca_2mkl_cmd=orca_2mkl_cmd,
             multiwfn_cmd=multiwfn_cmd,
@@ -238,12 +238,21 @@ def process_folder(
             "orca.engrad",
             "orca_stderr",
         ]
-        for fn in files_to_remove:
-            fp = os.path.join(folder, fn)
-            if os.path.exists(fp):
-                os.remove(fp)
-                # add log
-                logger.info("Removed file %s to save space", fp)
+        # orca.gbw.zstd0/orca.tar.zst are the only wavefunction source a retry
+        # has. Deleting them after a failed validation left the folder unable
+        # to be reprocessed at all without re-staging from the source tree.
+        if tf_validation:
+            for fn in files_to_remove:
+                fp = os.path.join(folder, fn)
+                if os.path.exists(fp):
+                    os.remove(fp)
+                    # add log
+                    logger.info("Removed file %s to save space", fp)
+        else:
+            logger.warning(
+                "Validation failed for %s - keeping compressed sources for retry",
+                folder,
+            )
 
         result["elapsed"] = t1 - t0
         result["status"] = "ok"
@@ -469,7 +478,7 @@ def process_folder_alcf(
         subprocess_env = {**os.environ, "OMP_STACKSIZE": omp_stacksize}
 
         t0: float = time.time()
-        gbw_analysis(
+        tf_validation = gbw_analysis(
             folder=folder,
             orca_2mkl_cmd=orca_2mkl_cmd,
             multiwfn_cmd=multiwfn_cmd,
@@ -498,12 +507,20 @@ def process_folder_alcf(
         )
         t1: float = time.time()
 
-        if clean:
+        # See process_folder: the compressed sources are the only thing a
+        # retry can rebuild the wavefunction from, so a failed validation
+        # keeps them.
+        if clean and tf_validation:
             for fn in files_to_remove:
                 fp = os.path.join(folder, fn)
                 if os.path.exists(fp):
                     os.remove(fp)
                     logger.info("Removed file %s to save space", fp)
+        elif clean:
+            logger.warning(
+                "Validation failed for %s - keeping compressed sources for retry",
+                folder,
+            )
 
         result["elapsed"] = t1 - t0
         result["status"] = "ok"

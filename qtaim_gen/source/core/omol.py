@@ -268,38 +268,29 @@ def create_jobs(
     # Determine target wavefunction extension based on --wfx flag
     wf_ext = ".wfx" if wfx else ".wfn"
 
-    wf_present = False
-    file_wf_search = None
-    for file in os.listdir(folder):
-        if file.endswith((".wfn", ".wfx")):
-            wf_present = True
-            file_wf_search = os.path.join(folder, file)
+    # A wavefunction only counts when it carries the canonical name every
+    # downstream step opens. Renaming to match the .gbw prefix instead is what
+    # produced orca5.wfn files that pass a suffix scan and fail every real
+    # read, so the normalization runs the other way now.
+    file_read = _normalize_wavefunction_name(folder, logger)
+    wf_present = file_read is not None
 
     bool_gbw = False
-    file_read = None
+    file_gbw = None
+    file_molden = None
 
     for file in os.listdir(folder):
         if file.endswith(".gbw"):
             bool_gbw = True
             file_gbw = os.path.join(folder, file)
-            file_wf = file.replace(".gbw", wf_ext)
-            # if there is a wfn/wfx, rename to match gbw prefix
-            if wf_present:
-                if file_wf not in os.listdir(folder):
-                    logger.info(f"Renaming wavefunction file to: {file_wf}")
-                    os.rename(
-                        file_wf_search,
-                        os.path.join(folder, file_wf),
-                    )
-
-            file_molden = file.replace(".gbw", ".molden.input")
-            file_molden = os.path.join(folder, file_molden)
-            file_read = os.path.join(folder, file_wf)
-
-        if file.endswith((".wfn", ".wfx")):
-            file_read = os.path.join(folder, file)
+            file_molden = os.path.join(
+                folder, file.replace(".gbw", ".molden.input")
+            )
 
     if not wf_present and bool_gbw:
+        # Conversion writes the canonical name whatever the .gbw is called, so
+        # a legacy orca5.gbw cannot seed another orca5.wfn.
+        file_read = os.path.join(folder, "orca" + wf_ext)
         logger.info(f"file_gbw: {file_gbw}")
         logger.info(f"out folder: {folder}")
         logger.info("wavefunction file not found - writing conversion script")
@@ -383,8 +374,7 @@ def create_jobs(
             elif routine == "convert":
                 job_dict["convert"] = os.path.join(folder, "convert.txt")
                 with open(os.path.join(folder, "convert.txt"), "w") as f:
-                    file_wf_target = file_gbw.replace(".gbw", wf_ext)
-                    file_wf_bare = file_wf_target.split("/")[-1]
+                    file_wf_bare = "orca" + wf_ext
                     if wfx:
                         # Multiwfn menu 100 -> 2 -> 4: export to .wfx
                         data = "100\n2\n4\n{}\n0\nq\n".format(file_wf_bare)
@@ -545,11 +535,12 @@ def run_jobs(
     if debug:
         order_of_operations = ["qtaim"]
 
-    wf_present = False
+    # Same canonical-name test as the per-step gate further down, so the two
+    # cannot disagree: a legacy orca5.wfn used to pass here and fail there,
+    # which skipped conversion and then refused every step.
+    wf_present = _wavefunction_present(folder)
     conv_file = None
     for file in os.listdir(folder):
-        if file.endswith((".wfn", ".wfx")):
-            wf_present = True
         if file.endswith("convert.in"):
             conv_file = os.path.join(folder, file)
 
@@ -1694,6 +1685,40 @@ def _wavefunction_present(folder: str) -> bool:
     return _wavefunction_path(folder) is not None
 
 
+def _normalize_wavefunction_name(
+    folder: str, logger: logging.Logger
+) -> Optional[str]:
+    """Return the canonical wavefunction path, renaming a non-canonical one
+    (e.g. a legacy orca5.wfn left by a conversion off orca5.gbw) into place.
+
+    orca.wfn/orca.wfx are the only names the rest of the pipeline opens, so a
+    differently-prefixed wavefunction is invisible to it while still being
+    substantial enough to suppress reconversion. The extension is preserved -
+    a .wfn is not renamed into a .wfx.
+    """
+    canonical = _wavefunction_path(folder)
+    if canonical is not None:
+        return canonical
+    for name in sorted(os.listdir(folder)):
+        if not name.endswith((".wfn", ".wfx")):
+            continue
+        src = os.path.join(folder, name)
+        try:
+            if not os.path.isfile(src) or os.path.getsize(src) == 0:
+                continue
+        except OSError:
+            continue
+        dst = os.path.join(folder, "orca" + os.path.splitext(name)[1])
+        try:
+            os.rename(src, dst)
+        except OSError as e:
+            logger.warning("Could not rename %s to %s: %s", src, dst, e)
+            continue
+        logger.info("Renamed non-canonical wavefunction %s to %s", name, dst)
+        return dst
+    return None
+
+
 # def2 basis sets put an ECP on every element from Rb (Z=37) up. The wfx of
 # such a system counts core electrons only if Multiwfn loaded the EDF library,
 # so an all-electron expectation cannot be compared against it reliably.
@@ -2237,7 +2262,7 @@ def gbw_analysis(
     if not os.path.exists(folder):
         print("Folder does not exist")
         logger.error("Folder does not exist: {}".format(folder))
-        return
+        return False
 
     if restart and not parse_only:
         if _reject_wavefunction_with_wrong_electron_count(
@@ -2249,27 +2274,23 @@ def gbw_analysis(
     # option to preprocess compressed files
     if preprocess_compressed:
         logger.info("Preprocessing compressed files in folder: {}".format(folder))
-        # check if the required files are already uncompressed - .inp, .wfn
-        required_files = [".inp", ".wfn", ".wfx"]
-        uncompressed_files = [
-            f for f in os.listdir(folder) if f.endswith(tuple(required_files))
-        ]
-        # also check these files are not empty
-        uncompressed_files = [
-            f
-            for f in uncompressed_files
-            if os.path.getsize(os.path.join(folder, f)) > 0
-        ]
-
-        if uncompressed_files:
-            logger.info("Found uncompressed files: {}".format(uncompressed_files))
-            logger.info("Skipping uncompression step")
-
+        # Extraction exists to produce a usable wavefunction, so gate on that
+        # directly. Counting names ending in .inp/.wfn/.wfx was not the same
+        # test: a stale orca5.wfn alongside orca.inp reached the old threshold
+        # of two files while leaving the folder with no orca.wfn/orca.wfx, so
+        # the .gbw was never extracted and the orca5 sweep below - the only
+        # code that removes orca5.wfn - never ran either.
+        extracted = False
+        wf_path = _normalize_wavefunction_name(folder, logger)
+        if wf_path is not None:
+            logger.info(
+                "Found usable wavefunction %s - skipping uncompression step", wf_path
+            )
         else:
-            logger.warning("No uncompressed files found - will attempt to uncompress")
-        # skip if uncompressed files are present
-
-        if len(uncompressed_files) < 2:
+            logger.warning(
+                "No usable wavefunction in %s - will attempt to uncompress", folder
+            )
+            extracted = True
             # run unstd and extract in the target folder so resulting files land there
             for file in os.listdir(folder):
                 if file.endswith(".tar.zst") or file.endswith(".tgz"):
@@ -2337,32 +2358,44 @@ def gbw_analysis(
                     except Exception as e:
                         logger.error(f"Error running unzstd for gbw {zstd_file}: {e}")
 
-            # Legacy orca5.* files are only safe to drop when the canonical
-            # orca.gbw is present (produced from orca.gbw.zstd0 above). If the
-            # folder only has orca5.gbw, removing it would strip the sole
-            # wavefunction source and brick downstream orca_2mkl/Multiwfn.
-            canonical_gbw_path = os.path.join(folder, "orca.gbw")
-            canonical_gbw_present = (
-                os.path.isfile(canonical_gbw_path)
-                and os.path.getsize(canonical_gbw_path) > 0
-            )
-            always_intermediate = [".tar", ".tar.zst", ".tgz", ".gbw.zstd0", ".zstd", ".npz"]
-            legacy_orca5 = ["orca5.gbw", "orca5.wfn", "orca5.wfx"]
-            for file in os.listdir(folder):
-                is_intermediate = any(file.endswith(ext) for ext in always_intermediate)
-                is_legacy_orca5 = file in legacy_orca5
-                if is_intermediate or (is_legacy_orca5 and canonical_gbw_present):
-                    try:
-                        os.remove(os.path.join(folder, file))
-                        logger.info(f"Removed intermediate file: {file}")
-                    except Exception as e:
-                        logger.error(f"Error removing intermediate file {file}: {e}")
-                elif is_legacy_orca5 and not canonical_gbw_present:
-                    logger.warning(
-                        "Keeping legacy %s -- no canonical orca.gbw present in %s",
-                        file,
-                        folder,
-                    )
+        # Legacy orca5.* files are only safe to drop once a canonical source
+        # exists: orca.gbw (extracted just above) or a canonical wavefunction.
+        # Dropping orca5.gbw without one would strip the sole wavefunction
+        # source and brick downstream orca_2mkl/Multiwfn. This sweep runs on
+        # every preprocess pass, not only when extraction ran, because a stale
+        # orca5.wfn is exactly what used to stop extraction from running.
+        canonical_gbw_path = os.path.join(folder, "orca.gbw")
+        canonical_gbw_present = (
+            os.path.isfile(canonical_gbw_path)
+            and os.path.getsize(canonical_gbw_path) > 0
+        )
+        canonical_source_present = (
+            canonical_gbw_present or _wavefunction_path(folder) is not None
+        )
+        # Intermediates are only swept on a pass that extracted. orca.tar.zst
+        # is still the archive _extract_orca_out_from_archive reads later, so
+        # a skip pass must leave it alone.
+        always_intermediate = (
+            [".tar", ".tar.zst", ".tgz", ".gbw.zstd0", ".zstd", ".npz"]
+            if extracted
+            else []
+        )
+        legacy_orca5 = ["orca5.gbw", "orca5.wfn", "orca5.wfx"]
+        for file in os.listdir(folder):
+            is_intermediate = any(file.endswith(ext) for ext in always_intermediate)
+            is_legacy_orca5 = file in legacy_orca5
+            if is_intermediate or (is_legacy_orca5 and canonical_source_present):
+                try:
+                    os.remove(os.path.join(folder, file))
+                    logger.info(f"Removed intermediate file: {file}")
+                except Exception as e:
+                    logger.error(f"Error removing intermediate file {file}: {e}")
+            elif is_legacy_orca5 and not canonical_source_present:
+                logger.warning(
+                    "Keeping legacy %s -- no canonical orca.gbw or wavefunction in %s",
+                    file,
+                    folder,
+                )
 
     if restart:
         # Check both locations: generator/ (previous completed run) and
@@ -2420,7 +2453,7 @@ def gbw_analysis(
                     )
                 logger.info("gbw_analysis completed in folder: {}".format(folder))
                 logger.info("Validation status: {}".format(tf_validation))
-                return
+                return tf_validation
 
             # attempt to reparse if output exists but validation failed
             else:
@@ -2522,7 +2555,7 @@ def gbw_analysis(
                             "gbw_analysis completed in folder: {}".format(folder)
                         )
                         logger.info("Validation status: {}".format(tf_validation))
-                        return
+                        return tf_validation
                 except Exception as e:
                     logger.error(f"Error during reparsing attempt: {e}")
                     logger.info("Proceeding to re-run full analysis.")
@@ -2647,6 +2680,8 @@ def gbw_analysis(
             full_set=full_set,
             move_results=move_results,
         )
+
+    return tf_validation
 
 
 # /global/scratch/users/santiagovargas/gbws_cleaning_lean/ml_elytes/elytes_md_eqv2_electro_512_C3H8O_3_group_133_shell_0_0_1_1341
