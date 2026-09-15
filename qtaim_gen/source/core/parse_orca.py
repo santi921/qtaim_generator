@@ -20,7 +20,9 @@ logger = logging.getLogger(__name__)
 # Emitted as result["orca_parser_version"] so downstream caches can detect stale
 # parses. History:
 #   1: implicit, pre-versioning (alpha-only orbitals, positional HOMO/LUMO)
-#   2: both spin blocks read, energy-ordered HOMO/LUMO, per-spin keys, NEL parsed
+#   2: both spin blocks read; flat homo/lumo keys are the spin-agnostic frontier
+#      picked by energy; *_alpha/*_beta keys always present; zero-energy
+#      placeholder rows skipped; n_electrons_nel and hf_type parsed
 ORCA_PARSER_VERSION = 2
 
 
@@ -151,7 +153,7 @@ def _new_orbital_block() -> dict:
     return {
         "homo_eh": None, "homo_ev": None,
         "lumo_eh": None, "lumo_ev": None,
-        "n_electrons": 0, "n_orbitals": 0,
+        "n_electrons": 0, "n_orbitals": 0, "n_doubly": 0,
     }
 
 
@@ -164,32 +166,63 @@ def _write_orbital_block(result: dict, block: dict, suffix: str) -> None:
         result[f"homo_lumo_gap_eh{suffix}"] = block["lumo_eh"] - block["homo_eh"]
 
 
+def _frontier(alpha: dict, beta: dict) -> dict:
+    """Spin-agnostic frontier over two channels: the highest occupied and the
+    lowest virtual orbital regardless of spin, eV paired to the same row."""
+    occupied = [b for b in (alpha, beta) if b["homo_eh"] is not None]
+    virtual = [b for b in (alpha, beta) if b["lumo_eh"] is not None]
+    homo = max(occupied, key=lambda b: b["homo_eh"]) if occupied else None
+    lumo = min(virtual, key=lambda b: b["lumo_eh"]) if virtual else None
+    return {
+        "homo_eh": homo["homo_eh"] if homo else None,
+        "homo_ev": homo["homo_ev"] if homo else None,
+        "lumo_eh": lumo["lumo_eh"] if lumo else None,
+        "lumo_ev": lumo["lumo_ev"] if lumo else None,
+    }
+
+
 def _finalize_orbitals(result: dict, current: dict, alpha: Optional[dict]) -> None:
     """Write orbital energy results into *result*.
 
     *current* is the block being accumulated when the section ended. For a
-    restricted run it is the only block. For an unrestricted run *alpha* holds
-    the finished SPIN UP block and *current* is the SPIN DOWN block.
+    single-block run (RHF/RKS/ROHF/ROKS) it is the only block. For an
+    unrestricted run *alpha* holds the finished SPIN UP block and *current* is
+    the SPIN DOWN block.
 
-    The flat keys (homo_eh, lumo_eh, homo_lumo_gap_eh, ...) always carry the
-    alpha values so existing consumers are unaffected. n_electrons is the total
-    over both spins. n_orbitals is per spin. Per-spin keys (*_alpha, *_beta)
-    are emitted only when a SPIN DOWN block was seen.
+    Schema (fixed width, every key always present):
+      homo_*/lumo_*/homo_lumo_gap_eh  spin-agnostic frontier: highest occupied
+                                      and lowest virtual over both channels
+      *_alpha / *_beta                per-channel values; for a single block both
+                                      equal the flat keys
+      n_electrons                     alpha + beta
+      n_electrons_alpha/_beta         per channel; for a single block split by
+                                      occupation (doubly occupied -> both,
+                                      singly occupied -> alpha)
+      n_orbitals                      per spin channel
     """
+    if alpha is not None and current["n_orbitals"] == 0:
+        # SPIN DOWN header seen but no rows (truncated file): single block.
+        current, alpha = alpha, None
     if alpha is None:
-        alpha, beta = current, None
+        block = current
+        _write_orbital_block(result, block, "")
+        _write_orbital_block(result, block, "_alpha")
+        _write_orbital_block(result, block, "_beta")
+        n_alpha = block["n_electrons"] - block["n_doubly"]
+        n_beta = block["n_doubly"]
+        n_orbitals = block["n_orbitals"]
     else:
         beta = current
-    _write_orbital_block(result, alpha, "")
-    result["n_electrons"] = alpha["n_electrons"]
-    result["n_orbitals"] = alpha["n_orbitals"]
-    if beta is None:
-        return
-    result["n_electrons"] += beta["n_electrons"]
-    _write_orbital_block(result, alpha, "_alpha")
-    _write_orbital_block(result, beta, "_beta")
-    result["n_electrons_alpha"] = alpha["n_electrons"]
-    result["n_electrons_beta"] = beta["n_electrons"]
+        _write_orbital_block(result, _frontier(alpha, beta), "")
+        _write_orbital_block(result, alpha, "_alpha")
+        _write_orbital_block(result, beta, "_beta")
+        n_alpha = alpha["n_electrons"]
+        n_beta = beta["n_electrons"]
+        n_orbitals = alpha["n_orbitals"]
+    result["n_electrons"] = n_alpha + n_beta
+    result["n_electrons_alpha"] = n_alpha
+    result["n_electrons_beta"] = n_beta
+    result["n_orbitals"] = n_orbitals
 
 
 # ── Main parser ────────────────────────────────────────────────────────
@@ -293,13 +326,16 @@ def parse_orca_output(orca_out_path: str) -> dict:
                         orb_alpha = None
                         orb_underline_seen = False
 
-                    elif stripped.startswith("Number of Electrons") and "NEL" in stripped:
+                    elif "NEL" in stripped and stripped.startswith("Number of Electrons"):
                         # "Number of Electrons    NEL             ....   60"
                         # Exact SCF electron count; differs from sum of Z under ECPs.
-                        try:
-                            result["n_electrons_nel"] = int(stripped.split()[-1])
-                        except ValueError:
-                            pass
+                        val = parse_orca_float(stripped.split()[-1])
+                        if val is not None:
+                            result["n_electrons_nel"] = int(val)
+
+                    elif "HFTyp" in stripped and stripped.startswith("Hartree-Fock type"):
+                        # "Hartree-Fock type      HFTyp           .... UHF"  (RHF/UHF/ROHF)
+                        result["hf_type"] = stripped.split()[-1]
 
                     elif stripped.startswith("MULLIKEN ATOMIC CHARGES"):
                         state = OrcaParseState.MULLIKEN_CHARGES
@@ -512,6 +548,8 @@ def parse_orca_output(orca_out_path: str) -> dict:
                         orb_cur["n_orbitals"] += 1
                         if occ > 0:
                             orb_cur["n_electrons"] += occ
+                            if occ == 2.0:
+                                orb_cur["n_doubly"] += 1
                             if orb_cur["homo_eh"] is None or e_eh > orb_cur["homo_eh"]:
                                 orb_cur["homo_eh"] = e_eh
                                 orb_cur["homo_ev"] = e_ev
