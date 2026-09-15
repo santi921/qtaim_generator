@@ -1405,6 +1405,60 @@ class TestTwoOrbitalSections:
         assert two["n_orbitals"] == 3
 
 
+_ORBITAL_TITLE = "----------------\nORBITAL ENERGIES\n----------------\n\n"
+_SECTIONS_AFTER_ORBITALS = (
+    "\n-------------------------   --------------------\n"
+    "FINAL SINGLE POINT ENERGY       -75.100000000000\n"
+    "-------------------------   --------------------\n\n"
+    "-----------------------\nMULLIKEN ATOMIC CHARGES\n-----------------------\n"
+    "   0 O :   -0.300000\n   1 H :    0.300000\nSum of atomic charges:    0.0000000\n"
+)
+
+
+class TestOrbitalSectionTermination:
+    """The section must end at the next separator even when no row parses,
+    so later sections are never swallowed."""
+
+    def _parse(self, tmp_job_dir, text):
+        p = os.path.join(tmp_job_dir, "term.out")
+        with open(p, "w") as f:
+            f.write(text)
+        return parse_orca_output(p)
+
+    def test_five_column_rows_do_not_stall(self, tmp_job_dir):
+        # Symmetry-enabled runs add an Irrep column; rows are not 4 tokens.
+        r = self._parse(tmp_job_dir, _ORBITAL_TITLE + (
+            "  NO   OCC          E(Eh)            E(eV)    Irrep\n"
+            "   0   2.0000     -20.234567      -550.6114    1-A1\n"
+            "   1   0.0000       0.100000         2.7211    2-A1\n"
+        ) + _SECTIONS_AFTER_ORBITALS)
+        assert r["n_orbitals"] == 0
+        assert r["final_energy_eh"] == pytest.approx(-75.1)
+        assert r["mulliken_charges"]["1_O"] == pytest.approx(-0.3)
+
+    def test_spin_up_without_spin_down_does_not_stall(self, tmp_job_dir):
+        r = self._parse(tmp_job_dir, _ORBITAL_TITLE + (
+            "                 SPIN UP ORBITALS\n"
+            "  NO   OCC          E(Eh)            E(eV)\n"
+            "   0   1.0000      -1.000000       -27.2114\n"
+            "   1   0.0000       0.100000         2.7211\n"
+        ) + _SECTIONS_AFTER_ORBITALS)
+        assert r["homo_eh"] == pytest.approx(-1.0)
+        assert r["final_energy_eh"] == pytest.approx(-75.1)
+        assert r["mulliken_charges"]["2_H"] == pytest.approx(0.3)
+
+    def test_only_first_virtuals_notice_is_ignored(self, tmp_job_dir):
+        r = self._parse(tmp_job_dir, _ORBITAL_TITLE + (
+            "  NO   OCC          E(Eh)            E(eV)\n"
+            "   0   2.0000      -1.000000       -27.2114\n"
+            "   1   0.0000       0.100000         2.7211\n"
+            "*Only the first 10 virtual orbitals were printed.\n"
+        ) + _SECTIONS_AFTER_ORBITALS)
+        assert r["lumo_eh"] == pytest.approx(0.1)
+        assert r["n_orbitals"] == 2
+        assert r["final_energy_eh"] == pytest.approx(-75.1)
+
+
 class TestTruncatedOrbitalBlocks:
 
     def _write(self, tmp_job_dir, text):

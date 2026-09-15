@@ -155,28 +155,6 @@ def _new_orbital_block() -> dict:
     }
 
 
-def _add_orbital_line(block: dict, occ: float, e_eh: float, e_ev: float) -> None:
-    """HOMO is the highest-energy occupied orbital, LUMO the lowest-energy
-    virtual one. Selection is by energy, not file order, since ROKS/ROHF
-    blocks are not guaranteed to be energy-sorted.
-
-    Basis functions removed for linear dependence are printed as trailing
-    rows "OCC 0.0000  E(Eh) 0.000000  E(eV) 0.0000". They are not orbitals and
-    would otherwise win the min-energy LUMO pick whenever the real LUMO is
-    positive, so they are skipped and not counted in n_orbitals."""
-    if occ == 0.0 and e_eh == 0.0 and e_ev == 0.0:
-        return
-    block["n_orbitals"] += 1
-    if occ > 0:
-        block["n_electrons"] += occ
-        if block["homo_eh"] is None or e_eh > block["homo_eh"]:
-            block["homo_eh"] = e_eh
-            block["homo_ev"] = e_ev
-    elif block["lumo_eh"] is None or e_eh < block["lumo_eh"]:
-        block["lumo_eh"] = e_eh
-        block["lumo_ev"] = e_ev
-
-
 def _write_orbital_block(result: dict, block: dict, suffix: str) -> None:
     result[f"homo_eh{suffix}"] = block["homo_eh"]
     result[f"homo_ev{suffix}"] = block["homo_ev"]
@@ -253,7 +231,7 @@ def parse_orca_output(orca_out_path: str) -> dict:
     # orb_alpha holds the finished SPIN UP block once SPIN DOWN starts.
     orb_cur = _new_orbital_block()
     orb_alpha: Optional[dict] = None
-    orb_spin_headers = False
+    orb_underline_seen = False
 
     # SCF convergence
     scf_convergence = {}
@@ -313,8 +291,7 @@ def parse_orca_output(orca_out_path: str) -> dict:
                         state = OrcaParseState.ORBITAL_ENERGIES
                         orb_cur = _new_orbital_block()
                         orb_alpha = None
-                        orb_spin_headers = False
-                        section_line_count = 0
+                        orb_underline_seen = False
 
                     elif stripped.startswith("Number of Electrons") and "NEL" in stripped:
                         # "Number of Electrons    NEL             ....   60"
@@ -490,36 +467,57 @@ def parse_orca_output(orca_out_path: str) -> dict:
                     # Unrestricted layout:
                     #   ORBITAL ENERGIES / ---- / blank / SPIN UP ORBITALS / header / rows /
                     #   blank / SPIN DOWN ORBITALS / header / rows / blank
+                    # Blank lines never end the section (one separates the two spin
+                    # blocks). The first "----" is the title underline; the next one
+                    # belongs to the following section and ends this one, so the
+                    # parser always makes progress even when no row parses.
                     stripped = line.strip()
-                    if stripped == "SPIN UP ORBITALS":
-                        orb_spin_headers = True
+                    if stripped == "":
+                        continue
+                    if stripped.startswith("----"):
+                        if not orb_underline_seen:
+                            orb_underline_seen = True
+                            continue
+                        _finalize_orbitals(result, orb_cur, orb_alpha)
+                        state = OrcaParseState.IDLE
                         continue
                     if stripped == "SPIN DOWN ORBITALS":
                         orb_alpha = orb_cur
                         orb_cur = _new_orbital_block()
                         continue
-                    if stripped == "" or stripped.startswith("----"):
-                        if orb_cur["n_orbitals"] == 0:
-                            continue  # still in the header region
-                        if orb_spin_headers and orb_alpha is None:
-                            continue  # gap between SPIN UP rows and the SPIN DOWN header
-                        _finalize_orbitals(result, orb_cur, orb_alpha)
-                        state = OrcaParseState.IDLE
-                        continue
                     parts = line.split()
                     # Orbital rows: "  NO   OCC   E(Eh)   E(eV)" with exactly 4 columns
-                    # and OCC is 0.0000, 1.0000, or 2.0000
+                    # and OCC is 0.0000, 1.0000, or 2.0000. "SPIN UP ORBITALS" and the
+                    # column header have 3 tokens / a "NO" first token and fall through.
                     if len(parts) == 4 and parts[0] != "NO":
                         try:
                             occ = float(parts[1])
-                            if occ not in (0.0, 1.0, 2.0):
-                                # Not a valid orbital row; terminate
-                                _finalize_orbitals(result, orb_cur, orb_alpha)
-                                state = OrcaParseState.IDLE
-                                continue
-                            _add_orbital_line(orb_cur, occ, float(parts[2]), float(parts[3]))
-                        except (ValueError, IndexError):
-                            pass
+                            e_eh = float(parts[2])
+                            e_ev = float(parts[3])
+                        except ValueError:
+                            continue
+                        if occ not in (0.0, 1.0, 2.0):
+                            # Not a valid orbital row; terminate
+                            _finalize_orbitals(result, orb_cur, orb_alpha)
+                            state = OrcaParseState.IDLE
+                            continue
+                        # Basis functions removed for linear dependence are printed
+                        # as trailing "0.0000  0.000000  0.0000" rows. Not orbitals:
+                        # they would win the min-energy LUMO pick when the real LUMO
+                        # is positive.
+                        if occ == 0.0 and e_eh == 0.0 and e_ev == 0.0:
+                            continue
+                        # HOMO = highest-energy occupied, LUMO = lowest-energy virtual,
+                        # by energy rather than file order (ROHF blocks are unsorted).
+                        orb_cur["n_orbitals"] += 1
+                        if occ > 0:
+                            orb_cur["n_electrons"] += occ
+                            if orb_cur["homo_eh"] is None or e_eh > orb_cur["homo_eh"]:
+                                orb_cur["homo_eh"] = e_eh
+                                orb_cur["homo_ev"] = e_ev
+                        elif orb_cur["lumo_eh"] is None or e_eh < orb_cur["lumo_eh"]:
+                            orb_cur["lumo_eh"] = e_eh
+                            orb_cur["lumo_ev"] = e_ev
 
                 # ── MULLIKEN ATOMIC CHARGES ────────────────────────
                 elif state == OrcaParseState.MULLIKEN_CHARGES:
