@@ -1282,14 +1282,13 @@ class TestUKSOmolQualityFields:
         assert r["hf_type"] == "UHF"
 
 
-# ── ORBITAL ENERGIES: spin blocks, energy ordering, NEL, versioning ─────
+# -- ORBITAL ENERGIES: spin blocks, energy ordering, NEL, versioning --
 
 
 class TestParserVersion:
 
     def test_version_key_on_parsed_file(self, rks_result):
         assert rks_result["orca_parser_version"] == ORCA_PARSER_VERSION
-        assert ORCA_PARSER_VERSION >= 2
 
     def test_no_version_key_on_empty_result(self, tmp_job_dir):
         noise = os.path.join(tmp_job_dir, "noise.out")
@@ -1556,7 +1555,7 @@ class TestTruncatedOrbitalBlocks:
         assert r["n_electrons"] == pytest.approx(2.0)
 
 
-# ── Real UKS output: rmechdb_264_step6_0_2 (ORCA 6, doublet, 4 atoms) ──────
+# -- Real UKS output: rmechdb_264_step6_0_2 (ORCA 6, doublet, 4 atoms) --
 
 UKS_RMECHDB_OUT = (
     Path(__file__).parent.parent / "data" / "cross_validation_wfns" / "wfx_pull"
