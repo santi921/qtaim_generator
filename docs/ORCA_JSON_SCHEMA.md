@@ -5,7 +5,25 @@ Written to `{job_folder}/orca.json` by `write_orca_json()`.
 
 All keys are optional - absent when the corresponding section is not present in the `.out` file
 (e.g. `mulliken_spins` only appears for UKS, `s_squared` only when ORCA prints the spin
-contamination block).
+contamination block). Exception: the orbital-energy keys below form a fixed-width set that is
+always complete once an `ORBITAL ENERGIES` block was read.
+
+## Versioning
+
+| Key | Type | Notes |
+|-----|------|-------|
+| `orca_parser_version` | int | Stamped on every non-empty result. Absent means version 1. Bumped when a key is added or an existing key changes meaning. |
+
+History:
+
+- 1 (implicit, no key): only the `SPIN UP ORBITALS` block was read, so for UKS runs `n_electrons` was the alpha count and `homo_*`/`lumo_*` were alpha values. HOMO/LUMO were the last occupied and first virtual row in file order.
+- 2: both spin blocks read; flat `homo_*`/`lumo_*` are the spin-agnostic frontier chosen by energy; per-spin keys always present; zero-energy placeholder rows skipped; `n_electrons_nel` and `hf_type` added.
+
+Consumers should treat rows below the current version as stale. `GeneralConverter` does this by default
+via `orca_min_parser_version` in the converter config (stale rows count as missing orca data, so
+`missing_data_strategy` applies; set `0` to disable). `oact_utilities` caches `generator_metrics.json`
+per job and should gate recompute on this key. Job folders parsed before version 2 need a re-run of
+the ORCA parse; the mirrored `orca.tar.zst` is the source when `orca.out` has been cleaned.
 
 ## Energy
 
@@ -40,15 +58,29 @@ contamination block).
 
 ## Orbital Energies
 
+Selection is by energy, not file order: HOMO is the highest-energy row with `OCC > 0`, LUMO the
+lowest-energy row with `OCC == 0`. Rows printed as `0.0000  0.000000  0.0000` (basis functions
+removed for linear dependence) are ignored. For UKS runs both `SPIN UP` and `SPIN DOWN` blocks are
+read. For geometry optimizations the last `ORBITAL ENERGIES` block wins.
+
 | Key | Type | Units | Notes |
 |-----|------|-------|-------|
-| `homo_eh` | float | Eh | Last occupied orbital energy. |
-| `homo_ev` | float | eV | |
-| `lumo_eh` | float | Eh | First virtual orbital energy. |
-| `lumo_ev` | float | eV | |
+| `homo_eh` | float | Eh | Spin-agnostic frontier: highest occupied orbital over both spin channels. |
+| `homo_ev` | float | eV | eV of the same row as `homo_eh`. |
+| `lumo_eh` | float | Eh | Spin-agnostic frontier: lowest virtual orbital over both spin channels. |
+| `lumo_ev` | float | eV | eV of the same row as `lumo_eh`. |
 | `homo_lumo_gap_eh` | float | Eh | `lumo_eh - homo_eh`. Negative = convergence to excited state. |
-| `n_electrons` | float | e | Total electron count from orbital occupancies. |
-| `n_orbitals` | int | - | |
+| `homo_eh_alpha`, `homo_ev_alpha`, `lumo_eh_alpha`, `lumo_ev_alpha`, `homo_lumo_gap_eh_alpha` | float | Eh / eV | `SPIN UP` channel. For a single-block run (RHF/RKS/ROHF/ROKS) equal to the flat keys. |
+| `homo_eh_beta`, `homo_ev_beta`, `lumo_eh_beta`, `lumo_ev_beta`, `homo_lumo_gap_eh_beta` | float | Eh / eV | `SPIN DOWN` channel. For a single-block run equal to the flat keys. |
+| `n_electrons` | float | e | Sum of orbital occupancies over both channels. Equals `n_electrons_nel` for a complete file. |
+| `n_electrons_alpha` | float | e | Alpha electrons. Single block: doubly occupied rows count once, singly occupied rows count once. |
+| `n_electrons_beta` | float | e | Beta electrons. Single block: doubly occupied rows only. |
+| `n_electrons_nel` | int | e | `Number of Electrons NEL` from GENERAL SETTINGS. Exact SCF electron count; differs from the sum of Z under ECPs. |
+| `n_orbitals` | int | - | Orbitals per spin channel, excluding placeholder rows. |
+| `hf_type` | str | - | `RHF`, `UHF` or `ROHF` from GENERAL SETTINGS. |
+
+A UKS file truncated before the `SPIN DOWN` block is reported as a single block: `hf_type == "UHF"`
+with `n_electrons != n_electrons_nel` is the signature.
 
 ## Quality Filter Fields
 
@@ -58,7 +90,7 @@ These fields support the OMol25-style quality checks. See collaborator `quality_
 |-----|------|-------|-------|
 | `n_alpha` | float | e | Integrated alpha electron count from DFT grid (DFT components block). |
 | `n_beta` | float | e | Integrated beta electron count. |
-| `n_total` | float | e | Integrated total electron count. Should match `n_electrons` to within ~0.001. |
+| `n_total` | float | e | Integrated total electron count. Should match `n_electrons_nel` to within ~0.001. |
 | `s_squared` | float | - | `<S**2>` expectation value. UKS only. Ideal: `S*(S+1)`. Filter: < 0.5 for metal open-shell, < 1.1 otherwise. |
 | `warnings` | list[str] | - | Warning messages from the ORCA `WARNINGS` header block. Each entry is one `WARNING:` message with continuation lines concatenated. Absent if no warnings. |
 | `cosx_warning` | bool | - | `true` if `"final exchange deviates considerably"` appears anywhere in the file. Indicates RIJCOSX approximation failure. |
@@ -66,11 +98,12 @@ These fields support the OMol25-style quality checks. See collaborator `quality_
 ### Electron consistency check (filter 4)
 
 ```python
-num_alpha = (n_electrons + spin_multiplicity - 1) // 2
-num_beta  = (n_electrons - spin_multiplicity + 1) // 2
-assert abs(n_alpha - num_alpha) < 0.001
-assert abs(n_beta  - num_beta)  < 0.001
-assert abs(n_total - n_electrons) < 0.001
+# n_electrons_nel is the exact SCF count; n_electrons_alpha/_beta are the
+# per-channel occupation sums (requires orca_parser_version >= 2).
+assert n_electrons_nel == n_electrons_alpha + n_electrons_beta
+assert abs(n_alpha - n_electrons_alpha) < 0.001   # grid integration error
+assert abs(n_beta  - n_electrons_beta)  < 0.001
+assert abs(n_total - n_electrons_nel)   < 0.001
 ```
 
 ### COSX warning check (filter 5)
