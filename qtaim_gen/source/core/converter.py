@@ -38,8 +38,10 @@ from qtaim_gen.source.utils.lmdbs import (
     parse_other_data,
     parse_bond_data,
     parse_orca_data,
-    gather_structure_info
+    gather_structure_info,
+    StaleOrcaParseError,
 )
+from qtaim_gen.source.core.parse_orca import ORCA_PARSER_VERSION
 from qtaim_gen.source.core.qtaim_embed import (
     split_graph_labels,
     get_include_exclude_indices,
@@ -1651,6 +1653,9 @@ class GeneralConverter(Converter):
         self.other_filter = config_dict.get("other_filter", None)
         # orca_filter=None falls back to DEFAULT_ORCA_FILTER inside parse_orca_data.
         self.orca_filter = config_dict.get("orca_filter", None)
+        # Rows whose orca.json predates this parser version are treated as missing
+        # orca data (so missing_data_strategy applies). 0 or null disables the gate.
+        self.orca_min_parser_version = config_dict.get("orca_min_parser_version", ORCA_PARSER_VERSION)
 
         # Double-dip warning: parse_orca.merge_orca_into_charge_json copies
         # mulliken/loewdin/mayer charges from orca.out into charge.json, so
@@ -1821,7 +1826,8 @@ class GeneralConverter(Converter):
                 dict_orca_raw = self.__getitem__(self._data_input_to_lmdb_key["orca"], key)
                 if dict_orca_raw is not None:
                     orca_atom_feats, orca_bond_feats, global_orca_feats = parse_orca_data(
-                        dict_orca_raw, global_feats["n_atoms"], self.orca_filter
+                        dict_orca_raw, global_feats["n_atoms"], self.orca_filter,
+                        min_parser_version=self.orca_min_parser_version,
                     )
                     global_feats.update(global_orca_feats)
                     for atom_idx, of in orca_atom_feats.items():
@@ -1832,6 +1838,11 @@ class GeneralConverter(Converter):
                     failures["orca"].append(key_str)
                     if self.missing_data_strategy == "skip":
                         return (key_str, None, failures)
+            except StaleOrcaParseError:
+                # stale orca.json is missing data, not a parse error
+                failures["orca"].append(key_str)
+                if self.missing_data_strategy == "skip":
+                    return (key_str, None, failures)
             except Exception as e:
                 logging.error(f"Error parsing orca data for key {key_str}: {e}")
                 failures["orca"].append(key_str)
@@ -2109,7 +2120,8 @@ class GeneralConverter(Converter):
                         dict_orca_raw = self.__getitem__(self._data_input_to_lmdb_key["orca"], key)
                         if dict_orca_raw is not None:
                             orca_atom_feats, orca_bond_feats, global_orca_feats = parse_orca_data(
-                                dict_orca_raw, global_feats["n_atoms"], self.orca_filter
+                                dict_orca_raw, global_feats["n_atoms"], self.orca_filter,
+                                min_parser_version=self.orca_min_parser_version,
                             )
                             for feat_key in orca_atom_feats.get(0, {}).keys():
                                 if feat_key not in self.keys_data["atom"]:
@@ -2130,6 +2142,10 @@ class GeneralConverter(Converter):
                             self.logger.debug(f"Key {key_str}: orca data missing in LMDB, skipping")
                             first_key_idx = idx + 1
                             continue
+                    except StaleOrcaParseError as e:
+                        self.logger.debug(f"Key {key_str}: {e}; skipping")
+                        first_key_idx = idx + 1
+                        continue
                     except Exception as e:
                         self.logger.warning(f"Key {key_str}: Failed to parse orca data: {e}", exc_info=True)
                         first_key_idx = idx + 1

@@ -763,6 +763,8 @@ class TestOrcaDataIntegration:
         config["charge_filter"] = ["mbis"]
         # Explicit narrow orca_filter — opts in to globals + per-atom mulliken
         config["orca_filter"] = ["final_energy_eh", "homo_eh", "mulliken_charges"]
+        # fixture orca.json files predate orca_parser_version; disable the gate
+        config["orca_min_parser_version"] = 0
 
         converter = GeneralConverter(config)
         converter.process(return_info=True)

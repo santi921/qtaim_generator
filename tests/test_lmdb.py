@@ -20,6 +20,7 @@ from qtaim_gen.source.utils.lmdbs import (
     parse_fuzzy_data,
     parse_orca_data,
     DEFAULT_ORCA_FILTER,
+    StaleOrcaParseError,
     gather_structure_info
 )
 from qtaim_gen.source.scripts.json_to_lmdb import (
@@ -1274,6 +1275,20 @@ class TestParseOrcaData:
             "orca_n_electrons_beta": 4.0,
         }
 
+    def test_min_parser_version_gate(self):
+        v1 = {"final_energy_eh": -1.0, "homo_eh": -0.3}  # no orca_parser_version key
+        v2 = {"final_energy_eh": -1.0, "homo_eh": -0.3, "orca_parser_version": 2}
+        with pytest.raises(StaleOrcaParseError):
+            parse_orca_data(v1, n_atoms=1, min_parser_version=2)
+        # disabled gate: None (default) or 0
+        assert parse_orca_data(v1, n_atoms=1)[2]["orca_homo_eh"] == -0.3
+        assert parse_orca_data(v1, n_atoms=1, min_parser_version=0)[2]["orca_homo_eh"] == -0.3
+        # current row passes
+        assert parse_orca_data(v2, n_atoms=1, min_parser_version=2)[2]["orca_homo_eh"] == -0.3
+        # fixture orca.json files are all pre-versioning
+        with pytest.raises(StaleOrcaParseError):
+            parse_orca_data(self.orca_v6, n_atoms=53, min_parser_version=2)
+
     def test_default_filter_contents(self):
         # guard against silent regressions on the default
         assert "final_energy_eh" in DEFAULT_ORCA_FILTER
@@ -1419,6 +1434,7 @@ class TestOrcaDoubleDipWarning:
             },
             "data_inputs": ["geom", "charge", "orca"],
             "missing_data_strategy": "skip",
+            "orca_min_parser_version": 0,  # fixture orca.json predates versioning
             "n_workers": 1,
             "batch_size": 1,
             "bonding_scheme": "structural",
