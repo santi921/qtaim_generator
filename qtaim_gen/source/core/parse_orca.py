@@ -158,7 +158,14 @@ def _new_orbital_block() -> dict:
 def _add_orbital_line(block: dict, occ: float, e_eh: float, e_ev: float) -> None:
     """HOMO is the highest-energy occupied orbital, LUMO the lowest-energy
     virtual one. Selection is by energy, not file order, since ROKS/ROHF
-    blocks are not guaranteed to be energy-sorted."""
+    blocks are not guaranteed to be energy-sorted.
+
+    Basis functions removed for linear dependence are printed as trailing
+    rows "OCC 0.0000  E(Eh) 0.000000  E(eV) 0.0000". They are not orbitals and
+    would otherwise win the min-energy LUMO pick whenever the real LUMO is
+    positive, so they are skipped and not counted in n_orbitals."""
+    if occ == 0.0 and e_eh == 0.0 and e_ev == 0.0:
+        return
     block["n_orbitals"] += 1
     if occ > 0:
         block["n_electrons"] += occ

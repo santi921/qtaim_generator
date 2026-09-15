@@ -1328,6 +1328,14 @@ class TestUKSSpinBlocks:
         assert uks["n_electrons_nel"] == 9
         assert uks["n_electrons"] == pytest.approx(uks["n_electrons_nel"])
 
+    def test_zero_energy_placeholder_rows_ignored(self, uks):
+        """Rows 8 and 9 of the SPIN UP block are 0.0000 / 0.000000 / 0.0000,
+        the form ORCA prints for basis functions removed by linear dependence.
+        They must not become the LUMO and must not count as orbitals."""
+        assert uks["lumo_eh_alpha"] == pytest.approx(0.1)
+        assert uks["lumo_ev_alpha"] == pytest.approx(2.7211)
+        assert uks["n_orbitals"] == 8
+
     def test_sections_after_orbitals_still_parsed(self, uks):
         """The blank line between spin blocks must not end the section early
         and the parser must return to IDLE for later sections."""
