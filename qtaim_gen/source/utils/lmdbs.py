@@ -925,8 +925,11 @@ _ORCA_PER_BOND_NAME_MAP = {
 }
 _ORCA_GLOBAL_SCALAR_KEYS = (
     "scf_cycles", "n_alpha", "n_beta", "n_total", "n_electrons", "n_orbitals",
+    "n_electrons_nel", "n_electrons_alpha", "n_electrons_beta",
     "s_squared", "final_energy_eh",
     "homo_eh", "homo_ev", "lumo_eh", "lumo_ev", "homo_lumo_gap_eh",
+    "homo_eh_alpha", "homo_ev_alpha", "lumo_eh_alpha", "lumo_ev_alpha", "homo_lumo_gap_eh_alpha",
+    "homo_eh_beta", "homo_ev_beta", "lumo_eh_beta", "lumo_ev_beta", "homo_lumo_gap_eh_beta",
     "gradient_norm", "gradient_rms", "gradient_max", "dipole_magnitude_au",
 )
 _ORCA_GLOBAL_DICT_PREFIX = {

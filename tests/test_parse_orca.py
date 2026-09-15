@@ -9,6 +9,7 @@ import pytest
 
 from qtaim_gen.source.utils.atomic_write import atomic_json_write
 from qtaim_gen.source.core.parse_orca import (
+    ORCA_PARSER_VERSION,
     OrcaParseState,
     _atom_key,
     _bond_key,
@@ -28,6 +29,9 @@ TEST_FILES = Path(__file__).parent / "test_files" / "orca_outs"
 FIXTURE_RKS = str(TEST_FILES / "minimal_rks.out")
 FIXTURE_TRUNCATED = str(TEST_FILES / "minimal_truncated.out")
 FIXTURE_DUPLICATE = str(TEST_FILES / "minimal_duplicate_energy.out")
+FIXTURE_UKS = str(TEST_FILES / "minimal_uks.out")
+FIXTURE_ROKS_UNSORTED = str(TEST_FILES / "minimal_roks_unsorted.out")
+FIXTURE_TWO_ORBITAL_SECTIONS = str(TEST_FILES / "minimal_two_orbital_sections.out")
 
 
 # ── Fixtures ──────────────────────────────────────────────────────────
@@ -690,7 +694,12 @@ class TestRefUKSMBIS:
     def test_scf_metadata(self, ref_uks_mbis):
         assert ref_uks_mbis["scf_converged"] is True
         assert ref_uks_mbis["scf_cycles"] == 23
-        assert ref_uks_mbis["n_electrons"] == pytest.approx(158.0)
+        # 158 was recorded when the parser read the SPIN UP block only, so it
+        # is the alpha count. Total must now be alpha + beta.
+        assert ref_uks_mbis["n_electrons_alpha"] == pytest.approx(158.0)
+        assert ref_uks_mbis["n_electrons"] == pytest.approx(
+            ref_uks_mbis["n_electrons_alpha"] + ref_uks_mbis["n_electrons_beta"]
+        )
         assert ref_uks_mbis["n_orbitals"] == 1368
 
     def test_energy_components(self, ref_uks_mbis):
@@ -831,11 +840,17 @@ class TestRefUKSMBIS:
         assert len(ref_uks_mbis["loewdin_spins"]) == n
 
     def test_all_keys_present(self, ref_uks_mbis):
-        """UKS+MBIS should produce the full set of 36 keys."""
+        """UKS+MBIS should produce the full set of 50 keys."""
         expected = {
+            "orca_parser_version",
             "final_energy_eh", "scf_converged", "scf_cycles", "scf_convergence",
             "energy_components", "homo_eh", "homo_ev", "lumo_eh", "lumo_ev",
             "homo_lumo_gap_eh", "n_electrons", "n_orbitals",
+            "homo_eh_alpha", "homo_ev_alpha", "lumo_eh_alpha", "lumo_ev_alpha",
+            "homo_lumo_gap_eh_alpha",
+            "homo_eh_beta", "homo_ev_beta", "lumo_eh_beta", "lumo_ev_beta",
+            "homo_lumo_gap_eh_beta",
+            "n_electrons_alpha", "n_electrons_beta", "n_electrons_nel",
             "mulliken_charges", "mulliken_spins",
             "loewdin_charges", "loewdin_spins",
             "mayer_charges", "mayer_population", "mayer_bond_orders",
@@ -1249,3 +1264,226 @@ class TestUKSOmolQualityFields:
 
     def test_no_cosx_warning(self, uks_omol_result):
         assert "cosx_warning" not in uks_omol_result
+
+    def test_electron_count_matches_nel(self, uks_omol_result):
+        assert uks_omol_result["n_electrons_nel"] == 603
+        assert uks_omol_result["n_electrons"] == pytest.approx(603.0)
+        assert uks_omol_result["n_electrons_alpha"] == pytest.approx(302.0)
+        assert uks_omol_result["n_electrons_beta"] == pytest.approx(301.0)
+
+    def test_per_spin_gaps_present(self, uks_omol_result):
+        for k in ("homo_lumo_gap_eh_alpha", "homo_lumo_gap_eh_beta"):
+            assert uks_omol_result[k] > 0
+        assert uks_omol_result["homo_eh"] == uks_omol_result["homo_eh_alpha"]
+
+
+# ── ORBITAL ENERGIES: spin blocks, energy ordering, NEL, versioning ─────
+
+
+class TestParserVersion:
+
+    def test_version_key_on_parsed_file(self, rks_result):
+        assert rks_result["orca_parser_version"] == ORCA_PARSER_VERSION
+        assert ORCA_PARSER_VERSION >= 2
+
+    def test_no_version_key_on_empty_result(self, tmp_job_dir):
+        noise = os.path.join(tmp_job_dir, "noise.out")
+        with open(noise, "w") as f:
+            f.write("nothing here\n")
+        assert parse_orca_output(noise) == {}
+
+
+class TestUKSSpinBlocks:
+    """minimal_uks.out: SPIN UP (5 occupied, gap 0.5) and SPIN DOWN (4 occupied, gap 0.4)."""
+
+    @pytest.fixture(scope="class")
+    def uks(self):
+        return parse_orca_output(FIXTURE_UKS)
+
+    def test_both_blocks_counted(self, uks):
+        assert uks["n_electrons_alpha"] == pytest.approx(5.0)
+        assert uks["n_electrons_beta"] == pytest.approx(4.0)
+        assert uks["n_electrons"] == pytest.approx(9.0)
+        assert uks["n_orbitals"] == 8
+
+    def test_alpha_block(self, uks):
+        assert uks["homo_eh_alpha"] == pytest.approx(-0.4)
+        assert uks["homo_ev_alpha"] == pytest.approx(-10.8846)
+        assert uks["lumo_eh_alpha"] == pytest.approx(0.1)
+        assert uks["lumo_ev_alpha"] == pytest.approx(2.7211)
+        assert uks["homo_lumo_gap_eh_alpha"] == pytest.approx(0.5)
+
+    def test_beta_block(self, uks):
+        assert uks["homo_eh_beta"] == pytest.approx(-0.35)
+        assert uks["homo_ev_beta"] == pytest.approx(-9.5240)
+        assert uks["lumo_eh_beta"] == pytest.approx(0.05)
+        assert uks["lumo_ev_beta"] == pytest.approx(1.3606)
+        assert uks["homo_lumo_gap_eh_beta"] == pytest.approx(0.4)
+
+    def test_flat_keys_carry_alpha(self, uks):
+        for k in ("homo_eh", "homo_ev", "lumo_eh", "lumo_ev", "homo_lumo_gap_eh"):
+            assert uks[k] == uks[f"{k}_alpha"]
+
+    def test_nel_matches_occupation_sum(self, uks):
+        assert uks["n_electrons_nel"] == 9
+        assert uks["n_electrons"] == pytest.approx(uks["n_electrons_nel"])
+
+    def test_sections_after_orbitals_still_parsed(self, uks):
+        """The blank line between spin blocks must not end the section early
+        and the parser must return to IDLE for later sections."""
+        assert uks["final_energy_eh"] == pytest.approx(-75.123456789012, rel=1e-12)
+        assert uks["mulliken_charges"]["1_O"] == pytest.approx(-0.3)
+        assert uks["mulliken_spins"]["1_O"] == pytest.approx(0.9)
+        assert uks["s_squared"] == pytest.approx(0.752)
+        assert uks["total_run_time_s"] == pytest.approx(5.123)
+
+    def test_no_per_spin_keys_for_restricted(self, rks_result):
+        assert "homo_eh_alpha" not in rks_result
+        assert "homo_eh_beta" not in rks_result
+        assert "n_electrons_alpha" not in rks_result
+
+
+class TestUnsortedOrbitalBlock:
+    """Synthetic ROHF-style block with occupied rows out of energy order and a
+    virtual row below the first virtual. Modeled on ORCA's atomic-guess output
+    for AmO; production blocks are normally energy-sorted."""
+
+    @pytest.fixture(scope="class")
+    def roks(self):
+        return parse_orca_output(FIXTURE_ROKS_UNSORTED)
+
+    def test_homo_is_max_occupied(self, roks):
+        # positional pick would be row 6 (-0.434274)
+        assert roks["homo_eh"] == pytest.approx(-0.130460)
+        assert roks["homo_ev"] == pytest.approx(-3.5500)
+
+    def test_lumo_is_min_virtual(self, roks):
+        # positional pick would be row 7 (0.002276)
+        assert roks["lumo_eh"] == pytest.approx(-0.010000)
+        assert roks["lumo_ev"] == pytest.approx(-0.2721)
+
+    def test_gap(self, roks):
+        assert roks["homo_lumo_gap_eh"] == pytest.approx(0.120460)
+
+    def test_counts(self, roks):
+        assert roks["n_electrons"] == pytest.approx(10.0)
+        assert roks["n_orbitals"] == 10
+        assert "n_electrons_alpha" not in roks
+
+    def test_nel_parsed_and_not_z_sum(self, roks):
+        # Am (Z=95) + O (Z=8) = 103 valence+core; ECP leaves 43 in the SCF
+        assert roks["n_electrons_nel"] == 43
+        assert roks["n_electrons_nel"] != 103
+
+
+class TestTwoOrbitalSections:
+    """Geometry optimizations print ORBITAL ENERGIES once per step; last wins."""
+
+    @pytest.fixture(scope="class")
+    def two(self):
+        return parse_orca_output(FIXTURE_TWO_ORBITAL_SECTIONS)
+
+    def test_last_section_wins(self, two):
+        assert two["homo_eh_alpha"] == pytest.approx(-1.0)
+        assert two["lumo_eh_alpha"] == pytest.approx(0.2)
+        assert two["homo_lumo_gap_eh_alpha"] == pytest.approx(1.2)
+        assert two["lumo_eh_beta"] == pytest.approx(0.075)
+        assert two["final_energy_eh"] == pytest.approx(-75.2)
+
+    def test_counts_reset_per_section(self, two):
+        assert two["n_electrons_alpha"] == pytest.approx(2.0)
+        assert two["n_electrons_beta"] == pytest.approx(1.0)
+        assert two["n_electrons"] == pytest.approx(3.0)
+        assert two["n_orbitals"] == 3
+
+
+class TestTruncatedOrbitalBlocks:
+
+    def _write(self, tmp_job_dir, text):
+        p = os.path.join(tmp_job_dir, "trunc.out")
+        with open(p, "w") as f:
+            f.write(text)
+        return p
+
+    def test_eof_inside_spin_up(self, tmp_job_dir):
+        p = self._write(tmp_job_dir, (
+            "----------------\nORBITAL ENERGIES\n----------------\n\n"
+            "                 SPIN UP ORBITALS\n"
+            "  NO   OCC          E(Eh)            E(eV)\n"
+            "   0   1.0000      -1.000000       -27.2114\n"
+            "   1   0.0000       0.100000         2.7211\n"
+        ))
+        r = parse_orca_output(p)
+        assert r["homo_eh"] == pytest.approx(-1.0)
+        assert r["n_electrons"] == pytest.approx(1.0)
+        assert "homo_eh_beta" not in r
+
+    def test_eof_inside_spin_down(self, tmp_job_dir):
+        p = self._write(tmp_job_dir, (
+            "----------------\nORBITAL ENERGIES\n----------------\n\n"
+            "                 SPIN UP ORBITALS\n"
+            "  NO   OCC          E(Eh)            E(eV)\n"
+            "   0   1.0000      -1.000000       -27.2114\n"
+            "   1   0.0000       0.100000         2.7211\n"
+            "\n"
+            "                 SPIN DOWN ORBITALS\n"
+            "  NO   OCC          E(Eh)            E(eV)\n"
+            "   0   1.0000      -0.900000       -24.4902\n"
+        ))
+        r = parse_orca_output(p)
+        assert r["homo_eh_alpha"] == pytest.approx(-1.0)
+        assert r["homo_eh_beta"] == pytest.approx(-0.9)
+        assert r["lumo_eh_beta"] is None
+        assert "homo_lumo_gap_eh_beta" not in r
+        assert r["n_electrons"] == pytest.approx(2.0)
+
+
+# ── Real UKS output: rmechdb_264_step6_0_2 (ORCA 6, doublet, 4 atoms) ──────
+
+UKS_RMECHDB_OUT = (
+    Path(__file__).parent.parent / "data" / "cross_validation_wfns" / "wfx_pull"
+    / "rmechdb" / "rmechdb_264_step6_0_2" / "orca.out"
+)
+
+
+@pytest.mark.skipif(not UKS_RMECHDB_OUT.is_file(), reason="rmechdb_264_step6_0_2/orca.out not present")
+class TestRefUKSRmechdb:
+    """Reference values computed independently of the parser with awk over the
+    SPIN UP / SPIN DOWN blocks (max occupied, min virtual, occupation sums)."""
+
+    @pytest.fixture(scope="class")
+    def r(self):
+        return parse_orca_output(str(UKS_RMECHDB_OUT))
+
+    def test_electron_counts(self, r):
+        assert r["n_electrons_nel"] == 19
+        assert r["n_electrons_alpha"] == pytest.approx(10.0)
+        assert r["n_electrons_beta"] == pytest.approx(9.0)
+        assert r["n_electrons"] == pytest.approx(19.0)
+        assert r["n_orbitals"] == 98
+
+    def test_alpha_block(self, r):
+        assert r["homo_eh_alpha"] == pytest.approx(-0.459843, rel=1e-6)
+        assert r["homo_ev_alpha"] == pytest.approx(-12.5130, rel=1e-5)
+        assert r["lumo_eh_alpha"] == pytest.approx(0.021681, rel=1e-6)
+        assert r["lumo_ev_alpha"] == pytest.approx(0.5900, rel=1e-4)
+        assert r["homo_lumo_gap_eh_alpha"] == pytest.approx(0.481524, rel=1e-6)
+
+    def test_beta_block(self, r):
+        assert r["homo_eh_beta"] == pytest.approx(-0.427444, rel=1e-6)
+        assert r["homo_ev_beta"] == pytest.approx(-11.6313, rel=1e-5)
+        assert r["lumo_eh_beta"] == pytest.approx(-0.071974, rel=1e-6)
+        assert r["lumo_ev_beta"] == pytest.approx(-1.9585, rel=1e-5)
+        assert r["homo_lumo_gap_eh_beta"] == pytest.approx(0.355470, rel=1e-6)
+
+    def test_flat_keys_carry_alpha(self, r):
+        assert r["homo_eh"] == r["homo_eh_alpha"]
+        assert r["lumo_eh"] == r["lumo_eh_alpha"]
+        assert r["homo_lumo_gap_eh"] == r["homo_lumo_gap_eh_alpha"]
+
+    def test_integrated_counts_agree_with_nel(self, r):
+        assert r["s_squared"] == pytest.approx(0.752763, rel=1e-6)
+        assert r["n_alpha"] == pytest.approx(9.999947002712, rel=1e-9)
+        assert r["n_beta"] == pytest.approx(8.999946680473, rel=1e-9)
+        assert r["n_total"] == pytest.approx(r["n_electrons_nel"], abs=1e-3)
+        assert r["final_energy_eh"] == pytest.approx(-176.204042094764, rel=1e-12)

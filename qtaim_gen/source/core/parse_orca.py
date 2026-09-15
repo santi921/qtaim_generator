@@ -16,6 +16,13 @@ from qtaim_gen.source.utils.atomic_write import atomic_json_write
 
 logger = logging.getLogger(__name__)
 
+# Bump when the output dict's schema or the meaning of an existing key changes.
+# Emitted as result["orca_parser_version"] so downstream caches can detect stale
+# parses. History:
+#   1: implicit, pre-versioning (alpha-only orbitals, positional HOMO/LUMO)
+#   2: both spin blocks read, energy-ordered HOMO/LUMO, per-spin keys, NEL parsed
+ORCA_PARSER_VERSION = 2
+
 
 class OrcaParseState(Enum):
     IDLE = auto()
@@ -139,24 +146,65 @@ def _parse_bond_pairs(line: str) -> List[Tuple[str, float]]:
     return pairs
 
 
-def _finalize_orbitals(
-    result: dict,
-    last_occupied_energy: Optional[float],
-    last_occupied_ev: Optional[float],
-    first_virtual_energy: Optional[float],
-    first_virtual_ev: Optional[float],
-    n_electrons: float,
-    n_orbitals: int,
-) -> None:
-    """Write orbital energy results into *result* dict."""
-    result["homo_eh"] = last_occupied_energy
-    result["homo_ev"] = last_occupied_ev
-    result["lumo_eh"] = first_virtual_energy
-    result["lumo_ev"] = first_virtual_ev
-    if last_occupied_energy is not None and first_virtual_energy is not None:
-        result["homo_lumo_gap_eh"] = first_virtual_energy - last_occupied_energy
-    result["n_electrons"] = n_electrons
-    result["n_orbitals"] = n_orbitals
+def _new_orbital_block() -> dict:
+    """Accumulator for one ORBITAL ENERGIES sub-block (one spin channel)."""
+    return {
+        "homo_eh": None, "homo_ev": None,
+        "lumo_eh": None, "lumo_ev": None,
+        "n_electrons": 0, "n_orbitals": 0,
+    }
+
+
+def _add_orbital_line(block: dict, occ: float, e_eh: float, e_ev: float) -> None:
+    """HOMO is the highest-energy occupied orbital, LUMO the lowest-energy
+    virtual one. Selection is by energy, not file order, since ROKS/ROHF
+    blocks are not guaranteed to be energy-sorted."""
+    block["n_orbitals"] += 1
+    if occ > 0:
+        block["n_electrons"] += occ
+        if block["homo_eh"] is None or e_eh > block["homo_eh"]:
+            block["homo_eh"] = e_eh
+            block["homo_ev"] = e_ev
+    elif block["lumo_eh"] is None or e_eh < block["lumo_eh"]:
+        block["lumo_eh"] = e_eh
+        block["lumo_ev"] = e_ev
+
+
+def _write_orbital_block(result: dict, block: dict, suffix: str) -> None:
+    result[f"homo_eh{suffix}"] = block["homo_eh"]
+    result[f"homo_ev{suffix}"] = block["homo_ev"]
+    result[f"lumo_eh{suffix}"] = block["lumo_eh"]
+    result[f"lumo_ev{suffix}"] = block["lumo_ev"]
+    if block["homo_eh"] is not None and block["lumo_eh"] is not None:
+        result[f"homo_lumo_gap_eh{suffix}"] = block["lumo_eh"] - block["homo_eh"]
+
+
+def _finalize_orbitals(result: dict, current: dict, alpha: Optional[dict]) -> None:
+    """Write orbital energy results into *result*.
+
+    *current* is the block being accumulated when the section ended. For a
+    restricted run it is the only block. For an unrestricted run *alpha* holds
+    the finished SPIN UP block and *current* is the SPIN DOWN block.
+
+    The flat keys (homo_eh, lumo_eh, homo_lumo_gap_eh, ...) always carry the
+    alpha values so existing consumers are unaffected. n_electrons is the total
+    over both spins. n_orbitals is per spin. Per-spin keys (*_alpha, *_beta)
+    are emitted only when a SPIN DOWN block was seen.
+    """
+    if alpha is None:
+        alpha, beta = current, None
+    else:
+        beta = current
+    _write_orbital_block(result, alpha, "")
+    result["n_electrons"] = alpha["n_electrons"]
+    result["n_orbitals"] = alpha["n_orbitals"]
+    if beta is None:
+        return
+    result["n_electrons"] += beta["n_electrons"]
+    _write_orbital_block(result, alpha, "_alpha")
+    _write_orbital_block(result, beta, "_beta")
+    result["n_electrons_alpha"] = alpha["n_electrons"]
+    result["n_electrons_beta"] = beta["n_electrons"]
 
 
 # ── Main parser ────────────────────────────────────────────────────────
@@ -194,13 +242,11 @@ def parse_orca_output(orca_out_path: str) -> dict:
     gradient = {}
     energy_components = {}
 
-    # Orbital energy tracking
-    last_occupied_energy = None
-    last_occupied_ev = None
-    first_virtual_energy = None
-    first_virtual_ev = None
-    n_electrons = 0
-    n_orbitals = 0
+    # Orbital energy tracking. orb_cur accumulates the sub-block being read;
+    # orb_alpha holds the finished SPIN UP block once SPIN DOWN starts.
+    orb_cur = _new_orbital_block()
+    orb_alpha: Optional[dict] = None
+    orb_spin_headers = False
 
     # SCF convergence
     scf_convergence = {}
@@ -258,13 +304,18 @@ def parse_orca_output(orca_out_path: str) -> dict:
 
                     elif stripped == "ORBITAL ENERGIES":
                         state = OrcaParseState.ORBITAL_ENERGIES
-                        last_occupied_energy = None
-                        last_occupied_ev = None
-                        first_virtual_energy = None
-                        first_virtual_ev = None
-                        n_electrons = 0
-                        n_orbitals = 0
+                        orb_cur = _new_orbital_block()
+                        orb_alpha = None
+                        orb_spin_headers = False
                         section_line_count = 0
+
+                    elif stripped.startswith("Number of Electrons") and "NEL" in stripped:
+                        # "Number of Electrons    NEL             ....   60"
+                        # Exact SCF electron count; differs from sum of Z under ECPs.
+                        try:
+                            result["n_electrons_nel"] = int(stripped.split()[-1])
+                        except ValueError:
+                            pass
 
                     elif stripped.startswith("MULLIKEN ATOMIC CHARGES"):
                         state = OrcaParseState.MULLIKEN_CHARGES
@@ -427,32 +478,39 @@ def parse_orca_output(orca_out_path: str) -> dict:
 
                 # ── ORBITAL ENERGIES ──────────────────────────────
                 elif state == OrcaParseState.ORBITAL_ENERGIES:
+                    # Restricted layout:
+                    #   ORBITAL ENERGIES / ---- / blank / "NO OCC E(Eh) E(eV)" / rows / blank
+                    # Unrestricted layout:
+                    #   ORBITAL ENERGIES / ---- / blank / SPIN UP ORBITALS / header / rows /
+                    #   blank / SPIN DOWN ORBITALS / header / rows / blank
                     stripped = line.strip()
-                    if (stripped == "" or stripped.startswith("----")) and section_line_count > 3:
-                        _finalize_orbitals(result, last_occupied_energy, last_occupied_ev, first_virtual_energy, first_virtual_ev, n_electrons, n_orbitals)
+                    if stripped == "SPIN UP ORBITALS":
+                        orb_spin_headers = True
+                        continue
+                    if stripped == "SPIN DOWN ORBITALS":
+                        orb_alpha = orb_cur
+                        orb_cur = _new_orbital_block()
+                        continue
+                    if stripped == "" or stripped.startswith("----"):
+                        if orb_cur["n_orbitals"] == 0:
+                            continue  # still in the header region
+                        if orb_spin_headers and orb_alpha is None:
+                            continue  # gap between SPIN UP rows and the SPIN DOWN header
+                        _finalize_orbitals(result, orb_cur, orb_alpha)
                         state = OrcaParseState.IDLE
                         continue
                     parts = line.split()
-                    # Orbital lines: "  NO   OCC   E(Eh)   E(eV)" with exactly 4 columns
+                    # Orbital rows: "  NO   OCC   E(Eh)   E(eV)" with exactly 4 columns
                     # and OCC is 0.0000, 1.0000, or 2.0000
                     if len(parts) == 4 and parts[0] != "NO":
                         try:
                             occ = float(parts[1])
                             if occ not in (0.0, 1.0, 2.0):
-                                # Not a valid orbital line; terminate
-                                _finalize_orbitals(result, last_occupied_energy, last_occupied_ev, first_virtual_energy, first_virtual_ev, n_electrons, n_orbitals)
+                                # Not a valid orbital row; terminate
+                                _finalize_orbitals(result, orb_cur, orb_alpha)
                                 state = OrcaParseState.IDLE
                                 continue
-                            e_eh = float(parts[2])
-                            e_ev = float(parts[3])
-                            n_orbitals += 1
-                            if occ > 0:
-                                n_electrons += occ
-                                last_occupied_energy = e_eh
-                                last_occupied_ev = e_ev
-                            elif first_virtual_energy is None:
-                                first_virtual_energy = e_eh
-                                first_virtual_ev = e_ev
+                            _add_orbital_line(orb_cur, occ, float(parts[2]), float(parts[3]))
                         except (ValueError, IndexError):
                             pass
 
@@ -792,7 +850,12 @@ def parse_orca_output(orca_out_path: str) -> dict:
     elif state == OrcaParseState.SCF_CONVERGENCE and scf_convergence:
         result["scf_convergence"] = scf_convergence
     elif state == OrcaParseState.ORBITAL_ENERGIES:
-        _finalize_orbitals(result, last_occupied_energy, last_occupied_ev, first_virtual_energy, first_virtual_ev, n_electrons, n_orbitals)
+        _finalize_orbitals(result, orb_cur, orb_alpha)
+
+    # Empty result stays empty (missing file, no ORCA sections) so callers can
+    # keep testing for {}.
+    if result:
+        result["orca_parser_version"] = ORCA_PARSER_VERSION
 
     return result
 

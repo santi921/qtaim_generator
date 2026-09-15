@@ -1249,6 +1249,31 @@ class TestParseOrcaData:
         assert glob["orca_dipole_au_y"] == 0.0
         assert glob["orca_dipole_au_z"] == 3.0
 
+    def test_per_spin_orbital_keys_opt_in(self):
+        doc = {
+            "homo_eh": -0.4, "homo_eh_alpha": -0.4, "homo_eh_beta": -0.35,
+            "homo_lumo_gap_eh_alpha": 0.5, "homo_lumo_gap_eh_beta": 0.4,
+            "n_electrons": 9.0, "n_electrons_alpha": 5.0, "n_electrons_beta": 4.0,
+            "n_electrons_nel": 9,
+            "orca_parser_version": 2,
+        }
+        # default filter: flat alpha-valued keys only
+        _, _, glob = parse_orca_data(doc, n_atoms=2)
+        assert glob["orca_homo_eh"] == -0.4
+        assert not any(k.endswith(("_alpha", "_beta", "_nel")) for k in glob)
+        assert "orca_orca_parser_version" not in glob
+        # explicit opt-in surfaces them
+        _, _, glob = parse_orca_data(
+            doc, n_atoms=2,
+            orca_filter=["homo_eh_beta", "homo_lumo_gap_eh_alpha", "n_electrons_nel", "n_electrons_beta"],
+        )
+        assert glob == {
+            "orca_homo_eh_beta": -0.35,
+            "orca_homo_lumo_gap_eh_alpha": 0.5,
+            "orca_n_electrons_nel": 9,
+            "orca_n_electrons_beta": 4.0,
+        }
+
     def test_default_filter_contents(self):
         # guard against silent regressions on the default
         assert "final_energy_eh" in DEFAULT_ORCA_FILTER
