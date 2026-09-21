@@ -1035,20 +1035,29 @@ def _copy_root_files(src_dir, dst_dir):
     different size (dst kept)."""
     copied, overlap = [], []
     os.makedirs(dst_dir, exist_ok=True)
+    # "Has an input" must mean "has one that parses". A truncated or otherwise
+    # unusable orca.inp on the destination is worse than none: it satisfies a
+    # name check, blocks the good copy, and then fails validation for having no
+    # parsable geometry -- which is exactly how 198 jobs stalled with a valid
+    # source record sitting right beside them.
     try:
-        dst_names = os.listdir(dst_dir)
-    except OSError:
-        dst_names = []
-    have_input = any(
-        n.endswith(INPUT_EXTS) and n not in INPUT_DECOYS for n in dst_names
-    )
+        with contextlib.redirect_stdout(io.StringIO()):
+            have_input = bool(get_charge_spin_n_atoms_from_folder(dst_dir))
+    except Exception:
+        have_input = False
     for n in salvageable_files(src_dir):
         if n.endswith(INPUT_EXTS):
-            # never carry a decoy, and carry a real input only when the
-            # destination has none at all
+            # never carry a decoy; carry a real input when the destination has
+            # no usable one, overwriting the unusable file it is replacing
             if n in INPUT_DECOYS or have_input:
                 continue
+            d = os.path.join(dst_dir, n)
+            tmp = d + ".l1.tmp"
+            shutil.copy2(os.path.join(src_dir, n), tmp)
+            os.replace(tmp, d)
+            copied.append(n)
             have_input = True
+            continue
         s = os.path.join(src_dir, n)
         d = os.path.join(dst_dir, n)
         if os.path.exists(d):
