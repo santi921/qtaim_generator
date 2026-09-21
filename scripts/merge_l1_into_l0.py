@@ -1334,15 +1334,18 @@ def cmd_apply(args):
 # --------------------------------------------------------------------------
 # prune
 # --------------------------------------------------------------------------
-def _dir_size(path):
+def _dir_usage(path):
+    """(bytes, file_count). Both matter: a quota can be on either."""
     total = 0
+    n = 0
     for root, _dirs, files in os.walk(path):
         for f in files:
+            n += 1
             try:
                 total += os.lstat(os.path.join(root, f)).st_size
             except OSError:
                 pass
-    return total
+    return total, n
 
 
 def prune_one(job_dir):
@@ -1355,18 +1358,18 @@ def prune_one(job_dir):
     """
     bdir = os.path.join(job_dir, BACKUP_DIR)
     if not os.path.isdir(bdir):
-        return ("none", 0)
+        return ("none", 0, 0)
     marker = os.path.join(job_dir, "generator", MARKER)
     if not os.path.exists(marker) and not os.path.exists(
         os.path.join(job_dir, SALVAGE_MARKER)
     ):
-        return ("kept_no_marker", 0)
-    size = _dir_size(bdir)
+        return ("kept_no_marker", 0, 0)
+    size, nfiles = _dir_usage(bdir)
     try:
         shutil.rmtree(bdir)
     except OSError as e:
-        return (f"error: {type(e).__name__}", 0)
-    return ("pruned", size)
+        return (f"error: {type(e).__name__}", 0, 0)
+    return ("pruned", size, nfiles)
 
 
 def cmd_prune(args):
@@ -1384,33 +1387,40 @@ def cmd_prune(args):
 
     res = Counter()
     freed = 0
+    files = 0
     with ProcessPoolExecutor(max_workers=args.workers) as ex:
         fn = prune_one if args.yes else _measure_one
-        for i, (status, size) in enumerate(
+        for i, (status, size, nfiles) in enumerate(
             ex.map(fn, job_dirs, chunksize=args.chunksize), 1
         ):
             res[status] += 1
             freed += size
+            files += nfiles
             if i % 20000 == 0:
-                print(f"[prune] {i}/{len(job_dirs)} {dict(res)} {freed / 1e9:.1f} GB", flush=True)
+                print(
+                    f"[prune] {i}/{len(job_dirs)} {dict(res)} "
+                    f"{freed / 1e9:.1f} GB / {files} files",
+                    flush=True,
+                )
     print("\n| status | count |\n|---|---|")
     for k, c in res.most_common():
         print(f"| {k} | {c} |")
     verb = "freed" if args.yes else "reclaimable"
-    print(f"\n{verb}: {freed / 1e9:.1f} GB")
+    print(f"\n{verb}: {freed / 1e9:.1f} GB in {files} files")
     return 0
 
 
 def _measure_one(job_dir):
     bdir = os.path.join(job_dir, BACKUP_DIR)
     if not os.path.isdir(bdir):
-        return ("none", 0)
+        return ("none", 0, 0)
     marker = os.path.join(job_dir, "generator", MARKER)
     if not os.path.exists(marker) and not os.path.exists(
         os.path.join(job_dir, SALVAGE_MARKER)
     ):
-        return ("kept_no_marker", 0)
-    return ("would_prune", _dir_size(bdir))
+        return ("kept_no_marker", 0, 0)
+    size, nfiles = _dir_usage(bdir)
+    return ("would_prune", size, nfiles)
 
 
 # --------------------------------------------------------------------------
