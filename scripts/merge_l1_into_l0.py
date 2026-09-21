@@ -1332,6 +1332,88 @@ def cmd_apply(args):
 
 
 # --------------------------------------------------------------------------
+# prune
+# --------------------------------------------------------------------------
+def _dir_size(path):
+    total = 0
+    for root, _dirs, files in os.walk(path):
+        for f in files:
+            try:
+                total += os.lstat(os.path.join(root, f)).st_size
+            except OSError:
+                pass
+    return total
+
+
+def prune_one(job_dir):
+    """Delete <job>/.pre_l1_merge when the merge marker proves it is redundant.
+
+    The marker is written only after post-merge validation passed, so a backup
+    sitting beside one can never be needed again. A backup with no marker is
+    left alone: that merge did not complete and the backup is the only copy of
+    what was there before.
+    """
+    bdir = os.path.join(job_dir, BACKUP_DIR)
+    if not os.path.isdir(bdir):
+        return ("none", 0)
+    marker = os.path.join(job_dir, "generator", MARKER)
+    if not os.path.exists(marker) and not os.path.exists(
+        os.path.join(job_dir, SALVAGE_MARKER)
+    ):
+        return ("kept_no_marker", 0)
+    size = _dir_size(bdir)
+    try:
+        shutil.rmtree(bdir)
+    except OSError as e:
+        return (f"error: {type(e).__name__}", 0)
+    return ("pruned", size)
+
+
+def cmd_prune(args):
+    seen = set()
+    with open(args.plan, "r", newline="") as f:
+        for r in csv.DictReader(f, delimiter="\t"):
+            if r["l0_dir"]:
+                seen.add(r["l0_dir"])
+    job_dirs = sorted(seen)
+    if args.limit:
+        job_dirs = job_dirs[: args.limit]
+    print(f"[prune] {len(job_dirs)} destination job folders from {args.plan}")
+    if not args.yes:
+        print("[prune] dry run: pass --yes to delete. Measuring instead.")
+
+    res = Counter()
+    freed = 0
+    with ProcessPoolExecutor(max_workers=args.workers) as ex:
+        fn = prune_one if args.yes else _measure_one
+        for i, (status, size) in enumerate(
+            ex.map(fn, job_dirs, chunksize=args.chunksize), 1
+        ):
+            res[status] += 1
+            freed += size
+            if i % 20000 == 0:
+                print(f"[prune] {i}/{len(job_dirs)} {dict(res)} {freed / 1e9:.1f} GB", flush=True)
+    print("\n| status | count |\n|---|---|")
+    for k, c in res.most_common():
+        print(f"| {k} | {c} |")
+    verb = "freed" if args.yes else "reclaimable"
+    print(f"\n{verb}: {freed / 1e9:.1f} GB")
+    return 0
+
+
+def _measure_one(job_dir):
+    bdir = os.path.join(job_dir, BACKUP_DIR)
+    if not os.path.isdir(bdir):
+        return ("none", 0)
+    marker = os.path.join(job_dir, "generator", MARKER)
+    if not os.path.exists(marker) and not os.path.exists(
+        os.path.join(job_dir, SALVAGE_MARKER)
+    ):
+        return ("kept_no_marker", 0)
+    return ("would_prune", _dir_size(bdir))
+
+
+# --------------------------------------------------------------------------
 def _add_strict_flags(p):
     p.add_argument("--no_check_orca", action="store_true", help="do not require orca.json")
     p.add_argument("--no_bcp_count", action="store_true", help="skip the bond-CP count cross-check")
@@ -1373,6 +1455,14 @@ def main(argv=None):
     p.add_argument("--resume", action="store_true")
     _add_strict_flags(p)
     p.set_defaults(func=cmd_plan)
+
+    p = sub.add_parser("prune", help="delete .pre_l1_merge backups whose merge marker proves them redundant")
+    p.add_argument("--plan", required=True, help="plan TSV naming the destination job folders")
+    p.add_argument("--yes", action="store_true", help="actually delete (default: measure only)")
+    p.add_argument("--workers", type=int, default=16)
+    p.add_argument("--chunksize", type=int, default=64)
+    p.add_argument("--limit", type=int, default=0)
+    p.set_defaults(func=cmd_prune)
 
     p = sub.add_parser("summarize", help="print the summary tables for an existing plan")
     p.add_argument("--plan", required=True)
