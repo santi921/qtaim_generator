@@ -216,13 +216,23 @@ def get_spin_charge_from_orca_inp(dft_inp_file: str) -> tuple:
         lines = [line.strip() for line in lines]
 
     # find line starting with "* xyz"
+    xyz_ind = None
     for ind, line in enumerate(lines):
         if "* xyz" in line or "*xyz" in line:
             xyz_ind = ind
-            header = lines[xyz_ind]
             break
 
-    charge, spin = header.split()[-2:]
+    if xyz_ind is None:
+        # Without this the function raised UnboundLocalError on `header`, which
+        # named nothing the caller could act on. ORCA writes orca.property.inp
+        # beside orca.inp and it has no coordinate block, so this is reached
+        # whenever a non-geometry input is handed in by mistake.
+        raise ValueError(
+            f"no '* xyz' coordinate block in {dft_inp_file}: "
+            f"not an ORCA geometry input"
+        )
+
+    charge, spin = lines[xyz_ind].split()[-2:]
     return int(charge), int(spin)
 
 
@@ -242,6 +252,8 @@ def orca_inp_to_dict(dft_inp_file: str) -> dict:
 
     # find line starting with "* xyz" or "*xyz" (ORCA accepts both)
     start_block = False
+    xyz_ind = None
+    end_block = None
     for ind, line in enumerate(lines):
         if start_block:
             if "*" in line:
@@ -251,6 +263,14 @@ def orca_inp_to_dict(dft_inp_file: str) -> dict:
         if "*xyz" in line or "* xyz" in line:
             xyz_ind = ind
             start_block = True
+
+    if xyz_ind is None:
+        raise ValueError(
+            f"no '* xyz' coordinate block in {dft_inp_file}: "
+            f"not an ORCA geometry input"
+        )
+    if end_block is None:
+        raise ValueError(f"unterminated '* xyz' block in {dft_inp_file}")
 
     # filter lines before and including xyz_ind
     lines = lines[xyz_ind + 1 : end_block]
@@ -284,6 +304,7 @@ def dft_inp_to_dict(dft_inp_file: str, parse_charge_spin: bool = False) -> dict:
     # find line starting with "* xyz"
     start = False
     ind_terminal = -1
+    xyz_ind = None
     for ind, line in enumerate(lines):
         # print(line)
         if "*" in line and start:
@@ -293,6 +314,12 @@ def dft_inp_to_dict(dft_inp_file: str, parse_charge_spin: bool = False) -> dict:
         if "* xyz" in line or "*xyz" in line:
             xyz_ind = ind
             start = True
+
+    if xyz_ind is None:
+        raise ValueError(
+            f"no '* xyz' coordinate block in {dft_inp_file}: "
+            f"not an ORCA geometry input"
+        )
 
     if parse_charge_spin:
         ret_dict = {}

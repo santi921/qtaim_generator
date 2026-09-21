@@ -43,15 +43,39 @@ def _safe_json_load(path: str, logger=None):
         return None
 
 
+# ORCA writes orca.property.inp beside orca.inp and the pipeline never deletes
+# it (clean_jobs sweeps .txt/.mfwn/molden/wavefunctions, not .inp). It carries
+# no "* xyz" block, so it is not a geometry input. Picking it silently reports
+# the wrong atom count, or crashes the parser outright.
+NON_GEOMETRY_INPUTS = ("convert.in",)
+NON_GEOMETRY_SUFFIXES = (".property.inp",)
+# Canonical geometry inputs, best first.
+PREFERRED_INPUTS = ("orca.inp", "input.inp", "input.in")
+
+
+def geometry_input_candidates(folder: str) -> list:
+    """Geometry input files in folder, best candidate first.
+
+    Deterministic by construction. os.listdir order is arbitrary and shifts
+    whenever a file is added to the directory, so selecting its first entry
+    made the parsed molecule depend on unrelated folder contents.
+    """
+    names = [
+        f
+        for f in os.listdir(folder)
+        if f.endswith((".inp", ".in"))
+        and f not in NON_GEOMETRY_INPUTS
+        and not f.endswith(NON_GEOMETRY_SUFFIXES)
+    ]
+    preferred = [f for f in PREFERRED_INPUTS if f in names]
+    rest = sorted(f for f in names if f not in preferred)
+    return preferred + rest
+
+
 def get_charge_spin_n_atoms_from_folder(
     folder: str, logger=None, verbose=False
 ) -> tuple:
-    # check for a file ending with .inp
-    inp_files = [f for f in os.listdir(folder) if f.endswith(".inp")]
-    # add *.in files to list
-    inp_files += [f for f in os.listdir(folder) if f.endswith(".in")]
-    # remove convert.in
-    inp_files = [f for f in inp_files if f != "convert.in"]
+    inp_files = geometry_input_candidates(folder)
 
     if not inp_files:
         if logger:
@@ -59,23 +83,37 @@ def get_charge_spin_n_atoms_from_folder(
         if verbose:
             print(f"No .inp file found in folder: {folder}.")
         return False
-    inp_file = inp_files[0]  # take the first .inp file found
+
+    # Try candidates in order: a folder may hold a stale or truncated input
+    # alongside the real one, and the first name is a preference, not a promise.
+    last_error = None
+    for inp_file in inp_files:
+        orca_inp_path = os.path.join(folder, inp_file)
+        try:
+            parsed = dft_inp_to_dict(orca_inp_path, parse_charge_spin=True)
+        except Exception as e:
+            last_error = f"{inp_file}: {type(e).__name__}: {e}"
+            if logger:
+                logger.warning(f"Could not parse input {orca_inp_path}: {e}")
+            continue
+
+        if logger:
+            logger.info(f'Using input file "{inp_file}" for validation.')
+        if verbose:
+            print(f'Using input file "{inp_file}" for validation.')
+        return parsed
 
     if logger:
-        logger.info(f'Using input file "{inp_file}" for validation.')
-
+        logger.error(
+            f"No parsable geometry input in {folder} "
+            f"(tried {inp_files}); last error: {last_error}"
+        )
     if verbose:
-        print(f'Using input file "{inp_file}" for validation.')
-
-    # gather n_atoms, spin, charge from the orca.inp file
-    orca_inp_path = os.path.join(folder, inp_file)  # might need to change this name
-    if not os.path.exists(orca_inp_path):
-        if verbose:
-            print(f"Missing orca.inp file at {orca_inp_path}.")
-        if logger:
-            logger.error(f"Missing orca.inp file at {orca_inp_path}.")
-        return False
-    return dft_inp_to_dict(orca_inp_path, parse_charge_spin=True)
+        print(
+            f"No parsable geometry input in {folder} "
+            f"(tried {inp_files}); last error: {last_error}"
+        )
+    return False
 
 
 def get_val_breakdown_from_folder(
