@@ -1029,10 +1029,17 @@ def salvageable_files(job_dir):
     return sorted(out)
 
 
-def _copy_root_files(src_dir, dst_dir):
+def _copy_root_files(src_dir, dst_dir, prefer_src_input=False):
     """Copy salvageable root files src -> dst, never overwriting. Returns
     (copied, overlap) where overlap lists files present on both sides with a
-    different size (dst kept)."""
+    different size (dst kept).
+
+    prefer_src_input: take the source's geometry input even when the
+    destination already has a parsable one. Set for the replace actions, which
+    install the source's whole generator/: that record validated against the
+    source's input, so keeping the destination's would compare the new data to
+    the old molecule. That is how 13 jobs failed with fuzzy-point counts like
+    "57 does not match expected 33" -- two different molecules, one folder."""
     copied, overlap = [], []
     os.makedirs(dst_dir, exist_ok=True)
     # "Has an input" must mean "has one that parses". A truncated or otherwise
@@ -1040,11 +1047,14 @@ def _copy_root_files(src_dir, dst_dir):
     # name check, blocks the good copy, and then fails validation for having no
     # parsable geometry -- which is exactly how 198 jobs stalled with a valid
     # source record sitting right beside them.
-    try:
-        with contextlib.redirect_stdout(io.StringIO()):
-            have_input = bool(get_charge_spin_n_atoms_from_folder(dst_dir))
-    except Exception:
+    if prefer_src_input:
         have_input = False
+    else:
+        try:
+            with contextlib.redirect_stdout(io.StringIO()):
+                have_input = bool(get_charge_spin_n_atoms_from_folder(dst_dir))
+        except Exception:
+            have_input = False
     for n in salvageable_files(src_dir):
         if n.endswith(INPUT_EXTS):
             # never carry a decoy; carry a real input when the destination has
@@ -1266,7 +1276,11 @@ def apply_one(row):
                 detail = {"replaced": "generator"}
             else:
                 detail = {"qtaim_json": "from src", "zip": _patch_qtaim(l0_dir, l1_dir)}
-            root_copied, overlap = _copy_root_files(l1_dir, l0_dir)
+            root_copied, overlap = _copy_root_files(
+                l1_dir,
+                l0_dir,
+                prefer_src_input=action in ("REPLACE", "REPLACE_L0", "REPLACE_LOOSE"),
+            )
             detail["root_copied"] = root_copied
             detail["root_overlap_kept_dst"] = overlap
             ok, why = _validate(l0_dir, target_level, verify_flags)
