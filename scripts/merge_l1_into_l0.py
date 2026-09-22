@@ -577,6 +577,26 @@ def plan_one(task):
     l0_ok = st0 in ("L0_VALID", "L1_VALID")
     l1_ok = st1 in ("L0_VALID", "L1_VALID")
 
+    def _salvage_action(l1_dir_):
+        """SALVAGE, or ALREADY_SALVAGED when the marker shows it was carried.
+
+        Without this the plan re-proposes every salvaged job forever: the
+        salvage branch looks only at what the source still holds, so a tree
+        that is fully transferred never reports a clean zero and cannot be
+        signed off before deleting the source."""
+        names = [n for n in salvageable_files(l1_dir_) if not n.endswith(".inp")]
+        if not names:
+            return None, ""
+        if os.path.exists(os.path.join(l0_dir or "", SALVAGE_MARKER)):
+            return (
+                "ALREADY_SALVAGED",
+                f"root files already carried ({SALVAGE_MARKER} present); still a rerun candidate",
+            )
+        return (
+            "SALVAGE",
+            f"needs rerun; {len(names)} root files to carry: " + ",".join(names)[:150],
+        )
+
     if "locked" in s1["flags"] or "recent" in s1["flags"]:
         row["action"] = "SKIP_L1_RUNNING"
         row["reason"] = "L1 folder locked or modified within quiet window"
@@ -591,10 +611,10 @@ def plan_one(task):
             row["action"] = "NOTHING" if st1 == "MISSING" else "KEEP_L0"
             row["reason"] = f"L1 {st1.lower()}"
             return row
-        salvage = [n for n in salvageable_files(l1_dir) if not n.endswith(".inp")] if st1 == "NO_GENERATOR" else []
-        if salvage:
-            row["action"] = "SALVAGE"
-            row["reason"] = f"needs rerun; {len(salvage)} root files to carry: " + ",".join(salvage)[:150]
+        act, why = _salvage_action(l1_dir) if st1 == "NO_GENERATOR" else (None, "")
+        if act:
+            row["action"] = act
+            row["reason"] = why
         else:
             row["action"] = "NEEDS_RERUN"
             row["reason"] = f"L0 {st0.lower()}, L1 {st1.lower()}"
@@ -695,10 +715,10 @@ def plan_one(task):
     # Neither side valid. If the source folder still holds files worth keeping
     # (compressed inputs, Multiwfn .out, partial JSONs), carry them over so the
     # rerun can start from lustre; the job stays a rerun candidate either way.
-    salvage = [n for n in salvageable_files(l1_dir) if not n.endswith(".inp")]
-    if salvage:
-        row["action"] = "SALVAGE"
-        row["reason"] = f"needs rerun; {len(salvage)} root files to carry: " + ",".join(salvage)[:150]
+    act, why = _salvage_action(l1_dir)
+    if act:
+        row["action"] = act
+        row["reason"] = why
     else:
         row["action"] = "NEEDS_RERUN"
         row["reason"] = f"L0: {s0['reason']} ; L1: {s1['reason']}"[:200]
