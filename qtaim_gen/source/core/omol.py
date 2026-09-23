@@ -575,8 +575,11 @@ def run_jobs(
     # create a json file to store job status
 
     # Maps each separate-mode operation → (compiled JSON filename, key to check).
-    # key=None for other_dict ops because other.json is built via dict.update()
-    # with scalar fields, not keyed by operation name.
+    # other.json is built via dict.update() with scalar fields, not keyed by
+    # operation name, so each other_* op is checked through one field only it
+    # writes (_OTHER_MARKER_KEYS). Checking mere non-emptiness let other_alie
+    # be skipped as "data verified" whenever other_geometry had already written
+    # its mpp/sdp fields, and the folder then failed on ALIE_Volume forever.
     # In non-separate mode all four dicts are empty so _compiled_map is empty;
     # the {order}.json file check in the loop covers those ops by name.
     _compiled_map: dict = {}
@@ -589,7 +592,9 @@ def run_jobs(
     for _op in fuzzy_dict:
         _compiled_map[_op] = ("fuzzy_full.json", _op)
     for _op in other_dict:
-        _compiled_map[_op] = ("other.json", None)
+        # KeyError on purpose: an unmapped other_* op would otherwise fall
+        # back to the non-emptiness check this map exists to replace
+        _compiled_map[_op] = ("other.json", _OTHER_MARKER_KEYS[_op])
 
     timings = {}
     # On restart, timings may be in generator/ (previous completed run) or
@@ -2104,6 +2109,15 @@ def _has_usable_step_output(
 # ("sum" and "abs_sum"); validate_fuzzy_dict pins the count at n_atoms + 2.
 _FUZZY_EXTRA_ENTRIES = 2
 
+# One field per other_* op that only that op writes into other.json. Used to
+# decide the op's own section is present, since other.json is a flat merge of
+# all other_* parsers (see parse_other_doc_geometry / parse_other_doc_esp).
+_OTHER_MARKER_KEYS = {
+    "other_geometry": "mpp_full",
+    "other_alie": "ALIE_Volume",
+    "other_esp": "ESP_Volume",
+}
+
 
 def _compiled_data_present(
     folder: str,
@@ -2156,8 +2170,13 @@ def _compiled_data_present(
             with open(json_path, "r") as f:
                 data = json.load(f)
             if key is None:
-                # other ops: just verify the compiled JSON is non-empty
+                # other ops with no marker key: just verify the compiled JSON is non-empty
                 if data:
+                    return True
+            elif json_name == "other.json":
+                # other ops: scalar fields merged flat, so test the op's own
+                # marker field by presence, not truthiness (mpp can be 0.0)
+                if isinstance(data, dict) and data.get(key) is not None:
                     return True
             elif sub_key is not None:
                 # charge ops: {"<op>": {"charge": {...}, ...}} - check the nested sub-key

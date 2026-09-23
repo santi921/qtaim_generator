@@ -103,6 +103,47 @@ def test_compiled_data_present_other_empty(tmp_path):
     assert not _compiled_data_present(str(tmp_path), "other_esp", compiled_map)
 
 
+def test_compiled_data_present_other_alie_missing_when_only_geometry(tmp_path):
+    """other.json holds only other_geometry fields -> other_alie is NOT present.
+
+    Regression: with key=None the non-empty file alone made other_alie
+    'data verified', so a walltime-killed ALIE step was skipped on every
+    restart and the folder failed validation on ALIE_Volume forever.
+    """
+    _write_json(
+        tmp_path / "other.json",
+        {"mpp_full": 3.2, "sdp_full": 16.8, "mpp_heavy": 3.1, "sdp_heavy": 13.2},
+    )
+    compiled_map = {
+        "other_geometry": ("other.json", "mpp_full"),
+        "other_alie": ("other.json", "ALIE_Volume"),
+    }
+    assert _compiled_data_present(str(tmp_path), "other_geometry", compiled_map)
+    assert not _compiled_data_present(str(tmp_path), "other_alie", compiled_map)
+
+
+def test_compiled_data_present_other_alie_found(tmp_path):
+    """other.json holds the ALIE marker -> other_alie present."""
+    _write_json(tmp_path / "other.json", {"mpp_full": 1.0, "ALIE_Volume": 512.3})
+    compiled_map = {"other_alie": ("other.json", "ALIE_Volume")}
+    assert _compiled_data_present(str(tmp_path), "other_alie", compiled_map)
+
+
+def test_compiled_data_present_other_marker_zero_is_present(tmp_path):
+    """A marker value of 0.0 (planar molecule) counts as present, not missing."""
+    _write_json(tmp_path / "other.json", {"mpp_full": 0.0})
+    compiled_map = {"other_geometry": ("other.json", "mpp_full")}
+    assert _compiled_data_present(str(tmp_path), "other_geometry", compiled_map)
+
+
+def test_other_marker_keys_cover_all_other_ops():
+    """Every op other_data_dict can emit has a marker, so none falls back to key=None."""
+    from qtaim_gen.source.core.omol import _OTHER_MARKER_KEYS
+    from qtaim_gen.source.data.multiwfn import other_data_dict
+
+    assert set(other_data_dict(full_set=2)) <= set(_OTHER_MARKER_KEYS)
+
+
 def test_compiled_data_present_order_not_in_map(tmp_path):
     """Order not in compiled_map → False."""
     compiled_map = {"hirshfeld": ("charge.json", "hirshfeld", "charge")}
