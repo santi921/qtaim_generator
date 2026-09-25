@@ -1114,30 +1114,74 @@ def _copy_root_files(src_dir, dst_dir, prefer_src_input=False):
     return copied, overlap, overwritten
 
 
+def _rm(path):
+    if os.path.isdir(path) and not os.path.islink(path):
+        shutil.rmtree(path, ignore_errors=True)
+    else:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+
+
+def _set_aside(dst_dir, rel, overwritten):
+    """Move dst_dir/rel to rel+SAVED_SUFFIX so a failed merge can put it back.
+
+    A rename, so it costs no inodes and no copy time, and unlike the optional
+    generator/ backup it also covers the job root."""
+    d = os.path.join(dst_dir, rel)
+    if not os.path.lexists(d):
+        return
+    saved = d + SAVED_SUFFIX
+    _rm(saved)
+    os.replace(d, saved)
+    overwritten.append((rel, saved))
+
+
 def _commit_overwrites(dst_dir, overwritten):
     """Merge succeeded: the saved originals are no longer needed."""
     for _n, saved in overwritten:
-        try:
-            os.remove(saved)
-        except OSError:
-            pass
+        _rm(saved)
 
 
 def _undo_root_copies(dst_dir, copied, overwritten):
     """Merge failed: remove what was added, then put back what was replaced.
 
-    Order matters: an overwritten input's name is also in `copied`, so the new
-    file is removed first and the saved original then takes its place."""
+    Order matters: a replaced path's name is also in `copied`, so the new file
+    or directory is removed first and the saved original then takes its place.
+    Restored in reverse so a path set aside twice ends at its first state."""
     for n in copied:
-        try:
-            os.remove(os.path.join(dst_dir, n))
-        except OSError:
-            pass
-    for n, saved in overwritten:
+        _rm(os.path.join(dst_dir, n))
+    for n, saved in reversed(overwritten):
         try:
             os.replace(saved, os.path.join(dst_dir, n))
         except OSError:
             pass
+
+
+QTAIM_LOOSE = ("qtaim.out", "CPprop.txt")
+
+
+def _sync_qtaim_loose(src_dir, dst_dir, locs, copied, overwritten):
+    """Make loose QTAIM provenance on dst match src at each location.
+
+    Validation and storable_bcp_count read qtaim.out and CPprop.txt from the
+    job root, then generator/, and only then from out_files.zip. A stale loose
+    copy on the destination therefore shadows the record just installed: one
+    pdb_fragments job failed "QTAIM search never completed" because its old
+    root qtaim.out outranked the complete one in the new zip. Where src has the
+    file it is copied over; where it does not, dst's is set aside."""
+    for loc in locs:
+        for name in QTAIM_LOOSE:
+            rel = os.path.join(loc, name) if loc else name
+            _set_aside(dst_dir, rel, overwritten)
+            s = os.path.join(src_dir, rel)
+            if os.path.isfile(s):
+                d = os.path.join(dst_dir, rel)
+                tmp = d + ".l1.tmp"
+                shutil.copy2(s, tmp)
+                os.replace(tmp, d)
+                copied.append(rel)
 
 
 def _zip_union_add_only(dst_zip, src_zip, only_members=None, exclude=()):
@@ -1225,51 +1269,84 @@ def _overlay(l0_dir, l1_dir):
     return added, zadded, zskipped
 
 
-def _replace(l0_dir, l1_dir):
+def _replace(l0_dir, l1_dir, copied, overwritten):
+    """Install the source's generator/. The old one is set aside, not deleted,
+    so rollback works without --backup; peak inode use is unchanged because the
+    previous version already built the new copy before deleting the old."""
     gen0 = os.path.join(l0_dir, "generator")
     gen1 = os.path.join(l1_dir, "generator")
     tmp = gen0 + ".l1.tmp"
-    if os.path.exists(tmp):
-        shutil.rmtree(tmp)
+    _rm(tmp)
     shutil.copytree(gen1, tmp)
-    if os.path.isdir(gen0):
-        shutil.rmtree(gen0)
+    _set_aside(l0_dir, "generator", overwritten)
     os.rename(tmp, gen0)
+    copied.append("generator")
 
 
-def _patch_qtaim(l0_dir, l1_dir):
-    """Replace dst qtaim.json plus qtaim.out/CPprop.txt in out_files.zip with src's."""
+def _patch_qtaim(l0_dir, l1_dir, copied, overwritten):
+    """Install the source's qtaim.json and its qtaim.out/CPprop.txt zip members.
+
+    The destination zip keeps every other member. A destination zip that cannot
+    be read is exactly why such a folder failed provenance in the first place,
+    since read_qtaim_out swallows BadZipFile; it is quarantined as .corrupt and
+    a fresh zip is built rather than aborting the merge. Nothing is written
+    until both archives have been read, and every replaced path is set aside."""
     gen0 = os.path.join(l0_dir, "generator")
     gen1 = os.path.join(l1_dir, "generator")
     src_q = os.path.join(gen1, "qtaim.json")
     if not os.path.isfile(src_q):
         raise RuntimeError("source has no qtaim.json")
+
+    src_pair = {}
+    try:
+        with zipfile.ZipFile(os.path.join(gen1, "out_files.zip"), "r") as z:
+            for name in QTAIM_ZIP_MEMBERS:
+                if name in z.namelist():
+                    src_pair[name] = (z.getinfo(name), z.read(name))
+    except (zipfile.BadZipFile, OSError, KeyError):
+        src_pair = {}
+    src_loose = any(
+        os.path.isfile(os.path.join(l1_dir, loc, "qtaim.out")) for loc in ("", "generator")
+    )
+    if "qtaim.out" not in src_pair and not src_loose:
+        raise RuntimeError("source has no readable qtaim.out, in its zip or loose")
+
+    dst_zip = os.path.join(gen0, "out_files.zip")
+    keep, quarantined = [], False
+    if os.path.isfile(dst_zip):
+        try:
+            with zipfile.ZipFile(dst_zip, "r") as z:
+                keep = [
+                    (info, z.read(info.filename))
+                    for info in z.infolist()
+                    if info.filename not in QTAIM_ZIP_MEMBERS
+                ]
+        except (zipfile.BadZipFile, OSError):
+            os.replace(dst_zip, dst_zip + ".corrupt")
+            keep, quarantined = [], True
+
+    tmp = dst_zip + ".l1.tmp"
+    try:
+        with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as o:
+            for info, data in keep:
+                o.writestr(info, data)
+            for info, data in src_pair.values():
+                o.writestr(info, data)
+    except Exception:
+        _rm(tmp)
+        raise
+    rel_zip = os.path.join("generator", "out_files.zip")
+    _set_aside(l0_dir, rel_zip, overwritten)
+    os.replace(tmp, dst_zip)
+    copied.append(rel_zip)
+
+    rel_q = os.path.join("generator", "qtaim.json")
+    _set_aside(l0_dir, rel_q, overwritten)
     tmp_q = os.path.join(gen0, "qtaim.json.l1.tmp")
     shutil.copy2(src_q, tmp_q)
     os.replace(tmp_q, os.path.join(gen0, "qtaim.json"))
-    src_zip = os.path.join(gen1, "out_files.zip")
-    dst_zip = os.path.join(gen0, "out_files.zip")
-    if not os.path.isfile(src_zip):
-        raise RuntimeError("source has no out_files.zip")
-    replaced = []
-    tmp = dst_zip + ".l1.tmp"
-    with zipfile.ZipFile(src_zip, "r") as s:
-        src_names = set(s.namelist())
-        if "qtaim.out" not in src_names:
-            raise RuntimeError("source zip has no qtaim.out")
-        with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as o:
-            if os.path.isfile(dst_zip):
-                with zipfile.ZipFile(dst_zip, "r") as d:
-                    for info in d.infolist():
-                        if info.filename in QTAIM_ZIP_MEMBERS:
-                            continue
-                        o.writestr(info, d.read(info.filename))
-            for name in QTAIM_ZIP_MEMBERS:
-                if name in src_names:
-                    o.writestr(s.getinfo(name), s.read(name))
-                    replaced.append(name)
-    os.replace(tmp, dst_zip)
-    return replaced
+    copied.append(rel_q)
+    return {"qtaim_json": "from src", "zip": sorted(src_pair), "zip_quarantined": quarantined}
 
 
 def apply_one(row):
@@ -1329,15 +1406,19 @@ def apply_one(row):
                 added, zadded, zskipped = _overlay(l0_dir, l1_dir)
                 detail = {"json": added, "zip": zadded, "zip_skipped_incomplete": zskipped}
             elif action in ("REPLACE", "REPLACE_L0", "REPLACE_LOOSE"):
-                _replace(l0_dir, l1_dir)
+                _replace(l0_dir, l1_dir, root_copied, root_overwritten)
+                _sync_qtaim_loose(l1_dir, l0_dir, ("",), root_copied, root_overwritten)
                 detail = {"replaced": "generator"}
             else:
-                detail = {"qtaim_json": "from src", "zip": _patch_qtaim(l0_dir, l1_dir)}
-            root_copied, overlap, root_overwritten = _copy_root_files(
+                detail = _patch_qtaim(l0_dir, l1_dir, root_copied, root_overwritten)
+                _sync_qtaim_loose(l1_dir, l0_dir, ("", "generator"), root_copied, root_overwritten)
+            rc, overlap, ro = _copy_root_files(
                 l1_dir,
                 l0_dir,
                 prefer_src_input=action in ("REPLACE", "REPLACE_L0", "REPLACE_LOOSE"),
             )
+            root_copied += rc
+            root_overwritten += ro
             detail["root_copied"] = root_copied
             detail["root_overlap_kept_dst"] = overlap
             ok, why = _validate(l0_dir, target_level, verify_flags)
@@ -1358,12 +1439,12 @@ def apply_one(row):
             out["result"] = "OK"
             out["detail"] = json.dumps(detail, separators=(",", ":"))
         except Exception as e:
+            # every write above set its original aside first, so this restores
+            # the folder with or without --backup
             _undo_root_copies(l0_dir, root_copied, root_overwritten)
             if backup:
                 _restore(l0_dir, touched)
-                out["detail"] = f"rolled back: {type(e).__name__}: {e}"[:300]
-            else:
-                out["detail"] = f"NOT rolled back (no backup): {type(e).__name__}: {e}"[:300]
+            out["detail"] = f"rolled back: {type(e).__name__}: {e}"[:300]
             out["result"] = "FAILED"
     except Exception as e:
         out["result"] = "ERROR"

@@ -38,7 +38,7 @@ def _load(name):
         return json.load(f)
 
 
-def make_job(job, level, drop=()):
+def make_job(job, level, drop=(), qtaim_out=True):
     """A job folder shaped like the pipeline leaves it, from the orca6_rks fixture."""
     gen = os.path.join(job, "generator")
     os.makedirs(gen)
@@ -71,7 +71,8 @@ def make_job(job, level, drop=()):
     with zipfile.ZipFile(os.path.join(gen, "out_files.zip"), "w") as z:
         for o in ("hirshfeld.out", "adch.out", "cm5.out", "becke.out", "fuzzy_bond.out"):
             z.writestr(o, "Main function menu\nrun\nMain function menu\n")
-        z.writestr("qtaim.out", f"Number of (3,-1) CPs: {n_bcp}\nhave been outputted to CPprop.txt\n")
+        if qtaim_out:
+            z.writestr("qtaim.out", f"Number of (3,-1) CPs: {n_bcp}\nhave been outputted to CPprop.txt\n")
     with open(os.path.join(job, "gbw_analysis.log"), "w") as f:
         f.write("log\n")
 
@@ -136,3 +137,72 @@ def test_decoy_input_is_never_copied(pair):
     out = _apply(_plan(dst, src))
     assert out["result"] == "OK", out["detail"]
     assert not os.path.exists(os.path.join(dst, "orca.property.inp"))
+
+
+def test_stale_root_qtaim_out_does_not_shadow_replaced_record(pair):
+    dst, src = pair
+    # vast's broken run left an incomplete qtaim.out at the job root; it is read
+    # before the zip, so without the sync it outranks the installed record
+    with open(os.path.join(dst, "qtaim.out"), "w") as f:
+        f.write("progress 12%\n")
+    row = _plan(dst, src)
+    assert row["action"] == "REPLACE"
+    out = _apply(row)
+    assert out["result"] == "OK", out["detail"]
+    assert not os.path.exists(os.path.join(dst, "qtaim.out"))
+    assert _saved_leftovers(dst) == []
+
+
+def test_failed_replace_restores_generator_without_backup(pair):
+    dst, src = pair
+    before = sorted(os.listdir(os.path.join(dst, "generator")))
+    row = _plan(dst, src)
+    os.remove(os.path.join(src, "generator", "orca.json"))
+    out = _apply(row, force=True)
+    assert out["result"] == "FAILED"
+    assert sorted(os.listdir(os.path.join(dst, "generator"))) == before
+    assert not os.path.exists(os.path.join(dst, "generator" + m.SAVED_SUFFIX))
+
+
+@pytest.fixture
+def patch_pair(tmp_path):
+    """Destination: level 1 whose zip is unreadable, so provenance fails.
+    Source: valid level 0. The plan must choose PATCH_QTAIM."""
+    dst = str(tmp_path / "vast" / "job")
+    src = str(tmp_path / "lustre" / "job")
+    make_job(dst, 1)
+    make_job(src, 0)
+    with open(os.path.join(dst, "generator", "out_files.zip"), "wb") as f:
+        f.write(b"not a zip")
+    return dst, src
+
+
+def test_patch_qtaim_survives_corrupt_destination_zip(patch_pair):
+    dst, src = patch_pair
+    row = _plan(dst, src)
+    assert row["action"] == "PATCH_QTAIM"
+    out = _apply(row)
+    assert out["result"] == "OK", out["detail"]
+    gen = os.path.join(dst, "generator")
+    with zipfile.ZipFile(os.path.join(gen, "out_files.zip")) as z:
+        assert "qtaim.out" in z.namelist()
+    assert os.path.exists(os.path.join(gen, "out_files.zip.corrupt"))
+    assert not [n for n in os.listdir(gen) if n.endswith(m.SAVED_SUFFIX)]
+
+
+def test_failed_patch_restores_qtaim_json(tmp_path):
+    dst = str(tmp_path / "vast" / "job")
+    src = str(tmp_path / "lustre" / "job")
+    make_job(dst, 1, qtaim_out=False)
+    make_job(src, 0)
+    with open(os.path.join(dst, "generator", "qtaim.json"), "a") as f:
+        f.write(" ")  # distinguishable bytes, still valid JSON
+    row = _plan(dst, src)
+    assert row["action"] == "PATCH_QTAIM"
+    with open(os.path.join(dst, "generator", "qtaim.json")) as f:
+        original = f.read()
+    os.remove(os.path.join(dst, "generator", "orca.json"))  # post-merge check_orca now fails
+    out = _apply(row, force=True)
+    assert out["result"] == "FAILED"
+    with open(os.path.join(dst, "generator", "qtaim.json")) as f:
+        assert f.read() == original
