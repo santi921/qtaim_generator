@@ -174,6 +174,7 @@ SALVAGE_MARKER = "l1_salvage.json"
 JOB_MARKERS = ("generator", "gbw_analysis.log", "orca.inp", "timings.json")
 MARKER = "l1_merge.json"
 BACKUP_DIR = ".pre_l1_merge"
+SAVED_SUFFIX = ".pre_l1"
 CANARY_KEY = "hirshfeld"
 
 PLAN_COLUMNS = [
@@ -1060,7 +1061,7 @@ def _copy_root_files(src_dir, dst_dir, prefer_src_input=False):
     source's input, so keeping the destination's would compare the new data to
     the old molecule. That is how 13 jobs failed with fuzzy-point counts like
     "57 does not match expected 33" -- two different molecules, one folder."""
-    copied, overlap = [], []
+    copied, overlap, overwritten = [], [], []
     os.makedirs(dst_dir, exist_ok=True)
     # "Has an input" must mean "has one that parses". A truncated or otherwise
     # unusable orca.inp on the destination is worse than none: it satisfies a
@@ -1082,6 +1083,14 @@ def _copy_root_files(src_dir, dst_dir, prefer_src_input=False):
             if n in INPUT_DECOYS or have_input:
                 continue
             d = os.path.join(dst_dir, n)
+            if os.path.exists(d):
+                # keep the file being replaced: rollback must restore it, and
+                # neither the copied-file sweep nor the generator/ backup covers
+                # the job root. ".pre_l1" ends in neither .inp nor .in, so it
+                # can never be picked up as a geometry input.
+                saved = d + SAVED_SUFFIX
+                os.replace(d, saved)
+                overwritten.append((n, saved))
             tmp = d + ".l1.tmp"
             shutil.copy2(os.path.join(src_dir, n), tmp)
             os.replace(tmp, d)
@@ -1102,7 +1111,33 @@ def _copy_root_files(src_dir, dst_dir, prefer_src_input=False):
     if os.path.isfile(log1) and not os.path.exists(os.path.join(dst_dir, "gbw_analysis.l1.log")):
         shutil.copy2(log1, os.path.join(dst_dir, "gbw_analysis.l1.log"))
         copied.append("gbw_analysis.l1.log")
-    return copied, overlap
+    return copied, overlap, overwritten
+
+
+def _commit_overwrites(dst_dir, overwritten):
+    """Merge succeeded: the saved originals are no longer needed."""
+    for _n, saved in overwritten:
+        try:
+            os.remove(saved)
+        except OSError:
+            pass
+
+
+def _undo_root_copies(dst_dir, copied, overwritten):
+    """Merge failed: remove what was added, then put back what was replaced.
+
+    Order matters: an overwritten input's name is also in `copied`, so the new
+    file is removed first and the saved original then takes its place."""
+    for n in copied:
+        try:
+            os.remove(os.path.join(dst_dir, n))
+        except OSError:
+            pass
+    for n, saved in overwritten:
+        try:
+            os.replace(saved, os.path.join(dst_dir, n))
+        except OSError:
+            pass
 
 
 def _zip_union_add_only(dst_zip, src_zip, only_members=None, exclude=()):
@@ -1271,7 +1306,8 @@ def apply_one(row):
 
         if action == "SALVAGE":
             # no generator/ to validate; just carry root files, add-only
-            copied, overlap = _copy_root_files(l1_dir, l0_dir)
+            copied, overlap, overwritten = _copy_root_files(l1_dir, l0_dir)
+            _commit_overwrites(l0_dir, overwritten)
             detail = {"root_copied": copied, "root_overlap_kept_dst": overlap}
             atomic_json_write(
                 salvage_marker,
@@ -1285,6 +1321,7 @@ def apply_one(row):
         verify_flags = LOOSE if action == "REPLACE_LOOSE" else strict
         touched = ["generator"]
         root_copied = []
+        root_overwritten = []
         if backup:
             _backup(l0_dir, touched)
         try:
@@ -1296,7 +1333,7 @@ def apply_one(row):
                 detail = {"replaced": "generator"}
             else:
                 detail = {"qtaim_json": "from src", "zip": _patch_qtaim(l0_dir, l1_dir)}
-            root_copied, overlap = _copy_root_files(
+            root_copied, overlap, root_overwritten = _copy_root_files(
                 l1_dir,
                 l0_dir,
                 prefer_src_input=action in ("REPLACE", "REPLACE_L0", "REPLACE_LOOSE"),
@@ -1317,14 +1354,11 @@ def apply_one(row):
                     "canary_max_abs_diff": row.get("canary_max_abs_diff", ""),
                 },
             )
+            _commit_overwrites(l0_dir, root_overwritten)
             out["result"] = "OK"
             out["detail"] = json.dumps(detail, separators=(",", ":"))
         except Exception as e:
-            for n in root_copied:
-                try:
-                    os.remove(os.path.join(l0_dir, n))
-                except OSError:
-                    pass
+            _undo_root_copies(l0_dir, root_copied, root_overwritten)
             if backup:
                 _restore(l0_dir, touched)
                 out["detail"] = f"rolled back: {type(e).__name__}: {e}"[:300]
