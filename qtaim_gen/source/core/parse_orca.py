@@ -933,10 +933,10 @@ def merge_orca_into_charge_json(orca_dict: dict, charge_json_path: str):
         charge_data["hirshfeld_orca"] = entry
         modified = True
 
-    # Mayer gross atomic charges from ORCA (QA column from Mayer population)
-    # Unifies with charge.json alongside Multiwfn-derived charge data
-    if "mayer_charges" in orca_dict:
-        charge_data["mayer_orca"] = {"charge": orca_dict["mayer_charges"]}
+    # Mayer QA "charges" are the Mulliken charges again (ORCA mislabels the
+    # column), not an independent scheme: never merge them, and drop the
+    # duplicate from charge.json files written before this was removed.
+    if charge_data.pop("mayer_orca", None) is not None:
         modified = True
 
     # MBIS charges from ORCA

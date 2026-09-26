@@ -380,7 +380,7 @@ class TestMergeOrcaIntoChargeJson:
 
         assert "mulliken_orca" in merged
         assert "loewdin_orca" in merged
-        assert "mayer_orca" in merged
+        assert "mayer_orca" not in merged
 
     def test_orca_mulliken_values(self, real_job_dir, rks_result):
         charge_path = os.path.join(real_job_dir, "charge.json")
@@ -394,16 +394,23 @@ class TestMergeOrcaIntoChargeJson:
         assert orca_mull["1_O"] == pytest.approx(-0.740774, rel=1e-5)
         assert orca_mull["53_H"] == pytest.approx(0.292385, rel=1e-5)
 
-    def test_orca_mayer_values(self, real_job_dir, rks_result):
+    def test_orca_mayer_charges_not_merged(self, real_job_dir, rks_result):
+        """Mayer QA charges duplicate Mulliken; they must never reach charge.json,
+        and a stale copy from an older merge is removed."""
+        assert "mayer_charges" in rks_result
         charge_path = os.path.join(real_job_dir, "charge.json")
+        with open(charge_path, "r") as f:
+            stale = json.load(f)
+        stale["mayer_orca"] = {"charge": {"1_O": -0.7408}}
+        with open(charge_path, "w") as f:
+            json.dump(stale, f)
+
         merge_orca_into_charge_json(rks_result, charge_path)
 
         with open(charge_path, "r") as f:
             merged = json.load(f)
-
-        orca_mayer = merged["mayer_orca"]["charge"]
-        assert len(orca_mayer) == 53
-        assert orca_mayer["1_O"] == pytest.approx(-0.7408, rel=1e-4)
+        assert "mayer_orca" not in merged
+        assert "mulliken_orca" in merged
 
     def test_orca_vs_multiwfn_same_atoms(self, real_job_dir, rks_result):
         """ORCA and Multiwfn charges should have the same atom keys."""

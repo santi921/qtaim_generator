@@ -47,7 +47,6 @@ CHARGE_MERGE_MAP = {
     "mulliken_charges": "mulliken_orca",
     "loewdin_charges": "loewdin_orca",
     "hirshfeld_charges": "hirshfeld_orca",
-    "mayer_charges": "mayer_orca",
     "mbis_charges": "mbis_orca",
 }
 
