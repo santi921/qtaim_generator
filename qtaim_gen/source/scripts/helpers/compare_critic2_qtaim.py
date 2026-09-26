@@ -59,6 +59,15 @@ def load_lmdb_entry(lmdb_path: str, key: str) -> Optional[dict]:
         env.close()
 
 
+def wfx_has_ecp(wfx_path: str) -> bool:
+    """True when the wfx header declares core electrons replaced by an ECP."""
+    with open(wfx_path) as f:
+        for line in f:
+            if line.strip() == "<Number of Core Electrons>":
+                return int(next(f).split()[0]) > 0
+    return False
+
+
 def bcp_keys(record: dict) -> set:
     """0-based atom-pair keys, normalized to min_max ordering."""
     keys = set()
@@ -102,7 +111,9 @@ def main(argv: Optional[List[str]] = None) -> int:
             continue
 
         meta = c2.get("_meta", {})
-        has_ecp = bool(meta.get("nna_remapped"))
+        # Remapped non-nuclear attractors occur on only some ECP jobs, so they
+        # cannot stand in for ECP use.
+        has_ecp = wfx_has_ecp(os.path.join(job_dir, "orca.wfx"))
         c2_keys, ref_keys = bcp_keys(c2), bcp_keys(ref)
         shared = c2_keys & ref_keys
         union = c2_keys | ref_keys
