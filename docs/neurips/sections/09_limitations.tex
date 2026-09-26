@@ -9,9 +9,11 @@
 
 This dataset is a subset of OMol25; release of the full electronic-structure
 slice would scale us into the hundreds of billions of atom and bond records, but
-we already cover the original's rich set of verticals. Descriptors are generated
-exclusively with Multiwfn, so a cross-package benchmark against AIMAll~\citep{aimall}
-or Critic2~\citep{critic2} would be a useful follow-up. Compute budget restricted
+we already cover the original's rich set of verticals. \revised{Hirshfeld, Becke and QTAIM
+descriptors are cross-checked against HORTON and Critic2 on an 87-structure subset
+(App.~\ref{app:xval}), but ADCH, ADC-Becke, CM5 and the fuzzy bond orders have a single
+implementation (Multiwfn), and we did not benchmark against the commercial
+AIMAll~\citep{aimall}.} Compute budget restricted
 us to the Tier 0 features; future releases will add the more expensive schemes
 relevant to other communities (MBIS for force-field~\citep{mbis} and MLIP
 development~\citep{bamboo}, IBSI for bond-strength analysis~\citep{ibsi}).

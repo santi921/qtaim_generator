@@ -29,6 +29,12 @@
 \definecolor{revcolor}{RGB}{178,24,43}
 \newcommand{\revised}[1]{\textcolor{revcolor}{#1}}
 
+% ---- double-blind switch ------------------------------------------------------
+% Identifying text (acknowledgments, facility names, affiliations) is wrapped in
+% \ifanon <anonymous text> \else <camera-ready text> \fi. Set \anonfalse for camera-ready.
+\newif\ifanon
+\anontrue
+
 \title{Beyond Energies and Forces: OMol-Descriptors-4M, an Open
   Post-DFT Pipeline and Evaluation Protocol for Machine Learning in Chemistry}
 

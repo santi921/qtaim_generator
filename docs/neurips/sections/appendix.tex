@@ -14,9 +14,16 @@ Funding sources are listed in the Acknowledgments.
 
 \paragraph{Composition.}
 Each instance is a single molecular structure with associated wavefunction-derived
-descriptors. The corpus contains 3{,}986{,}738 structures (the publicly released
-4M wavefunction subset of OMol25) spanning 80+
-elements. Per-structure data is sharded across eight LMDB files
+descriptors. \revised{The catalogue contains 3{,}986{,}738 structures, the full
+public 4M wavefunction subset of OMol25, spanning 80+ elements, and
+\texttt{energy.lmdb} carries energies and forces for all of them. Descriptor
+LMDBs cover 3{,}985{,}130: the 1{,}608 jobs whose QTAIM or ORCA post-processing
+failed (Table~\ref{tab:lmdb_quality}) are absent from every descriptor LMDB
+rather than partially populated, so all descriptor families share one key set
+and a consumer never has to reconcile per-family coverage. Joining any
+descriptor LMDB with \texttt{energy.lmdb} yields the 3{,}985{,}130 common keys.}
+Per-structure data is sharded across \revised{nine} LMDB files
+\revised{(eight descriptor LMDBs plus \texttt{energy.lmdb})}
 (Section~\ref{sec:storage}); the descriptor families are enumerated in
 Section~\ref{sec:dataset}. Splits are described in Section~\ref{sec:eval}.
 The corpus contains no human subjects, personally identifiable information, or
@@ -45,16 +52,16 @@ level of theory or extrapolating to excited-state regimes (see \S\ref{sec:limits
 
 \paragraph{Distribution.}
 The dataset is released on Hugging Face under a CC-BY-4.0 license, inheriting
-OMol25's license terms: \url{https://huggingface.co/datasets/neuripssub2026test/OMol-Descriptors-4M}.
+OMol25's license terms: \url{https://huggingface.co/datasets/confsubanon/OMol-Descriptors-4M}.
 The \texttt{generator} pipeline is released under MIT license at
 \url{https://anonymous.4open.science/r/qtaim_generator-8C0C/README.md}. No third-party IP, export controls, or fees
 apply.
 
 \paragraph{Maintenance.}
-The dataset will be maintained by the authors at Lawrence Berkeley National
-Laboratory. Issues, errata, and feature requests can be filed on the code
-repository. Updates, including the planned merge with OMol25 energies and
-forces, and additional descriptor schemes (MBIS, IBSI, CHELPG), will be
+The dataset will be maintained by the authors\ifanon\else\ at Lawrence Berkeley National
+Laboratory\fi. Issues, errata, and feature requests can be filed on the code
+repository. Updates, including \revised{reruns of the jobs that failed
+post-processing} and additional descriptor schemes (MBIS, IBSI, CHELPG), will be
 released as versioned HF records with changelogs. Older versions will
 remain accessible.
 
@@ -62,7 +69,17 @@ remain accessible.
 \label{app:compute}
 
 Post-processing of the 4M-structure subset was carried out on
-three HPC systems:
+three HPC systems\ifanon\ (names withheld for review):
+
+\begin{itemize}
+  \item \textbf{System A} (Flux scheduler). Used for the highest-throughput phase of
+    Multiwfn-driven QTAIM, charge, bond-order, and fuzzy-integration jobs.
+  \item \textbf{System B} (PBS Pro, AMD EPYC nodes). Used for additional descriptor
+    generation and Parsl-managed workflow batches.
+  \item \textbf{System C} (Slurm). Used for ORCA conversions (\texttt{orca\_2mkl}),
+    JSON-to-LMDB sharded conversion, and analytical notebook workloads.
+\end{itemize}
+\else:
 
 \begin{itemize}
   \item \textbf{Tuolumne} (Lawrence Livermore National Laboratory). El Capitan
@@ -79,6 +96,7 @@ three HPC systems:
     notebook workloads.
     \url{https://scienceit-docs.lbl.gov/hpc/systems/lawrencium/}
 \end{itemize}
+\fi
 
 
 \section{Held-Out Construction Logic}
@@ -321,10 +339,10 @@ held-out, and the column totals recover the full 3{,}986{,}738-structure corpus.
 
 Table~\ref{tab:lmdb_quality} reports raw failure counts per vertical from the
 post-conversion audit (\texttt{lmdb\_status\_audit.py}).
-\textit{QTAIM fail}: records where the \texttt{qtaim.lmdb} entry is empty,
-malformed, or unpickleable.
-\textit{ORCA fail}: same for \texttt{orca.lmdb} (includes SCF non-convergence
-flagged at the parse stage).
+\revised{\textit{QTAIM fail}: the \texttt{qtaim.lmdb} record holds no nuclear
+critical point with atomic properties.
+\textit{ORCA fail}: the \texttt{orca.lmdb} record lacks the final SCF energy
+(includes SCF non-convergence flagged at the parse stage).}
 \textit{Other fail}: failures across \texttt{structure}, \texttt{charge},
 \texttt{bond}, \texttt{fuzzy}, and \texttt{other} LMDBs (all zero in this
 release).
@@ -333,8 +351,15 @@ any single descriptor LMDB; values $\leq 4$ across all verticals.
 
 \begin{table}[h]
 \centering
-\caption{Per-vertical LMDB conversion-quality audit. Verticals with all
-zeros across the four failure columns are shown as ``--''.}
+\caption{Per-vertical LMDB conversion-quality audit, run on the converted LMDBs
+before release filtering. Verticals with all
+zeros across the four failure columns are shown as ``--''.
+\revised{Jobs counted as QTAIM or ORCA failures are removed from every
+descriptor LMDB in the release (not left as partial records): 1{,}608 jobs,
+which is the gap between the 3{,}986{,}738 catalogued structures and the
+3{,}985{,}130 carried by the descriptor LMDBs. The 23 \texttt{ml\_mo} jobs
+counted here (24 failure counts; one job fails both) are the exception and
+remain in this release.}}
 \label{tab:lmdb_quality}
 \begin{tabular}{lrrrrr}
 \toprule
@@ -471,6 +496,95 @@ entries, as partial charges on noble-gas atoms are close to zero for all schemes
 \label{fig:charge_pearson_per_vertical}
 \end{figure}
 
+\begingroup\color{revcolor}
+\section{Cross-Package Validation}
+\label{app:xval}
+
+We re-derived a subset of the released descriptors with two codes independent of
+Multiwfn, reading the same wavefunction files used in production. The subset holds 87
+structures from seven verticals chosen to span the regimes where partitioning is easy and
+where it is hard: organics (\texttt{rmechdb}), transition-metal and lanthanide complexes
+(\texttt{tm\_react}, \texttt{mo\_hydrides}), charged solvation shells
+(\texttt{5A\_elytes}, \texttt{droplet}), and noble-gas systems (\texttt{noble\_gas},
+\texttt{noble\_gas\_compounds}); 25 of the 87 use ECPs.
+
+\textbf{Partial charges (HORTON).} Becke and Hirshfeld charges were recomputed with
+HORTON~\citep{horton} on molecular integration grids from \texttt{qc-grid}~\citep{qcgrid}.
+Hirshfeld was run on the 62 all-electron structures only, since the pro-atom densities are
+all-electron. The two Hirshfeld implementations also use different pro-atom libraries
+(Multiwfn's built-in spherical atomic densities versus \texttt{qc-AtomDB}), so their residual
+bounds implementation and reference-density effects together. Becke partitions depend on an
+atomic-radii table and a clip on the size-adjustment parameter; HORTON defaults to
+Bragg--Slater radii and Multiwfn to modified CSD radii. With native conventions the two codes
+correlate at only $r=0.49$; with Multiwfn's radii and clip reproduced in HORTON they agree
+as closely as Hirshfeld does (Table~\ref{tab:xval_charges}). The radii table is therefore a
+free parameter of the Becke scheme, which we disclose rather than tune. The released
+\texttt{becke} scheme is additionally ADC-corrected (Sec.~\ref{sec:dataset}), which is why
+raw HORTON Becke does not track it. HORTON has no ADC step, so ADC-Becke and ADCH remain
+single-implementation, as do CM5 and the fuzzy bond orders. The largest Hirshfeld
+residuals (0.05--0.06~$e$) all fall on metal centers (Ga, Ca, Mn, Zn, Ni, Al).
+
+\begin{table}[h]
+\centering
+\small
+\caption{HORTON versus Multiwfn atomic charges on the same wavefunctions. ``Matched radii''
+uses Multiwfn's modified-CSD radii and $\pm0.5$ size-adjustment clip in HORTON. Differences in $e$.}
+\label{tab:xval_charges}
+\begin{tabular}{lrrrr}
+\toprule
+Comparison & Atoms & Median $|\Delta q|$ & Max $|\Delta q|$ & Pearson $r$ \\
+\midrule
+Hirshfeld, HORTON vs.\ Multiwfn          & 1{,}030 & 0.004 & 0.062 & 0.9993 \\
+Raw Becke, matched radii                 & 1{,}355 & 0.005 & 0.848 & 0.9940 \\
+Raw Becke, native radii                  & 1{,}355 & 0.233 & 2.735 & 0.489 \\
+Raw Becke vs.\ released ADC-Becke & 1{,}355 & 0.259 & 5.725 & 0.043 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{QTAIM topology (Critic2).} Critical points were located with
+Critic2~\citep{critic2} on the same wavefunctions and matched to the Multiwfn bond critical
+points by atom pair. Table~\ref{tab:xval_qtaim} reports agreement on the 1{,}439 BCPs found
+by both codes. Median differences are below $10^{-6}$~a.u.\ for every field except ELF and LOL,
+which the two codes define against different uniform-electron-gas references and so differ
+by a systematic offset. On the 62 all-electron structures every other field agrees with
+$r=1.0000$. The BCP sets themselves, which are the graph edges under the QTAIM bonding
+scheme, match exactly in 77 of 87 structures (59 of 62 all-electron, 18 of 25 ECP); 10
+BCPs are found only by Critic2 and 29 only by Multiwfn, 31 of these 39 in ECP structures
+and 24 at $\rho<0.05$~a.u. The two codes sometimes differ on individual BCPs: about 1\%
+of shared BCPs disagree in ellipticity ($>0.1$) or $\eta$ ($>0.01$), all in ECP structures
+and concentrated at low density (median $\rho\approx0.05$~a.u.\ versus 0.26~a.u.\ for
+agreeing BCPs), where the two smaller Hessian eigenvalues are nearly degenerate and their
+ratio is ill-conditioned. Critic2 does not read the EDF core densities, so near some ECP
+atoms (10 structures) it reports non-nuclear attractors, which we assign to the nearest
+nucleus.
+
+\begin{table}[h]
+\centering
+\small
+\caption{Critic2 versus Multiwfn on 1{,}439 shared BCPs (1{,}438 for Hessian-derived
+fields). Atomic units. $^\dagger$Convention-divergent definition.}
+\label{tab:xval_qtaim}
+\begin{tabular}{lrrrr}
+\toprule
+Field & Median $|\Delta|$ & Mean $|\Delta|$ & $r$ (87 structures) & $r$ (62 all-electron) \\
+\midrule
+$\rho$                               & $1.9\times10^{-8}$ & $1.7\times10^{-4}$ & 0.9992 & 1.0000 \\
+$\nabla^2\rho$                       & $8.7\times10^{-8}$ & $8.9\times10^{-4}$ & 0.9995 & 1.0000 \\
+Lagrangian kinetic energy $G$        & $5.3\times10^{-9}$ & $7.4\times10^{-5}$ & 1.0000 & 1.0000 \\
+Hamiltonian kinetic energy $K$       & $1.8\times10^{-8}$ & $2.7\times10^{-4}$ & 0.9994 & 1.0000 \\
+Energy density $H$                   & $1.8\times10^{-8}$ & $3.9\times10^{-4}$ & 0.9985 & 1.0000 \\
+Hessian determinant                  & $5.5\times10^{-8}$ & $1.7\times10^{-2}$ & 0.9471 & 1.0000 \\
+$\eta$                               & $3.1\times10^{-7}$ & $1.5\times10^{-3}$ & 0.9995 & 1.0000 \\
+Ellipticity                          & $2.8\times10^{-7}$ & $4.1\times10^{-2}$ & 0.4029 & 1.0000 \\
+ELF$^\dagger$                        & $1.2\times10^{-2}$ & $6.0\times10^{-2}$ & 0.9792 & 0.9795 \\
+LOL$^\dagger$                        & $4.2\times10^{-2}$ & $4.9\times10^{-2}$ & 0.9888 & 0.9903 \\
+BCP position (\AA)                   & $4.1\times10^{-7}$ & $3.4\times10^{-4}$ & --     & --     \\
+\bottomrule
+\end{tabular}
+\end{table}
+\endgroup
+
 \section{OMol-Descriptors-4M vs.\ tmQM+ Structural Overlap}
 \label{app:umap_omol_vs_tmqmplus}
 
@@ -518,6 +632,25 @@ noble-gas-compounds verticals.}
 %\section{Additional Cross-Method Residual Plots}
 %\label{app:residuals}
 
+\begingroup\color{revcolor}
+\section{Running a Single Job Folder}
+\label{app:single_folder}
+
+The same entry point that drives production runs processes one folder. The folder needs an
+ORCA wavefunction (\texttt{.gbw}) and the ORCA input that produced it; an \texttt{orca.out},
+if present, is parsed into \texttt{orca.json}.
+\begin{verbatim}
+full-runner --folder ./my_job \
+  --multiwfn_cmd /path/to/Multiwfn_noGUI \
+  --orca_2mkl_cmd /path/to/orca_2mkl --n_threads 4
+\end{verbatim}
+This writes \texttt{charge.json}, \texttt{bond.json}, \texttt{qtaim.json},
+\texttt{fuzzy\_full.json}, \texttt{other.json} and \texttt{timings.json} into the folder.
+On the 21-atom example shipped with the repository, the tier-0 run takes about 8~s on
+4 threads. Replacing \texttt{--folder} with \texttt{--job\_file} (one path per line) runs
+a list of folders; the Parsl runners (Sec.~\ref{sec:pipeline}) distribute that list across
+nodes.
+\endgroup
 
 
 \section{Throughput and Parallel Scaling}

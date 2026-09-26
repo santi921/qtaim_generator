@@ -22,6 +22,7 @@ compatibility with \texttt{.wfn}/\texttt{.wfx} files, the \texttt{.gbw} is conve
 Molden via \texttt{orca\_2mkl} and the EDF library is loaded inside Multiwfn so ECPs are
 treated correctly~\citep{multiwfn}. Folders that fail the EDF load are flagged
 automatically (see Sec.~\ref{sec:dataset}) and re-queued.
+\revised{A single folder runs with one command (App.~\ref{app:single_folder}).}
 
 A user selects a calculation tier through a single integer \texttt{full\_set}~$\in\{0,1,2\}$
 which cascades through the four post-DFT families implemented in
@@ -139,8 +140,9 @@ filter, exposing atom-, bond-, and global-level targets simultaneously.
 
 \subsection{HPC Portability and Reproducibility}
 
-We exercised the pipeline across three HPC schedulers (PBS Pro on ALCF Polaris, Slurm on
-NERSC Perlmutter, Flux on LLNL Tuolumne). PBS and Slurm use a controller-and-workers Parsl
+We exercised the pipeline across three HPC schedulers \ifanon(PBS Pro, Slurm, and Flux, at
+three computing centers whose names are withheld for review)\else(PBS Pro on ALCF Polaris,
+Slurm on NERSC Perlmutter, Flux on LLNL Tuolumne)\fi. PBS and Slurm use a controller-and-workers Parsl
 topology where a login node farms job folders out to allocated worker nodes via the
 \texttt{PBSProProvider}/\texttt{SlurmProvider} executors. Flux uses a single-node Parsl
 \texttt{ThreadPoolExecutor} that works through a local job queue without remote dispatch;

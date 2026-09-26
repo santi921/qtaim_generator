@@ -19,7 +19,7 @@
 \item {\bf Limitations}
     \item[] Question: Does the paper discuss the limitations of the work performed by the authors?
     \item[] Answer: \answerYes{} % Replace by \answerYes{}, \answerNo{}, or \answerNA{}.
-    \item[] Justification: Section 7 (Limitations and Broader Impact) discusses single-level-of-theory binding inherited from OMol25, ground-state-only coverage, exclusive use of Multiwfn for descriptor generation (no cross-package validation against AIMAll/Critic2), the absence of energy/force merging with the original OMol25 labels, and the Tier 0 restriction imposed by compute budget.
+    \item[] Justification: Section 7 (Limitations and Broader Impact) discusses single-level-of-theory binding inherited from OMol25, ground-state-only coverage, the schemes with a single implementation (ADCH, ADC-Becke, CM5, fuzzy bond orders; Hirshfeld, Becke and QTAIM are cross-checked against HORTON and Critic2 on a subset), and the Tier 0 restriction imposed by compute budget.
     \item[] Guidelines:
     \begin{itemize}
         \item The answer \answerNA{} means that the paper has no limitation while the answer \answerNo{} means that the paper has limitations, but those are not discussed in the paper. 
@@ -69,7 +69,7 @@
 \item {\bf Open access to data and code}
     \item[] Question: Does the paper provide open access to the data and code, with sufficient instructions to faithfully reproduce the main experimental results, as described in supplemental material?
     \item[] Answer: \answerYes{}% Replace by \answerYes{}, \answerNo{}, or \answerNA{}.
-    \item[] Justification: Code is released at \url{https://anonymous.4open.science/r/qtaim_generator-8C0C/README.md} under the MIT license, and the dataset is hosted on Hugging Face under CC-BY-4.0 at \url{https://huggingface.co/datasets/neuripssub2026test/OMol-Descriptors-4M}. Both are documented (datasheet in App. A; pipeline in Section 4; README in repo).
+    \item[] Justification: Code is released at \url{https://anonymous.4open.science/r/qtaim_generator-8C0C/README.md} under the MIT license, and the dataset is hosted on Hugging Face under CC-BY-4.0 at \url{https://huggingface.co/datasets/confsubanon/OMol-Descriptors-4M}. Both are documented (datasheet in App. A; pipeline in Section 4; README in repo).
     \item[] Guidelines:
     \begin{itemize}
         \item The answer \answerNA{} means that paper does not include experiments requiring code.
