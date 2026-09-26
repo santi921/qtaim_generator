@@ -265,6 +265,17 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
 
     parser.add_argument(
+        "--recheck_fuzzy",
+        action="store_true",
+        help=(
+            "repair physically wrong fuzzy integrations and open-shell fuzzy bond orders "
+            "(all-zero hirsh density, spin not summing to multiplicity - 1, "
+            "all-alpha or alpha-only fuzzy bonds): reparse archived output where it is "
+            "trustworthy, otherwise rerun only those steps (implies --restart)"
+        ),
+    )
+
+    parser.add_argument(
         "--require_qtaim_provenance",
         action="store_true",
         help=(
@@ -314,6 +325,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     require_qtaim_provenance = bool(
         getattr(args, "require_qtaim_provenance", False)
     )
+    recheck_fuzzy = bool(getattr(args, "recheck_fuzzy", False))
 
     # parsl args
     type_runner: str = str(getattr(args, "type_runner", "local"))
@@ -390,6 +402,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         check_bcp_count=check_bcp_count,
         bcp_tolerance=bcp_tolerance,
         require_qtaim_provenance=require_qtaim_provenance,
+        recheck_fuzzy=recheck_fuzzy,
         check_ecp=check_ecp,
     )
 
@@ -435,6 +448,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             check_bcp_count=check_bcp_count,
             bcp_tolerance=bcp_tolerance,
             require_qtaim_provenance=require_qtaim_provenance,
+            recheck_fuzzy=recheck_fuzzy,
         )
         for f in folders_run
     ]

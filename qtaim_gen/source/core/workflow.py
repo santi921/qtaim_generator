@@ -109,6 +109,7 @@ def process_folder(
     exhaustive_qtaim: bool = False,
     patch_timings: bool = False,
     horton_python: str = "",
+    recheck_fuzzy: bool = False,
 ) -> Dict[str, Any]:
     """Process a single folder and return a small status dict.
 
@@ -179,6 +180,7 @@ def process_folder(
                     verbose=False,
                     move_results=move_results,
                     logger=logger,
+                    recheck_fuzzy=recheck_fuzzy,
                 )
 
                 if not tf_validation:
@@ -225,6 +227,7 @@ def process_folder(
             subprocess_env=subprocess_env,
             patch_timings=patch_timings,
             horton_python=horton_python,
+            recheck_fuzzy=recheck_fuzzy,
         )
         t1: float = time.time()
 
@@ -302,6 +305,7 @@ def process_folder_alcf(
     exhaustive_qtaim: bool = False,
     patch_timings: bool = False,
     horton_python: str = "",
+    recheck_fuzzy: bool = False,
 ) -> Dict[str, Any]:
     """Process a single folder and return a small status dict.
 
@@ -425,6 +429,7 @@ def process_folder_alcf(
                 check_bcp_count=check_bcp_count,
                 bcp_tolerance=bcp_tolerance,
                 require_qtaim_provenance=require_qtaim_provenance,
+                recheck_fuzzy=recheck_fuzzy,
             )
 
             if not overwrite and tf_validation:
@@ -504,6 +509,7 @@ def process_folder_alcf(
             subprocess_env=subprocess_env,
             patch_timings=patch_timings,
             horton_python=horton_python,
+            recheck_fuzzy=recheck_fuzzy,
         )
         t1: float = time.time()
 

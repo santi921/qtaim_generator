@@ -544,10 +544,10 @@ QTAIM_EXPORT_MARKER = "have been outputted to CPprop.txt"
 QTAIM_COUNT_PATTERN = re.compile(r"Number of \(3,-1\) CPs:\s*(\d+)")
 
 
-def read_qtaim_out(folder: str) -> Optional[str]:
-    """Multiwfn's qtaim.out text, or None. Checks root, generator/, then the
-    out_files.zip that survives cleanup."""
-    for rel in ("qtaim.out", os.path.join("generator", "qtaim.out")):
+def read_multiwfn_out(folder: str, name: str) -> Optional[str]:
+    """Text of a Multiwfn `<step>.out`, or None. Checks root, generator/, then
+    the out_files.zip that survives cleanup."""
+    for rel in (name, os.path.join("generator", name)):
         path = os.path.join(folder, rel)
         if os.path.isfile(path) and os.path.getsize(path) > 0:
             try:
@@ -559,11 +559,16 @@ def read_qtaim_out(folder: str) -> Optional[str]:
     if os.path.isfile(zip_path):
         try:
             with zipfile.ZipFile(zip_path, "r") as zf:
-                if "qtaim.out" in zf.namelist():
-                    return zf.read("qtaim.out").decode("utf-8", errors="replace")
+                if name in zf.namelist():
+                    return zf.read(name).decode("utf-8", errors="replace")
         except (zipfile.BadZipFile, OSError, KeyError):
             pass
     return None
+
+
+def read_qtaim_out(folder: str) -> Optional[str]:
+    """Multiwfn's qtaim.out text, or None (see read_multiwfn_out)."""
+    return read_multiwfn_out(folder, "qtaim.out")
 
 
 def qtaim_run_status(folder: str) -> dict:
@@ -987,6 +992,7 @@ def validation_checks(
     check_bcp_count: bool = False,
     bcp_tolerance: int = DEFAULT_BCP_TOLERANCE,
     require_qtaim_provenance: bool = False,
+    recheck_fuzzy: bool = False,
 ):
     """
     Run all validation checks on the json files in the given folder.
@@ -1006,6 +1012,10 @@ def validation_checks(
             the count Multiwfn reported in qtaim.out, and reject records whose
             critical points were lost between the search and the stored file.
             Off by default: it needs qtaim.out, which older runs may not retain.
+        recheck_fuzzy (bool): also fail when fuzzy integrations or open-shell
+            fuzzy bond orders are present but physically wrong (all-zero
+            densities, spin not summing to multiplicity - 1, all-alpha or
+            alpha-only fuzzy bonds). Dry run: nothing is written.
     Returns:
         bool: True if all validation checks pass, False otherwise.
     """
@@ -1144,6 +1154,18 @@ def validation_checks(
         ):
             if logger:
                 logger.error(f"ORCA json validation failed in folder: {folder}")
+            tf_cond = False
+
+    if recheck_fuzzy and tf_cond and spin is not None:
+        from qtaim_gen.source.utils.fuzzy_recheck import recheck_fuzzy as _recheck
+
+        report = _recheck(folder, int(spin), logger=logger, dry_run=True)
+        if report["reparse"] or report["rerun"]:
+            if logger:
+                logger.error(
+                    f"recheck_fuzzy: reparse {report['reparse']}, rerun {report['rerun']} "
+                    f"in folder: {folder}"
+                )
             tf_cond = False
 
     if verbose:

@@ -13,6 +13,11 @@ folder-level validation gate, and classifies:
   no_outputs       results folder missing or never started (no gbw_analysis.log)
   error            classification raised an exception
 
+With --recheck_fuzzy (see qtaim_gen.source.utils.fuzzy_recheck), also:
+
+  reparse_only           wrong fuzzy values fixable from archived output, no rerun
+  no_wavefunction_source open-shell rerun needed but only a .wfn exists
+
 Writes one JSON line per folder to --report_file, prints a summary, and
 optionally writes non-complete folders to --requeue_file.
 
@@ -35,11 +40,13 @@ from tqdm import tqdm
 
 from qtaim_gen.source.core.omol import (
     _compiled_data_present,
+    _gbw_source_present,
     _has_ecp_atoms,
     _has_usable_step_output,
     _is_substantive_step_out,
     _wavefunction_present,
 )
+from qtaim_gen.source.utils.fuzzy_recheck import recheck_fuzzy as _recheck_fuzzy
 from qtaim_gen.source.data.multiwfn import (
     bond_order_dict,
     charge_data_dict,
@@ -93,6 +100,8 @@ def classify_folder(
     root_omol_results: Optional[str],
     full_set: int,
     move_results: bool,
+    recheck_fuzzy: bool = False,
+    preprocess_compressed: bool = False,
 ) -> dict:
     folder = resolve_results_folder(folder_inputs, root_omol_inputs, root_omol_results)
     rec = {"folder": folder_inputs, "results_folder": folder}
@@ -106,16 +115,35 @@ def classify_folder(
     n_atoms = None
     charge = None
     spin_tf = False
+    mult = None
     try:
         dft_dict = get_charge_spin_n_atoms_from_folder(folder)
         if dft_dict and dft_dict.get("mol"):
             n_atoms = len(dft_dict["mol"])
             spin_tf = dft_dict.get("spin", 1) != 1
+            mult = dft_dict.get("spin")
             if dft_dict.get("charge") is not None and not _has_ecp_atoms(dft_dict):
                 charge = int(dft_dict["charge"])
     except Exception:
         pass
     rec["n_atoms"] = n_atoms
+
+    # what gbw_analysis(recheck_fuzzy=True) would reparse / invalidate
+    recheck = None
+    if recheck_fuzzy and mult is not None:
+        recheck = _recheck_fuzzy(
+            folder, int(mult), dry_run=True, preprocess_compressed=preprocess_compressed
+        )
+        # the ALCF runner copies the gbw source in from the inputs tree at run time
+        if (
+            not recheck["ok"]
+            and os.path.abspath(folder_inputs) != os.path.abspath(folder)
+            and os.path.isdir(folder_inputs)
+            and _gbw_source_present(folder_inputs, preprocess_compressed)
+        ):
+            recheck["ok"] = True
+            recheck["wavefunction"] = "gbw source in the inputs folder"
+        rec["recheck"] = recheck
 
     # workload done so far (restart resumes from here)
     for base in (os.path.join(folder, "generator"), folder):
@@ -144,7 +172,16 @@ def classify_folder(
     except Exception:
         valid = False
     if valid:
-        rec["class"] = "complete"
+        if not recheck or not (recheck["reparse"] or recheck["rerun"]):
+            rec["class"] = "complete"
+        elif not recheck["ok"]:
+            rec["class"] = "no_wavefunction_source"
+        elif not recheck["rerun"]:
+            rec["class"] = "reparse_only"
+        else:
+            rec["rerun_steps"] = list(recheck["rerun"])
+            rec["wavefunction_present"] = _wavefunction_present(folder)
+            rec["class"] = "needs_rerun"
         return rec
 
     order, compiled_map, fuzzy_routines = routine_sets(full_set, spin_tf)
@@ -173,10 +210,15 @@ def classify_folder(
                 truncated_steps.append(op)
                 break
 
+    if recheck:
+        rerun_steps += [s for s in recheck["rerun"] if s not in rerun_steps]
     rec["rerun_steps"] = rerun_steps
     rec["truncated_steps"] = truncated_steps
     rec["wavefunction_present"] = _wavefunction_present(folder)
-    rec["class"] = "needs_rerun" if rerun_steps else "validation_loop"
+    if recheck and not recheck["ok"]:
+        rec["class"] = "no_wavefunction_source"
+    else:
+        rec["class"] = "needs_rerun" if rerun_steps else "validation_loop"
     return rec
 
 
@@ -202,6 +244,12 @@ def main(argv: Optional[List[str]] = None) -> int:
                         help="parallel workers (I/O bound; default 8)")
     parser.add_argument("--report_file", type=str, default="sweep_report.jsonl",
                         help="JSONL output, one record per folder")
+    parser.add_argument("--recheck_fuzzy", action="store_true",
+                        help="also classify physically wrong fuzzy integrations / open-shell "
+                             "fuzzy bonds as gbw_analysis(recheck_fuzzy=True) would")
+    parser.add_argument("--preprocess_compressed", action="store_true",
+                        help="with --recheck_fuzzy: count .gbw.zstd0 as a wavefunction source, "
+                             "as the runner does under --preprocess_compressed")
     parser.add_argument("--requeue_file", type=str, default=None,
                         help="if set, write non-complete folder paths here")
     args = parser.parse_args(argv)
@@ -228,6 +276,8 @@ def main(argv: Optional[List[str]] = None) -> int:
                 args.root_omol_results,
                 args.full_set,
                 args.move_results,
+                args.recheck_fuzzy,
+                args.preprocess_compressed,
             ): folder
             for folder in folders
         }
@@ -255,7 +305,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
 
     print("\nFolder classes:")
-    for cls in ("complete", "needs_rerun", "validation_loop", "no_outputs", "error"):
+    for cls in ("complete", "reparse_only", "needs_rerun", "validation_loop",
+                "no_wavefunction_source", "no_outputs", "error"):
         if class_counts.get(cls):
             print(f"  {cls:16s} {class_counts[cls]}")
     if rerun_counts:
@@ -274,7 +325,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     print(f"\nReport: {args.report_file}")
 
     if args.requeue_file:
-        requeue = [r["folder"] for r in records if r["class"] != "complete"]
+        # no_wavefunction_source folders are always refused; requeueing them wastes a slot
+        requeue = [r["folder"] for r in records
+                   if r["class"] not in ("complete", "no_wavefunction_source")]
         with open(args.requeue_file, "w") as f:
             for folder in requeue:
                 f.write(folder + "\n")

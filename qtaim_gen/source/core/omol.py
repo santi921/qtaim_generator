@@ -1817,6 +1817,21 @@ def _discard_wavefunction_derived_outputs(folder: str, logger: logging.Logger) -
             logger.warning("Could not remove %s: %s", path, e)
 
 
+def _gbw_source_present(folder: str, preprocess_compressed: bool = False) -> bool:
+    """Whether the folder can regenerate a wavefunction: a non-empty .gbw, or a
+    .gbw.zstd0 when preprocess_compressed is set (otherwise nothing extracts it).
+    orca.tar.zst does not count: it holds orca.inp/orca.out, not the gbw."""
+    for name in os.listdir(folder):
+        path = os.path.join(folder, name)
+        if name.endswith(".gbw") or (preprocess_compressed and name.endswith(".gbw.zstd0")):
+            try:
+                if os.path.getsize(path) > 0:
+                    return True
+            except OSError:
+                continue
+    return False
+
+
 def _reject_wavefunction_with_wrong_electron_count(
     folder: str, logger: logging.Logger, preprocess_compressed: bool = False
 ) -> bool:
@@ -1844,12 +1859,7 @@ def _reject_wavefunction_with_wrong_electron_count(
     observed = _wavefunction_electrons(wf_path)
     if expected is None or observed is None or abs(observed - expected) <= 0.5:
         return False
-    has_gbw_source = any(
-        name.endswith(".gbw")
-        or (preprocess_compressed and name.endswith(".gbw.zstd0"))
-        for name in os.listdir(folder)
-    )
-    if not has_gbw_source:
+    if not _gbw_source_present(folder, preprocess_compressed):
         logger.error(
             "%s declares %.1f electrons but the input implies %d, and no .gbw "
             "is available to reconvert from; leaving the folder as is",
@@ -2240,6 +2250,7 @@ def gbw_analysis(
     subprocess_env: Optional[dict] = None,
     patch_timings: bool = False,
     horton_python: str = "",
+    recheck_fuzzy: bool = False,
 ) -> None:
     """
     Run a full analysis on a folder of gbw files
@@ -2266,6 +2277,10 @@ def gbw_analysis(
             non-empty enables the HORTON charge engine post-step (default off)
         check_bcp_count(bool): reject qtaim.json records holding fewer bond
             critical points than Multiwfn reported in qtaim.out
+        recheck_fuzzy(bool): before anything else, repair physically wrong
+            fuzzy integrations / open-shell fuzzy bond orders by reparsing the
+            archived output where it is trustworthy, and invalidate the rest
+            so the restart reruns only those steps (implies restart)
     Writes:
         - settings.ini file with memory and n_threads
         - jobs for conversion to wfn/wfx and multiwfn analysis
@@ -2289,6 +2304,26 @@ def gbw_analysis(
             folder, logger, preprocess_compressed=preprocess_compressed
         ):
             restart = False
+
+    # Runs before extraction: removing an open-shell orca.wfn here is what
+    # lets preprocess_compressed rebuild the wavefunction as .wfx.
+    if recheck_fuzzy and not parse_only:
+        from qtaim_gen.source.utils.fuzzy_recheck import recheck_fuzzy as _recheck
+        from qtaim_gen.source.utils.validation import (
+            get_charge_spin_n_atoms_from_folder,
+        )
+
+        _dft = get_charge_spin_n_atoms_from_folder(folder, logger=logger)
+        if _dft and _dft.get("spin") is not None:
+            _report = _recheck(
+                folder, int(_dft["spin"]), logger=logger, wfx=wfx,
+                preprocess_compressed=preprocess_compressed,
+            )
+            if not _report["ok"]:
+                logger.error("recheck_fuzzy: %s - not running", _report["wavefunction"])
+                return False
+        else:
+            logger.warning("recheck_fuzzy: multiplicity unreadable in %s - recheck skipped", folder)
 
     # check if there is a .wfn or .gbw file in the folder. If there is an
     # option to preprocess compressed files
@@ -2436,6 +2471,12 @@ def gbw_analysis(
         else:
             logger.info("Timings file found at %s - restarting.", timings_path)
 
+    if recheck_fuzzy and not restart and not overwrite:
+        # data presence drives the per-step skip; without restart every step
+        # reruns. --overwrite asks for exactly that, so it is left alone.
+        restart = True
+        logger.info("recheck_fuzzy: forcing restart so only invalidated steps rerun")
+
     # check if output already exists
     if not overwrite:
         # if move_results:
@@ -2456,6 +2497,7 @@ def gbw_analysis(
                     check_bcp_count=check_bcp_count,
                     bcp_tolerance=bcp_tolerance,
                     require_qtaim_provenance=require_qtaim_provenance,
+                    recheck_fuzzy=recheck_fuzzy,
                 )
             except Exception as e:
                 logger.error(f"Error during validation checks: {e}")
@@ -2491,6 +2533,7 @@ def gbw_analysis(
                         check_bcp_count=check_bcp_count,
                         bcp_tolerance=bcp_tolerance,
                         require_qtaim_provenance=require_qtaim_provenance,
+                        recheck_fuzzy=recheck_fuzzy,
                     )
                 except Exception:
                     tf_without_orca = False
@@ -2558,6 +2601,7 @@ def gbw_analysis(
                         check_bcp_count=check_bcp_count,
                         bcp_tolerance=bcp_tolerance,
                         require_qtaim_provenance=require_qtaim_provenance,
+                        recheck_fuzzy=recheck_fuzzy,
                     )
 
                     if tf_validation:
@@ -2648,6 +2692,7 @@ def gbw_analysis(
         check_bcp_count=check_bcp_count,
         bcp_tolerance=bcp_tolerance,
         require_qtaim_provenance=require_qtaim_provenance,
+        recheck_fuzzy=recheck_fuzzy,
     )
 
     # Optional repair pass: if validation failed and patch_timings is on,
