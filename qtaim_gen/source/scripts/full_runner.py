@@ -61,11 +61,18 @@ def main(argv=None):
         help="number of jobs to check and try to run",
     )
 
-    parser.add_argument(
+    job_source = parser.add_mutually_exclusive_group()
+    job_source.add_argument(
         "--job_file",
         type=str,
         help="file containing list of folders to run analysis on",
         default="./out.txt",
+    )
+    job_source.add_argument(
+        "--folder",
+        type=str,
+        default=None,
+        help="run a single job folder instead of reading --job_file",
     )
 
     parser.add_argument(
@@ -187,12 +194,14 @@ def main(argv=None):
         resource.RLIMIT_STACK, (resource.RLIM_INFINITY, resource.RLIM_INFINITY)
     )
 
-    # this is the running list of folders to run analysis on - change this to your own file
-    folder_file = os.path.join(job_file)
-    # read folder file and randomly select a folder
-    with open(folder_file, "r") as f:
-        folders = f.readlines()
-    folders = [f.strip() for f in folders if f.strip()]  # remove empty lines
+    if args.folder:
+        folders = [args.folder]
+        num_jobs = 1
+    else:
+        # read folder file and randomly select a folder
+        with open(job_file, "r") as f:
+            folders = f.readlines()
+        folders = [f.strip() for f in folders if f.strip()]  # remove empty lines
     if not folders:
         print("No folders found in out.txt")
         return

@@ -21,6 +21,20 @@ pip install -e ".[wandb]"   # W&B tracking integration
 pip install -e ".[dev]"     # pytest, ruff
 ```
 
+## Quick start: one job folder
+
+A job folder needs an ORCA wavefunction (`.gbw`, or an existing `orca.wfn`/`orca.wfx`) and the ORCA input that produced it (`orca.inp`, `input.inp` or `input.in`; used to validate charge, spin and atom count). An `orca.out` is optional; if present it is parsed into `orca.json`.
+
+```bash
+cp -r qtaim_gen/tutorials/trial_run/2 ./my_job   # the .gbw is deleted after conversion, so work on a copy
+full-runner --folder ./my_job \
+  --multiwfn_cmd /path/to/Multiwfn_noGUI \
+  --orca_2mkl_cmd /path/to/orca_2mkl \
+  --n_threads 4
+```
+
+This writes `charge.json`, `bond.json`, `qtaim.json`, `fuzzy_full.json`, `other.json` and `timings.json` into the folder (about 8 s for the 21-atom example on 4 threads). Folders that already hold these files are skipped unless `--overwrite` is set. Add `--clean` to remove the Multiwfn intermediates. To process many folders, pass `--job_file` (one path per line) instead of `--folder`.
+
 ## Overview
 
 The package has two main workflows:
