@@ -429,6 +429,14 @@ def main(argv: Optional[List[str]] = None) -> int:
     args = p.parse_args(argv)
     if not args.descriptor_root and not args.graph_root:
         p.error("give --descriptor_root and/or --graph_root")
+    for flag, root, discover in (("--descriptor_root", args.descriptor_root, discover_descriptor_sets),
+                                 ("--graph_root", args.graph_root, discover_graph_sets)):
+        if root is None:
+            continue
+        if not os.path.isdir(root):
+            p.error(f"{flag} {root!r} is not a directory")
+        if not discover(root):
+            p.error(f"{flag} {root!r} contains no LMDB sets")
 
     print(f"loading mapping {args.mapping}", file=sys.stderr)
     mapping = load_mapping(args.mapping)

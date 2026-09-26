@@ -108,6 +108,17 @@ def test_misplaced_duplicate_unknown(tmp_path, workers):
     assert rep["sets"]["train"]["descriptor"]["vs_canonical"]["misplaced"] == 0
 
 
+@pytest.mark.parametrize("flag", ["--descriptor_root", "--graph_root"])
+def test_missing_or_empty_root_fails(tmp_path, flag):
+    mapping = tmp_path / "map.tsv.gz"
+    _write_mapping(mapping)
+    with pytest.raises(SystemExit):
+        main(["--mapping", str(mapping), flag, str(tmp_path / "does_not_exist")])
+    (tmp_path / "empty").mkdir()
+    with pytest.raises(SystemExit):
+        main(["--mapping", str(mapping), flag, str(tmp_path / "empty")])
+
+
 def test_prefix_vertical_from_parent(tmp_path):
     mapping = tmp_path / "map.tsv.gz"
     _write_mapping(mapping)
