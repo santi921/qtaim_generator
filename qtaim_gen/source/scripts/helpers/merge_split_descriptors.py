@@ -19,9 +19,9 @@ removed before re-opening), so partial runs can be retried.
 Typical invocation:
 
   python -m qtaim_gen.source.scripts.helpers.merge_split_descriptors \\
-      --splits_dir /p/lustre5/vargas58/converters/splits \\
-      --output_dir /p/lustre5/vargas58/converters/splits_merged \\
-      --write_report /p/lustre5/vargas58/converters/splits_merged/merge_report.json
+      --splits_dir /p/lustre5/username/converters/splits \\
+      --output_dir /p/lustre5/username/converters/splits_merged \\
+      --write_report /p/lustre5/username/converters/splits_merged/merge_report.json
 """
 from __future__ import annotations
 
@@ -35,10 +35,10 @@ from typing import Optional
 import lmdb
 
 DEFAULT_SPLITS_DIR = Path(
-    "/p/lustre5/vargas58/converters/splits"
+    "/p/lustre5/username/converters/splits"
 )
 DEFAULT_OUTPUT_DIR = Path(
-    "/p/lustre5/vargas58/converters/splits_merged"
+    "/p/lustre5/username/converters/splits_merged"
 )
 DESCRIPTORS = (
     "structure", "charge", "bond", "qtaim", "fuzzy",

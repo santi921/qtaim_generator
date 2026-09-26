@@ -123,7 +123,7 @@ def run_sharded_workflow():
 
     # Merge shards
     print(f"\n--- Merging Shards ---")
-    output_dir = "/home/santiagovargas/dev/qtaim_generator/data/output_graphs/base_merged"
+    output_dir = "/home/anonymous_user/dev/qtaim_generator/data/output_graphs/base_merged"
 
     merged_path = BaseConverter.merge_shards(
         shard_dirs=shard_dirs,

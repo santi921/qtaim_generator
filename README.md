@@ -2,7 +2,7 @@
 
 <img src="assets/TOC.png" width=50% height=50%>
 
-A high-throughput post-processing package for quantum chemistry calculations. It wraps Multiwfn and ORCA to compute a rich set of descriptors - QTAIM critical points, partial charges (Hirshfeld, ADCH, CM5, Becke, Mulliken, Loewdin, Mayer), bond orders (fuzzy, IBSI, Laplacian, Mayer), and fuzzy atomic densities - and converts them into graph-based LMDB datasets for ML training with [qtaim_embed](https://github.com/santi921/qtaim_embed).
+A high-throughput post-processing package for quantum chemistry calculations. It wraps Multiwfn and ORCA to compute a rich set of descriptors - QTAIM critical points, partial charges (Hirshfeld, ADCH, CM5, Becke, Mulliken, Loewdin, Mayer), bond orders (fuzzy, IBSI, Laplacian, Mayer), and fuzzy atomic densities - and converts them into graph-based LMDB datasets for ML training with [qtaim_embed](https://anonymous.4open.science/r/qtaim_embed-0E05).
 
 ## Install
 
@@ -47,7 +47,7 @@ For large datasets (e.g. OMol4M) with variable-depth job folder hierarchies, pas
 
 ## Dataset
 
-OMol-Descriptors-4M, the dataset produced by this pipeline on the OMol25 4M public release, is hosted on Hugging Face: [santi921/OMol-Descriptors-4M](https://huggingface.co/datasets/santi921/OMol-Descriptors-4M). It ships six partial-charge schemes, four bond-order schemes, full QTAIM topology, fuzzy descriptors, and ORCA-derived globals across ~4M structures spanning 34 chemical verticals.
+OMol-Descriptors-4M, the dataset produced by this pipeline on the OMol25 4M public release, is hosted on Hugging Face: [confsubanon/OMol-Descriptors-4M](https://huggingface.co/datasets/confsubanon/OMol-Descriptors-4M). It ships six partial-charge schemes, four bond-order schemes, full QTAIM topology, fuzzy descriptors, and ORCA-derived globals across ~4M structures spanning 34 chemical verticals.
 
 ---
 

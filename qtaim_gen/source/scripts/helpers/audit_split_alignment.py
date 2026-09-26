@@ -30,8 +30,8 @@ mapping; missing graphs alone are reported but do not fail the audit.
 Usage (NERSC):
     python -m qtaim_gen.source.scripts.helpers.audit_split_alignment \\
         --mapping split_destinations.tsv.gz \\
-        --descriptor_root /pscratch/sd/s/santiago/qtaim_embed_experiments/data/generator_lmdbs/OMol-Descriptors-4M \\
-        --graph_root /pscratch/sd/s/santiago/qtaim_embed_experiments/data/node/OMol4M_charge_full \\
+        --descriptor_root /pscratch/sd/u/username/qtaim_embed_experiments/data/generator_lmdbs/OMol-Descriptors-4M \\
+        --graph_root /pscratch/sd/u/username/qtaim_embed_experiments/data/node/OMol4M_charge_full \\
         --workers 32 --report alignment.json --moves_tsv graph_moves.tsv
 """
 from __future__ import annotations

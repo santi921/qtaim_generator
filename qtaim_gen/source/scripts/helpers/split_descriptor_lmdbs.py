@@ -72,13 +72,13 @@ from qtaim_gen.source.utils.splits import (
 
 
 DEFAULT_LMDB_ROOT = Path(
-    "/home/santiagovargas/dev/qtaim_generator/data/OMol4M_lmdbs"
+    "/home/anonymous_user/dev/qtaim_generator/data/OMol4M_lmdbs"
 )
 DEFAULT_HOLDOUT_PARQUET = Path(
-    "/home/santiagovargas/dev/qtaim_generator/data/holdouts/manifest_holdout.parquet"
+    "/home/anonymous_user/dev/qtaim_generator/data/holdouts/manifest_holdout.parquet"
 )
 DEFAULT_OUT_DIR = Path(
-    "/home/santiagovargas/dev/qtaim_generator/data/OMol4M_lmdbs/splits"
+    "/home/anonymous_user/dev/qtaim_generator/data/OMol4M_lmdbs/splits"
 )
 DEFAULT_DESCRIPTORS = (
     "structure", "charge", "bond", "qtaim", "fuzzy",

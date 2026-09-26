@@ -68,16 +68,16 @@ import pyarrow.parquet as pq
 
 # --------------------------------------------------------------------------- defaults
 DEFAULT_MANIFEST_DIR = Path(
-    "/home/santiagovargas/dev/qtaim_generator/data/omol_manifest"
+    "/home/anonymous_user/dev/qtaim_generator/data/omol_manifest"
 )
 DEFAULT_TM_BOND_ROOT = Path(
-    "/home/santiagovargas/dev/qtaim_generator/data/OMol4M_lmdbs/tm_bond_lists"
+    "/home/anonymous_user/dev/qtaim_generator/data/OMol4M_lmdbs/tm_bond_lists"
 )
 DEFAULT_LN_BOND_ROOT = Path(
-    "/home/santiagovargas/dev/qtaim_generator/data/OMol4M_lmdbs/ln_bond_lists"
+    "/home/anonymous_user/dev/qtaim_generator/data/OMol4M_lmdbs/ln_bond_lists"
 )
 DEFAULT_OUT_DIR = Path(
-    "/home/santiagovargas/dev/qtaim_generator/data/OMol4M_lmdbs/filter_csv_for_holdouts"
+    "/home/anonymous_user/dev/qtaim_generator/data/OMol4M_lmdbs/filter_csv_for_holdouts"
 )
 
 # H1 stratified sampling

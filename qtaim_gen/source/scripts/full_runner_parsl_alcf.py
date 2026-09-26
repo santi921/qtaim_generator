@@ -465,23 +465,23 @@ full-runner-parsl-alcf --num_folders 2000 --orca_2mkl_cmd $HOME/orca_6_0_0/orca_
       --multiwfn_cmd $HOME/Multiwfn_3_8/Multiwfn_noGUI --clean --full_set 0 \
         --n_threads 220 --n_threads_per_job 1 --safety_factor 1.0 --move_results \
         --timeout_hr 8             --queue workq-route --restart --n_nodes 5 --type_runner hpc \
-        --job_file /lus/eagle/projects/generator/jobs_by_topdir/packaged_together.txt \
-        --preprocess_compressed --root_omol_results /lus/eagle/projects/generator/OMol25_postprocessing/ \
-        --root_omol_inputs /lus/eagle/projects/OMol25/ 
+        --job_file /path/to/projects/generator/jobs_by_topdir/packaged_together.txt \
+        --preprocess_compressed --root_omol_results /path/to/projects/generator/OMol25_postprocessing/ \
+        --root_omol_inputs /path/to/projects/OMol25/ 
 
 
 full-runner-parsl-alcf --num_folders 15000 --orca_2mkl_cmd $HOME/orca_6_0_0/orca_2mkl    \
       --multiwfn_cmd $HOME/Multiwfn_3_8/Multiwfn_noGUI --clean --full_set 0 \
         --n_threads 220 --n_threads_per_job 1 --safety_factor 1.0 --move_results \
         --timeout_hr 6             --queue workq-route --restart --n_nodes 8 --type_runner hpc \
-        --job_file /lus/eagle/projects/generator/jobs_by_topdir/rna.txt \
-        --preprocess_compressed --root_omol_results /lus/eagle/projects/generator/OMol25_postprocessing/ \
-        --root_omol_inputs /lus/eagle/projects/OMol25/ 
+        --job_file /path/to/projects/generator/jobs_by_topdir/rna.txt \
+        --preprocess_compressed --root_omol_results /path/to/projects/generator/OMol25_postprocessing/ \
+        --root_omol_inputs /path/to/projects/OMol25/ 
 
 
 full-runner-parsl --clean --restart \
---multiwfn_cmd /global/scratch/users/santiagovargas/Multiwfn/Multiwfn_3.8_dev_bin_Linux/Multiwfn \
---orca_2mkl_cmd /global/scratch/users/santiagovargas/orca_6_0_1_linux_x86-64_shared_openmpi416/orca_2mkl \
+--multiwfn_cmd /global/scratch/users/anonymous_user/Multiwfn/Multiwfn_3.8_dev_bin_Linux/Multiwfn \
+--orca_2mkl_cmd /global/scratch/users/anonymous_user/orca_6_0_1_linux_x86-64_shared_openmpi416/orca_2mkl \
 --n_threads 10 --n_threads_per_job 10 --full_set 0 --move_results --type_runner local \
 --job_file ../pdb_fragments_300K_refined.txt --num_folders 1 --preprocess_compressed
 

@@ -89,10 +89,10 @@ Safety
 Usage
 -----
     python scripts/merge_l1_into_l0.py plan \\
-        --dst_root /p/vast1/vargas58/OMol4M \\
-        --src_root /p/lustre5/vargas58/OMol4M \\
+        --dst_root /p/vast1/username/OMol4M \\
+        --src_root /p/lustre5/username/OMol4M \\
         --inputs_root /p/lustre5/bennion1/Omol2025-4M-DiversitySet \\
-        --job_list /p/lustre5/vargas58/generator_working/job_lists/omol.txt \\
+        --job_list /p/lustre5/username/generator_working/job_lists/omol.txt \\
         --scan_l1_root --scan_subdirs omol --workers 32 --out l1_merge_plan.tsv
 
 --scan_l1_root discovers what level 1 actually wrote. --l1_remaining_list is

@@ -9,7 +9,7 @@ import traceback
 from qtaim_gen.source.core.converter import GeneralConverter
 from qtaim_embed.data.lmdb import load_graph_from_serialized
 
-config_file = '/home/santiagovargas/dev/qtaim_generator/qtaim_gen/source/scripts/helpers/configs_converter/general_fuzzy_bonds.json'
+config_file = '/home/anonymous_user/dev/qtaim_generator/qtaim_gen/source/scripts/helpers/configs_converter/general_fuzzy_bonds.json'
 
 # Load config
 with open(config_file) as f:

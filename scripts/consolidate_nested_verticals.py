@@ -36,9 +36,9 @@ The per-family validators it wraps are called directly here instead.
 
 Usage:
     python scripts/consolidate_nested_verticals.py \
-        --folder_root /p/vast1/vargas58/OMol4M \
+        --folder_root /p/vast1/username/OMol4M \
         --verticals tm_react scaled_separations_exp \
-        --quarantine_dir /p/lustre5/vargas58/generator_working/quarantine \
+        --quarantine_dir /p/lustre5/username/generator_working/quarantine \
         --out_csv ./audits/consolidate.csv --workers 20
 
 Read the verdict tally, confirm MIXED and GEOMETRY_MISMATCH are zero (or handle

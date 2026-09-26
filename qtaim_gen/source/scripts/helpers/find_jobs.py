@@ -4,15 +4,15 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 FILE_NAME = "orca.gbw.zstd0"  # change here if it's actually "orca.gbw.zst0"
 
 SPECIAL_OMOL_PATHS = [
-    "/lus/eagle/projects/OMol25/omol/torsion_profiles/outputs_120324/",
-    "/lus/eagle/projects/OMol25/omol/electrolytes/md_based/outputs_241029/",
-    "/lus/eagle/projects/OMol25/omol/electrolytes/outputs_unsolvated_120424/",
-    "/lus/eagle/projects/OMol25/omol/electrolytes/solvated_090624/",
-    "/lus/eagle/projects/OMol25/omol/redo_orca6/metal_organics/outputs_062424/",
-    "/lus/eagle/projects/OMol25/omol/metal_organics/outputs_072324",
-    "/lus/eagle/projects/OMol25/omol/metal_organics/outputs_ln_082524",
-    "/lus/eagle/projects/OMol25/omol/metal_organics/outputs_low_spin_241118",
-    "/lus/eagle/projects/OMol25/omol/metal_organics/restart5to6",
+    "/path/to/projects/OMol25/omol/torsion_profiles/outputs_120324/",
+    "/path/to/projects/OMol25/omol/electrolytes/md_based/outputs_241029/",
+    "/path/to/projects/OMol25/omol/electrolytes/outputs_unsolvated_120424/",
+    "/path/to/projects/OMol25/omol/electrolytes/solvated_090624/",
+    "/path/to/projects/OMol25/omol/redo_orca6/metal_organics/outputs_062424/",
+    "/path/to/projects/OMol25/omol/metal_organics/outputs_072324",
+    "/path/to/projects/OMol25/omol/metal_organics/outputs_ln_082524",
+    "/path/to/projects/OMol25/omol/metal_organics/outputs_low_spin_241118",
+    "/path/to/projects/OMol25/omol/metal_organics/restart5to6",
 ]
 
 
@@ -99,10 +99,10 @@ def find_zst_folders(
 
 
 if __name__ == "__main__":
-    # can you iterate over top-level dirs in /lus/eagle/projects/OMol25
-    root_directory = "/lus/eagle/projects/OMol25"
+    # can you iterate over top-level dirs in /path/to/projects/OMol25
+    root_directory = "/path/to/projects/OMol25"
     # save to different files in one directory
-    project_dir = "/lus/eagle/projects/generator/job_lists/"
+    project_dir = "/path/to/projects/generator/job_lists/"
     folder_list = [
         "pdb_pockets_300K",
         "trans1x",

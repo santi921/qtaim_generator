@@ -58,7 +58,7 @@ To run these tests, install qtaim-embed:
 ```bash
 pip install qtaim-embed
 # or from source
-git clone https://github.com/santi921/qtaim_embed
+git clone https://anonymous.4open.science/r/qtaim_embed-0E05
 cd qtaim_embed
 pip install -e .
 ```

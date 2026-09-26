@@ -19,7 +19,7 @@ Standalone: needs `lmdb`; `pyarrow` only for a parquet mapping.
 
 Usage:
     python lookup_missing_split_keys.py --mapping split_destinations.tsv.gz \\
-        --split_root .../OMol-Descriptors-4M --source_root /p/lustre5/vargas58/converters/converters_final \\
+        --split_root .../OMol-Descriptors-4M --source_root /p/lustre5/username/converters/converters_final \\
         [--job_root /p/lustre5/.../OMol4M] --out missing_keys.tsv
 """
 from __future__ import annotations

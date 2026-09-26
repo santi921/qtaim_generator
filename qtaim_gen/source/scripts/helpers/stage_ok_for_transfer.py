@@ -13,7 +13,7 @@ Example layout produced under --dest_dir:
 Usage
 -----
 python stage_ok_for_transfer.py \\
-    --ok_file   /lus/eagle/projects/generator/eagle_ok.txt \\
+    --ok_file   /path/to/projects/generator/eagle_ok.txt \\
     --dest_dir  /tmp/eagle_ok \\
     --workers   16
 """
@@ -28,7 +28,7 @@ from tqdm import tqdm
 
 logger = logging.getLogger("stage_ok_for_transfer")
 
-EAGLE_PREFIX = "/lus/eagle/projects/OMol25"
+EAGLE_PREFIX = "/path/to/projects/OMol25"
 _EXTS = (".tar.zst", ".gbw.zstd0")
 
 

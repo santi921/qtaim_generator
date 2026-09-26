@@ -23,10 +23,10 @@ from typing import Optional
 import lmdb
 
 DEFAULT_LMDB_ROOT = Path(
-    "/p/lustre5/vargas58/converters/converters_final"
+    "/p/lustre5/username/converters/converters_final"
 )
 DEFAULT_SPLITS_DIR = Path(
-    "/p/lustre5/vargas58/converters/splits"
+    "/p/lustre5/username/converters/splits"
 )
 DESCRIPTORS = (
     "structure", "charge", "bond", "qtaim", "fuzzy",

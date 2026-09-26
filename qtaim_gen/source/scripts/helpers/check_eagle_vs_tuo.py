@@ -20,10 +20,10 @@ Output:
 Usage
 -----
 python check_eagle_vs_tuo.py \\
-    --corrupt_file /lus/eagle/projects/generator/corrupt_dirs.txt \\
-    --scratch      /lus/eagle/projects/generator/tmp \\
-    --output_ok    /lus/eagle/projects/generator/eagle_ok.txt \\
-    --output_bad   /lus/eagle/projects/generator/eagle_also_bad.txt
+    --corrupt_file /path/to/projects/generator/corrupt_dirs.txt \\
+    --scratch      /path/to/projects/generator/tmp \\
+    --output_ok    /path/to/projects/generator/eagle_ok.txt \\
+    --output_bad   /path/to/projects/generator/eagle_also_bad.txt
 """
 import os
 import shutil
@@ -39,7 +39,7 @@ from tqdm import tqdm
 logger = logging.getLogger("check_eagle_vs_tuo")
 
 TUO_PREFIX = "/p/lustre5/bennion1/Omol2025-4M-DiversitySet"
-EAGLE_PREFIX = "/lus/eagle/projects/OMol25"
+EAGLE_PREFIX = "/path/to/projects/OMol25"
 
 _EXTS = (".tar.zst", ".gbw.zstd0")
 

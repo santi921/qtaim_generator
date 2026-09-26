@@ -73,13 +73,13 @@ import lmdb
 import pandas as pd
 
 DEFAULT_HOLDOUT_DIR = Path(
-    "/home/santiagovargas/dev/qtaim_generator/data/OMol4M_lmdbs/filter_csv_for_holdouts"
+    "/home/anonymous_user/dev/qtaim_generator/data/OMol4M_lmdbs/filter_csv_for_holdouts"
 )
 DEFAULT_LMDB_ROOT = Path(
-    "/home/santiagovargas/dev/qtaim_generator/data/OMol4M_lmdbs"
+    "/home/anonymous_user/dev/qtaim_generator/data/OMol4M_lmdbs"
 )
 DEFAULT_OUT_DIR = Path(
-    "/home/santiagovargas/dev/qtaim_generator/data/OMol4M_lmdbs/holdout_lmdbs"
+    "/home/anonymous_user/dev/qtaim_generator/data/OMol4M_lmdbs/holdout_lmdbs"
 )
 
 DEFAULT_DESCRIPTORS = (

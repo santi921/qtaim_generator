@@ -20,7 +20,7 @@ Example (OMol4M):
     python -m qtaim_gen.source.scripts.helpers.sweep_truncated_steps \
         --job_file job_lists/ml_elytes_refined.txt \
         --root_omol_inputs /p/lustre5/bennion1/Omol2025-4M-DiversitySet/ \
-        --root_omol_results /p/lustre5/vargas58/OMol4M/ \
+        --root_omol_results /p/lustre5/username/OMol4M/ \
         --full_set 1 --n_workers 32 \
         --report_file sweep_ml_elytes.jsonl
 """

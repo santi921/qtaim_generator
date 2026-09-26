@@ -226,8 +226,8 @@ def show_rows(db_path="validation_results.sqlite", limit=5, subset=None):
 
 
 def create_overall_count_db(
-    folder_jobs_OMol="/lus/eagle/projects/generator/jobs_by_topdir",
-    db_path="/lus/eagle/projects/generator/jobs_by_topdir/overall_counts.sqlite",
+    folder_jobs_OMol="/path/to/projects/generator/jobs_by_topdir",
+    db_path="/path/to/projects/generator/jobs_by_topdir/overall_counts.sqlite",
 ):
     conn = sqlite3.connect(db_path)
     c = conn.cursor()
@@ -254,8 +254,8 @@ def create_overall_count_db(
 
 
 def print_summary(
-    db_path="/lus/eagle/projects/generator/jobs_by_topdir",
-    path_to_overall_counts_db="/lus/eagle/projects/generator/jobs_by_topdir/overall_counts.sqlite",
+    db_path="/path/to/projects/generator/jobs_by_topdir",
+    path_to_overall_counts_db="/path/to/projects/generator/jobs_by_topdir/overall_counts.sqlite",
 ):
 
     if path_to_overall_counts_db:
@@ -573,7 +573,7 @@ def log_to_wandb(
 
 
 if __name__ == "__main__":
-    root_dir = "/lus/eagle/projects/generator/OMol25_postprocessing/"  # Change to your root directory
+    root_dir = "/path/to/projects/generator/OMol25_postprocessing/"  # Change to your root directory
     db_path = "validation_results.sqlite"
     # scan_test(root_dir, db_path)
     scan_and_store_parallel(root_dir, db_path)

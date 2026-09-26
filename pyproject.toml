@@ -8,7 +8,7 @@ version = "0.0.0"
 description = "QTAIM generator and utilities"
 readme = "README.md"
 requires-python = ">=3.9"
-authors = [ { name = "Santiago Vargas" } ]
+authors = [ { name = "Anonymous Authors" } ]
 
 # Dependencies
 # Note: RDKit is best installed from conda (conda-forge) for full functionality and C++ dependencies.
@@ -88,8 +88,7 @@ folder-orca-inp-to-pkl = "qtaim_gen.source.scripts.helpers.folder_orca_inp_to_pk
 
 # Optional: add project URLs
 [project.urls]
-"Homepage" = "https://github.com/santi921/qtaim_generator"
-"Bug Tracker" = "https://github.com/santi921/qtaim_generator/issues"
+"Homepage" = "https://anonymous.4open.science/r/qtaim_generator-8C0C"
 
 # Conda environment specification (informational). Use `environment.yml` to
 # create the recommended conda environment with RDKit from conda-forge.

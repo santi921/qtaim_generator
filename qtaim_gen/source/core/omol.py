@@ -2703,7 +2703,7 @@ def gbw_analysis(
     return tf_validation
 
 
-# /global/scratch/users/santiagovargas/gbws_cleaning_lean/ml_elytes/elytes_md_eqv2_electro_512_C3H8O_3_group_133_shell_0_0_1_1341
+# /global/scratch/users/anonymous_user/gbws_cleaning_lean/ml_elytes/elytes_md_eqv2_electro_512_C3H8O_3_group_133_shell_0_0_1_1341
 #!/bin/bash
 # SBATCH --job-name=conj_systems
 # SBATCH --partition=cm2
@@ -2713,5 +2713,5 @@ def gbw_analysis(
 # SBATCH --time=40:00:00
 # SBATCH -C lr6_m192
 # SBATCH -p lr6
-# SBATCH --account=lr_blau
-# SBATCH --qos=condo_blau
+# SBATCH --account=lr_account
+# SBATCH --qos=condo_account

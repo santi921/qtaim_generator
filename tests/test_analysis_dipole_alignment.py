@@ -189,7 +189,7 @@ def test_aggregate_pair_pearson_matches_scipy(tmp_path):
 
 # ---- Real-vertical sign-sanity smoke test ----
 
-_REAL_VERTICAL = Path("/home/santiagovargas/dev/qtaim_generator/data/OMol4M_lmdbs/5A_elytes")
+_REAL_VERTICAL = Path("/home/anonymous_user/dev/qtaim_generator/data/OMol4M_lmdbs/5A_elytes")
 
 
 @pytest.mark.slow

@@ -156,7 +156,7 @@ def test_aggregate_per_element_rows_present(tmp_path):
 
 # ---- Real-vertical smoke ----
 
-_REAL = Path("/home/santiagovargas/dev/qtaim_generator/data/OMol4M_lmdbs/5A_elytes")
+_REAL = Path("/home/anonymous_user/dev/qtaim_generator/data/OMol4M_lmdbs/5A_elytes")
 
 
 @pytest.mark.slow

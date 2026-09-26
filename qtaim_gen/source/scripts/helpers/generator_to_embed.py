@@ -9,15 +9,15 @@ Supports three converter types:
 Example config (lmdb_config.json):
 {
     "restart": false,
-    "lmdb_path": "/eagle/projects/generator/qtaim_embed/test_parse/",
+    "lmdb_path": "/path/to/projects/generator/qtaim_embed/test_parse/",
     "lmdb_name": "base_graphs.lmdb",
     "lmdb_locations": {
-        "geom_lmdb": "/eagle/projects/generator/lmdbs/rmechdb/structure.lmdb",
-        "qtaim_lmdb": "/eagle/projects/generator/lmdbs/rmechdb/qtaim.lmdb",
-        "charge_lmdb": "/eagle/projects/generator/lmdbs/rmechdb/charge.lmdb",
-        "fuzzy_full_lmdb": "/eagle/projects/generator/lmdbs/rmechdb/fuzzy.lmdb",
-        "bonds_lmdb": "/eagle/projects/generator/lmdbs/rmechdb/bond.lmdb",
-        "other_lmdb": "/eagle/projects/generator/lmdbs/rmechdb/other.lmdb"
+        "geom_lmdb": "/path/to/projects/generator/lmdbs/rmechdb/structure.lmdb",
+        "qtaim_lmdb": "/path/to/projects/generator/lmdbs/rmechdb/qtaim.lmdb",
+        "charge_lmdb": "/path/to/projects/generator/lmdbs/rmechdb/charge.lmdb",
+        "fuzzy_full_lmdb": "/path/to/projects/generator/lmdbs/rmechdb/fuzzy.lmdb",
+        "bonds_lmdb": "/path/to/projects/generator/lmdbs/rmechdb/bond.lmdb",
+        "other_lmdb": "/path/to/projects/generator/lmdbs/rmechdb/other.lmdb"
     },
     "keys_data": {
         "atom": ["eta", "lol"],

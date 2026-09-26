@@ -122,7 +122,7 @@ def nersc_config(
     threads_per_task: int = 1,
     threads_per_node: int = 40,
     n_jobs: int = 1,
-    queue: str = "condo_blau",
+    queue: str = "condo_account",
     walltime: str = "00:30:00",
     monitoring: bool = False,
     memory: str = 192,
@@ -165,7 +165,7 @@ def nersc_config(
                 # Options that specify properties of PBS Jobs
                 provider=SlurmProvider(
                     # Project name
-                    account="lr_blau",
+                    account="lr_account",
                     qos=queue,
                     # partition="cm2",
                     # Commands run before workers launched

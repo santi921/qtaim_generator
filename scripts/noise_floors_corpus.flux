@@ -11,8 +11,8 @@ conda activate generator
 export PYTHONUNBUFFERED=1
 ulimit -s unlimited
 
-ROOT=/p/lustre5/vargas58/converters/converters_final
-OUT_DIR=/p/lustre5/vargas58/converters/noise_floors
+ROOT=/p/lustre5/username/converters/converters_final
+OUT_DIR=/p/lustre5/username/converters/noise_floors
 
 JOBS=8 WORKERS=4 ROOT=$ROOT OUT_DIR=$OUT_DIR \
     bash "$(dirname "$0")/noise_floors_corpus.sh"
