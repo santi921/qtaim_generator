@@ -23,6 +23,7 @@ from qtaim_gen.source.core.parse_multiwfn import (
 )
 
 from qtaim_gen.source.core.omol import gbw_analysis
+from qtaim_gen.source.data.multiwfn import fuzzy_data
 
 TEST_FILES = Path(__file__).parent / "test_files"
 
@@ -397,6 +398,30 @@ class TestMultiwfnParser:
         assert np.isclose(
             density_dict["sum"], 65.99996761, atol=1e-3
         ), "wrong value for becke fuzzy density for 13_H"
+
+    def test_fuzzy_bond_open_shell_reads_total(self):
+        # Multiwfn on an open-shell .wfx prints "Alpha: a Beta: b Total: t".
+        d = parse_bond_order_fuzzy(
+            str(TEST_FILES / "multiwfn" / "open_shell_wfx" / "fuzzy_bond.out")
+        )
+        assert np.isclose(d["4_C_to_5_C"], 1.251987, atol=1e-6)
+        assert np.isclose(d["1_H_to_2_Br"], 0.899321, atol=1e-6)
+
+    def test_fuzzy_real_space_keeps_first_block(self):
+        # Output of the pre-fix hirsh_fuzzy_density input: a rho block, then an
+        # all-zero block that used to overwrite it.
+        d = parse_fuzzy_real_space(
+            str(TEST_FILES / "multiwfn" / "hirsh_two_block" / "hirsh_fuzzy_density.out")
+        )["hirsh_fuzzy_density"]
+        assert np.isclose(d["sum"], 94.99993976, atol=1e-6)
+        assert np.isclose(d["2_Br"], 35.15197230, atol=1e-6)
+        assert len([k for k in d if k not in ("sum", "abs_sum")]) == 12
+
+    def test_hirsh_fuzzy_inputs_skip_mbis_submenu(self):
+        strings = fuzzy_data(spin=True, full_set=1)
+        assert strings["hirsh_fuzzy_density"] == "15\n-1\n3\n1\n1\n0\nq\n"
+        assert strings["hirsh_fuzzy_spin"] == "15\n-1\n3\n1\n5\n0\nq\n"
+        assert strings["mbis_fuzzy_density"] == "15\n-1\n5\n1\n1\n1\n0\n0\nq\n"
 
 
 EDGE_CASES = Path(__file__).parent / "test_files" / "edge_cases"

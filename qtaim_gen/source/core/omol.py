@@ -234,7 +234,7 @@ def create_jobs(
     logger: Optional[logging.Logger] = None,
     full_set: int = 0,
     patch_path: bool = False,
-    wfx: bool = False,
+    wfx: bool = True,
     exhaustive_qtaim: bool = False,
 ) -> None:
     """
@@ -1675,7 +1675,8 @@ def _is_substantive_step_out(path: str, order: str = None) -> bool:
 def _wavefunction_path(folder: str) -> Optional[str]:
     """Path of a non-empty orca.wfn or orca.wfx in folder/ or generator/, or None."""
     for base in (folder, os.path.join(folder, "generator")):
-        for ext in (".wfn", ".wfx"):
+        # .wfx first: Multiwfn reads an open-shell .wfn as all-alpha.
+        for ext in (".wfx", ".wfn"):
             wf = os.path.join(base, f"orca{ext}")
             try:
                 if os.path.isfile(wf) and os.path.getsize(wf) > 0:
@@ -2234,7 +2235,7 @@ def gbw_analysis(
     check_bcp_count: bool = False,
     bcp_tolerance: int = 2,
     require_qtaim_provenance: bool = False,
-    wfx: bool = False,
+    wfx: bool = True,
     exhaustive_qtaim: bool = False,
     subprocess_env: Optional[dict] = None,
     patch_timings: bool = False,

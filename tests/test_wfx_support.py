@@ -92,7 +92,7 @@ class TestCreateJobsWfxMode:
         shutil.rmtree(self.tmpdir)
 
     def test_create_jobs_wfn_mode(self):
-        """Default mode (wfx=False) produces option 4 targeting .wfn."""
+        """wfx=False produces option 5 targeting .wfn."""
         from qtaim_gen.source.core.omol import create_jobs
 
         create_jobs(
@@ -134,6 +134,30 @@ class TestCreateJobsWfxMode:
         # Should use Multiwfn option 5 for .wfx
         assert "100\n2\n4\n" in content, f"Expected option 5 for .wfx, got: {content}"
         assert "orca.wfx" in content, f"Expected .wfx filename, got: {content}"
+
+    def test_create_jobs_defaults_to_wfx(self):
+        """No wfx argument: conversion targets .wfx (open-shell .wfn loses alpha/beta)."""
+        from qtaim_gen.source.core.omol import create_jobs
+
+        create_jobs(
+            folder=self.tmpdir,
+            multiwfn_cmd="/usr/bin/Multiwfn",
+            orca_2mkl_cmd="/usr/bin/orca_2mkl",
+            separate=False,
+            debug=True,
+        )
+        with open(os.path.join(self.tmpdir, "convert.txt")) as f:
+            content = f.read()
+        assert "100\n2\n4\n" in content
+        assert "orca.wfx" in content
+
+    def test_wavefunction_path_prefers_wfx(self):
+        from qtaim_gen.source.core.omol import _wavefunction_path
+
+        for ext in (".wfn", ".wfx"):
+            with open(os.path.join(self.tmpdir, "orca" + ext), "w") as f:
+                f.write("wf\n")
+        assert _wavefunction_path(self.tmpdir) == os.path.join(self.tmpdir, "orca.wfx")
 
     def test_create_jobs_skips_conversion_when_wfn_exists(self):
         """No convert.txt when .wfn already present."""

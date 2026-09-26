@@ -101,7 +101,7 @@ def process_folder(
     orca_6: bool = True,
     full_set: bool = False,
     move_results: bool = True,
-    wfx: bool = False,
+    wfx: bool = True,
     check_orca: bool = False,
     check_bcp_count: bool = False,
     bcp_tolerance: int = 2,
@@ -294,7 +294,7 @@ def process_folder_alcf(
         str
     ] = None,  # root where to store results, should mimic root_omol_inputs
     root_omol_inputs: Optional[str] = None,  # root where input folders are located
-    wfx: bool = False,
+    wfx: bool = True,
     check_orca: bool = False,
     check_bcp_count: bool = False,
     bcp_tolerance: int = 2,

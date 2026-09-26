@@ -80,10 +80,14 @@ def fuzzy_data(spin: bool = True, full_set: int = 0) -> dict:
     # string_ret = "15\n1\n1\nn1\n2\n1\n3\n1\n9\n4\nn\n0\nq\n"
     string_dict = {}
     string_dict["becke_fuzzy_density"] = "15\n1\n1\n0\nq\n"
-    string_dict["hirsh_fuzzy_density"] = "15\n-1\n3\n1\n1\n1\n0\n0\nq\n"
+    # Hirshfeld (-1 -> 3) returns straight to the fuzzy menu; only MBIS (-1 -> 5)
+    # has a "1 Start calculation!" submenu needing the extra "1". With it, the
+    # density string integrated rho twice (second block all zeros) and the spin
+    # string integrated rho (function 1) instead of spin density (function 5).
+    string_dict["hirsh_fuzzy_density"] = "15\n-1\n3\n1\n1\n0\nq\n"
 
     if spin:
-        string_dict["hirsh_fuzzy_spin"] = "15\n-1\n3\n1\n1\n5\n0\nq\n"
+        string_dict["hirsh_fuzzy_spin"] = "15\n-1\n3\n1\n5\n0\nq\n"
         string_dict["becke_fuzzy_spin"] = "15\n1\n5\n0\nq\n"
         if full_set > 0:
             string_dict["mbis_fuzzy_spin"] = "15\n-1\n5\n1\n1\n5\n0\nq\n"

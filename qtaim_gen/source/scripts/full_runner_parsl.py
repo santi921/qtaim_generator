@@ -167,7 +167,15 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument(
         "--wfx",
         action="store_true",
-        help="Use .wfx wavefunction format instead of .wfn (more stable for heavy atoms, Z > 36)",
+        default=True,
+        help="Use .wfx wavefunction format (default; kept for compatibility)",
+    )
+
+    parser.add_argument(
+        "--wfn",
+        dest="wfx",
+        action="store_false",
+        help="Use legacy .wfn instead of .wfx. Multiwfn reads an open-shell .wfn as all-alpha, so spin quantities and fuzzy bond orders are wrong for open-shell jobs",
     )
 
     parser.add_argument(
@@ -256,7 +264,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     dry_run: bool = bool(getattr(args, "dry_run", False))
     overwrite = bool(args.overwrite) if "overwrite" in args else False
     clean_first: bool = bool(getattr(args, "clean_first", False))
-    wfx: bool = bool(getattr(args, "wfx", False))
+    wfx: bool = bool(getattr(args, "wfx", True))
     exhaustive_qtaim: bool = bool(getattr(args, "exhaustive_qtaim", False))
     patch_timings: bool = bool(getattr(args, "patch_timings", False))
     horton_python: str = str(getattr(args, "horton_python", ""))

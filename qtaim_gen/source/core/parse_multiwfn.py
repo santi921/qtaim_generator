@@ -759,10 +759,6 @@ def parse_bond_order_fuzzy(bond_order_txt):
                 if line.strip() == "":
                     fuzzy_bool = False
                 else:
-                    if "alpha" in line.lower():
-                        shift = True
-                    else:
-                        shift = False
                     split_list = line.split()
                     # print(split_list)
                     # print("a: \'{}\' b: \'{}\'".format(a, b))
@@ -777,12 +773,9 @@ def parse_bond_order_fuzzy(bond_order_txt):
                     a = a.replace(")", "")
                     b = b.replace(")", "")
 
-                    if shift:
-                        ind_alpha = line.find("Alpha:")
-                        ind_beta = line.find("Beta:")
-                        order = float(line[ind_alpha + 6 : ind_beta - 1].strip())
-                    else:
-                        order = float(split_list[-1])
+                    # Last token is the bond order in both layouts; open-shell lines
+                    # read "Alpha: a Beta: b Total: t" and the bond order is t.
+                    order = float(split_list[-1])
                     # fuzzy_bond_dict.append((a, b, order))
                     fuzzy_bond_dict["{}_to_{}".format(a, b)] = order
 
@@ -1124,9 +1117,11 @@ def parse_fuzzy_real_space(fuzzy_loc):
         for line in f:
             if trigger_bool_real:
                 if line == "\n" or len(line) < 3:  # terminate the block
-                    trigger_bool_real = False
                     name = fuzzy_loc.split("/")[-1].split(".")[0]
                     ret_dict[name] = dict_data_temp
+                    # First block only: outputs from the pre-fix hirsh_fuzzy_density
+                    # input hold a second, all-zero block that used to overwrite it.
+                    return ret_dict
 
                 else:
                     line_split = line.split()

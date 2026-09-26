@@ -190,7 +190,15 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument(
         "--wfx",
         action="store_true",
-        help="Use .wfx wavefunction format instead of .wfn (more stable for heavy atoms, Z > 36)",
+        default=True,
+        help="Use .wfx wavefunction format (default; kept for compatibility)",
+    )
+
+    parser.add_argument(
+        "--wfn",
+        dest="wfx",
+        action="store_false",
+        help="Use legacy .wfn instead of .wfx. Multiwfn reads an open-shell .wfn as all-alpha, so spin quantities and fuzzy bond orders are wrong for open-shell jobs",
     )   
     
     parser.add_argument(
@@ -295,7 +303,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     root_omol_inputs: Optional[str] = getattr(args, "root_omol_inputs", None)
     clean_first: bool = bool(getattr(args, "clean_first", False))
     patch_path: bool = bool(getattr(args, "patch_path", False))
-    wfx: bool = bool(getattr(args, "wfx", False))
+    wfx: bool = bool(getattr(args, "wfx", True))
     check_orca: bool = bool(getattr(args, "check_orca", False))
     check_ecp: bool = bool(getattr(args, "check_ecp", False))
     exhaustive_qtaim: bool = bool(getattr(args, "exhaustive_qtaim", False))

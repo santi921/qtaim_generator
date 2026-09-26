@@ -1,0 +1,151 @@
+ Warning: "settings.ini" was found neither in current folder nor in the path defined by "Multiwfnpath" environment variable. Now using default settings instead
+ 
+ Multiwfn -- A Multifunctional Wavefunction Analyzer
+ Version 3.8(dev), update date: 2024-Oct-6
+ Developer: Tian Lu (Beijing Kein Research Center for Natural Sciences)
+ Multiwfn official website: http://sobereva.com/multiwfn
+ Multiwfn English forum: http://sobereva.com/wfnbbs
+ Multiwfn Chinese forum: http://bbs.keinsci.com/wfn
+ Both following papers ***MUST BE CITED IN MAIN TEXT*** if Multiwfn is used:
+          Tian Lu, Feiwu Chen, J. Comput. Chem., 33, 580-592 (2012)
+          Tian Lu, J. Chem. Phys., 161, 082503 (2024)
+ See "How to cite Multiwfn.pdf" in Multiwfn binary package for more information
+
+ ( Number of parallel threads:   4  Current date: 2026-09-26  Time: 03:39:27 )
+
+ Warning: You should set OMP_STACKSIZE environment variable as mentioned in Section 2.1.2 of Multiwfn manual!
+ 
+ Please wait...
+ 
+ Total energy:       0.000000000000 Hartree,   Virial ratio:  2.00000000
+ Total/Alpha/Beta electrons:     95.0000     48.0000     47.0000
+ Number of orbital:    95,  Atoms:     12,  GTFs:    499
+ This is unrestricted single-determinant wavefunction
+ Orbitals from 1 to    48 are alpha type, from    49 to    95 are beta type
+ 
+
+ Loaded rt.wfx successfully!
+ 
+ Formula: H7 C3 Br2      Total atoms:      12
+ Molecule weight:       202.89485 Da
+ Point group: C1 
+ 
+ "q": Exit program gracefully          "r": Load a new file
+                    ************ Main function menu ************
+ 0 Show molecular structure and view orbitals
+ 1 Output all properties at a point       2 Topology analysis
+ 3 Output and plot specific property in a line
+ 4 Output and plot specific property in a plane
+ 5 Output and plot specific property within a spatial region (calc. grid data)
+ 6 Check & modify wavefunction
+ 7 Population analysis and calculation of atomic charges
+ 8 Orbital composition analysis           9 Bond order analysis
+ 10 Plot total DOS, PDOS, OPDOS, local DOS, COHP and photoelectron spectrum
+ 11 Plot IR/Raman/UV-Vis/ECD/VCD/ROA/NMR spectrum
+ 12 Quantitative analysis of molecular surface
+ 13 Process grid data (No grid data is presented currently)
+ 14 Adaptive natural density partitioning (AdNDP) analysis
+ 15 Fuzzy atomic space analysis
+ 16 Charge decomposition analysis (CDA) and plot orbital interaction diagram
+ 17 Basin analysis                       18 Electron excitation analysis
+ 19 Orbital localization analysis        20 Visual study of weak interaction
+ 21 Energy decomposition analysis        22 Conceptual DFT (CDFT) analysis
+ 23 ETS-NOCV analysis                    24 (Hyper)polarizability analysis
+ 25 Electron delocalization and aromaticity analyses
+ 26 Structure and geometry related analyses
+ 100 Other functions (Part 1)            200 Other functions (Part 2)
+ 300 Other functions (Part 3)
+ 
+            ================ Bond order analysis ===============
+ -1 Define fragment 1 and 2 for options 1,3,4,7,8,10 (to be defined)
+ 0 Return
+ 1 Mayer bond order analysis
+ 2 Multicenter bond order analysis
+ -2 Multicenter bond order analysis in NAO basis
+ 3 Wiberg bond order analysis in Lowdin orthogonalized basis
+ 4 Mulliken bond order (Mulliken overlap population) analysis
+ 5 Decompose Mulliken bond order between two atoms to orbital contributions
+ 6 Orbital occupancy-perturbed Mayer bond order
+ 7 Fuzzy bond order analysis (FBO)
+ 8 Laplacian bond order (LBO)
+ 9 Decompose Wiberg bond order in NAO basis as atomic orbital pair contribution
+ 10 Intrinsic bond strength index (IBSI)
+ 11 AV1245 index (approximate multicenter bond order for large rings) and AVmin
+ 20 Bond order density (BOD) and natural adaptive orbital (NAdO) analyses
+ Radial points:   45    Angular points:  170   Total:      7650 per center
+ Please wait...
+ 
+ Calculation took up       0 seconds wall clock time
+ Error of alpha AOM is    0.00040312
+ Error of Beta AOM is     0.00034324
+ 
+ Calculating LI and DI from AOM...
+ 
+ The total bond order >=  0.050000
+ #    1:    1(H )    2(Br) Alpha:   0.446844 Beta:  0.452476 Total:  0.899321
+ #    2:    1(H )    4(C ) Alpha:   0.033145 Beta:  0.020008 Total:  0.053153
+ #    3:    1(H )    7(Br) Alpha:   0.055889 Beta:  0.057899 Total:  0.113788
+ #    4:    2(Br)    3(H ) Alpha:   0.027518 Beta:  0.029908 Total:  0.057426
+ #    5:    2(Br)    4(C ) Alpha:   0.048370 Beta:  0.041078 Total:  0.089448
+ #    6:    2(Br)    7(Br) Alpha:   0.076800 Beta:  0.082476 Total:  0.159276
+ #    7:    3(H )    4(C ) Alpha:   0.442039 Beta:  0.418063 Total:  0.860101
+ #    8:    4(C )    5(C ) Alpha:   0.643844 Beta:  0.608142 Total:  1.251987
+ #    9:    4(C )    6(C ) Alpha:   0.634759 Beta:  0.540524 Total:  1.175283
+ #   10:    4(C )    7(Br) Alpha:   0.144964 Beta:  0.107021 Total:  0.251986
+ #   11:    4(C )    8(H ) Alpha:   0.027089 Beta:  0.028552 Total:  0.055641
+ #   12:    4(C )    9(H ) Alpha:   0.032021 Beta:  0.040884 Total:  0.072905
+ #   13:    4(C )   10(H ) Alpha:   0.030262 Beta:  0.034989 Total:  0.065251
+ #   14:    5(C )    6(C ) Alpha:   0.042860 Beta:  0.037660 Total:  0.080520
+ #   15:    5(C )    8(H ) Alpha:   0.450340 Beta:  0.447859 Total:  0.898199
+ #   16:    5(C )    9(H ) Alpha:   0.450286 Beta:  0.423701 Total:  0.873987
+ #   17:    5(C )   10(H ) Alpha:   0.447801 Beta:  0.434496 Total:  0.882297
+ #   18:    6(C )    7(Br) Alpha:   0.554671 Beta:  0.593628 Total:  1.148300
+ #   19:    6(C )   11(H ) Alpha:   0.423780 Beta:  0.420554 Total:  0.844335
+ #   20:    6(C )   12(H ) Alpha:   0.416693 Beta:  0.416057 Total:  0.832751
+ #   21:    7(Br)   11(H ) Alpha:   0.040893 Beta:  0.038621 Total:  0.079514
+ #   22:    7(Br)   12(H ) Alpha:   0.042173 Beta:  0.040465 Total:  0.082638
+ 
+ If outputting bond order matrix to bndmat.txt in current folder? (y/n)
+ 
+            ================ Bond order analysis ===============
+ -1 Define fragment 1 and 2 for options 1,3,4,7,8,10 (to be defined)
+ 0 Return
+ 1 Mayer bond order analysis
+ 2 Multicenter bond order analysis
+ -2 Multicenter bond order analysis in NAO basis
+ 3 Wiberg bond order analysis in Lowdin orthogonalized basis
+ 4 Mulliken bond order (Mulliken overlap population) analysis
+ 5 Decompose Mulliken bond order between two atoms to orbital contributions
+ 6 Orbital occupancy-perturbed Mayer bond order
+ 7 Fuzzy bond order analysis (FBO)
+ 8 Laplacian bond order (LBO)
+ 9 Decompose Wiberg bond order in NAO basis as atomic orbital pair contribution
+ 10 Intrinsic bond strength index (IBSI)
+ 11 AV1245 index (approximate multicenter bond order for large rings) and AVmin
+ 20 Bond order density (BOD) and natural adaptive orbital (NAdO) analyses
+ 
+ "q": Exit program gracefully          "r": Load a new file
+                    ************ Main function menu ************
+ 0 Show molecular structure and view orbitals
+ 1 Output all properties at a point       2 Topology analysis
+ 3 Output and plot specific property in a line
+ 4 Output and plot specific property in a plane
+ 5 Output and plot specific property within a spatial region (calc. grid data)
+ 6 Check & modify wavefunction
+ 7 Population analysis and calculation of atomic charges
+ 8 Orbital composition analysis           9 Bond order analysis
+ 10 Plot total DOS, PDOS, OPDOS, local DOS, COHP and photoelectron spectrum
+ 11 Plot IR/Raman/UV-Vis/ECD/VCD/ROA/NMR spectrum
+ 12 Quantitative analysis of molecular surface
+ 13 Process grid data (No grid data is presented currently)
+ 14 Adaptive natural density partitioning (AdNDP) analysis
+ 15 Fuzzy atomic space analysis
+ 16 Charge decomposition analysis (CDA) and plot orbital interaction diagram
+ 17 Basin analysis                       18 Electron excitation analysis
+ 19 Orbital localization analysis        20 Visual study of weak interaction
+ 21 Energy decomposition analysis        22 Conceptual DFT (CDFT) analysis
+ 23 ETS-NOCV analysis                    24 (Hyper)polarizability analysis
+ 25 Electron delocalization and aromaticity analyses
+ 26 Structure and geometry related analyses
+ 100 Other functions (Part 1)            200 Other functions (Part 2)
+ 300 Other functions (Part 3)
