@@ -76,13 +76,36 @@ class TestClassifyFolder:
         )
         assert rec["class"] == "no_outputs"
 
-    def test_no_outputs_without_log(self, tmp_path):
+    def test_no_outputs_when_folder_empty(self, tmp_path):
         folder = tmp_path / "job"
         folder.mkdir()
         rec = sweep.classify_folder(
             str(folder), None, None, full_set=1, move_results=False
         )
         assert rec["class"] == "no_outputs"
+
+    def test_merged_folder_without_log_is_classified(self, tmp_path, monkeypatch):
+        """L1-merged folders carry results but no gbw_analysis.log."""
+        folder = tmp_path / "job"
+        (folder / "generator").mkdir(parents=True)
+        (folder / "generator" / "l1_merge.json").write_text("{}")
+        (folder / "orca.inp").write_text(_ORCA_INP)
+        monkeypatch.setattr(sweep, "validation_checks", lambda *a, **k: True)
+        rec = sweep.classify_folder(
+            str(folder), None, None, full_set=1, move_results=True
+        )
+        assert rec["class"] == "complete"
+
+    def test_root_files_without_log_are_classified(self, tmp_path, monkeypatch):
+        folder = tmp_path / "job"
+        folder.mkdir()
+        (folder / "charge.json").write_text("{}")
+        (folder / "orca.inp").write_text(_ORCA_INP)
+        monkeypatch.setattr(sweep, "validation_checks", lambda *a, **k: False)
+        rec = sweep.classify_folder(
+            str(folder), None, None, full_set=1, move_results=True
+        )
+        assert rec["class"] not in ("no_outputs", "error")
 
     def test_complete_when_validation_passes(self, tmp_path, monkeypatch):
         folder = _make_started_folder(tmp_path)

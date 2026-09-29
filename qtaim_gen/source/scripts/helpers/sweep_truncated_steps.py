@@ -10,7 +10,9 @@ folder-level validation gate, and classifies:
                    (self-heals on the next --restart pass)
   validation_loop  validation fails but every step would be skipped --
                    the folder would requeue forever; needs attention
-  no_outputs       results folder missing or never started (no gbw_analysis.log)
+  no_outputs       results folder missing or empty. A log is not required: the
+                   L1 merge carried lustre's log as gbw_analysis.l1.log, and
+                   merged folders with results can hold no log at all
   error            classification raised an exception
 
 With --recheck_fuzzy (see qtaim_gen.source.utils.fuzzy_recheck), also:
@@ -137,9 +139,11 @@ def classify_folder(
     folder = resolve_results_folder(folder_inputs, root_omol_inputs, root_omol_results)
     rec = {"folder": folder_inputs, "results_folder": folder}
 
-    if not os.path.isdir(folder) or not os.path.exists(
-        os.path.join(folder, "gbw_analysis.log")
-    ):
+    try:
+        started = bool(os.listdir(folder))
+    except OSError:
+        started = False
+    if not started:
         rec["class"] = "no_outputs"
         return rec
 
