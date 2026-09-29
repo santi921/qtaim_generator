@@ -2553,8 +2553,27 @@ def gbw_analysis(
                         )
                     if move_results:
                         move_results_to_folder(folder, logger=logger, clean=clean)
-                    # Clean up orca.out after successful orca-only parse (28-114 MB)
-                    if clean:
+                    # Callers gate cleanup on this: the ALCF runner kept the
+                    # copied gbw/tar.zst in every folder when this returned None
+                    try:
+                        tf_validation = validation_checks(
+                            folder_check,
+                            full_set=full_set,
+                            verbose=False,
+                            move_results=move_results,
+                            logger=logger,
+                            check_orca=check_orca,
+                            check_bcp_count=check_bcp_count,
+                            bcp_tolerance=bcp_tolerance,
+                            require_qtaim_provenance=require_qtaim_provenance,
+                            recheck_fuzzy=recheck_fuzzy,
+                        )
+                    except Exception as e:
+                        logger.error(f"Error validating orca-only parse: {e}")
+                        tf_validation = False
+                    # Clean up orca.out after a validated orca-only parse (28-114 MB);
+                    # a failed parse keeps it for the retry
+                    if clean and tf_validation:
                         from qtaim_gen.source.core.parse_orca import find_orca_output_file
                         orca_out_path = find_orca_output_file(folder)
                         if orca_out_path is not None:
@@ -2570,8 +2589,11 @@ def gbw_analysis(
                             full_set=full_set,
                             move_results=move_results,
                         )
-                    logger.info("gbw_analysis completed (orca-only) in folder: %s", folder)
-                    return
+                    logger.info(
+                        "gbw_analysis completed (orca-only) in folder: %s, validation: %s",
+                        folder, tf_validation,
+                    )
+                    return tf_validation
 
                 try:
                     logger.warning(
@@ -2747,17 +2769,3 @@ def gbw_analysis(
         )
 
     return tf_validation
-
-
-# /global/scratch/users/santiagovargas/gbws_cleaning_lean/ml_elytes/elytes_md_eqv2_electro_512_C3H8O_3_group_133_shell_0_0_1_1341
-#!/bin/bash
-# SBATCH --job-name=conj_systems
-# SBATCH --partition=cm2
-# SBATCH --nodes=1
-# SBATCH --ntasks-per-node=6
-# SBATCH --cpus-per-task=1
-# SBATCH --time=40:00:00
-# SBATCH -C lr6_m192
-# SBATCH -p lr6
-# SBATCH --account=lr_blau
-# SBATCH --qos=condo_blau

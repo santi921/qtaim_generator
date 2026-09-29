@@ -1170,7 +1170,7 @@ class TestRestartReparsesStaleOrca:
         shutil.copy(FIXTURE_RKS, job / "orca.out")
         assert validation_checks(str(job), full_set=0, move_results=False, check_orca=True) is False
 
-        gbw_analysis(
+        ok = gbw_analysis(
             str(job),
             multiwfn_cmd="false",
             orca_2mkl_cmd="false",
@@ -1182,9 +1182,34 @@ class TestRestartReparsesStaleOrca:
             check_orca=True,
         )
 
+        # the ALCF runner gates its cleanup on this; None kept the copied gbw in every folder
+        assert ok is True
         with open(job / "orca.json") as f:
             assert json.load(f)["orca_parser_version"] == ORCA_PARSER_VERSION
         assert validation_checks(str(job), full_set=0, move_results=False, check_orca=True) is True
+
+    def test_orca_only_path_without_source_returns_false(self, valid_job_dir):
+        from qtaim_gen.source.core.omol import gbw_analysis
+
+        job = Path(valid_job_dir)
+        with open(job / "orca.json", "w") as f:
+            json.dump({"final_energy_eh": -100.0}, f)
+        assert not list(job.glob("orca.out")) and not list(job.glob("orca.tar.zst"))
+
+        ok = gbw_analysis(
+            str(job),
+            multiwfn_cmd="false",
+            orca_2mkl_cmd="false",
+            restart=True,
+            overwrite=False,
+            clean=True,
+            full_set=0,
+            move_results=False,
+            check_orca=True,
+        )
+
+        # still v1: the runner must see a failure, not None, and skip its cleanup
+        assert ok is False
 
 
 # ── Quality filter fields ─────────────────────────────────────────────
