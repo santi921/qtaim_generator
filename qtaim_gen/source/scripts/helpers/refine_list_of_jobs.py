@@ -118,6 +118,17 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
 
     parser.add_argument(
+        "--recheck_fuzzy",
+        action="store_true",
+        help=(
+            "also keep jobs whose stored fuzzy integrations or open-shell fuzzy bond "
+            "orders are physically wrong (all-zero hirsh density, spin not summing to "
+            "multiplicity - 1, all-alpha or alpha-only fuzzy bonds). Read-only: nothing "
+            "in the job folder is changed. Without it such jobs pass as done and are dropped"
+        ),
+    )
+
+    parser.add_argument(
         "--log_file",
         type=str,
         default=None,
@@ -203,6 +214,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     job_file: str = getattr(args, "job_file")
     orphaned_check: bool = bool(getattr(args, "check_orphaned", False))
     check_orca: bool = bool(getattr(args, "check_orca", False))
+    recheck_fuzzy: bool = bool(getattr(args, "recheck_fuzzy", False))
     check_bcp_count: bool = bool(getattr(args, "check_bcp_count", False))
     bcp_tolerance = int(getattr(args, "bcp_tolerance", 2))
     require_qtaim_provenance = bool(
@@ -252,6 +264,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         check_bcp_count=check_bcp_count,
         bcp_tolerance=bcp_tolerance,
         require_qtaim_provenance=require_qtaim_provenance,
+        recheck_fuzzy=recheck_fuzzy,
         check_ecp=check_ecp,
         logger=logger,
         max_workers=n_workers,

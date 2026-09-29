@@ -1,4 +1,5 @@
 import os
+import json
 import logging
 import time
 import zipfile
@@ -6,6 +7,7 @@ from typing import Optional, Dict, Any, List
 import shutil
 
 from qtaim_gen.source.core.omol import gbw_analysis
+from qtaim_gen.source.utils.atomic_write import atomic_json_write
 from qtaim_gen.source.utils.validation import validation_checks
 
 
@@ -87,7 +89,9 @@ _STASH = "generator.pre_clean"
 _STASH_DONE = "generator.pre_clean.done"
 _STASH_FAILED = "generator.failed_rerun"
 _CLEAN_FIRST_KEEP = ("gbw_analysis.log", ".processing.lock", _STASH)
-_CLEAN_FIRST_NEEDS_MOVE = "clean_first requires move_results: the results sit in the job folder and would be deleted"
+# top-level keys are steps (or a step's flattened properties in other.json)
+_STEP_KEYED = ("charge.json", "bond.json", "fuzzy_full.json", "other.json", "timings.json")
+_CLEAN_FIRST_NEEDS_MOVE ="clean_first requires move_results: the results sit in the job folder and would be deleted"
 # ORCA outputs the local runner cannot re-stage from anywhere else
 _LOCAL_INPUT_SUFFIXES = (".inp", ".gbw", ".gbw.zstd0", ".tar.zst", ".tgz")
 _LOCAL_INPUT_NAMES = ("orca.out", "orca.property.txt", "orca.engrad", "density_mat.npz")
@@ -95,6 +99,49 @@ _LOCAL_INPUT_NAMES = ("orca.out", "orca.property.txt", "orca.engrad", "density_m
 
 def _is_local_input(name: str) -> bool:
     return name.endswith(_LOCAL_INPUT_SUFFIXES) or name in _LOCAL_INPUT_NAMES
+
+
+def _carry_forward(stash: str, gen: str, logger: logging.Logger) -> None:
+    """Copy into a validated rerun's generator/ what it did not recompute:
+    steps above its full_set (a level-0 rerun of a level-1 folder must not
+    drop mbis/elf), whole files it never wrote (horton.json, or orca.json
+    without check_orca), and archived .out entries it did not replace.
+    qtaim.json and orca.json are never merged key by key: their keys are CPs
+    and parsed fields, not steps. A kill part way leaves the stash in place,
+    and the next pass restores it and reruns."""
+    from qtaim_gen.source.utils.io import merge_zip_into
+
+    carried = []
+    for name in sorted(os.listdir(stash)):
+        old_p, new_p = os.path.join(stash, name), os.path.join(gen, name)
+        try:
+            if name == "out_files.zip":
+                tmp = new_p + ".carry"
+                shutil.copy2(old_p, tmp)
+                if os.path.exists(new_p):
+                    merge_zip_into(new_p, tmp, logger=logger)  # new entries win
+                os.replace(tmp, new_p)
+                carried.append(name)
+            elif not name.endswith(".json"):
+                continue
+            elif not os.path.exists(new_p):
+                shutil.copy2(old_p, new_p)
+                carried.append(name)
+            elif name in _STEP_KEYED:
+                with open(old_p) as f:
+                    old = json.load(f)
+                with open(new_p) as f:
+                    new = json.load(f)
+                missing = {k: v for k, v in old.items() if k not in new}
+                if missing:
+                    atomic_json_write(new_p, {**new, **missing})
+                    carried.append(f"{name}[{','.join(sorted(missing))}]")
+        except (OSError, ValueError, zipfile.BadZipFile) as e:
+            # an unreadable old file has nothing to carry; failing here would
+            # restore the stash over a validated rerun
+            logger.warning("clean_first: could not carry forward %s: %s", old_p, e)
+    if carried:
+        logger.info("clean_first: carried forward from %s: %s", stash, "; ".join(carried))
 
 
 def _settle_stash(folder: str, keep_new: bool, logger: logging.Logger) -> None:
@@ -110,6 +157,7 @@ def _settle_stash(folder: str, keep_new: bool, logger: logging.Logger) -> None:
     if not os.path.isdir(stash):
         return
     if keep_new:
+        _carry_forward(stash, gen, logger)
         os.rename(stash, os.path.join(folder, _STASH_DONE))
         shutil.rmtree(os.path.join(folder, _STASH_DONE))
         logger.info("clean_first rerun validated; dropped %s", stash)

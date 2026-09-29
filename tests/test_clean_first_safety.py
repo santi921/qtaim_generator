@@ -58,28 +58,64 @@ class TestSettleStash:
         job = _results_folder(tmp_path / "job")
         workflow._clean_first(str(job), _LOG)
         (job / "generator").mkdir()
-        (job / "generator" / "charge.json").write_text("{}")
+        (job / "generator" / "charge.json").write_text(json.dumps({"hirshfeld": "new"}))
         return job
 
     def test_success_drops_stash(self, tmp_path):
         job = self._stashed(tmp_path)
         workflow._settle_stash(str(job), keep_new=True, logger=_LOG)
         assert not (job / workflow._STASH).exists()
-        assert (job / "generator" / "charge.json").read_text() == "{}"
+        assert json.loads((job / "generator" / "charge.json").read_text()) == {"hirshfeld": "new"}
+
+    def test_success_carries_forward_what_the_rerun_did_not_compute(self, tmp_path):
+        job = _results_folder(tmp_path / "job")
+        old = job / "generator"
+        (old / "fuzzy_full.json").write_text(json.dumps({"becke_fuzzy_density": "old", "mbis_fuzzy_spin": "L1"}))
+        (old / "timings.json").write_text(json.dumps({"becke_fuzzy_density": 1.0, "mbis_fuzzy_spin": 2.0}))
+        (old / "qtaim.json").write_text(json.dumps({"0": {}, "4_31": {"stale": 1}}))
+        (old / "horton.json").write_text(json.dumps({"mbis": 1}))
+        (old / "other.json").write_text("{not json")
+        with zipfile.ZipFile(old / "out_files.zip", "w") as zf:
+            zf.writestr("becke_fuzzy_density.out", "old")
+            zf.writestr("mbis_fuzzy_spin.out", "L1")
+        workflow._clean_first(str(job), _LOG)
+        new = job / "generator"
+        new.mkdir()
+        (new / "fuzzy_full.json").write_text(json.dumps({"becke_fuzzy_density": "new"}))
+        (new / "timings.json").write_text(json.dumps({"becke_fuzzy_density": 9.0}))
+        (new / "qtaim.json").write_text(json.dumps({"0": {}}))
+        (new / "other.json").write_text(json.dumps({"ALIE_Volume": 1.0}))
+        with zipfile.ZipFile(new / "out_files.zip", "w") as zf:
+            zf.writestr("becke_fuzzy_density.out", "new")
+
+        workflow._settle_stash(str(job), keep_new=True, logger=_LOG)
+        load = lambda n: json.loads((new / n).read_text())  # noqa: E731
+        assert load("fuzzy_full.json") == {"becke_fuzzy_density": "new", "mbis_fuzzy_spin": "L1"}
+        assert load("timings.json") == {"becke_fuzzy_density": 9.0, "mbis_fuzzy_spin": 2.0}
+        assert load("qtaim.json") == {"0": {}}
+        assert load("horton.json") == {"mbis": 1}
+        assert load("charge.json") == {"hirshfeld": {"charge": {"1_C": 0.1}}}
+        assert load("other.json") == {"ALIE_Volume": 1.0}
+        with zipfile.ZipFile(new / "out_files.zip") as zf:
+            assert {n: zf.read(n).decode() for n in zf.namelist()} == {
+                "becke_fuzzy_density.out": "new", "mbis_fuzzy_spin.out": "L1",
+            }
+        assert not (new / "out_files.zip.carry").exists()
+        assert not (job / workflow._STASH).exists()
 
     def test_failure_restores_stash_over_partial(self, tmp_path):
         job = self._stashed(tmp_path)
         workflow._settle_stash(str(job), keep_new=False, logger=_LOG)
         assert not (job / workflow._STASH).exists()
         assert _names(job / "generator") == ["charge.json", "timings.json"]
-        assert "hirshfeld" in (job / "generator" / "charge.json").read_text()
+        assert "1_C" in (job / "generator" / "charge.json").read_text()
 
     def test_interrupted_restore_is_finished(self, tmp_path):
         job = self._stashed(tmp_path)
         # killed after the partial generator/ was renamed away, before the stash came back
         (job / "generator").rename(job / workflow._STASH_FAILED)
         workflow._settle_stash(str(job), keep_new=False, logger=_LOG)
-        assert "hirshfeld" in (job / "generator" / "charge.json").read_text()
+        assert "1_C" in (job / "generator" / "charge.json").read_text()
         assert not (job / workflow._STASH_FAILED).exists()
 
     def test_interrupted_drop_never_restores_old_results(self, tmp_path):
@@ -88,7 +124,7 @@ class TestSettleStash:
         (job / workflow._STASH).rename(job / workflow._STASH_DONE)
         workflow._settle_stash(str(job), keep_new=False, logger=_LOG)
         assert not (job / workflow._STASH_DONE).exists()
-        assert (job / "generator" / "charge.json").read_text() == "{}"
+        assert json.loads((job / "generator" / "charge.json").read_text()) == {"hirshfeld": "new"}
 
 
 class TestCleanFirstRunners:
@@ -157,7 +193,8 @@ class TestCleanFirstRunners:
         monkeypatch.setattr(workflow, "gbw_analysis", fake_gbw)
         workflow.process_folder(str(job), clean_first=True, move_results=True)
         assert json.loads((job / "generator" / "qtaim.json").read_text()) == {"0": {}}
-        assert _names(job / "generator") == ["qtaim.json"]
+        # charge/timings were not rewritten by the fake rerun, so they carry forward whole
+        assert _names(job / "generator") == ["charge.json", "qtaim.json", "timings.json"]
         assert not (job / workflow._STASH).exists()
 
     def test_unvalidated_rerun_restores_old_results(self, tmp_path, monkeypatch):

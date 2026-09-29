@@ -146,3 +146,19 @@ def test_cli_rejects_checkpoint_with_sampling(job_folders, fake_validation, tmp_
     )
     assert rc == 2
     assert not ckpt.exists()
+
+
+@pytest.mark.parametrize("flag,expected", [([], False), (["--recheck_fuzzy"], True)])
+def test_cli_passes_recheck_fuzzy_to_validation(job_folders, monkeypatch, tmp_path, flag, expected):
+    job_file, folders = job_folders
+    seen = []
+
+    def _fake(folder_outputs, **kwargs):
+        seen.append(kwargs.get("recheck_fuzzy"))
+        return False
+
+    monkeypatch.setattr(io_mod, "validation_checks", _fake)
+    out = tmp_path / "refined.txt"
+    refine_main(["--job_file", str(job_file), "--refined_job_file", str(out), "--quiet", "--n_workers", "1"] + flag)
+    assert seen and set(seen) == {expected}
+    assert sorted(out.read_text().split()) == sorted(folders)
