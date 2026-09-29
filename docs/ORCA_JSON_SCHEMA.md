@@ -24,6 +24,10 @@ via `orca_min_parser_version` in the converter config (stale rows count as missi
 `missing_data_strategy` applies; set `0` to disable). `oact_utilities` caches `generator_metrics.json`
 per job and should gate recompute on this key. Job folders parsed before version 2 need a re-run of
 the ORCA parse; the mirrored `orca.tar.zst` is the source when `orca.out` has been cleaned.
+`validation_checks(check_orca=True)` fails such folders (`orca_min_parser_version`, default current), so a
+runner restart with `--check_orca` reparses them on the orca-only path without rerunning Multiwfn;
+`sweep_truncated_steps --check_orca` reports them as `orca_reparse` / `orca_no_source`. `reparse-orca-json`
+does the same reparse standalone.
 
 ## Energy
 

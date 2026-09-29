@@ -1110,11 +1110,32 @@ class TestValidationChecksOrcaFlag:
     def test_passes_with_valid_orca_json_when_required(self, valid_job_dir):
         orca_path = os.path.join(valid_job_dir, "orca.json")
         with open(orca_path, "w") as f:
-            json.dump({"final_energy_eh": -100.0}, f)
+            json.dump({"final_energy_eh": -100.0, "orca_parser_version": ORCA_PARSER_VERSION}, f)
         result = validation_checks(
             valid_job_dir, full_set=0, move_results=False, check_orca=True
         )
         assert result is True
+
+    def test_fails_with_stale_orca_json_when_required(self, valid_job_dir):
+        """Unversioned (v1) orca.json fails check_orca so the runner reparses it."""
+        orca_path = os.path.join(valid_job_dir, "orca.json")
+        with open(orca_path, "w") as f:
+            json.dump({"final_energy_eh": -100.0}, f)
+        assert validation_checks(
+            valid_job_dir, full_set=0, move_results=False, check_orca=True
+        ) is False
+        assert validation_checks(
+            valid_job_dir, full_set=0, move_results=False, check_orca=True,
+            orca_min_parser_version=None,
+        ) is True
+
+    def test_stale_orca_json_passes_when_not_required(self, valid_job_dir):
+        orca_path = os.path.join(valid_job_dir, "orca.json")
+        with open(orca_path, "w") as f:
+            json.dump({"final_energy_eh": -100.0}, f)
+        assert validation_checks(
+            valid_job_dir, full_set=0, move_results=False, check_orca=False
+        ) is True
 
     def test_fails_with_corrupt_orca_json_when_required(self, valid_job_dir):
         orca_path = os.path.join(valid_job_dir, "orca.json")
@@ -1134,6 +1155,36 @@ class TestValidationChecksOrcaFlag:
             valid_job_dir, full_set=0, move_results=False, check_orca=False
         )
         assert result is False
+
+
+class TestRestartReparsesStaleOrca:
+    """check_orca rejects a v1 orca.json, so a restart takes the orca-only path."""
+
+    def test_restart_with_check_orca_upgrades_stale_orca_json(self, valid_job_dir):
+        import shutil
+        from qtaim_gen.source.core.omol import gbw_analysis
+
+        job = Path(valid_job_dir)
+        with open(job / "orca.json", "w") as f:
+            json.dump({"final_energy_eh": -100.0}, f)
+        shutil.copy(FIXTURE_RKS, job / "orca.out")
+        assert validation_checks(str(job), full_set=0, move_results=False, check_orca=True) is False
+
+        gbw_analysis(
+            str(job),
+            multiwfn_cmd="false",
+            orca_2mkl_cmd="false",
+            restart=True,
+            overwrite=False,
+            clean=False,
+            full_set=0,
+            move_results=False,
+            check_orca=True,
+        )
+
+        with open(job / "orca.json") as f:
+            assert json.load(f)["orca_parser_version"] == ORCA_PARSER_VERSION
+        assert validation_checks(str(job), full_set=0, move_results=False, check_orca=True) is True
 
 
 # ── Quality filter fields ─────────────────────────────────────────────

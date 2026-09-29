@@ -100,6 +100,25 @@ class TestProcessFolder:
         assert _load(job / "generator" / "orca.json")["orca_parser_version"] == ORCA_PARSER_VERSION
         assert "mulliken_orca" in _load(job / "generator" / "charge.json")
 
+    def test_generator_layout_merges_timings(self, tmp_path):
+        job = _make_job(tmp_path, "job", layout="generator")
+        with open(job / "generator" / "timings.json", "w") as f:
+            json.dump({"qtaim": 12.0, "orca_parse": 99.0}, f)
+        assert _run(job, move_files=True)["status"] == rj.STATUS_REPARSED
+        assert not (job / "timings.json").exists()
+        t = _load(job / "generator" / "timings.json")
+        assert t["qtaim"] == 12.0
+        assert t["orca_parse"] != 99.0
+
+    def test_flat_layout_keeps_root_timings(self, tmp_path):
+        job = _make_job(tmp_path, "job")
+        with open(job / "timings.json", "w") as f:
+            json.dump({"qtaim": 12.0}, f)
+        assert _run(job)["status"] == rj.STATUS_REPARSED
+        t = _load(job / "timings.json")
+        assert t["qtaim"] == 12.0
+        assert "orca_parse" in t
+
     def test_truncated_out_is_partial(self, tmp_path):
         job = _make_job(tmp_path, "job", with_out=False)
         text = FIXTURE_UKS.read_text()

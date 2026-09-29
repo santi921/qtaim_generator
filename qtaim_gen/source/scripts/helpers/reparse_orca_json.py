@@ -42,11 +42,14 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from glob import glob
 from typing import Dict, List, Optional
 
+from tqdm import tqdm
+
 from qtaim_gen.source.core.parse_orca import (
     ORCA_PARSER_VERSION,
     find_orca_output_file,
     validate_parse_completeness,
 )
+from qtaim_gen.source.utils.atomic_write import atomic_json_write
 
 STATUS_CURRENT = "current"
 STATUS_REPARSED = "reparsed"
@@ -152,6 +155,30 @@ def _settle_orca_json_location(folder: str, move_files: bool) -> Optional[str]:
     return _orca_json_path(folder, move_files)
 
 
+def _settle_timings(folder: str, move_files: bool) -> None:
+    """_run_orca_parse writes <folder>/timings.json (generator/ copy merged with
+    root, plus orca_parse). In the generator/ layout merge it into
+    generator/timings.json the way move_results_to_folder does (root wins) and
+    remove the root copy, so no loose file is left for a cleanup to discard."""
+    root_path = os.path.join(folder, "timings.json")
+    gen_dir = os.path.join(folder, "generator")
+    if not (move_files and os.path.isdir(gen_dir) and os.path.isfile(root_path)):
+        return
+    with open(root_path, "r") as f:
+        root = json.load(f)
+    gen_path = os.path.join(gen_dir, "timings.json")
+    merged = {}
+    if os.path.isfile(gen_path) and os.path.getsize(gen_path) > 0:
+        try:
+            with open(gen_path, "r") as f:
+                merged.update(json.load(f))
+        except json.JSONDecodeError:
+            pass
+    merged.update(root)
+    atomic_json_write(gen_path, merged)
+    os.remove(root_path)
+
+
 def process_folder(
     folder: str,
     move_files: bool,
@@ -200,6 +227,7 @@ def process_folder(
                 return result
         _run_orca_parse(folder, move_files, logger)
         json_path = _settle_orca_json_location(folder, move_files)
+        _settle_timings(folder, move_files)
         result["version_after"] = _orca_json_version(json_path)
         if result["version_after"] is None or result["version_after"] < min_version:
             result["status"] = STATUS_FAILED
@@ -285,21 +313,18 @@ def main() -> int:
     )
     results: List[Dict[str, object]] = []
     t0 = time.time()
-    progress_every = max(1, n // 20)
-    if workers <= 1:
-        for i, folder in enumerate(folders):
-            results.append(process_folder(folder, **kwargs))
-            if (i + 1) % progress_every == 0 or (i + 1) == n:
-                print(f"  {i + 1}/{n} ({(i + 1) / max(time.time() - t0, 1e-6):.1f}/s)", file=sys.stderr)
-    else:
-        with ProcessPoolExecutor(max_workers=workers) as pool:
-            futs = {pool.submit(process_folder, f, **kwargs): f for f in folders}
-            done = 0
-            for fut in as_completed(futs):
-                results.append(fut.result())
-                done += 1
-                if done % progress_every == 0 or done == n:
-                    print(f"  {done}/{n} ({done / max(time.time() - t0, 1e-6):.1f}/s)", file=sys.stderr)
+    desc = "Classifying" if args.dry_run else "Reparsing"
+    with tqdm(total=n, desc=desc, unit="folder", file=sys.stderr, mininterval=2.0) as bar:
+        if workers <= 1:
+            for folder in folders:
+                results.append(process_folder(folder, **kwargs))
+                bar.update(1)
+        else:
+            with ProcessPoolExecutor(max_workers=workers) as pool:
+                futs = {pool.submit(process_folder, f, **kwargs): f for f in folders}
+                for fut in as_completed(futs):
+                    results.append(fut.result())
+                    bar.update(1)
 
     agg: Dict[str, object] = {"folders_total": n}
     for status in (STATUS_CURRENT, STATUS_WOULD_REPARSE, STATUS_REPARSED, STATUS_PARTIAL,

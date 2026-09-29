@@ -324,6 +324,8 @@ def _validate(folder, full_set, flags):
                     check_orca=flags["check_orca"],
                     check_bcp_count=flags["check_bcp_count"],
                     require_qtaim_provenance=flags["require_qtaim_provenance"],
+                    # level validity only; a stale orca.json parse is not a merge concern
+                    orca_min_parser_version=None,
                 )
             )
         except Exception as e:

@@ -18,6 +18,14 @@ With --recheck_fuzzy (see qtaim_gen.source.utils.fuzzy_recheck), also:
   reparse_only           wrong fuzzy values fixable from archived output, no rerun
   no_wavefunction_source open-shell rerun needed but only a .wfn exists
 
+With --check_orca, a folder whose orca.json is missing, malformed or older
+than the current parser (orca_parser_version) is not complete, and every
+record carries "orca_stale". When that is the only problem:
+
+  orca_reparse           runner takes the orca-only path (no Multiwfn)
+  orca_no_source         no orca.out / orca.tar.zst in the results or inputs
+                         folder, so the reparse cannot happen
+
 Writes one JSON line per folder to --report_file, prints a summary, and
 optionally writes non-complete folders to --requeue_file.
 
@@ -47,6 +55,7 @@ from qtaim_gen.source.core.omol import (
     _wavefunction_present,
 )
 from qtaim_gen.source.utils.fuzzy_recheck import recheck_fuzzy as _recheck_fuzzy
+from qtaim_gen.source.core.parse_orca import ORCA_PARSER_VERSION, find_orca_output_file
 from qtaim_gen.source.data.multiwfn import (
     bond_order_dict,
     charge_data_dict,
@@ -55,6 +64,7 @@ from qtaim_gen.source.data.multiwfn import (
 )
 from qtaim_gen.source.utils.validation import (
     get_charge_spin_n_atoms_from_folder,
+    validate_orca_dict,
     validation_checks,
 )
 
@@ -73,6 +83,26 @@ def resolve_results_folder(
         rel = folder_inputs[len(root_omol_inputs):].lstrip(os.sep)
         return os.path.join(root_omol_results, rel)
     return folder_inputs
+
+
+def orca_stale(folder: str, move_results: bool) -> bool:
+    """What validation_checks(check_orca=True) rejects on orca.json alone."""
+    base = os.path.join(folder, "generator") if move_results else folder
+    path = os.path.join(base, "orca.json")
+    if not os.path.isfile(path):
+        return True
+    return not validate_orca_dict(path, min_parser_version=ORCA_PARSER_VERSION)
+
+
+def orca_source_present(folder: str, folder_inputs: str) -> bool:
+    """orca.out or orca.tar.zst in the results folder, or in the inputs folder
+    (the ALCF runner copies it in at run time)."""
+    for base in {folder, folder_inputs}:
+        if os.path.isdir(base) and (
+            find_orca_output_file(base) or os.path.isfile(os.path.join(base, "orca.tar.zst"))
+        ):
+            return True
+    return False
 
 
 def routine_sets(full_set: int, spin_tf: bool):
@@ -102,6 +132,7 @@ def classify_folder(
     move_results: bool,
     recheck_fuzzy: bool = False,
     preprocess_compressed: bool = False,
+    check_orca: bool = False,
 ) -> dict:
     folder = resolve_results_folder(folder_inputs, root_omol_inputs, root_omol_results)
     rec = {"folder": folder_inputs, "results_folder": folder}
@@ -159,6 +190,10 @@ def classify_folder(
         except (OSError, json.JSONDecodeError, AttributeError):
             continue
 
+    stale = check_orca and orca_stale(folder, move_results)
+    if check_orca:
+        rec["orca_stale"] = stale
+
     try:
         valid = bool(
             validation_checks(
@@ -173,7 +208,12 @@ def classify_folder(
         valid = False
     if valid:
         if not recheck or not (recheck["reparse"] or recheck["rerun"]):
-            rec["class"] = "complete"
+            if not stale:
+                rec["class"] = "complete"
+            elif orca_source_present(folder, folder_inputs):
+                rec["class"] = "orca_reparse"
+            else:
+                rec["class"] = "orca_no_source"
         elif not recheck["ok"]:
             rec["class"] = "no_wavefunction_source"
         elif not recheck["rerun"]:
@@ -250,6 +290,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--preprocess_compressed", action="store_true",
                         help="with --recheck_fuzzy: count .gbw.zstd0 as a wavefunction source, "
                              "as the runner does under --preprocess_compressed")
+    parser.add_argument("--check_orca", action="store_true",
+                        help="require a current orca.json (orca_parser_version), as the "
+                             "runner does under --check_orca")
     parser.add_argument("--requeue_file", type=str, default=None,
                         help="if set, write non-complete folder paths here")
     args = parser.parse_args(argv)
@@ -278,6 +321,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                 args.move_results,
                 args.recheck_fuzzy,
                 args.preprocess_compressed,
+                args.check_orca,
             ): folder
             for folder in folders
         }
@@ -305,10 +349,13 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
 
     print("\nFolder classes:")
-    for cls in ("complete", "reparse_only", "needs_rerun", "validation_loop",
+    for cls in ("complete", "orca_reparse", "orca_no_source", "reparse_only", "needs_rerun", "validation_loop",
                 "no_wavefunction_source", "no_outputs", "error"):
         if class_counts.get(cls):
             print(f"  {cls:16s} {class_counts[cls]}")
+    if args.check_orca:
+        n_stale = sum(1 for rec in records if rec.get("orca_stale"))
+        print(f"\norca.json stale (any class, reparsed on the runner pass): {n_stale}")
     if rerun_counts:
         print("\nSteps needing rerun (folder counts):")
         for step, n in rerun_counts.most_common():
@@ -327,7 +374,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     if args.requeue_file:
         # no_wavefunction_source folders are always refused; requeueing them wastes a slot
         requeue = [r["folder"] for r in records
-                   if r["class"] not in ("complete", "no_wavefunction_source")]
+                   if r["class"] not in ("complete", "no_wavefunction_source", "orca_no_source")]
         with open(args.requeue_file, "w") as f:
             for folder in requeue:
                 f.write(folder + "\n")

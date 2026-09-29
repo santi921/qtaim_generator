@@ -7,6 +7,7 @@ import tempfile
 import zipfile
 from typing import Optional
 from qtaim_gen.source.core.parse_qtaim import dft_inp_to_dict
+from qtaim_gen.source.core.parse_orca import ORCA_PARSER_VERSION
 import numpy as np
 from datetime import datetime
 
@@ -883,10 +884,12 @@ def validate_orca_dict(
     n_atoms: int = None,
     verbose: bool = False,
     logger=None,
+    min_parser_version: Optional[int] = None,
 ) -> bool:
     """Validate orca.json structure and data integrity.
 
-    Returns True if valid, False if malformed.
+    Returns True if valid, False if malformed, or older than min_parser_version
+    (orca_parser_version, 1 when absent) when that is set.
     Returns True if file is absent (backward compat -- absence is valid).
     """
     if not os.path.exists(orca_json_loc):
@@ -914,6 +917,20 @@ def validate_orca_dict(
         if logger:
             logger.error("orca.json is empty dict at %s", orca_json_loc)
         return False
+
+    if min_parser_version:
+        version = data.get("orca_parser_version", 1)
+        if version < min_parser_version:
+            if logger:
+                logger.error(
+                    "orca.json parser version %s < %s at %s (stale, needs reparse)",
+                    version,
+                    min_parser_version,
+                    orca_json_loc,
+                )
+            if verbose:
+                print(f"orca.json parser version {version} < {min_parser_version}: stale")
+            return False
 
     # Type checks for known keys
     type_checks = {
@@ -993,6 +1010,7 @@ def validation_checks(
     bcp_tolerance: int = DEFAULT_BCP_TOLERANCE,
     require_qtaim_provenance: bool = False,
     recheck_fuzzy: bool = False,
+    orca_min_parser_version: Optional[int] = ORCA_PARSER_VERSION,
 ):
     """
     Run all validation checks on the json files in the given folder.
@@ -1016,6 +1034,9 @@ def validation_checks(
             fuzzy bond orders are present but physically wrong (all-zero
             densities, spin not summing to multiplicity - 1, all-alpha or
             alpha-only fuzzy bonds). Dry run: nothing is written.
+        orca_min_parser_version (Optional[int]): with check_orca, also fail when
+            orca.json predates this parser version (orca_parser_version, 1 when
+            absent), so the runner reparses it. None or 0 disables the gate.
     Returns:
         bool: True if all validation checks pass, False otherwise.
     """
@@ -1142,7 +1163,11 @@ def validation_checks(
                 print(f"Missing required orca.json in folder: {folder_check_res}")
             tf_cond = False
         elif not validate_orca_dict(
-            orca_json_loc, n_atoms=n_atoms, verbose=verbose, logger=logger
+            orca_json_loc,
+            n_atoms=n_atoms,
+            verbose=verbose,
+            logger=logger,
+            min_parser_version=orca_min_parser_version,
         ):
             if logger:
                 logger.error(f"ORCA json validation failed in folder: {folder}")

@@ -163,6 +163,105 @@ class TestClassifyFolder:
         assert rec["timings_sum_s"] == 150.0
 
 
+class TestCheckOrca:
+    @staticmethod
+    def _write_orca_json(folder, version=None):
+        data = {"final_energy_eh": -1.0}
+        if version is not None:
+            data["orca_parser_version"] = version
+        (folder / "orca.json").write_text(json.dumps(data))
+
+    def _classify(self, folder, check_orca=True):
+        return sweep.classify_folder(
+            str(folder), None, None, full_set=0, move_results=False, check_orca=check_orca
+        )
+
+    def test_current_orca_json_is_complete(self, tmp_path, monkeypatch):
+        folder = _make_started_folder(tmp_path)
+        self._write_orca_json(folder, sweep.ORCA_PARSER_VERSION)
+        monkeypatch.setattr(sweep, "validation_checks", lambda *a, **k: True)
+        rec = self._classify(folder)
+        assert rec["class"] == "complete"
+        assert rec["orca_stale"] is False
+
+    def test_stale_orca_json_with_archive_is_orca_reparse(self, tmp_path, monkeypatch):
+        folder = _make_started_folder(tmp_path)
+        self._write_orca_json(folder)
+        (folder / "orca.tar.zst").write_bytes(b"x")
+        monkeypatch.setattr(sweep, "validation_checks", lambda *a, **k: True)
+        rec = self._classify(folder)
+        assert rec["class"] == "orca_reparse"
+        assert rec["orca_stale"] is True
+
+    def test_missing_orca_json_with_out_is_orca_reparse(self, tmp_path, monkeypatch):
+        folder = _make_started_folder(tmp_path)
+        (folder / "orca.out").write_text("ORCA\n")
+        monkeypatch.setattr(sweep, "validation_checks", lambda *a, **k: True)
+        assert self._classify(folder)["class"] == "orca_reparse"
+
+    def test_source_in_inputs_folder_counts(self, tmp_path, monkeypatch):
+        inputs = tmp_path / "in"
+        results = tmp_path / "res"
+        (inputs / "job").mkdir(parents=True)
+        (inputs / "job" / "orca.tar.zst").write_bytes(b"x")
+        results.mkdir()
+        folder = _make_started_folder(results)
+        self._write_orca_json(folder)
+        monkeypatch.setattr(sweep, "validation_checks", lambda *a, **k: True)
+        rec = sweep.classify_folder(
+            str(inputs / "job"), str(inputs), str(results),
+            full_set=0, move_results=False, check_orca=True,
+        )
+        assert rec["class"] == "orca_reparse"
+
+    def test_stale_without_source_is_orca_no_source(self, tmp_path, monkeypatch):
+        folder = _make_started_folder(tmp_path)
+        self._write_orca_json(folder)
+        monkeypatch.setattr(sweep, "validation_checks", lambda *a, **k: True)
+        assert self._classify(folder)["class"] == "orca_no_source"
+
+    def test_stale_ignored_without_flag(self, tmp_path, monkeypatch):
+        folder = _make_started_folder(tmp_path)
+        self._write_orca_json(folder)
+        monkeypatch.setattr(sweep, "validation_checks", lambda *a, **k: True)
+        rec = self._classify(folder, check_orca=False)
+        assert rec["class"] == "complete"
+        assert "orca_stale" not in rec
+
+    def test_stale_flag_rides_along_on_rerun(self, tmp_path, monkeypatch):
+        folder = _make_started_folder(tmp_path)
+        self._write_orca_json(folder)
+        (folder / "elf_fuzzy.out").write_text(
+            _MULTIWFN_HEAD + " Progress: [##--------]  20.0 %\n"
+        )
+        rec = sweep.classify_folder(
+            str(folder), None, None, full_set=1, move_results=False, check_orca=True
+        )
+        assert rec["class"] == "needs_rerun"
+        assert rec["orca_stale"] is True
+
+    def test_requeue_skips_orca_no_source(self, tmp_path, monkeypatch):
+        (tmp_path / "a").mkdir()
+        (tmp_path / "b").mkdir()
+        a = _make_started_folder(tmp_path / "a")
+        b = _make_started_folder(tmp_path / "b")
+        for f in (a, b):
+            self._write_orca_json(f)
+        (a / "orca.tar.zst").write_bytes(b"x")
+        monkeypatch.setattr(sweep, "validation_checks", lambda *a, **k: True)
+        job_file = tmp_path / "jobs.txt"
+        job_file.write_text(f"{a}\n{b}\n")
+        requeue = tmp_path / "requeue.txt"
+        rc = sweep.main([
+            "--job_file", str(job_file), "--check_orca",
+            "--report_file", str(tmp_path / "r.jsonl"),
+            "--requeue_file", str(requeue), "--n_workers", "1",
+        ])
+        assert rc == 0
+        assert requeue.read_text().split() == [str(a)]
+
+
+
 class TestMainCli:
     def test_end_to_end_report_and_requeue(self, tmp_path):
         folder = _make_started_folder(tmp_path)
