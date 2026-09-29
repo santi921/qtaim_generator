@@ -83,17 +83,60 @@ def teardown_logger(folder: str, name: str = "gbw_analysis") -> None:
         logger.removeHandler(handler)
 
 
-_CLEAN_FIRST_KEEP = ("gbw_analysis.log", ".processing.lock", "generator")
+_STASH = "generator.pre_clean"
+_STASH_DONE = "generator.pre_clean.done"
+_STASH_FAILED = "generator.failed_rerun"
+_CLEAN_FIRST_KEEP = ("gbw_analysis.log", ".processing.lock", _STASH)
+_CLEAN_FIRST_NEEDS_MOVE = "clean_first requires move_results: the results sit in the job folder and would be deleted"
+# ORCA outputs the local runner cannot re-stage from anywhere else
+_LOCAL_INPUT_SUFFIXES = (".inp", ".gbw", ".gbw.zstd0", ".tar.zst", ".tgz")
+_LOCAL_INPUT_NAMES = ("orca.out", "orca.property.txt", "orca.engrad", "density_mat.npz")
 
 
-def _clean_first(folder: str, logger: logging.Logger) -> None:
-    """Remove the folder's working files so every step recomputes from fresh
-    inputs. generator/ (the completed results) is never touched: the caller
-    forces overwrite, and the finished rerun merges its results into
-    generator/ key by key, so a rerun that dies (walltime, quota, OOM) leaves
-    the previous results in place instead of an empty folder."""
+def _is_local_input(name: str) -> bool:
+    return name.endswith(_LOCAL_INPUT_SUFFIXES) or name in _LOCAL_INPUT_NAMES
+
+
+def _settle_stash(folder: str, keep_new: bool, logger: logging.Logger) -> None:
+    """Resolve a generator.pre_clean/ stash: drop it once the rerun validated,
+    otherwise put it back over whatever partial generator/ the rerun wrote.
+    Every step is a rename first, so a kill at any point leaves either the
+    stash or the old results in place, never neither."""
+    gen = os.path.join(folder, "generator")
+    stash = os.path.join(folder, _STASH)
+    for leftover in (_STASH_DONE, _STASH_FAILED):
+        if os.path.isdir(os.path.join(folder, leftover)):
+            shutil.rmtree(os.path.join(folder, leftover))
+    if not os.path.isdir(stash):
+        return
+    if keep_new:
+        os.rename(stash, os.path.join(folder, _STASH_DONE))
+        shutil.rmtree(os.path.join(folder, _STASH_DONE))
+        logger.info("clean_first rerun validated; dropped %s", stash)
+        return
+    if os.path.isdir(gen):
+        os.rename(gen, os.path.join(folder, _STASH_FAILED))
+    os.rename(stash, gen)
+    shutil.rmtree(os.path.join(folder, _STASH_FAILED), ignore_errors=True)
+    logger.warning("clean_first rerun did not validate; restored previous generator/ from %s", stash)
+
+
+def _clean_first(folder: str, logger: logging.Logger, keep_inputs: bool = False) -> None:
+    """Move generator/ aside to generator.pre_clean/ and remove the working
+    files, so every step recomputes into an empty generator/: no stale QTAIM
+    CP or step result can survive the merge or satisfy validation. The caller
+    settles the stash when the rerun ends, and restores an orphaned stash
+    from a killed rerun before calling this (_settle_stash).
+
+    keep_inputs keeps the ORCA inputs/outputs in place (local runner, where
+    the job folder is the only copy); the ALCF runner re-copies them from the
+    input tree."""
+    gen = os.path.join(folder, "generator")
+    if os.path.isdir(gen):
+        os.rename(gen, os.path.join(folder, _STASH))
+        logger.info("clean_first: moved %s aside to %s", gen, _STASH)
     for item in os.listdir(folder):
-        if item in _CLEAN_FIRST_KEEP:
+        if item in _CLEAN_FIRST_KEEP or (keep_inputs and _is_local_input(item)):
             continue
         item_path = os.path.join(folder, item)
         try:
@@ -150,6 +193,10 @@ def process_folder(
         "elapsed": None,
         "error": None,
     }
+    if clean_first and not move_results:
+        result["status"] = "error"
+        result["error"] = _CLEAN_FIRST_NEEDS_MOVE
+        return result
     # normalize to absolute path and set up logger
     folder = os.path.abspath(folder)
     logger: logging.Logger = setup_logger_for_folder(folder)
@@ -161,9 +208,11 @@ def process_folder(
         result["error"] = "folder locked by active process"
         return result
 
+    rerun_ok = False
     try:
+        _settle_stash(folder, keep_new=False, logger=logger)
         if clean_first:
-            _clean_first(folder, logger)
+            _clean_first(folder, logger, keep_inputs=True)
             overwrite, restart = True, False
 
         # pre-checks (idempotency)
@@ -239,6 +288,7 @@ def process_folder(
             recheck_fuzzy=recheck_fuzzy,
         )
         t1: float = time.time()
+        rerun_ok = bool(tf_validation)
 
         files_to_remove = [
             "density_mat.npz",
@@ -279,6 +329,11 @@ def process_folder(
         return result
 
     finally:
+        if clean_first:
+            try:
+                _settle_stash(folder, keep_new=rerun_ok, logger=logger)
+            except Exception as e:
+                logger.error("Could not settle %s in %s: %s", _STASH, folder, e)
         release_lock(folder)
         teardown_logger(folder)
 
@@ -331,6 +386,10 @@ def process_folder_alcf(
         "elapsed": None,
         "error": None,
     }
+    if clean_first and not move_results:
+        result["status"] = "error"
+        result["error"] = _CLEAN_FIRST_NEEDS_MOVE
+        return result
 
     files_to_remove = [
         "density_mat.npz",
@@ -372,7 +431,9 @@ def process_folder_alcf(
         result["error"] = "folder locked by active process"
         return result
 
+    rerun_ok = False
     try:
+        _settle_stash(folder, keep_new=False, logger=logger)
         if clean_first:
             _clean_first(folder, logger)
             overwrite, restart = True, False
@@ -508,6 +569,7 @@ def process_folder_alcf(
             recheck_fuzzy=recheck_fuzzy,
         )
         t1: float = time.time()
+        rerun_ok = bool(tf_validation)
 
         # See process_folder: the compressed sources are the only thing a
         # retry can rebuild the wavefunction from, so a failed validation
@@ -537,6 +599,11 @@ def process_folder_alcf(
         return result
 
     finally:
+        if clean_first:
+            try:
+                _settle_stash(folder, keep_new=rerun_ok, logger=logger)
+            except Exception as e:
+                logger.error("Could not settle %s in %s: %s", _STASH, folder, e)
         release_lock(folder)
         teardown_logger(folder)
 

@@ -350,20 +350,17 @@ ECP_NO_ZIP = 0   # zip missing, empty, corrupt, or lacks adch.out/cm5.out
 ECP_PASSED = 1
 ECP_FAILED = -1
 ECP_NOT_APPLICABLE = 2  # no atom carries an ECP (Z < 37)
-_FIRST_ECP_Z = 37
 
 
 def _folder_has_ecp_atoms(folder_outputs: str) -> Optional[bool]:
     """Whether the job's geometry has an atom at or beyond Rb (def2 ECPs);
-    None when no geometry input can be read."""
-    try:
-        dft_dict = get_charge_spin_n_atoms_from_folder(folder_outputs)
-        return any(
-            _PERIODIC_TABLE.GetAtomicNumber(a["element"]) >= _FIRST_ECP_Z
-            for a in dft_dict["mol"].values()
-        )
-    except Exception:
+    None when no geometry input can be read or it parses to zero atoms."""
+    from qtaim_gen.source.core.omol import _has_ecp_atoms  # omol imports this module
+
+    dft_dict = get_charge_spin_n_atoms_from_folder(folder_outputs)
+    if not dft_dict or not dft_dict.get("mol"):
         return None
+    return _has_ecp_atoms(dft_dict)
 
 
 def check_ecp_for_folder(folder_outputs: str) -> int:

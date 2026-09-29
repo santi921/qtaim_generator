@@ -178,8 +178,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument(
         "--clean_first",
         action="store_true",
-        help="remove the folder's working files and recompute every step (implies --overwrite); "
-        "generator/ is kept until the rerun's results replace it",
+        help="move generator/ aside, remove the folder's working files and recompute every step "
+        "(implies --overwrite); the old generator/ is restored if the rerun does not validate. "
+        "Requires --move_results",
     )
 
     parser.add_argument(
@@ -290,6 +291,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
 
     args = parser.parse_args(argv)
+    if args.clean_first and not args.move_results:
+        parser.error("--clean_first requires --move_results (without it the results sit in the job folder and would be deleted)")
     # print(args)
     for key, value in vars(args).items():
         print(f"{key}: {value}")
