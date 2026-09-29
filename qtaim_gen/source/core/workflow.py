@@ -83,6 +83,30 @@ def teardown_logger(folder: str, name: str = "gbw_analysis") -> None:
         logger.removeHandler(handler)
 
 
+_CLEAN_FIRST_KEEP = ("gbw_analysis.log", ".processing.lock", "generator")
+
+
+def _clean_first(folder: str, logger: logging.Logger) -> None:
+    """Remove the folder's working files so every step recomputes from fresh
+    inputs. generator/ (the completed results) is never touched: the caller
+    forces overwrite, and the finished rerun merges its results into
+    generator/ key by key, so a rerun that dies (walltime, quota, OOM) leaves
+    the previous results in place instead of an empty folder."""
+    for item in os.listdir(folder):
+        if item in _CLEAN_FIRST_KEEP:
+            continue
+        item_path = os.path.join(folder, item)
+        try:
+            if os.path.isfile(item_path) or os.path.islink(item_path):
+                os.unlink(item_path)
+                logger.info(f"Removed file {item_path} due to clean_first flag")
+            elif os.path.isdir(item_path):
+                shutil.rmtree(item_path)
+                logger.info(f"Removed directory {item_path} due to clean_first flag")
+        except Exception as e:
+            logger.error(f"Failed to remove {item_path}. Reason: {e}")
+
+
 def process_folder(
     folder: str,
     multiwfn_cmd: Optional[str] = None,
@@ -139,23 +163,8 @@ def process_folder(
 
     try:
         if clean_first:
-            # clean everything except gbw_analysis.log and .processing.lock
-            for item in os.listdir(folder):
-                if item not in ("gbw_analysis.log", ".processing.lock"):
-                    item_path = os.path.join(folder, item)
-                    try:
-                        if os.path.isfile(item_path) or os.path.islink(item_path):
-                            os.unlink(item_path)
-                            logger.info(
-                                f"Removed file {item_path} due to clean_first flag"
-                            )
-                        elif os.path.isdir(item_path):
-                            shutil.rmtree(item_path)
-                            logger.info(
-                                f"Removed directory {item_path} due to clean_first flag"
-                            )
-                    except Exception as e:
-                        logger.error(f"Failed to remove {item_path}. Reason: {e}")
+            _clean_first(folder, logger)
+            overwrite, restart = True, False
 
         # pre-checks (idempotency)
         # e.g. skip if outputs exist and not restart
@@ -365,21 +374,8 @@ def process_folder_alcf(
 
     try:
         if clean_first:
-            # clean everything except gbw_analysis.log and .processing.lock
-            for item in os.listdir(folder):
-                if item not in ("gbw_analysis.log", ".processing.lock"):
-                    item_path = os.path.join(folder, item)
-                    try:
-                        if os.path.isfile(item_path) or os.path.islink(item_path):
-                            os.unlink(item_path)
-                            logger.info(f"Removed file {item_path} due to clean_first flag")
-                        elif os.path.isdir(item_path):
-                            shutil.rmtree(item_path)
-                            logger.info(
-                                f"Removed directory {item_path} due to clean_first flag"
-                            )
-                    except Exception as e:
-                        logger.error(f"Failed to remove {item_path}. Reason: {e}")
+            _clean_first(folder, logger)
+            overwrite, restart = True, False
 
         _COMPRESSED_EXTS = (".gbw.zstd0", ".tar.zst", ".tgz")
         empty_compressed: list = []

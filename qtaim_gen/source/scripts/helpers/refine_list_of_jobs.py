@@ -133,7 +133,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument(
         "--check_ecp",
         action="store_true",
-        help="filter out jobs where ECP loaded successfully; keep only ECP_FAILED and ECP_NO_ZIP jobs",
+        help="also keep valid jobs whose archived adch/cm5 output shows the ECP (EDF) failed to load; jobs without ECP atoms or without archived output are not kept",
     )
 
     parser.add_argument(

@@ -1500,12 +1500,9 @@ class TestLockProtection:
         for f in [lockfile, other_file, log_file]:
             with open(f, "w") as fh:
                 fh.write("test")
-        # Simulate clean_first loop (from workflow.py)
-        for item in os.listdir(folder):
-            if item not in ("gbw_analysis.log", ".processing.lock"):
-                item_path = os.path.join(folder, item)
-                if os.path.isfile(item_path):
-                    os.unlink(item_path)
+        from qtaim_gen.source.core.workflow import _clean_first
+        import logging
+        _clean_first(folder, logging.getLogger("test"))
         # Lock and log should survive
         assert os.path.exists(lockfile)
         assert os.path.exists(log_file)

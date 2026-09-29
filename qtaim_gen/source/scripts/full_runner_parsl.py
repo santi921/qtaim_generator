@@ -161,7 +161,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument(
         "--clean_first",
         action="store_true",
-        help="clean folder before running analysis",
+        help="remove the folder's working files and recompute every step (implies --overwrite); "
+        "generator/ is kept until the rerun's results replace it",
     )
 
     parser.add_argument(

@@ -178,7 +178,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument(
         "--clean_first",
         action="store_true",
-        help="clean folder before running analysis",
+        help="remove the folder's working files and recompute every step (implies --overwrite); "
+        "generator/ is kept until the rerun's results replace it",
     )
 
     parser.add_argument(
@@ -210,7 +211,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument(
         "--check_ecp",
         action="store_true",
-        help="queue jobs that passed validation but have ECP_FAILED or ECP_NO_ZIP status (use with --clean_first to restart them)",
+        help="queue jobs that passed validation but whose archived adch/cm5 output shows the ECP (EDF) failed to load; jobs without ECP atoms or without archived output are not queued (use with --clean_first to recompute them)",
     )
 
     parser.add_argument(

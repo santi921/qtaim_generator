@@ -11,7 +11,10 @@ import numpy as np
 from rdkit import Chem
 
 from qtaim_gen.source.core.parse_qtaim import dft_inp_to_dict
-from qtaim_gen.source.utils.validation import validation_checks
+from qtaim_gen.source.utils.validation import (
+    get_charge_spin_n_atoms_from_folder,
+    validation_checks,
+)
 from qtaim_gen.source.utils.atomic_write import atomic_json_write  # re-export
 
 # RDKit periodic table for element lookups
@@ -256,11 +259,17 @@ def get_folders_from_file(
                 else:
                     # validation passed — check ECP if requested
                     if check_ecp:
+                        # only a proven failure is queued: no archived charge
+                        # output means the ECP status is unknown, not failed
                         ecp_status = check_ecp_for_folder(folder_outputs)
-                        if ecp_status != ECP_PASSED:
+                        if ecp_status == ECP_FAILED:
                             if logger:
                                 logger.info(f"Adding {folder} to run list: ECP status={ecp_status}")
                             return folder
+                        if ecp_status == ECP_NO_ZIP and logger:
+                            logger.info(
+                                f"ECP status unknown for {folder} (no archived adch.out/cm5.out); not queued"
+                            )
                     if logger:
                         logger.info(f"Skipping {folder} due to pre-validation pass")
                     return None
@@ -340,6 +349,21 @@ def get_folders_from_file(
 ECP_NO_ZIP = 0   # zip missing, empty, corrupt, or lacks adch.out/cm5.out
 ECP_PASSED = 1
 ECP_FAILED = -1
+ECP_NOT_APPLICABLE = 2  # no atom carries an ECP (Z < 37)
+_FIRST_ECP_Z = 37
+
+
+def _folder_has_ecp_atoms(folder_outputs: str) -> Optional[bool]:
+    """Whether the job's geometry has an atom at or beyond Rb (def2 ECPs);
+    None when no geometry input can be read."""
+    try:
+        dft_dict = get_charge_spin_n_atoms_from_folder(folder_outputs)
+        return any(
+            _PERIODIC_TABLE.GetAtomicNumber(a["element"]) >= _FIRST_ECP_Z
+            for a in dft_dict["mol"].values()
+        )
+    except Exception:
+        return None
 
 
 def check_ecp_for_folder(folder_outputs: str) -> int:
@@ -352,10 +376,13 @@ def check_ecp_for_folder(folder_outputs: str) -> int:
         folder_outputs: Path to the job output folder containing generator/ subdirectory
 
     Returns:
+        ECP_NOT_APPLICABLE (2) - no atom carries an ECP, so there is nothing to check
         ECP_NO_ZIP (0)  - zip missing, empty, corrupt, or lacks candidate files
         ECP_PASSED (1)  - EDF library line found; ECP loaded correctly
         ECP_FAILED (-1) - candidate files found but EDF line absent; ECP failed
     """
+    if _folder_has_ecp_atoms(folder_outputs) is False:
+        return ECP_NOT_APPLICABLE
     zip_path = os.path.join(folder_outputs, "generator", "out_files.zip")
     if not os.path.isfile(zip_path):
         return ECP_NO_ZIP
