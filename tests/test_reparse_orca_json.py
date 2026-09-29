@@ -129,6 +129,40 @@ class TestProcessFolder:
         assert _load(job / "orca.json")["orca_parser_version"] == ORCA_PARSER_VERSION
 
 
+class TestLock:
+
+    def test_locked_folder_is_left_alone(self, tmp_path):
+        job = _make_job(tmp_path, "job")
+        (job / ".processing.lock").write_text("other job")
+        r = _run(job)
+        assert r["status"] == rj.STATUS_LOCKED
+        assert _load(job / "orca.json") == V1_ORCA_JSON
+        assert (job / ".processing.lock").read_text() == "other job"
+
+    def test_lock_released_after_reparse_and_failure(self, tmp_path):
+        ok = _make_job(tmp_path, "ok")
+        assert _run(ok)["status"] == rj.STATUS_REPARSED
+        assert not (ok / ".processing.lock").exists()
+        bad = _make_job(tmp_path, "bad")
+        (bad / "orca.out").write_text("")  # parser raises or writes nothing usable
+        assert _run(bad)["status"] in (rj.STATUS_FAILED, rj.STATUS_PARTIAL)
+        assert not (bad / ".processing.lock").exists()
+
+    def test_stale_lock_is_broken(self, tmp_path):
+        job = _make_job(tmp_path, "job")
+        lock = job / ".processing.lock"
+        lock.write_text("dead job")
+        old = os.path.getmtime(lock) - 9 * 3600
+        os.utime(lock, (old, old))
+        assert _run(job)["status"] == rj.STATUS_REPARSED
+        assert not lock.exists()
+
+    def test_dry_run_takes_no_lock(self, tmp_path):
+        job = _make_job(tmp_path, "job")
+        (job / ".processing.lock").write_text("other job")
+        assert _run(job, dry_run=True)["status"] == rj.STATUS_WOULD_REPARSE
+
+
 class TestSourceRoot:
 
     def test_source_out_is_staged_and_removed(self, tmp_path):
@@ -203,3 +237,35 @@ class TestDiscovery:
         (tmp_path / "unrelated").mkdir()
         found = rj.discover_folders(str(tmp_path), None)
         assert sorted(os.path.basename(f) for f in found) == ["with_json", "with_out"]
+
+
+
+class TestOrder:
+
+    @pytest.fixture
+    def job_list(self, tmp_path):
+        jobs = [str(_make_job(tmp_path, f"j{i:02d}", with_out=False)) for i in range(30)]
+        lst = tmp_path / "jobs.txt"
+        lst.write_text("\n".join(jobs) + "\n")
+        return lst, jobs
+
+    def _run_order(self, job_list, tmp_path, monkeypatch, name, *extra):
+        lst, _ = job_list
+        report = tmp_path / f"{name}.json"
+        monkeypatch.setattr("sys.argv", ["reparse-orca-json", "--folder_list", str(lst), "--workers", "1",
+                                         "--dry_run", "--report", str(report), *extra])
+        rj.main()
+        return [r["folder"] for r in _load(report)["per_folder"]]
+
+    def test_default_order_is_random(self, job_list, tmp_path, monkeypatch):
+        done = self._run_order(job_list, tmp_path, monkeypatch, "a")
+        assert sorted(done) == sorted(job_list[1]) and done != job_list[1]
+
+    def test_seed_is_reproducible(self, job_list, tmp_path, monkeypatch):
+        a = self._run_order(job_list, tmp_path, monkeypatch, "a", "--seed", "7")
+        b = self._run_order(job_list, tmp_path, monkeypatch, "b", "--seed", "7")
+        c = self._run_order(job_list, tmp_path, monkeypatch, "c", "--seed", "8")
+        assert a == b and a != c
+
+    def test_ordered_keeps_list_order(self, job_list, tmp_path, monkeypatch):
+        assert self._run_order(job_list, tmp_path, monkeypatch, "a", "--ordered") == job_list[1]

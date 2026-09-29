@@ -36,6 +36,7 @@ import argparse
 import json
 import logging
 import os
+import random
 import sys
 import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
@@ -57,6 +58,7 @@ STATUS_PARTIAL = "partial"          # parsed, but truncated .out (no charges / e
 STATUS_WOULD_REPARSE = "would_reparse"
 STATUS_NO_SOURCE = "no_source"
 STATUS_FAILED = "failed"
+STATUS_LOCKED = "locked"          # .processing.lock held by another job (runner or reparse)
 
 
 def _orca_json_path(folder: str, move_files: bool) -> Optional[str]:
@@ -216,9 +218,25 @@ def process_folder(
         return result
 
     from qtaim_gen.source.core.omol import _run_orca_parse
+    from qtaim_gen.source.core.workflow import acquire_lock, release_lock
 
+    # same lock the runners take: concurrent reparse jobs over one list, or a
+    # runner on the same folder, must not parse an orca.out another is staging
+    if not acquire_lock(folder):
+        result["status"] = STATUS_LOCKED
+        return result
     staged: List[str] = []
     try:
+        # re-read under the lock: another job may have finished this folder
+        version = _orca_json_version(_orca_json_path(folder, move_files))
+        if version is not None and version >= min_version and not force:
+            result["status"] = STATUS_CURRENT
+            return result
+        kind = locate_source(folder, source_folder)
+        result["source"] = kind
+        if kind is None:
+            result["status"] = STATUS_NO_SOURCE
+            return result
         if kind in ("source_out", "source_archive"):
             staged = _stage_from_source(folder, source_folder, kind, logger)
             if find_orca_output_file(folder) is None:
@@ -241,6 +259,7 @@ def process_folder(
         result["error"] = f"{type(e).__name__}: {e}"
     finally:
         _remove_staged(staged, logger)
+        release_lock(folder)
     return result
 
 
@@ -280,10 +299,15 @@ def main() -> int:
     ap.add_argument("--force", action="store_true", help="Reparse even when orca.json is current.")
     ap.add_argument("--workers", type=int, default=0, help="Parallel workers (default: cpu_count, 1 disables).")
     ap.add_argument("--limit", type=int, default=None, help="Process at most N folders (debug).")
+    ap.add_argument("--ordered", action="store_true",
+                    help="Process folders in list order. Default is a random order, so several jobs "
+                         "over the same list spread out instead of walking it in step.")
+    ap.add_argument("--seed", type=int, default=None,
+                    help="Seed for the random order (default: a different order per run).")
     ap.add_argument("--dry_run", action="store_true", help="Classify folders, write nothing.")
     ap.add_argument("--report", default=None, help="Write a JSON report of per-folder results.")
     ap.add_argument("--list_remaining", default=None,
-                    help="Write the folders that are still stale after the run (no_source, partial, failed).")
+                    help="Write the folders that are still stale after the run (no_source, partial, failed, locked).")
     args = ap.parse_args()
 
     if not args.root_dir and not args.folder_list:
@@ -294,6 +318,8 @@ def main() -> int:
     logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(message)s")
 
     folders = discover_folders(args.root_dir, args.folder_list)
+    if not args.ordered:
+        random.Random(args.seed).shuffle(folders)
     if args.limit is not None:
         folders = folders[: args.limit]
     n = len(folders)
@@ -304,7 +330,8 @@ def main() -> int:
     workers = args.workers if args.workers > 0 else (os.cpu_count() or 1)
     workers = min(workers, n)
     print(f"Scanning {n} folders with {workers} worker(s); min_version={args.min_version}; "
-          f"move_files={args.move_files}; dry_run={args.dry_run}; source_root={args.source_root}",
+          f"move_files={args.move_files}; dry_run={args.dry_run}; source_root={args.source_root}; "
+          f"order={'list' if args.ordered else f'random (seed={args.seed})'}",
           file=sys.stderr)
 
     kwargs = dict(
@@ -328,7 +355,7 @@ def main() -> int:
 
     agg: Dict[str, object] = {"folders_total": n}
     for status in (STATUS_CURRENT, STATUS_WOULD_REPARSE, STATUS_REPARSED, STATUS_PARTIAL,
-                   STATUS_NO_SOURCE, STATUS_FAILED):
+                   STATUS_NO_SOURCE, STATUS_FAILED, STATUS_LOCKED):
         agg[status] = sum(1 for r in results if r["status"] == status)
     for kind in ("folder_out", "folder_archive", "source_out", "source_archive"):
         agg[f"source_{kind}"] = sum(1 for r in results if r["source"] == kind)
@@ -352,7 +379,8 @@ def main() -> int:
     if args.list_remaining:
         os.makedirs(os.path.dirname(args.list_remaining) or ".", exist_ok=True)
         remaining = [r["folder"] for r in results
-                     if r["status"] in (STATUS_NO_SOURCE, STATUS_PARTIAL, STATUS_FAILED, STATUS_WOULD_REPARSE)]
+                     if r["status"] in (STATUS_NO_SOURCE, STATUS_PARTIAL, STATUS_FAILED, STATUS_WOULD_REPARSE,
+                                        STATUS_LOCKED)]
         with open(args.list_remaining, "w") as f:
             for p in remaining:
                 f.write(f"{p}\n")
