@@ -262,6 +262,25 @@ class TestCheckOrca:
 
 
 
+class TestHirshDensityRebuild:
+    def test_closed_shell_without_archive_is_reparse_only(self, tmp_path, monkeypatch):
+        folder = _make_started_folder(tmp_path)
+        gen = folder / "generator"
+        gen.mkdir()
+        atoms = ["1_C", "2_O", "3_H"]
+        zeros = dict.fromkeys(atoms, 0.0)
+        zeros.update(sum=0.0, abs_sum=0.0)
+        (gen / "fuzzy_full.json").write_text(json.dumps({"hirsh_fuzzy_density": zeros}))
+        (gen / "charge.json").write_text(json.dumps(
+            {"hirshfeld": {"charge": {"1_C": 0.1, "2_O": -0.2, "3_H": 0.1}}}))
+        monkeypatch.setattr(sweep, "validation_checks", lambda *a, **k: True)
+        rec = sweep.classify_folder(
+            str(folder), None, None, full_set=0, move_results=True, recheck_fuzzy=True
+        )
+        assert rec["class"] == "reparse_only"
+        assert rec["recheck"]["derived"] == ["hirsh_fuzzy_density"]
+
+
 class TestMainCli:
     def test_end_to_end_report_and_requeue(self, tmp_path):
         folder = _make_started_folder(tmp_path)

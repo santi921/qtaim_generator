@@ -12,7 +12,9 @@ three classes of wrong-but-complete data are never rerun:
   read the Total column (alpha only).
 
 `recheck_fuzzy` finds these, re-parses the archived Multiwfn output where that
-output is trustworthy (no rerun), and otherwise invalidates the step (compiled
+output is trustworthy (no rerun), rebuilds `hirsh_fuzzy_density` from the stored
+Hirshfeld charges when there is no such output (no rerun), and otherwise
+invalidates the step (compiled
 key plus per-step .out/.json in the job root and generator/) so a restart
 reruns exactly that step. Open-shell spin steps only rerun on a .wfx: an
 existing one, or one rebuilt from a gbw source (any .wfn is then removed).
@@ -33,6 +35,8 @@ from qtaim_gen.source.core.parse_multiwfn import (
     parse_bond_order_fuzzy,
     parse_fuzzy_real_space,
 )
+from rdkit import Chem
+
 from qtaim_gen.source.utils.atomic_write import atomic_json_write
 from qtaim_gen.source.utils.validation import read_multiwfn_out
 
@@ -41,6 +45,7 @@ SPIN_KEYS = ("becke_fuzzy_spin", "hirsh_fuzzy_spin", "mbis_fuzzy_spin")
 SPIN_TOL = 0.1  # integrated spin density = N_alpha - N_beta exactly; grid error is ~1e-4
 _SUMMARY = ("sum", "abs_sum")
 SPIN_SENSITIVE = frozenset(SPIN_KEYS) | {"fuzzy_bond"}
+_PERIODIC_TABLE = Chem.GetPeriodicTable()
 
 
 def _atom_values(entry) -> Optional[List[float]]:
@@ -70,6 +75,33 @@ def fuzzy_value_failures(fuzzy_dict: dict, mult: int) -> List[str]:
                 if vals is None or abs(sum(vals) - (mult - 1)) > SPIN_TOL:
                     bad.append(key)
     return bad
+
+
+def hirsh_density_from_charges(folder: str) -> Optional[dict]:
+    """`hirsh_fuzzy_density` rebuilt from the stored Hirshfeld charges as
+    N_A = Z_A - q_A, in the parser's layout (atoms, then sum and abs_sum).
+
+    The fuzzy Hirshfeld integral of rho is the Hirshfeld population. Multiwfn
+    adds the EDF core density for ECP atoms in both calculations, so the full Z
+    applies. Checked against archived integrals on 112 jobs incl. ECP atoms and
+    lanthanides: max 4.5e-3 e per atom. None when charge.json has no usable
+    Hirshfeld charges.
+    """
+    charge = _preferred(folder, _compiled(folder, "charge.json"))
+    hirsh = charge.get("hirshfeld")
+    q = hirsh.get("charge") if isinstance(hirsh, dict) else None
+    if not isinstance(q, dict) or not q:
+        return None
+    out = {}
+    try:
+        for key, val in q.items():
+            out[key] = _PERIODIC_TABLE.GetAtomicNumber(key.split("_", 1)[1]) - float(val)
+    except (IndexError, TypeError, ValueError, RuntimeError):
+        return None
+    total = sum(out.values())
+    out["sum"] = total
+    out["abs_sum"] = sum(abs(v) for k, v in out.items() if k != "sum")
+    return out
 
 
 def out_electron_counts(text: str) -> Optional[Tuple[float, float, float]]:
@@ -124,10 +156,13 @@ def _preferred(folder: str, copies: Dict[str, dict]) -> dict:
 def plan_recheck(folder: str, mult: int) -> Dict[str, object]:
     """Decide, without writing anything, what each suspect step needs.
 
-    Returns {"reparse": {step: payload}, "rerun": [step, ...]}.
+    Returns {"reparse": {step: payload}, "rerun": [step, ...],
+    "derived": [step, ...]}; "derived" lists the reparse steps rebuilt from
+    charges rather than from archived output.
     """
     reparse: Dict[str, object] = {}
     rerun: List[str] = []
+    derived: List[str] = []
 
     fuzzy = _preferred(folder, _compiled(folder, "fuzzy_full.json"))
     for step in fuzzy_value_failures(fuzzy, mult):
@@ -139,6 +174,12 @@ def plan_recheck(folder: str, mult: int) -> Dict[str, object]:
                 payload = None
             if payload is not None and not fuzzy_value_failures({step: payload}, mult):
                 reparse[step] = payload
+                continue
+        if step == "hirsh_fuzzy_density":
+            payload = hirsh_density_from_charges(folder)
+            if payload is not None and not fuzzy_value_failures({step: payload}, mult):
+                reparse[step] = payload
+                derived.append(step)
                 continue
         rerun.append(step)
 
@@ -163,7 +204,7 @@ def plan_recheck(folder: str, mult: int) -> Dict[str, object]:
             else:
                 # read as all-alpha, or no output to tell which era it came from
                 rerun.append("fuzzy_bond")
-    return {"reparse": reparse, "rerun": rerun}
+    return {"reparse": reparse, "rerun": rerun, "derived": derived}
 
 
 def _remove_step_files(folder: str, step: str, exts, logger=None) -> None:
@@ -217,7 +258,7 @@ def recheck_fuzzy(
 ) -> Dict[str, object]:
     """Recheck, repair by reparse, and invalidate for rerun. See module docstring.
 
-    Returns {"reparse": [...], "rerun": [...], "wavefunction": str, "ok": bool}.
+    Returns {"reparse": [...], "rerun": [...], "derived": [...], "wavefunction": str, "ok": bool}.
     Reparses are always applied (they need no wavefunction). Rerun steps are
     only invalidated when `ok`, i.e. they can really run; otherwise their
     current values are left in place and `ok` is False.
@@ -225,7 +266,13 @@ def recheck_fuzzy(
     plan = plan_recheck(folder, mult)
     reparse, rerun = plan["reparse"], plan["rerun"]
     ok, wf_note, wfns = _wavefunction_plan(folder, rerun, mult, wfx, preprocess_compressed)
-    report = {"reparse": sorted(reparse), "rerun": sorted(rerun), "wavefunction": wf_note, "ok": ok}
+    report = {
+        "reparse": sorted(reparse),
+        "rerun": sorted(rerun),
+        "derived": sorted(plan["derived"]),
+        "wavefunction": wf_note,
+        "ok": ok,
+    }
     if dry_run:
         return report
     invalidate = rerun if ok else []
@@ -257,5 +304,8 @@ def recheck_fuzzy(
             if logger:
                 logger.info("recheck_fuzzy: removed %s so the rerun converts to .wfx", p)
     if logger:
-        logger.info("recheck_fuzzy: reparsed %s, rerun %s (%s)", report["reparse"], report["rerun"], wf_note)
+        logger.info(
+            "recheck_fuzzy: reparsed %s (rebuilt from Hirshfeld charges: %s), rerun %s (%s)",
+            report["reparse"], report["derived"], report["rerun"], wf_note,
+        )
     return report

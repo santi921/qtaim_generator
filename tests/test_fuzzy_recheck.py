@@ -9,6 +9,7 @@ import pytest
 
 from qtaim_gen.source.utils.fuzzy_recheck import (
     fuzzy_value_failures,
+    hirsh_density_from_charges,
     out_electron_counts,
     recheck_fuzzy,
 )
@@ -81,7 +82,8 @@ class TestRecheck:
         job = _job(tmp_path, {"becke_fuzzy_density": GOOD_DENSITY, "hirsh_fuzzy_density": ZEROS},
                    outs={"hirsh_fuzzy_density.out": HIRSH_TWO_BLOCK}, loose=["hirsh_fuzzy_density.json"])
         rep = recheck_fuzzy(str(job), mult=1)
-        assert rep == {"reparse": ["hirsh_fuzzy_density"], "rerun": [], "wavefunction": "not needed", "ok": True}
+        assert rep == {"reparse": ["hirsh_fuzzy_density"], "rerun": [], "derived": [],
+                       "wavefunction": "not needed", "ok": True}
         fz = json.loads((job / "generator" / "fuzzy_full.json").read_text())
         assert fz["hirsh_fuzzy_density"]["sum"] == pytest.approx(94.99993976)
         assert fz["becke_fuzzy_density"] == GOOD_DENSITY
@@ -141,7 +143,8 @@ class TestRecheck:
 
     def test_clean_record_untouched(self, tmp_path):
         job = _job(tmp_path, {"becke_fuzzy_density": GOOD_DENSITY, "hirsh_fuzzy_density": GOOD_DENSITY})
-        assert recheck_fuzzy(str(job), mult=1) == {"reparse": [], "rerun": [], "wavefunction": "not needed", "ok": True}
+        assert recheck_fuzzy(str(job), mult=1) == {
+            "reparse": [], "rerun": [], "derived": [], "wavefunction": "not needed", "ok": True}
 
 
 class TestReviewFixes:
@@ -213,3 +216,61 @@ class TestReviewFixes:
         rep = recheck_fuzzy(str(job), mult=1)
         assert rep["ok"] and rep["rerun"] == ["hirsh_fuzzy_density"]
         assert (job / "orca.wfn").exists()
+
+
+HIRSH_Q = [0.06, -0.15, 0.03, -0.01, -0.08, -0.03, -0.04, 0.04, 0.04, 0.04, 0.05, 0.05]
+Z_ATOMS = [1, 35, 1, 6, 6, 6, 35, 1, 1, 1, 1, 1]
+
+
+def _write_charges(job, charges):
+    gen = job / "generator"
+    (gen / "charge.json").write_text(json.dumps(
+        {"hirshfeld": {"charge": dict(zip(ATOMS, charges)), "dipole": {"mag": 0.1}}}))
+
+
+class TestHirshDensityFromCharges:
+    def test_zero_density_rebuilt_without_archive(self, tmp_path):
+        job = _job(tmp_path, {"becke_fuzzy_density": GOOD_DENSITY, "hirsh_fuzzy_density": ZEROS})
+        _write_charges(job, HIRSH_Q)
+        rep = recheck_fuzzy(str(job), mult=1)
+        assert rep["reparse"] == ["hirsh_fuzzy_density"] and rep["derived"] == ["hirsh_fuzzy_density"]
+        assert rep["rerun"] == [] and rep["wavefunction"] == "not needed"
+        h = json.loads((job / "generator" / "fuzzy_full.json").read_text())["hirsh_fuzzy_density"]
+        assert list(h) == ATOMS + ["sum", "abs_sum"]
+        for key, z, q in zip(ATOMS, Z_ATOMS, HIRSH_Q):
+            assert h[key] == pytest.approx(z - q)
+        assert h["sum"] == pytest.approx(sum(Z_ATOMS) - sum(HIRSH_Q))
+        assert h["abs_sum"] == pytest.approx(h["sum"])
+
+    def test_archived_output_preferred_over_charges(self, tmp_path):
+        job = _job(tmp_path, {"hirsh_fuzzy_density": ZEROS},
+                   outs={"hirsh_fuzzy_density.out": HIRSH_TWO_BLOCK})
+        _write_charges(job, HIRSH_Q)
+        rep = recheck_fuzzy(str(job), mult=1)
+        assert rep["reparse"] == ["hirsh_fuzzy_density"] and rep["derived"] == []
+        h = json.loads((job / "generator" / "fuzzy_full.json").read_text())["hirsh_fuzzy_density"]
+        assert h["sum"] == pytest.approx(94.99993976)
+
+    def test_open_shell_spin_still_reruns(self, tmp_path):
+        job = _job(tmp_path, {"hirsh_fuzzy_density": ZEROS, "hirsh_fuzzy_spin": ALL_ALPHA_SPIN},
+                   loose=["orca.gbw"])
+        _write_charges(job, HIRSH_Q)
+        rep = recheck_fuzzy(str(job), mult=2, dry_run=True)
+        assert rep["derived"] == ["hirsh_fuzzy_density"] and rep["rerun"] == ["hirsh_fuzzy_spin"]
+
+    def test_no_charges_falls_back_to_rerun(self, tmp_path):
+        job = _job(tmp_path, {"hirsh_fuzzy_density": ZEROS}, loose=["orca.gbw"])
+        rep = recheck_fuzzy(str(job), mult=1, dry_run=True)
+        assert rep["rerun"] == ["hirsh_fuzzy_density"] and rep["derived"] == []
+
+    def test_nan_charge_falls_back_to_rerun(self, tmp_path):
+        job = _job(tmp_path, {"hirsh_fuzzy_density": ZEROS}, loose=["orca.gbw"])
+        _write_charges(job, HIRSH_Q[:-1] + [float("nan")])
+        rep = recheck_fuzzy(str(job), mult=1, dry_run=True)
+        assert rep["rerun"] == ["hirsh_fuzzy_density"] and rep["derived"] == []
+
+    def test_unknown_element_label_returns_none(self, tmp_path):
+        job = _job(tmp_path, {"hirsh_fuzzy_density": ZEROS})
+        (job / "generator" / "charge.json").write_text(
+            json.dumps({"hirshfeld": {"charge": {"1_Xx": 0.1}}}))
+        assert hirsh_density_from_charges(str(job)) is None

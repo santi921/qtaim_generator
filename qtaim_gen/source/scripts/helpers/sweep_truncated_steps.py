@@ -353,6 +353,9 @@ def main(argv: Optional[List[str]] = None) -> int:
                 "no_wavefunction_source", "no_outputs", "error"):
         if class_counts.get(cls):
             print(f"  {cls:16s} {class_counts[cls]}")
+    if args.recheck_fuzzy:
+        n_derived = sum(1 for rec in records if (rec.get("recheck") or {}).get("derived"))
+        print(f"\nhirsh_fuzzy_density rebuilt from Hirshfeld charges (no archived .out): {n_derived}")
     if args.check_orca:
         n_stale = sum(1 for rec in records if rec.get("orca_stale"))
         print(f"\norca.json stale (any class, reparsed on the runner pass): {n_stale}")
