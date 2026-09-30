@@ -223,6 +223,41 @@ class TestSourceRoot:
         assert not (job / "orca.out").exists()
 
 
+class TestDeadStaging:
+
+    def _setup(self, tmp_path):
+        results, source = tmp_path / "results", tmp_path / "source"
+        job = _make_job(results, "vert/job", with_out=False)
+        src_job = source / "vert" / "job"
+        src_job.mkdir(parents=True)
+        shutil.copy(FIXTURE_UKS, src_job / "orca.out")
+        (src_job / "orca.tar.zst").write_bytes(b"archive")
+        return results, source, job, src_job
+
+    def test_killed_run_leftovers_are_cleared_before_parsing(self, tmp_path):
+        results, source, job, src_job = self._setup(tmp_path)
+        # what a run killed mid-extraction leaves: the archive link and a truncated orca.out
+        os.symlink(src_job / "orca.tar.zst", job / "orca.tar.zst")
+        text = FIXTURE_UKS.read_text()
+        (job / "orca.out").write_text(text[: text.index("FINAL SINGLE POINT ENERGY")])
+
+        r = _run(job, root_dir=str(results), source_root=str(source))
+        assert r["status"] == rj.STATUS_REPARSED
+        assert r["source"] == "source_out"
+        assert not os.path.lexists(job / "orca.tar.zst") and not (job / "orca.out").exists()
+        assert (src_job / "orca.tar.zst").read_bytes() == b"archive"
+
+    def test_real_files_are_left_alone(self, tmp_path):
+        results, source, job, src_job = self._setup(tmp_path)
+        shutil.copy(FIXTURE_UKS, job / "orca.out")
+        (job / "orca.tar.zst").write_bytes(b"own copy")
+        r = _run(job, root_dir=str(results), source_root=str(source))
+        assert r["status"] == rj.STATUS_REPARSED
+        assert r["source"] == "folder_out"
+        assert (job / "orca.tar.zst").read_bytes() == b"own copy"
+        assert (job / "orca.out").is_file()
+
+
 class TestDiscovery:
 
     def test_folder_list_skips_comments_and_missing(self, tmp_path):

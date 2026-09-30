@@ -135,6 +135,22 @@ def _stage_from_source(folder: str, source_folder: str, kind: str, logger: loggi
     return created
 
 
+def _clear_dead_staging(folder: str, source_folder: Optional[str], logger: logging.Logger) -> None:
+    """Remove what a killed run (walltime, preemption) staged and never cleaned: the orca.tar.zst
+    symlink into the source folder and the orca.out / orca.tar extracted beside it, which may be
+    truncated. Left in place, it would be parsed as folder_out and give a partial orca.json.
+    Only a link resolving to the source folder's archive counts; nothing else creates one."""
+    link = os.path.join(folder, "orca.tar.zst")
+    if not (source_folder and os.path.islink(link)):
+        return
+    if os.path.realpath(link) != os.path.realpath(os.path.join(source_folder, "orca.tar.zst")):
+        return
+    for p in (link, os.path.join(folder, "orca.out"), os.path.join(folder, "orca.tar")):
+        if os.path.lexists(p):
+            os.remove(p)
+    logger.warning("Removed staging left by a killed run in %s", folder)
+
+
 def _remove_staged(paths: List[str], logger: logging.Logger) -> None:
     for p in paths:
         try:
@@ -232,6 +248,7 @@ def process_folder(
         if version is not None and version >= min_version and not force:
             result["status"] = STATUS_CURRENT
             return result
+        _clear_dead_staging(folder, source_folder, logger)
         kind = locate_source(folder, source_folder)
         result["source"] = kind
         if kind is None:
