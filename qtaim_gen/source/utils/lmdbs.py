@@ -20,6 +20,11 @@ from qtaim_gen.source.core.parse_qtaim import (
     get_spin_charge_from_orca_inp,
     orca_inp_to_dict,
 )
+from qtaim_gen.source.core.parse_orca import ORCA_PARSER_VERSION
+
+
+class StaleOrcaParseError(ValueError):
+    """orca.json was written by an older parser than the caller requires."""
 
 
 def _derive_lmdb_key(folder_path: str, root_dir: str) -> str:
@@ -925,8 +930,11 @@ _ORCA_PER_BOND_NAME_MAP = {
 }
 _ORCA_GLOBAL_SCALAR_KEYS = (
     "scf_cycles", "n_alpha", "n_beta", "n_total", "n_electrons", "n_orbitals",
+    "n_electrons_nel", "n_electrons_alpha", "n_electrons_beta",
     "s_squared", "final_energy_eh",
     "homo_eh", "homo_ev", "lumo_eh", "lumo_ev", "homo_lumo_gap_eh",
+    "homo_eh_alpha", "homo_ev_alpha", "lumo_eh_alpha", "lumo_ev_alpha", "homo_lumo_gap_eh_alpha",
+    "homo_eh_beta", "homo_ev_beta", "lumo_eh_beta", "lumo_ev_beta", "homo_lumo_gap_eh_beta",
     "gradient_norm", "gradient_rms", "gradient_max", "dipole_magnitude_au",
 )
 _ORCA_GLOBAL_DICT_PREFIX = {
@@ -969,6 +977,7 @@ def parse_orca_data(
     n_atoms: int,
     orca_filter: Optional[List[str]] = None,
     clean: bool = True,
+    min_parser_version: Optional[int] = None,
 ) -> Tuple[
     Dict[int, Dict[str, Any]],
     Dict[Tuple[int, int], Dict[str, Any]],
@@ -984,12 +993,24 @@ def parse_orca_data(
             keys to surface. None falls back to DEFAULT_ORCA_FILTER (chemistry
             globals only — per-atom and per-bond data are opt-in).
         clean (bool): Coerce NaN/inf scalars to 0.0.
+        min_parser_version (Optional[int]): Raise StaleOrcaParseError when the
+            row's orca_parser_version (1 if absent) is below this. None or 0
+            disables the check. Rows written before ORCA_PARSER_VERSION 2 carry
+            alpha-only n_electrons and HOMO/LUMO for UKS runs, so a mixed LMDB
+            must not surface them next to current rows.
 
     Returns:
         atom_feats (Dict[int, Dict[str, Any]]): {atom_idx: {feat_name: value}}
         bond_feats (Dict[Tuple[int, int], Dict[str, Any]]): {(i,j) sorted: {feat_name: value}}
         global_feats (Dict[str, float]): {feat_name: value}
     """
+    if min_parser_version:
+        version = dict_orca.get("orca_parser_version", 1)
+        if version < min_parser_version:
+            raise StaleOrcaParseError(
+                f"orca.json parser version {version} < required {min_parser_version}; "
+                f"re-run the ORCA parse (current parser is {ORCA_PARSER_VERSION})"
+            )
     if orca_filter is None:
         orca_filter = DEFAULT_ORCA_FILTER
 

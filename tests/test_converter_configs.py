@@ -111,6 +111,8 @@ def _patched_config(name, tmp_path, orca_lmdb):
     for key in list(config["lmdb_locations"]):
         if key == "orca_lmdb":
             config["lmdb_locations"][key] = orca_lmdb
+            # fixture orca.json files predate orca_parser_version; disable the gate
+            config["orca_min_parser_version"] = 0
         elif key in FIXTURE_LOCATIONS:
             config["lmdb_locations"][key] = str(MERGED / FIXTURE_LOCATIONS[key])
         else:
