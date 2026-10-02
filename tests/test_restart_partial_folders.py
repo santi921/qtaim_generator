@@ -1341,6 +1341,96 @@ class TestMoveResultsQuarantine:
         assert set(merged.keys()) == {"adch", "becke"}
         assert not (gen / "charge.json.corrupt").exists()
 
+    @staticmethod
+    def _qtaim_folder(tmp_path, old, new=None, cpprop=None):
+        """generator/qtaim.json holding `old`; optional root qtaim.json and CPprop.txt.
+        cpprop: "fresh" (newer than the generator/ record) or "stale" (older)."""
+        folder = tmp_path / "job"
+        gen = folder / "generator"
+        gen.mkdir(parents=True)
+        _write_json(gen / "qtaim.json", old)
+        if new is not None:
+            _write_json(folder / "qtaim.json", new)
+        if cpprop:
+            (folder / "CPprop.txt").write_text("CP data\n")
+            t = os.path.getmtime(gen / "qtaim.json")
+            os.utime(folder / "CPprop.txt", (t + 60, t + 60) if cpprop == "fresh" else (t - 60, t - 60))
+        return folder, gen
+
+    def test_fresh_qtaim_json_replaces_not_merges(self, tmp_path):
+        """A rerun's qtaim.json is the full CP set: a mislabeled pair only the old record had must go."""
+        import logging
+        from qtaim_gen.source.core.omol import move_results_to_folder
+
+        old = {"0": {"density": 1.0}, "1": {"density": 1.0}, "0_5": {"density": 0.3}}
+        new = {"0": {"density": 1.1}, "1": {"density": 1.1}, "0_1": {"density": 0.3}}
+        folder, gen = self._qtaim_folder(tmp_path, old, new, cpprop="fresh")
+        _write_json(gen / "charge.json", {"adch": {"charge": {"1_C": 0.1}}})
+        _write_json(folder / "charge.json", {"becke": {"charge": {"1_C": 0.2}}})
+
+        move_results_to_folder(str(folder), logger=logging.getLogger("test_qtaim_replace"), clean=True)
+
+        with open(gen / "qtaim.json") as f:
+            assert json.load(f) == new
+        with open(gen / "charge.json") as f:
+            assert set(json.load(f)) == {"adch", "becke"}
+        assert not (folder / "qtaim.json").exists()
+
+    def test_stale_root_qtaim_json_kept_out_under_clean_false(self, tmp_path):
+        """clean=False leaves the root copy and its CPprop.txt; a later pass must not undo a patched record."""
+        import logging
+        from qtaim_gen.source.core.omol import move_results_to_folder
+
+        patched = {"0": {"density": 1.0}, "1": {"density": 1.0}, "0_1": {"density": 0.3}}
+        leftover = {"0": {"density": 1.0}, "1": {"density": 1.0}}
+        folder, gen = self._qtaim_folder(tmp_path, patched, leftover, cpprop="stale")
+
+        move_results_to_folder(str(folder), logger=logging.getLogger("test_qtaim_stale"), clean=False)
+
+        with open(gen / "qtaim.json") as f:
+            assert json.load(f) == patched
+        assert (folder / "qtaim.json").exists()
+
+    def test_root_qtaim_json_without_cpprop_is_a_leftover(self, tmp_path):
+        import logging
+        from qtaim_gen.source.core.omol import move_results_to_folder
+
+        old = {"0": {"density": 1.0}, "0_1": {"density": 0.3}}
+        folder, gen = self._qtaim_folder(tmp_path, old, {"0": {"density": 2.0}})
+
+        move_results_to_folder(str(folder), logger=logging.getLogger("test_qtaim_no_cpprop"), clean=True)
+
+        with open(gen / "qtaim.json") as f:
+            assert json.load(f) == old
+        assert not (folder / "qtaim.json").exists()
+
+    def test_empty_fresh_qtaim_json_keeps_existing(self, tmp_path):
+        import logging
+        from qtaim_gen.source.core.omol import move_results_to_folder
+
+        old = {"0": {"density": 1.0}, "0_1": {"density": 0.3}}
+        folder, gen = self._qtaim_folder(tmp_path, old, {}, cpprop="fresh")
+
+        move_results_to_folder(str(folder), logger=logging.getLogger("test_qtaim_empty"), clean=True)
+
+        with open(gen / "qtaim.json") as f:
+            assert json.load(f) == old
+        assert not (folder / "qtaim.json").exists()
+
+    def test_qtaim_json_moved_when_generator_has_none(self, tmp_path):
+        import logging
+        from qtaim_gen.source.core.omol import move_results_to_folder
+
+        folder = tmp_path / "job"
+        (folder / "generator").mkdir(parents=True)
+        new = {"0": {"density": 1.0}}
+        _write_json(folder / "qtaim.json", new)
+
+        move_results_to_folder(str(folder), logger=logging.getLogger("test_qtaim_move"), clean=True)
+
+        with open(folder / "generator" / "qtaim.json") as f:
+            assert json.load(f) == new
+
 
 # ---------------------------------------------------------------------------
 # Tests: backfill_skip_timing (log -> sentinel) for restart-skip path

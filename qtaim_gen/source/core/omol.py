@@ -1325,6 +1325,21 @@ def move_results_to_folder(
             new_path = os.path.join(folder, file)
             if os.path.exists(existing_path):
                 try:
+                    if file == "qtaim.json":
+                        # A root qtaim.json is only this run's result when the CPprop.txt it
+                        # was parsed from is newer than the generator/ record. Otherwise it is
+                        # a leftover (clean=False keeps the root copy and CPprop.txt, and every
+                        # pass re-parses them) and must not undo a later rerun or patch.
+                        cpprop = os.path.join(folder, "CPprop.txt")
+                        if not (os.path.isfile(cpprop)
+                                and os.path.getmtime(cpprop) > os.path.getmtime(existing_path)):
+                            logger.warning(
+                                "Kept generator/qtaim.json in %s: root qtaim.json is not from a "
+                                "CPprop.txt newer than it", folder,
+                            )
+                            if clean:
+                                os.remove(new_path)
+                            continue
                     with open(new_path, "r") as f:
                         data_new = json.load(f)
                     try:
@@ -1351,21 +1366,27 @@ def move_results_to_folder(
                                 existing_path, mv_err,
                             )
                         data_existing = {}
-                    # merge the two dicts
-                    if isinstance(data_existing, dict) and isinstance(data_new, dict):
-
+                    # qtaim.json is keyed by critical point, not by step: a fresh root copy
+                    # is the full CP set of this run's CPprop.txt, and merging it would keep
+                    # CPs (or mislabeled atom pairs) that only the old record had
+                    if file == "qtaim.json" and isinstance(data_new, dict) and data_new:
+                        data_merged = data_new
+                        action = "Replaced"
+                    elif isinstance(data_existing, dict) and isinstance(data_new, dict):
                         data_merged = {**data_existing, **data_new}
+                        action = "Merged"
                     else:
                         data_merged = data_new  # if not dict, just overwrite
+                        action = "Replaced"
                     atomic_json_write(existing_path, data_merged)
 
-                    logger.info(f"Merged {file} into results folder")
+                    logger.info(f"{action} {file} into results folder")
                     # remove the original file
 
                     if clean:
                         os.remove(new_path)
                 except Exception as e:
-                    logger.error(f"Error merging file {file}: {e}")
+                    logger.error(f"Error moving {file} into results folder: {e}")
             else:
                 try:
                     os.rename(
