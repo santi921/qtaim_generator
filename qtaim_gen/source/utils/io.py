@@ -792,7 +792,9 @@ def sample_lines(filename, n):
     with open(filename, "r") as f:
         total_lines = sum(1 for _ in f)
 
-    if n > total_lines:
+    if n <= 0:
+        return []
+    if n >= total_lines:
         # just return all lines
         with open(filename, "r") as f:
             return f.readlines()

@@ -162,3 +162,23 @@ def test_cli_passes_recheck_fuzzy_to_validation(job_folders, monkeypatch, tmp_pa
     refine_main(["--job_file", str(job_file), "--refined_job_file", str(out), "--quiet", "--n_workers", "1"] + flag)
     assert seen and set(seen) == {expected}
     assert sorted(out.read_text().split()) == sorted(folders)
+
+
+class TestEmptyJobFile:
+
+    def test_sample_lines_empty_file_and_zero(self, tmp_path):
+        empty = tmp_path / "empty.txt"
+        empty.write_text("")
+        assert io_mod.sample_lines(str(empty), 0) == []
+        lines = tmp_path / "lines.txt"
+        lines.write_text("a\nb\n")
+        assert io_mod.sample_lines(str(lines), 0) == []
+        assert sorted(io_mod.sample_lines(str(lines), 2)) == ["a\n", "b\n"]
+
+    def test_refine_on_empty_list_does_not_crash(self, tmp_path):
+        empty = tmp_path / "empty.txt"
+        empty.write_text("")
+        out = tmp_path / "out.txt"
+        assert refine_main(["--job_file", str(empty), "--refined_job_file", str(out), "--num_folders", "-1",
+                            "--quiet"]) == []
+        assert not out.exists()

@@ -37,6 +37,7 @@ import json
 import logging
 import os
 import random
+import subprocess
 import sys
 import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
@@ -59,6 +60,7 @@ STATUS_WOULD_REPARSE = "would_reparse"
 STATUS_NO_SOURCE = "no_source"
 STATUS_FAILED = "failed"
 STATUS_LOCKED = "locked"          # .processing.lock held by another job (runner or reparse)
+STATUS_MISSING = "missing"        # listed folder does not exist in the results tree
 
 
 def _orca_json_path(folder: str, move_files: bool) -> Optional[str]:
@@ -151,6 +153,29 @@ def _clear_dead_staging(folder: str, source_folder: Optional[str], logger: loggi
     logger.warning("Removed staging left by a killed run in %s", folder)
 
 
+def _clear_leftover_tar(folder: str, source_folder: Optional[str], logger: logging.Logger) -> None:
+    """Remove an orca.tar a killed extraction left behind. The unzstd fallback (hosts whose tar lacks
+    zstd) writes it only transiently and refuses to run while one exists, so a leftover blocks the
+    folder for good. Called under the lock, so no extraction of ours is using it; removed only when
+    an orca.tar.zst that passes ``zstd -t`` exists in the folder or the source folder, so the
+    archive it came from is still recoverable."""
+    tar = os.path.join(folder, "orca.tar")
+    if os.path.islink(tar) or not os.path.isfile(tar):
+        return
+    for base in (folder, source_folder):
+        zst = os.path.join(base, "orca.tar.zst") if base else None
+        if not (zst and os.path.isfile(zst)):
+            continue
+        try:
+            intact = subprocess.run(["zstd", "-tq", zst], capture_output=True).returncode == 0
+        except FileNotFoundError:
+            return
+        if intact:
+            os.remove(tar)
+            logger.warning("Removed leftover orca.tar in %s (intact archive: %s)", folder, zst)
+            return
+
+
 def _remove_staged(paths: List[str], logger: logging.Logger) -> None:
     for p in paths:
         try:
@@ -216,6 +241,10 @@ def process_folder(
     }
     logger = logging.getLogger("reparse_orca_json")
 
+    if not os.path.isdir(folder):
+        result["status"] = STATUS_MISSING
+        return result
+
     json_path = _orca_json_path(folder, move_files)
     version = _orca_json_version(json_path)
     result["version_before"] = version
@@ -249,6 +278,7 @@ def process_folder(
             result["status"] = STATUS_CURRENT
             return result
         _clear_dead_staging(folder, source_folder, logger)
+        _clear_leftover_tar(folder, source_folder, logger)
         kind = locate_source(folder, source_folder)
         result["source"] = kind
         if kind is None:
@@ -284,8 +314,9 @@ def discover_folders(root_dir: Optional[str], folder_list: Optional[str]) -> Lis
     if folder_list:
         with open(folder_list, "r") as f:
             raw = [line.strip() for line in f]
-        candidates = [line for line in raw if line and not line.startswith("#")]
-        return [p for p in candidates if os.path.isdir(p)]
+        # no stat here: on a large list that is one serial metadata lookup per line before any
+        # worker starts (and before --limit). process_folder reports a missing folder instead.
+        return [line for line in raw if line and not line.startswith("#")]
     if root_dir:
         out = []
         for d in sorted(glob(os.path.join(root_dir, "*"))):
@@ -372,7 +403,7 @@ def main() -> int:
 
     agg: Dict[str, object] = {"folders_total": n}
     for status in (STATUS_CURRENT, STATUS_WOULD_REPARSE, STATUS_REPARSED, STATUS_PARTIAL,
-                   STATUS_NO_SOURCE, STATUS_FAILED, STATUS_LOCKED):
+                   STATUS_NO_SOURCE, STATUS_FAILED, STATUS_LOCKED, STATUS_MISSING):
         agg[status] = sum(1 for r in results if r["status"] == status)
     for kind in ("folder_out", "folder_archive", "source_out", "source_archive"):
         agg[f"source_{kind}"] = sum(1 for r in results if r["source"] == kind)

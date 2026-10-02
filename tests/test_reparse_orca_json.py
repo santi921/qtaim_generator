@@ -258,13 +258,73 @@ class TestDeadStaging:
         assert (job / "orca.out").is_file()
 
 
+class TestLeftoverTar:
+    """An orca.tar left by a killed unzstd fallback blocks extraction until it is removed."""
+
+    def _setup(self, tmp_path, archive="real"):
+        if shutil.which("tar") is None or shutil.which("zstd") is None:
+            pytest.skip("tar/zstd not available")
+        results, source = tmp_path / "results", tmp_path / "source"
+        job = _make_job(results, "vert/job", with_out=False)
+        src_job = source / "vert" / "job"
+        src_job.mkdir(parents=True)
+        if archive == "real":
+            shutil.copy(FIXTURE_UKS, src_job / "orca.out")
+            proc = subprocess.run(["tar", "--zstd", "-cf", "orca.tar.zst", "orca.out"], cwd=src_job,
+                                  capture_output=True)
+            if proc.returncode != 0:
+                pytest.skip(f"tar --zstd unavailable: {proc.stderr.decode(errors='replace')[:200]}")
+            os.remove(src_job / "orca.out")
+        elif archive == "corrupt":
+            (src_job / "orca.tar.zst").write_bytes(b"not a zstd frame")
+        (job / "orca.tar").write_bytes(b"partial tar from a killed run")
+        return results, source, job
+
+    def test_removed_when_an_intact_archive_exists(self, tmp_path):
+        results, source, job = self._setup(tmp_path)
+        r = _run(job, root_dir=str(results), source_root=str(source))
+        assert r["status"] == rj.STATUS_REPARSED
+        assert not (job / "orca.tar").exists()
+
+    def test_kept_when_the_archive_is_corrupt(self, tmp_path):
+        results, source, job = self._setup(tmp_path, archive="corrupt")
+        _run(job, root_dir=str(results), source_root=str(source))
+        assert (job / "orca.tar").read_bytes() == b"partial tar from a killed run"
+
+    def test_kept_when_there_is_no_archive(self, tmp_path):
+        results, source, job = self._setup(tmp_path, archive=None)
+        shutil.copy(FIXTURE_UKS, job / "orca.out")
+        r = _run(job, root_dir=str(results), source_root=str(source))
+        assert r["status"] == rj.STATUS_REPARSED
+        assert (job / "orca.tar").is_file()
+
+    def test_dry_run_leaves_it(self, tmp_path):
+        results, source, job = self._setup(tmp_path)
+        _run(job, dry_run=True, root_dir=str(results), source_root=str(source))
+        assert (job / "orca.tar").is_file()
+
+
 class TestDiscovery:
 
-    def test_folder_list_skips_comments_and_missing(self, tmp_path):
+    def test_folder_list_skips_comments_without_stat(self, tmp_path):
         a = _make_job(tmp_path, "a")
         lst = tmp_path / "jobs.txt"
         lst.write_text(f"# comment\n\n{a}\n{tmp_path / 'missing'}\n")
-        assert rj.discover_folders(None, str(lst)) == [str(a)]
+        assert rj.discover_folders(None, str(lst)) == [str(a), str(tmp_path / "missing")]
+
+    def test_missing_folder_is_reported_not_fatal(self, tmp_path):
+        assert _run(tmp_path / "missing")["status"] == rj.STATUS_MISSING
+
+    def test_limit_applies_before_any_folder_is_read(self, tmp_path, monkeypatch):
+        jobs = [str(_make_job(tmp_path, f"j{i}")) for i in range(3)]
+        lst = tmp_path / "jobs.txt"
+        lst.write_text("\n".join([str(tmp_path / "gone")] + jobs) + "\n")
+        report = tmp_path / "rep.json"
+        monkeypatch.setattr("sys.argv", ["reparse-orca-json", "--folder_list", str(lst), "--workers", "1",
+                                         "--ordered", "--limit", "2", "--dry_run", "--report", str(report)])
+        rj.main()
+        agg = _load(report)["aggregate"]
+        assert agg["folders_total"] == 2 and agg[rj.STATUS_MISSING] == 1 and agg[rj.STATUS_WOULD_REPARSE] == 1
 
     def test_root_dir_finds_folders_with_orca_artifacts(self, tmp_path):
         _make_job(tmp_path, "with_json", with_out=False)
