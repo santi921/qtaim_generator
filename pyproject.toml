@@ -41,6 +41,7 @@ lmdb-filter-vertical = "qtaim_gen.source.scripts.helpers.filter_lmdb_vertical:ma
 backfill-orca-into-json = "qtaim_gen.source.scripts.helpers.backfill_orca_into_json:main"
 reparse-orca-json = "qtaim_gen.source.scripts.helpers.reparse_orca_json:main"
 recheck-fuzzy = "qtaim_gen.source.scripts.helpers.recheck_fuzzy_folders:main"
+requalify-qtaim = "qtaim_gen.source.scripts.helpers.requalify_qtaim_folders:main"
 
 # Analysis (paper Stream G: comparator embedding)
 analysis-soap-featurize = "qtaim_gen.source.analysis.comparator_embedding.cli:main"
