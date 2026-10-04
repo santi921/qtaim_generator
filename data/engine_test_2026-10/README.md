@@ -14,16 +14,26 @@ RES=/global/scratch/users/santiagovargas/OMol4M
 WORK=/global/scratch/users/santiagovargas/engine_test
 ```
 
-## 1. Code and env (login node)
+## 1. Code and env (login node), separate from production
+
+The production checkout (/global/scratch/users/santiagovargas/qtaim_generator) and env (qtaim_generator) stay
+untouched; the test uses its own clone and a cloned env.
 
 ```bash
-cd <qtaim_generator checkout> && git fetch && git checkout feat/horton-charge-engine && git pull
-conda activate qtaim_generator
-pip check > /tmp/pipcheck_before.txt; pip install --dry-run numba==0.68.0   # expect only numba + llvmlite
-pip install numba==0.68.0 && pip install -e . --no-deps
-pip check > /tmp/pipcheck_after.txt; diff /tmp/pipcheck_before.txt /tmp/pipcheck_after.txt
-pytest -q tests/test_charge_engine.py          # also compiles and caches the numba kernels
+cd /global/scratch/users/santiagovargas
+git clone -b feat/charge-engine git@github.com:santi921/qtaim_generator.git qtaim_generator_engine
+conda create -y -n qtaim_engine --clone qtaim_generator
+conda activate qtaim_engine
+pip install --dry-run numba==0.68.0            # expect only numba + llvmlite
+pip install numba==0.68.0
+pip install -e qtaim_generator_engine --no-deps
+python -c "import qtaim_gen, numba; print(qtaim_gen.__file__, numba.__version__)"   # must be the _engine clone
+pip check
+cd qtaim_generator_engine && pytest -q tests/test_charge_engine.py   # also builds the numba cache
 ```
+
+The slurm script activates `qtaim_engine` (override with `--export=ALL,CONDA_ENV=...`).
+Run everything below from `qtaim_generator_engine`.
 
 ## 2. Select and copy (login node)
 

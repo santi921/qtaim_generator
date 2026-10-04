@@ -20,7 +20,7 @@
 
 source ~/.bashrc
 module load gcc
-conda activate qtaim_generator
+conda activate ${CONDA_ENV:-qtaim_engine}   # separate env + checkout, see README
 export PYTHONUNBUFFERED=1
 export OMP_STACKSIZE=4G
 export KMP_STACKSIZE=200M
