@@ -4,6 +4,15 @@ Helpers to generate the data strings for the multiwfn program
 
 from typing import Optional, List
 
+# full_set=0 routines core/charge_engine.py computes in one pass, so the
+# charge-engine mode of gbw_analysis does not send them to Multiwfn
+ENGINE_ROUTINES = frozenset({
+    "hirshfeld", "adch", "cm5", "becke",
+    "becke_fuzzy_density", "hirsh_fuzzy_density",
+    "becke_fuzzy_spin", "hirsh_fuzzy_spin",
+    "fuzzy_bond",
+})
+
 
 def charge_data() -> str:
     """
@@ -78,6 +87,9 @@ def fuzzy_data(spin: bool = True, full_set: int = 0) -> dict:
     """
     # string_ret = "15\n1\n1\n1\n2\n1\n3\n1\n9\n4\nn\n0\nq\n"
     # string_ret = "15\n1\n1\nn1\n2\n1\n3\n1\n9\n4\nn\n0\nq\n"
+    # Each string must run in its own Multiwfn process: the -1 partition choice
+    # persists within a session, so a becke_* step chained after a hirsh_* step
+    # silently uses Hirshfeld (docs/solutions/multiwfn-gotchas/).
     string_dict = {}
     string_dict["becke_fuzzy_density"] = "15\n1\n1\n0\nq\n"
     # Hirshfeld (-1 -> 3) returns straight to the fuzzy menu; only MBIS (-1 -> 5)

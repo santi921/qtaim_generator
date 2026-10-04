@@ -225,6 +225,7 @@ def process_folder(
     patch_timings: bool = False,
     horton_python: str = "",
     recheck_fuzzy: bool = False,
+    charge_engine: bool = False,
 ) -> Dict[str, Any]:
     """Process a single folder and return a small status dict.
 
@@ -287,6 +288,7 @@ def process_folder(
                     move_results=move_results,
                     logger=logger,
                     recheck_fuzzy=recheck_fuzzy,
+                    charge_engine=charge_engine,
                 )
 
                 if not tf_validation:
@@ -334,6 +336,7 @@ def process_folder(
             patch_timings=patch_timings,
             horton_python=horton_python,
             recheck_fuzzy=recheck_fuzzy,
+            charge_engine=charge_engine,
         )
         t1: float = time.time()
         rerun_ok = bool(tf_validation)
@@ -418,6 +421,7 @@ def process_folder_alcf(
     patch_timings: bool = False,
     horton_python: str = "",
     recheck_fuzzy: bool = False,
+    charge_engine: bool = False,
 ) -> Dict[str, Any]:
     """Process a single folder and return a small status dict.
 
@@ -535,6 +539,7 @@ def process_folder_alcf(
                 bcp_tolerance=bcp_tolerance,
                 require_qtaim_provenance=require_qtaim_provenance,
                 recheck_fuzzy=recheck_fuzzy,
+                charge_engine=charge_engine,
             )
 
             if not overwrite and tf_validation:
@@ -615,6 +620,7 @@ def process_folder_alcf(
             patch_timings=patch_timings,
             horton_python=horton_python,
             recheck_fuzzy=recheck_fuzzy,
+            charge_engine=charge_engine,
         )
         t1: float = time.time()
         rerun_ok = bool(tf_validation)

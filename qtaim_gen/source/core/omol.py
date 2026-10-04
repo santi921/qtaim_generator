@@ -20,6 +20,7 @@ from qtaim_gen.source.utils.atomic_write import atomic_json_write
 from qtaim_gen.source.core.horton import run_horton_analysis
 
 from qtaim_gen.source.data.multiwfn import (
+    ENGINE_ROUTINES,
     charge_data,
     charge_data_dict,
     bond_order_data,
@@ -490,6 +491,7 @@ def run_jobs(
     check_bcp_count: bool = False,
     bcp_tolerance: int = 2,
     require_qtaim_provenance: bool = False,
+    skip_routines: Optional[frozenset] = None,
 ) -> None:
     """
     Run conversion and multiwfn jobs
@@ -501,6 +503,8 @@ def run_jobs(
         full_set(int): whether to use full set of analysis (1) or minimal (0)
         move_results(bool): whether to move results to a separate folder
         clean_jobs_tf(bool): whether to remove job files after running
+        skip_routines(frozenset): routines produced elsewhere (the charge
+            engine); never sent to Multiwfn
 
     """
     if logger is None:
@@ -642,6 +646,8 @@ def run_jobs(
     _fuzzy_routine_set = set(fuzzy_dict.keys()) if separate else set()
 
     for order in order_of_operations:
+        if skip_routines and order in skip_routines:
+            continue
         # Per-sub-job restart: data presence is the primary skip signal; timing
         # is secondary. This handles cases where timings.json was reset/corrupted
         # or a crash occurred between the mfwn script finishing and the timing write.
@@ -809,6 +815,7 @@ def parse_multiwfn(
     debug: bool = False,
     logger: Optional[logging.Logger] = None,
     full_set: int = 0,
+    skip_routines: Optional[frozenset] = None,
 ) -> None:
     """
     Parse multiwfn output files to jsons and save them in folder
@@ -817,6 +824,8 @@ def parse_multiwfn(
         separate(bool): whether to separate the analysis into different files
         debug(bool): whether to run a minimal set of jobs
         return_dicts(bool): return results as well as writing
+        skip_routines(frozenset): routines whose json the charge engine wrote;
+            their .out files are not parsed
     """
     # if return_dicts:
     #    compiled_dicts = {}
@@ -851,6 +860,10 @@ def parse_multiwfn(
                 # 'becke_fuzzy_density' (same for mbis/*_spin variants),
                 # writing wrong-parser output that only list order corrected.
                 if file == routine + ".out":
+                    # the charge engine wrote this routine's json; a leftover
+                    # Multiwfn .out must not overwrite it
+                    if skip_routines and routine in skip_routines:
+                        continue
                     if routine == "qtaim":
                         # qtaim.out is provenance only; qtaim.json is built
                         # from CPprop.txt below.
@@ -1488,6 +1501,94 @@ def _extract_orca_out_from_archive(folder: str, logger: logging.Logger) -> bool:
                 os.remove(tar_path)
             except OSError as e:
                 logger.warning("Could not remove intermediate orca.tar: %s", e)
+
+
+def _engine_outputs_present(folder: str, spin_tf: bool) -> bool:
+    """True when generator/ holds a completed charge-engine run: a positive
+    charge_engine timing and every engine routine in the compiled jsons."""
+    gen = os.path.join(folder, "generator")
+    want = {
+        "charge.json": ["hirshfeld", "adch", "cm5", "becke"],
+        "bond.json": ["fuzzy_bond"],
+        "fuzzy_full.json": ["becke_fuzzy_density", "hirsh_fuzzy_density"]
+        + (["becke_fuzzy_spin", "hirsh_fuzzy_spin"] if spin_tf else []),
+    }
+    try:
+        with open(os.path.join(gen, "timings.json")) as f:
+            if not json.load(f).get("charge_engine", 0) > 0:
+                return False
+        for name, keys in want.items():
+            with open(os.path.join(gen, name)) as f:
+                data = json.load(f)
+            if not all(data.get(k) for k in keys):
+                return False
+    except (OSError, json.JSONDecodeError, TypeError):
+        return False
+    return True
+
+
+def _run_charge_engine(
+    folder: str,
+    n_threads: int,
+    logger: logging.Logger,
+    restart: bool = False,
+) -> bool:
+    """Compute ENGINE_ROUTINES with core/charge_engine.py and write each as the
+    per-step <routine>.json parse_multiwfn would have produced from Multiwfn,
+    plus a 'charge_engine' timing. parse_multiwfn then compiles them into
+    charge.json / bond.json / fuzzy_full.json unchanged."""
+    spin_tf = check_spin(folder)
+    if restart and _engine_outputs_present(folder, spin_tf):
+        logger.info("charge_engine: completed run found in generator/ - skipping")
+        return True
+
+    wf_path = _wavefunction_path(folder)
+    if wf_path is None or not wf_path.endswith(".wfx"):
+        logger.error("charge_engine: needs orca.wfx, found %s", wf_path)
+        return False
+
+    import numba
+    from qtaim_gen.source.core import charge_engine
+
+    numba.set_num_threads(max(1, min(n_threads, numba.config.NUMBA_NUM_THREADS)))
+    start = time.time()
+    try:
+        out = charge_engine.run(wf_path)
+    except Exception as e:
+        logger.error("charge_engine failed on %s: %s", wf_path, e)
+        return False
+    elapsed = time.time() - start
+
+    meta = out.get("_meta", {})
+    if meta.get("skipped"):
+        logger.error("charge_engine skipped schemes in %s: %s", folder, meta["skipped"])
+    spin_routines = {"becke_fuzzy_spin", "hirsh_fuzzy_spin"}
+    written = []
+    for routine in sorted(ENGINE_ROUTINES):
+        if routine in spin_routines and not spin_tf:
+            continue
+        if routine not in out:
+            logger.error("charge_engine produced no %s for %s", routine, folder)
+            continue
+        atomic_json_write(os.path.join(folder, f"{routine}.json"), out[routine])
+        written.append(routine)
+
+    timings_path = os.path.join(folder, "timings.json")
+    timings = {}
+    if os.path.isfile(timings_path) and os.path.getsize(timings_path) > 0:
+        try:
+            with open(timings_path) as f:
+                timings = json.load(f)
+        except json.JSONDecodeError:
+            logger.warning("charge_engine: unreadable %s, rewriting", timings_path)
+    timings["charge_engine"] = elapsed
+    atomic_json_write(timings_path, timings)
+    logger.info(
+        "charge_engine: %d routines in %.2f s (nelec grid %.4f of %.1f)",
+        len(written), elapsed, meta.get("nelec_grid_becke", float("nan")),
+        meta.get("nelec_wfx", float("nan")),
+    )
+    return len(written) == len(ENGINE_ROUTINES) - (0 if spin_tf else len(spin_routines))
 
 
 def _run_orca_parse(
@@ -2269,6 +2370,7 @@ def gbw_analysis(
     patch_timings: bool = False,
     horton_python: str = "",
     recheck_fuzzy: bool = False,
+    charge_engine: bool = False,
 ) -> None:
     """
     Run a full analysis on a folder of gbw files
@@ -2299,6 +2401,10 @@ def gbw_analysis(
             fuzzy integrations / open-shell fuzzy bond orders by reparsing the
             archived output where it is trustworthy, and invalidate the rest
             so the restart reruns only those steps (implies restart)
+        charge_engine(bool): compute ENGINE_ROUTINES (charges, fuzzy density/
+            spin, fuzzy_bond) with core/charge_engine.py instead of Multiwfn;
+            validation then requires a charge_engine timing, so folders whose
+            data came from Multiwfn are recomputed
     Writes:
         - settings.ini file with memory and n_threads
         - jobs for conversion to wfn/wfx and multiwfn analysis
@@ -2327,9 +2433,6 @@ def gbw_analysis(
     # lets preprocess_compressed rebuild the wavefunction as .wfx.
     if recheck_fuzzy and not parse_only:
         from qtaim_gen.source.utils.fuzzy_recheck import recheck_fuzzy as _recheck
-        from qtaim_gen.source.utils.validation import (
-            get_charge_spin_n_atoms_from_folder,
-        )
 
         _dft = get_charge_spin_n_atoms_from_folder(folder, logger=logger)
         if _dft and _dft.get("spin") is not None:
@@ -2516,6 +2619,7 @@ def gbw_analysis(
                     bcp_tolerance=bcp_tolerance,
                     require_qtaim_provenance=require_qtaim_provenance,
                     recheck_fuzzy=recheck_fuzzy,
+                    charge_engine=charge_engine,
                 )
             except Exception as e:
                 logger.error(f"Error during validation checks: {e}")
@@ -2552,6 +2656,7 @@ def gbw_analysis(
                         bcp_tolerance=bcp_tolerance,
                         require_qtaim_provenance=require_qtaim_provenance,
                         recheck_fuzzy=recheck_fuzzy,
+                        charge_engine=charge_engine,
                     )
                 except Exception:
                     tf_without_orca = False
@@ -2585,6 +2690,7 @@ def gbw_analysis(
                             bcp_tolerance=bcp_tolerance,
                             require_qtaim_provenance=require_qtaim_provenance,
                             recheck_fuzzy=recheck_fuzzy,
+                            charge_engine=charge_engine,
                         )
                     except Exception as e:
                         logger.error(f"Error validating orca-only parse: {e}")
@@ -2642,6 +2748,7 @@ def gbw_analysis(
                         bcp_tolerance=bcp_tolerance,
                         require_qtaim_provenance=require_qtaim_provenance,
                         recheck_fuzzy=recheck_fuzzy,
+                        charge_engine=charge_engine,
                     )
 
                     if tf_validation:
@@ -2697,12 +2804,17 @@ def gbw_analysis(
             check_bcp_count=check_bcp_count,
             bcp_tolerance=bcp_tolerance,
             require_qtaim_provenance=require_qtaim_provenance,
+            skip_routines=ENGINE_ROUTINES if charge_engine else None,
         )
+        # after run_jobs: its convert step is what produces orca.wfx
+        if charge_engine:
+            _run_charge_engine(folder, n_threads=n_threads, logger=logger, restart=restart)
 
     print("... Parsing multiwfn output")
     # parse those jobs to jsons for 5 categories
     parse_multiwfn(
-        folder, separate=separate, debug=debug, logger=logger, full_set=full_set
+        folder, separate=separate, debug=debug, logger=logger, full_set=full_set,
+        skip_routines=ENGINE_ROUTINES if charge_engine else None,
     )
 
     # Parse ORCA output file (if present)
@@ -2733,6 +2845,7 @@ def gbw_analysis(
         bcp_tolerance=bcp_tolerance,
         require_qtaim_provenance=require_qtaim_provenance,
         recheck_fuzzy=recheck_fuzzy,
+        charge_engine=charge_engine,
     )
 
     # Optional repair pass: if validation failed and patch_timings is on,

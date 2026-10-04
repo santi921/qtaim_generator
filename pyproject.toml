@@ -80,6 +80,8 @@ find-bad-json = "qtaim_gen.source.scripts.helpers.find_bad_json:main"
 full-runner = "qtaim_gen.source.scripts.full_runner:main"
 full-runner-parsl = "qtaim_gen.source.scripts.full_runner_parsl:main"
 full-runner-parsl-alcf = "qtaim_gen.source.scripts.full_runner_parsl_alcf:main"
+full-runner-engine = "qtaim_gen.source.scripts.full_runner_engine:main"
+charge-engine = "qtaim_gen.source.core.charge_engine:main"
 
 find-empty-compressed = "qtaim_gen.source.scripts.helpers.find_empty_compressed:main"
 count-orca-json = "qtaim_gen.source.scripts.helpers.count_orca_json:main"

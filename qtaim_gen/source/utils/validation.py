@@ -8,6 +8,7 @@ import zipfile
 from typing import Optional
 from qtaim_gen.source.core.parse_qtaim import dft_inp_to_dict
 from qtaim_gen.source.core.parse_orca import ORCA_PARSER_VERSION
+from qtaim_gen.source.data.multiwfn import ENGINE_ROUTINES
 import numpy as np
 from datetime import datetime
 
@@ -261,10 +262,16 @@ def validate_timing_dict(
     spin_tf: bool = False,
     logger: any = None,
     n_atoms: int = None,
+    charge_engine: bool = False,
 ):
     """
     Basic check that the timing json file has the expected structure.
     Check that it has the keys 'total', 'qtaim', 'charge', 'bond', and 'fuzzy_full'.
+
+    A positive 'charge_engine' timing stands in for the per-routine timings of
+    ENGINE_ROUTINES (core/charge_engine.py computed them in one pass). With
+    charge_engine=True that timing is required, so folders whose charge/fuzzy/
+    bond data came from Multiwfn are not counted as done.
     """
     timing_dict = _safe_json_load(timing_json_loc, logger=logger)
     if timing_dict is None:
@@ -273,6 +280,20 @@ def validate_timing_dict(
     expected_keys, excepted_spin_keys = get_expected_timing_keys(
         full_set=full_set, spin_tf=False
     )
+    engine_done = (
+        isinstance(timing_dict.get("charge_engine"), (int, float))
+        and timing_dict["charge_engine"] > 0
+    )
+    if charge_engine and not engine_done:
+        msg = "No charge_engine timing: charge/fuzzy/bond data is not from the charge engine."
+        if logger:
+            logger.error(msg)
+        if verbose:
+            print(msg)
+        return False
+    if engine_done:
+        expected_keys = [k for k in expected_keys if k not in ENGINE_ROUTINES]
+        excepted_spin_keys = [k for k in excepted_spin_keys if k not in ENGINE_ROUTINES]
 
     # Keys patched by patch_timings_from_log carry a TIMING_PLACEHOLDER (-1.0)
     # when log-scrape couldn't find them; accept those here so cleanup runs.
@@ -1011,6 +1032,7 @@ def validation_checks(
     require_qtaim_provenance: bool = False,
     recheck_fuzzy: bool = False,
     orca_min_parser_version: Optional[int] = ORCA_PARSER_VERSION,
+    charge_engine: bool = False,
 ):
     """
     Run all validation checks on the json files in the given folder.
@@ -1037,6 +1059,8 @@ def validation_checks(
         orca_min_parser_version (Optional[int]): with check_orca, also fail when
             orca.json predates this parser version (orca_parser_version, 1 when
             absent), so the runner reparses it. None or 0 disables the gate.
+        charge_engine (bool): also fail unless timings.json records a
+            charge_engine run (see validate_timing_dict).
     Returns:
         bool: True if all validation checks pass, False otherwise.
     """
@@ -1099,7 +1123,8 @@ def validation_checks(
     tf_cond = True
 
     if not validate_timing_dict(
-        timing_json_loc, verbose=verbose, full_set=full_set, spin_tf=spin_tf
+        timing_json_loc, verbose=verbose, full_set=full_set, spin_tf=spin_tf,
+        charge_engine=charge_engine,
     ):
         if logger:
             logger.error(f"Timing json validation failed in folder: {folder}")

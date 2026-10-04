@@ -90,3 +90,7 @@ runs/
 !tests/test_files/**/*.mfwn
 data/profiling_study/runs/
 data/profiling_study/logs/
+
+# numba on-disk JIT cache (charge engine kernels)
+*.nbi
+*.nbc

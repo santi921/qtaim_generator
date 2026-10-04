@@ -267,6 +267,17 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
 
     parser.add_argument(
+        "--charge_engine",
+        action="store_true",
+        help=(
+            "compute charges (hirshfeld, adch, cm5, becke), fuzzy density/spin and "
+            "fuzzy_bond with the in-process charge engine instead of Multiwfn; "
+            "needs .wfx wavefunctions (the default). Prevalidation then treats folders without a charge_engine "
+            "timing as not done. full-runner-engine sets this"
+        ),
+    )
+
+    parser.add_argument(
         "--recheck_fuzzy",
         action="store_true",
         help=(
@@ -330,6 +341,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         getattr(args, "require_qtaim_provenance", False)
     )
     recheck_fuzzy = bool(getattr(args, "recheck_fuzzy", False))
+    charge_engine = bool(getattr(args, "charge_engine", False))
 
     # parsl args
     type_runner: str = str(getattr(args, "type_runner", "local"))
@@ -408,6 +420,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         require_qtaim_provenance=require_qtaim_provenance,
         recheck_fuzzy=recheck_fuzzy,
         check_ecp=check_ecp,
+        charge_engine=charge_engine,
     )
 
     if not folders_run:
@@ -453,6 +466,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             bcp_tolerance=bcp_tolerance,
             require_qtaim_provenance=require_qtaim_provenance,
             recheck_fuzzy=recheck_fuzzy,
+            charge_engine=charge_engine,
         )
         for f in folders_run
     ]

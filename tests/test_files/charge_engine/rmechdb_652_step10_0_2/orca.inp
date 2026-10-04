@@ -1,0 +1,9 @@
+! wB97M-V def2-TZVPD EnGrad RIJCOSX def2/J NoUseSym DIIS NOSOSCF NormalConv DEFGRID3 ALLPOP 
+%scf Convergence Tight maxiter 300 end %elprop Dipole true Quadrupole true end %output Print[P_ReducedOrbPopMO_L] 1 Print[P_ReducedOrbPopMO_M] 1 Print[P_BondOrder_L] 1 Print[P_BondOrder_M] 1 Print[P_Fockian] 1 Print[P_OrbEn] 2 end %basis GTOName "def2-tzvpd.bas" end %scf THRESH 1e-12 TCUT 1e-13 end %maxcore 2544.0 %nbo NBOKEYLIST = "$NBO NPA NBO E2PERT 0.1 $END" end 
+*xyz 0 2 
+Br   0.49449242803393 -1.494098245461358 0.5
+O   -1.503932461179699 -1.550810664626643 0.5
+O   -2.177459961647529 -0.279081484353588 0.5
+O   -3.481230005206703 -0.059509605558406 0.5
+*
+%pal nprocs 16 end

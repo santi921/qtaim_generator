@@ -1,0 +1,10 @@
+! wB97M-V def2-TZVPD EnGrad RIJCOSX def2/J NoUseSym DIIS NOSOSCF NormalConv DEFGRID3 ALLPOP 
+%scf Convergence Tight maxiter 300 end %elprop Dipole true Quadrupole true end %output Print[P_ReducedOrbPopMO_L] 1 Print[P_ReducedOrbPopMO_M] 1 Print[P_BondOrder_L] 1 Print[P_BondOrder_M] 1 Print[P_Fockian] 1 Print[P_OrbEn] 2 end %scf THRESH 1e-12 TCUT 1e-13 end %maxcore 2544.0 %nbo NBOKEYLIST = "$NBO NPA NBO E2PERT 0.1 $END" end 
+*xyz 0 1 
+Xe   -0.0 0.0 0.0
+Cl   2.42266 0.0 0.0
+Cl   0.0 2.42266 0.0
+Cl   -2.42266 -0.0 0.0
+Cl   0.0 -2.42266 0.0
+*
+%pal nprocs 16 end
