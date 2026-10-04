@@ -23,12 +23,13 @@ untouched; the test uses its own clone and a cloned env.
 cd /global/scratch/users/santiagovargas
 git clone -b feat/charge-engine git@github.com:santi921/qtaim_generator.git qtaim_generator_engine
 conda create -y -n qtaim_engine --clone qtaim_generator
-conda activate qtaim_engine
-pip install --dry-run numba==0.68.0            # expect only numba + llvmlite
-pip install numba==0.68.0
-pip install -e qtaim_generator_engine --no-deps
+conda activate qtaim_engine && echo $CONDA_PREFIX      # must end in envs/qtaim_engine; stop if activate fails
+export PYTHONNOUSERSITE=1                                # never read or write ~/.local
+python -m pip install --dry-run numba==0.68.0           # expect only numba + llvmlite
+python -m pip install numba==0.68.0
+python -m pip install -e qtaim_generator_engine --no-deps
 python -c "import qtaim_gen, numba; print(qtaim_gen.__file__, numba.__version__)"   # must be the _engine clone
-pip check
+python -m pip check
 cd qtaim_generator_engine && pytest -q tests/test_charge_engine.py   # also builds the numba cache
 ```
 
