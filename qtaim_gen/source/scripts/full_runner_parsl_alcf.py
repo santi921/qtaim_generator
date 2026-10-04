@@ -186,7 +186,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument(
         "--patch_path",
         action="store_true",
-        help="sometimes multiwfn has issues with pathing so this will just write the input with the relative path",
+        help="no-op, kept for existing job scripts: Multiwfn is always given the bare wavefunction name (200-char input path limit)",
     )
 
     parser.add_argument(

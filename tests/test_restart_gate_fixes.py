@@ -408,3 +408,24 @@ class TestDamagedCpprop:
             z.writestr("CPprop.txt", CPPROP_FIXTURE.read_bytes())
             z.writestr("qtaim.out", COUNT_LINE + EXPORT_LINE)
         assert qtaim_cpprop_problems(str(tmp_path)) == []
+
+
+def test_multiwfn_wrapper_passes_bare_wavefunction_name(tmp_path):
+    # Multiwfn 3.8 rejects input paths over 200 chars, so the script must
+    # name the wavefunction relative to its cwd even for deep job folders.
+    folder = tmp_path / ("x" * 120) / ("y" * 120)
+    folder.mkdir(parents=True)
+    inp = folder / "hirshfeld.txt"
+    inp.write_text("7\n1\n1\nn\n0\nq\n")
+    for override in (False, True):
+        write_multiwfn_exe(
+            out_folder=str(folder),
+            read_file=str(folder / "orca.wfx"),
+            multi_wfn_cmd="Multiwfn",
+            multiwfn_input_file=str(inp),
+            name="props_hirshfeld.mfwn",
+            overwrite=True,
+            gbw_override=override,
+        )
+        cmd = (folder / "props_hirshfeld.mfwn").read_text().splitlines()[-1]
+        assert cmd.startswith("Multiwfn 'orca.wfx' < ")
