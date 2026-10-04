@@ -174,7 +174,8 @@ def write_multiwfn_exe(
         mv_cpprop(bool): whether to move the cpprop file to the output folder
         overwrite(bool): whether to overwrite the file if it already exists
         name(str): name of the bash script
-        gbw_override(bool): whether to override the gbw file location
+        gbw_override(bool): no-op; the wavefunction is always passed by bare
+            name (Multiwfn's 200-char input path limit)
     """
 
     out_file = str(Path.home().joinpath(out_folder, name))
@@ -193,18 +194,14 @@ def write_multiwfn_exe(
                 f.write("orca_2mkl '" + str(Path.home().joinpath(out_folder)) + "'\n")
 
             multiwfn_input_file_root = multiwfn_input_file.split("/")[-1].split(".")[0]
+            # Always the bare name: Multiwfn 3.8 truncates input paths over 200
+            # chars ("Unable to find the input file", exit 24), and the script is
+            # run with cwd=out_folder. gbw_override is kept as a no-op.
             bare_file = read_file.split("/")[-1]
-            
-            if gbw_override: 
-                # 
-                gbw_loc = bare_file
-            else: 
-                gbw_loc = str(Path.home().joinpath(out_folder, read_file))
 
-            
             f.write(
                 "{} ".format(multi_wfn_cmd)  # multiwfn command
-                + "'" + gbw_loc + "'"  # wfn/gbw file
+                + "'" + bare_file + "'"  # wfn/gbw file
                 + " < '{}' | tee ".format(multiwfn_input_file)  # multiwfn input file
                 + "'" + str(
                     Path.home().joinpath(
@@ -248,7 +245,7 @@ def create_jobs(
         orca_6(bool): whether calc is from orca6
         logger(logging.Logger): logger to log messages
         full_set(int): whether to use full set of analysis (1) or minimal (0)
-        patch_path(bool): whether to patch the pathing in the multiwfn input files
+        patch_path(bool): no-op; Multiwfn is always given the bare wavefunction name
         wfx(bool): whether to use .wfx format instead of .wfn for conversion
 
     """
