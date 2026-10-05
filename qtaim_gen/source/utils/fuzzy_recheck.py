@@ -8,16 +8,20 @@ three classes of wrong-but-complete data are never rerun:
 - fuzzy spin integrations that do not sum to (multiplicity - 1): open-shell
   jobs run from a .wfn, which Multiwfn reads as all-alpha, and every
   `hirsh_fuzzy_spin` (its input integrated rho, not spin density);
-- open-shell `fuzzy_bond` from a .wfn (all-alpha) or parsed before the parser
-  read the Total column (alpha only).
+- `fuzzy_bond` of any unrestricted wavefunction, open shell or UKS singlet:
+  from a .wfn (read as all-alpha; 2x the delocalization index for a singlet) or
+  parsed before the parser read the Total column (alpha only, 0.5x for a
+  singlet). A singlet with no archived fuzzy_bond.out is left alone: nothing
+  tells a restricted record (fine) from an unrestricted one.
 
 `recheck_fuzzy` finds these, re-parses the archived Multiwfn output where that
 output is trustworthy (no rerun), rebuilds `hirsh_fuzzy_density` from the stored
 Hirshfeld charges when there is no such output (no rerun), and otherwise
 invalidates the step (compiled
 key plus per-step .out/.json in the job root and generator/) so a restart
-reruns exactly that step. Open-shell spin steps only rerun on a .wfx: an
-existing one, or one rebuilt from a gbw source (any .wfn is then removed).
+reruns exactly that step. Open-shell spin steps and any fuzzy_bond rerun only
+run on a .wfx: an existing one, or one rebuilt from a gbw source (any .wfn is
+then removed).
 When a rerun could not actually happen (no source, or --wfn for spin steps)
 the steps are left untouched and the folder is refused; reparses, which need
 no wavefunction, are applied either way.
@@ -183,27 +187,32 @@ def plan_recheck(folder: str, mult: int) -> Dict[str, object]:
                 continue
         rerun.append(step)
 
-    if mult > 1:
-        bond = _preferred(folder, _compiled(folder, "bond.json"))
-        if "fuzzy_bond" in bond:
-            text = read_multiwfn_out(folder, "fuzzy_bond.out")
-            counts = out_electron_counts(text) if text is not None else None
-            # beta > 0: alpha/beta resolved (.wfx era), only the parser column
-            # can be wrong. beta == 0 is also genuine when every electron is
-            # unpaired (H atom, H2+): total == mult - 1.
-            if counts is not None and (counts[2] > 0 or abs(counts[0] - (mult - 1)) < 0.5):
-                try:
-                    payload = _parse_text("fuzzy_bond", text, parse_bond_order_fuzzy)
-                except Exception:
-                    payload = None
-                if payload:
-                    if payload != bond["fuzzy_bond"]:
-                        reparse["fuzzy_bond"] = payload
-                else:
-                    rerun.append("fuzzy_bond")
+    # Singlets too: a UKS singlet's fuzzy_bond is wrong the same two ways
+    # (alpha-only 0.5x from a .wfx, doubled 2x from an all-alpha .wfn).
+    bond = _preferred(folder, _compiled(folder, "bond.json"))
+    if "fuzzy_bond" in bond:
+        text = read_multiwfn_out(folder, "fuzzy_bond.out")
+        counts = out_electron_counts(text) if text is not None else None
+        if counts is None and mult == 1:
+            # no archived banner: a restricted singlet (fine) cannot be told from
+            # an unrestricted one, so rerunning every such folder is not justified
+            pass
+        # beta > 0: alpha/beta resolved (.wfx era), only the parser column
+        # can be wrong. beta == 0 is also genuine when every electron is
+        # unpaired (H atom, H2+): total == mult - 1.
+        elif counts is not None and (counts[2] > 0 or abs(counts[0] - (mult - 1)) < 0.5):
+            try:
+                payload = _parse_text("fuzzy_bond", text, parse_bond_order_fuzzy)
+            except Exception:
+                payload = None
+            if payload:
+                if payload != bond["fuzzy_bond"]:
+                    reparse["fuzzy_bond"] = payload
             else:
-                # read as all-alpha, or no output to tell which era it came from
                 rerun.append("fuzzy_bond")
+        else:
+            # read as all-alpha, or (open shell) no output to tell which era it came from
+            rerun.append("fuzzy_bond")
     return {"reparse": reparse, "rerun": rerun, "derived": derived}
 
 
@@ -225,24 +234,27 @@ def _wavefunction_plan(
     Returns (ok, note, wfn_files_to_remove). Spin-sensitive open-shell steps
     need a .wfx: an existing one, or a gbw source to convert from (any .wfn is
     then removed so conversion runs). Other steps need any wavefunction or
-    source. Without them the rerun could not happen and must not be set up.
+    source. A fuzzy_bond rerun needs a .wfx at any multiplicity: at mult 1 it is
+    only planned for an all-alpha (.wfn) record, and a rerun from that .wfn
+    would reproduce the doubled value. Without them the rerun could not happen
+    and must not be set up.
     """
     if not rerun:
         return True, "not needed", []
-    spin_rerun = mult > 1 and bool(set(rerun) & SPIN_SENSITIVE)
+    spin_rerun = (mult > 1 and bool(set(rerun) & SPIN_SENSITIVE)) or "fuzzy_bond" in rerun
     source = _gbw_source_present(folder, preprocess_compressed)
     wfns = sorted(
         p for b in (folder, os.path.join(folder, "generator")) for p in glob.glob(os.path.join(b, "*.wfn"))
     )
     if spin_rerun:
         if not wfx:
-            return False, "open-shell spin steps need .wfx; refusing to rerun them with --wfn", []
+            return False, "spin steps / fuzzy_bond need .wfx; refusing to rerun them with --wfn", []
         existing = _wavefunction_path(folder)
         if existing is not None and existing.endswith(".wfx"):
             return True, "orca.wfx present", []
         if source:
             return True, "rebuilding .wfx from the gbw source", wfns
-        return False, "open-shell rerun needs a .wfx and no gbw source is present", []
+        return False, "spin / fuzzy_bond rerun needs a .wfx and no gbw source is present", []
     if _wavefunction_path(folder) is not None or wfns or source:
         return True, "wavefunction or gbw source present", []
     return False, "no wavefunction or gbw source to rerun from", []
