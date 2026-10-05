@@ -193,6 +193,51 @@ class TestSingletFuzzyBond:
         assert recheck_fuzzy(str(job), mult=1) == {
             "reparse": [], "rerun": [], "derived": [], "wavefunction": "not needed", "ok": True}
 
+    RESTRICTED_LINES = (
+        "#    1:    1(H )    2(Br)   0.899321\n"
+        "#    2:    4(C )    5(C )   1.251987\n"
+    )
+
+    def _inp(self, job, keyword):
+        (job / "orca.inp").write_text(f"! {keyword} wB97M-V def2-TZVPD\n*xyz 0 1\nH 0 0 0\nH 0 0 0.74\n*\n")
+
+    def _restricted_out(self, lines=True):
+        head = FUZZY_BOND_WFX.split("Orbitals from")[0].replace(
+            self.BANNER, "Total/Alpha/Beta electrons:     96.0000     48.0000     48.0000")
+        return head + ("The total bond order >=  0.050000\n" + self.RESTRICTED_LINES if lines else "")
+
+    def test_uks_singlet_without_archive_reruns(self, tmp_path):
+        job = _job(tmp_path, {}, bond={"fuzzy_bond": {"4_C_to_5_C": 2.5}}, loose=["orca.gbw"])
+        self._inp(job, "UKS")
+        rep = recheck_fuzzy(str(job), mult=1, dry_run=True)
+        assert rep["rerun"] == ["fuzzy_bond"] and rep["ok"]
+
+    def test_rks_singlet_never_parsed_or_rerun(self, tmp_path):
+        job = _job(tmp_path, {}, bond={"fuzzy_bond": {"4_C_to_5_C": 9.9}},
+                   outs={"fuzzy_bond.out": self._out(96, 96, 0)})
+        self._inp(job, "RKS")
+        assert recheck_fuzzy(str(job), mult=1) == {
+            "reparse": [], "rerun": [], "derived": [], "wavefunction": "not needed", "ok": True}
+
+    def test_restricted_single_column_output_is_clean(self, tmp_path):
+        job = _job(tmp_path, {}, bond={"fuzzy_bond": {"4_C_to_5_C": 9.9}},
+                   outs={"fuzzy_bond.out": self._restricted_out()})
+        assert recheck_fuzzy(str(job), mult=1)["reparse"] == []
+
+    def test_truncated_restricted_output_is_clean_and_keeps_the_wfn(self, tmp_path):
+        job = _job(tmp_path, {}, bond={"fuzzy_bond": {"4_C_to_5_C": 1.0}},
+                   outs={"fuzzy_bond.out": self._restricted_out(lines=False)}, loose=["input.wfn", "orca.gbw"])
+        rep = recheck_fuzzy(str(job), mult=1)
+        assert rep["rerun"] == [] and rep["reparse"] == []
+        assert (job / "input.wfn").exists()
+
+    def test_truncated_unrestricted_output_reruns(self, tmp_path):
+        truncated = FUZZY_BOND_WFX.split("The total bond order")[0].replace(
+            self.BANNER, "Total/Alpha/Beta electrons:     96.0000     48.0000     48.0000")
+        job = _job(tmp_path, {}, bond={"fuzzy_bond": {"4_C_to_5_C": 1.0}},
+                   outs={"fuzzy_bond.out": truncated}, loose=["orca.gbw"])
+        assert recheck_fuzzy(str(job), mult=1, dry_run=True)["rerun"] == ["fuzzy_bond"]
+
     def test_open_shell_without_archive_still_reruns(self, tmp_path):
         job = _job(tmp_path, {}, bond={"fuzzy_bond": {"4_C_to_5_C": 2.5}}, loose=["orca.gbw"])
         assert recheck_fuzzy(str(job), mult=2, dry_run=True)["rerun"] == ["fuzzy_bond"]
