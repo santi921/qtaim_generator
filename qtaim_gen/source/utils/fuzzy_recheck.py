@@ -8,17 +8,23 @@ three classes of wrong-but-complete data are never rerun:
 - fuzzy spin integrations that do not sum to (multiplicity - 1): open-shell
   jobs run from a .wfn, which Multiwfn reads as all-alpha, and every
   `hirsh_fuzzy_spin` (its input integrated rho, not spin density);
-- open-shell `fuzzy_bond` from a .wfn (all-alpha) or parsed before the parser
-  read the Total column (alpha only).
+- `fuzzy_bond` of any unrestricted wavefunction, open shell or UKS singlet:
+  from a .wfn (read as all-alpha; 2x the delocalization index for a singlet) or
+  parsed before the parser read the Total column (alpha only, 0.5x for a
+  singlet). A restricted singlet (RKS/RHF input, or single-column output) can
+  carry neither error and is never parsed or rerun. A UKS singlet with no
+  archived fuzzy_bond.out cannot be checked, so it reruns.
 
 `recheck_fuzzy` finds these, re-parses the archived Multiwfn output where that
 output is trustworthy (no rerun), rebuilds `hirsh_fuzzy_density` from the stored
 Hirshfeld charges when there is no such output (no rerun), and otherwise
 invalidates the step (compiled
 key plus per-step .out/.json in the job root and generator/) so a restart
-reruns exactly that step. Open-shell spin steps only rerun on a .wfx: an
-existing one, or one rebuilt from a gbw source (any .wfn is then removed).
-When a rerun could not actually happen (no source, or --wfn for spin steps)
+reruns exactly that step. Open-shell spin steps and any fuzzy_bond rerun only
+run on a .wfx: an existing one, or one rebuilt from a gbw source (any .wfn is
+then removed).
+When a rerun could not actually happen (no source, or --wfn for spin steps or
+fuzzy_bond)
 the steps are left untouched and the folder is refused; reparses, which need
 no wavefunction, are applied either way.
 """
@@ -27,6 +33,7 @@ import glob
 import json
 import math
 import os
+import re
 import tempfile
 from typing import Dict, List, Optional, Tuple
 
@@ -38,7 +45,7 @@ from qtaim_gen.source.core.parse_multiwfn import (
 from rdkit import Chem
 
 from qtaim_gen.source.utils.atomic_write import atomic_json_write
-from qtaim_gen.source.utils.validation import read_multiwfn_out
+from qtaim_gen.source.utils.validation import geometry_input_candidates, read_multiwfn_out
 
 DENSITY_KEYS = ("becke_fuzzy_density", "hirsh_fuzzy_density", "mbis_fuzzy_density")
 SPIN_KEYS = ("becke_fuzzy_spin", "hirsh_fuzzy_spin", "mbis_fuzzy_spin")
@@ -102,6 +109,61 @@ def hirsh_density_from_charges(folder: str) -> Optional[dict]:
     out["sum"] = total
     out["abs_sum"] = sum(abs(v) for k, v in out.items() if k != "sum")
     return out
+
+
+# a bond line of an unrestricted fuzzy_bond.out; a restricted run prints one column
+_UNRESTRICTED_BOND_LINE = re.compile(r"Alpha:\s*\S+\s+Beta:\s*\S+\s+Total:")
+
+
+def unrestricted_input(folder: str) -> Optional[bool]:
+    """Whether the folder's ORCA input asks for an unrestricted reference (a UKS/UHF
+    keyword on a `!` line, or HFTyp UHF/UKS in a block). None when no input is readable."""
+    try:
+        names = geometry_input_candidates(folder)
+    except OSError:
+        return None
+    for name in names:
+        try:
+            with open(os.path.join(folder, name), errors="replace") as f:
+                lines = [line.strip().lower() for line in f]
+        except OSError:
+            continue
+        for line in lines:
+            if line.startswith("!") and {"uks", "uhf"} & set(line[1:].split()):
+                return True
+            if "hftyp" in line and ("uks" in line or "uhf" in line):
+                return True
+        return False
+    return None
+
+
+def _singlet_fuzzy_bond(folder: str, stored) -> Tuple[Optional[dict], bool]:
+    """(reparse payload or None, rerun?) for a mult-1 fuzzy_bond.
+
+    Restricted singlets come first and cost nothing: an RKS/RHF input, or a
+    single-column output, cannot hold either error. Unrestricted ones fail two
+    ways: an all-alpha banner (.wfn era, 2x) reruns from a .wfx; a three-column
+    output parsed before the Total column was read (0.5x) is reparsed. An
+    unrestricted singlet with no usable archive cannot be checked and reruns.
+    """
+    unrestricted = unrestricted_input(folder)
+    if unrestricted is False:
+        return None, False
+    text = read_multiwfn_out(folder, "fuzzy_bond.out")
+    if text is None:
+        return None, bool(unrestricted)
+    counts = out_electron_counts(text)
+    if counts is not None and counts[2] == 0 and counts[0] > 0.5:
+        return None, True
+    if not (_UNRESTRICTED_BOND_LINE.search(text) or "are alpha type" in text):
+        return None, False
+    try:
+        payload = _parse_text("fuzzy_bond", text, parse_bond_order_fuzzy)
+    except Exception:
+        payload = None
+    if not payload:
+        return None, True
+    return (payload if payload != stored else None), False
 
 
 def out_electron_counts(text: str) -> Optional[Tuple[float, float, float]]:
@@ -183,27 +245,32 @@ def plan_recheck(folder: str, mult: int) -> Dict[str, object]:
                 continue
         rerun.append(step)
 
-    if mult > 1:
-        bond = _preferred(folder, _compiled(folder, "bond.json"))
-        if "fuzzy_bond" in bond:
-            text = read_multiwfn_out(folder, "fuzzy_bond.out")
-            counts = out_electron_counts(text) if text is not None else None
-            # beta > 0: alpha/beta resolved (.wfx era), only the parser column
-            # can be wrong. beta == 0 is also genuine when every electron is
-            # unpaired (H atom, H2+): total == mult - 1.
-            if counts is not None and (counts[2] > 0 or abs(counts[0] - (mult - 1)) < 0.5):
-                try:
-                    payload = _parse_text("fuzzy_bond", text, parse_bond_order_fuzzy)
-                except Exception:
-                    payload = None
-                if payload:
-                    if payload != bond["fuzzy_bond"]:
-                        reparse["fuzzy_bond"] = payload
-                else:
-                    rerun.append("fuzzy_bond")
+    bond = _preferred(folder, _compiled(folder, "bond.json"))
+    if "fuzzy_bond" in bond and mult == 1:
+        payload, needs_rerun = _singlet_fuzzy_bond(folder, bond["fuzzy_bond"])
+        if payload is not None:
+            reparse["fuzzy_bond"] = payload
+        if needs_rerun:
+            rerun.append("fuzzy_bond")
+    elif "fuzzy_bond" in bond:
+        text = read_multiwfn_out(folder, "fuzzy_bond.out")
+        counts = out_electron_counts(text) if text is not None else None
+        # beta > 0: alpha/beta resolved (.wfx era), only the parser column
+        # can be wrong. beta == 0 is also genuine when every electron is
+        # unpaired (H atom, H2+): total == mult - 1.
+        if counts is not None and (counts[2] > 0 or abs(counts[0] - (mult - 1)) < 0.5):
+            try:
+                payload = _parse_text("fuzzy_bond", text, parse_bond_order_fuzzy)
+            except Exception:
+                payload = None
+            if payload:
+                if payload != bond["fuzzy_bond"]:
+                    reparse["fuzzy_bond"] = payload
             else:
-                # read as all-alpha, or no output to tell which era it came from
                 rerun.append("fuzzy_bond")
+        else:
+            # read as all-alpha, or no output to tell which era it came from
+            rerun.append("fuzzy_bond")
     return {"reparse": reparse, "rerun": rerun, "derived": derived}
 
 
@@ -225,24 +292,27 @@ def _wavefunction_plan(
     Returns (ok, note, wfn_files_to_remove). Spin-sensitive open-shell steps
     need a .wfx: an existing one, or a gbw source to convert from (any .wfn is
     then removed so conversion runs). Other steps need any wavefunction or
-    source. Without them the rerun could not happen and must not be set up.
+    source. A fuzzy_bond rerun needs a .wfx at any multiplicity: at mult 1 it is
+    only planned for an unrestricted singlet, which a .wfn reads as all-alpha
+    (the doubled value). Without them the rerun could not happen and must not
+    be set up.
     """
     if not rerun:
         return True, "not needed", []
-    spin_rerun = mult > 1 and bool(set(rerun) & SPIN_SENSITIVE)
+    spin_rerun = (mult > 1 and bool(set(rerun) & SPIN_SENSITIVE)) or "fuzzy_bond" in rerun
     source = _gbw_source_present(folder, preprocess_compressed)
     wfns = sorted(
         p for b in (folder, os.path.join(folder, "generator")) for p in glob.glob(os.path.join(b, "*.wfn"))
     )
     if spin_rerun:
         if not wfx:
-            return False, "open-shell spin steps need .wfx; refusing to rerun them with --wfn", []
+            return False, "spin steps / fuzzy_bond need .wfx; refusing to rerun them with --wfn", []
         existing = _wavefunction_path(folder)
         if existing is not None and existing.endswith(".wfx"):
             return True, "orca.wfx present", []
         if source:
             return True, "rebuilding .wfx from the gbw source", wfns
-        return False, "open-shell rerun needs a .wfx and no gbw source is present", []
+        return False, "spin / fuzzy_bond rerun needs a .wfx and no gbw source is present", []
     if _wavefunction_path(folder) is not None or wfns or source:
         return True, "wavefunction or gbw source present", []
     return False, "no wavefunction or gbw source to rerun from", []

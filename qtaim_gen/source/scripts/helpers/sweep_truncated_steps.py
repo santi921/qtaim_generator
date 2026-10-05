@@ -135,6 +135,7 @@ def classify_folder(
     recheck_fuzzy: bool = False,
     preprocess_compressed: bool = False,
     check_orca: bool = False,
+    wfx: bool = True,
 ) -> dict:
     folder = resolve_results_folder(folder_inputs, root_omol_inputs, root_omol_results)
     rec = {"folder": folder_inputs, "results_folder": folder}
@@ -167,7 +168,7 @@ def classify_folder(
     recheck = None
     if recheck_fuzzy and mult is not None:
         recheck = _recheck_fuzzy(
-            folder, int(mult), dry_run=True, preprocess_compressed=preprocess_compressed
+            folder, int(mult), dry_run=True, wfx=wfx, preprocess_compressed=preprocess_compressed
         )
         # the ALCF runner copies the gbw source in from the inputs tree at run time
         if (
@@ -297,6 +298,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--check_orca", action="store_true",
                         help="require a current orca.json (orca_parser_version), as the "
                              "runner does under --check_orca")
+    parser.add_argument("--wfn", action="store_true",
+                        help="the runner converts to .wfn (no --wfx): spin steps and fuzzy_bond reruns "
+                             "are then reported as refused, as the runner would refuse them")
     parser.add_argument("--requeue_file", type=str, default=None,
                         help="if set, write non-complete folder paths here")
     args = parser.parse_args(argv)
@@ -326,6 +330,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                 args.recheck_fuzzy,
                 args.preprocess_compressed,
                 args.check_orca,
+                not args.wfn,
             ): folder
             for folder in folders
         }

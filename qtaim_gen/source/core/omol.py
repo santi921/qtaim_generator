@@ -2299,7 +2299,7 @@ def gbw_analysis(
         check_bcp_count(bool): reject qtaim.json records holding fewer bond
             critical points than Multiwfn reported in qtaim.out
         recheck_fuzzy(bool): before anything else, repair physically wrong
-            fuzzy integrations / open-shell fuzzy bond orders by reparsing the
+            fuzzy integrations / unrestricted fuzzy bond orders by reparsing the
             archived output where it is trustworthy, and invalidate the rest
             so the restart reruns only those steps (implies restart)
     Writes:
@@ -2326,8 +2326,9 @@ def gbw_analysis(
         ):
             restart = False
 
-    # Runs before extraction: removing an open-shell orca.wfn here is what
-    # lets preprocess_compressed rebuild the wavefunction as .wfx.
+    # Runs before extraction: removing an unrestricted orca.wfn here (open shell,
+    # or a UKS singlet's fuzzy_bond) is what lets preprocess_compressed rebuild
+    # the wavefunction as .wfx.
     if recheck_fuzzy and not parse_only:
         from qtaim_gen.source.utils.fuzzy_recheck import recheck_fuzzy as _recheck
         from qtaim_gen.source.utils.validation import (
