@@ -11,6 +11,14 @@ from scratch) and reports:
     other.json, is unchanged (merge mode must not touch them)
   - wall time of the 9 Multiwfn routines (original timings.json) vs the
     charge_engine timing (new timings.json) on the same job
+  - which original records carry the known Multiwfn fuzzy bugs (tracker #28:
+    all-zero hirsh_fuzzy_density, open-shell spin sums != mult - 1,
+    hirsh_fuzzy_spin holding the density, alpha-only open-shell fuzzy_bond);
+    those diffs are reported apart from the clean-original comparison, together
+    with the engine's own physical checks (spin sums, density sums)
+
+Only jobs completed on both sides are compared (new: a charge_engine timing;
+original: a generator/timings.json).
 
     python scripts/compare_engine_merge.py --job_file jobs.txt \
         --root_omol_inputs SRC/ --orig_root RES/ --new_root WORK/ --report out.json
@@ -21,6 +29,8 @@ import json
 import os
 
 import numpy as np
+
+from qtaim_gen.source.core.parse_qtaim import dft_inp_to_dict
 
 from qtaim_gen.source.data.multiwfn import ENGINE_ROUTINES
 
@@ -50,11 +60,73 @@ def values(step, d):
     return d
 
 
+# which original-record bug signature invalidates which scheme's comparison
+AFFECTED_BY = {
+    "hirsh_fuzzy_density": {"hirsh_density_zero"},
+    "becke_fuzzy_spin": {"spin_sum_wrong"},
+    "hirsh_fuzzy_spin": {"spin_sum_wrong", "hirsh_spin_is_density"},
+    "fuzzy_bond": {"spin_sum_wrong", "fuzzy_bond_alpha_only"},
+}
+
+
+def multiplicity(*folders):
+    for folder in folders:
+        inp = os.path.join(folder, "orca.inp")
+        if os.path.isfile(inp):
+            try:
+                return int(dft_inp_to_dict(inp, parse_charge_spin=True)["spin"])
+            except Exception:
+                pass
+    return None
+
+
+def fuzzy_sum(fz, step):
+    v = (fz or {}).get(step) or {}
+    return v.get("sum")
+
+
 def compare_job(orig, new):
-    rec = {"diffs": {}, "missing": [], "pair_set_changes": 0, "untouched_changed": []}
+    rec = {"diffs": {}, "missing": [], "pair_set_changes": 0, "untouched_changed": [],
+           "orig_flags": [], "engine_checks": {}}
     files = {}
     for name in ("charge.json", "bond.json", "fuzzy_full.json", "qtaim.json", "other.json", "timings.json"):
         files[name] = (load(os.path.join(orig, "generator", name)), load(os.path.join(new, "generator", name)))
+    o_t, n_t = files["timings.json"]
+    rec["charge_engine_s"] = (n_t or {}).get("charge_engine")
+    rec["complete"] = bool(o_t) and bool(rec["charge_engine_s"])
+    if not rec["complete"]:
+        return rec
+
+    mult = multiplicity(new, orig)
+    rec["mult"] = mult
+    open_shell = mult is not None and mult != 1
+    o_fz, n_fz = files["fuzzy_full.json"]
+
+    # bug signatures in the original record
+    o_h = values("hirsh_fuzzy_density", (o_fz or {}).get("hirsh_fuzzy_density"))
+    if o_h is not None and sum(abs(v) for v in o_h.values()) < 1e-6:
+        rec["orig_flags"].append("hirsh_density_zero")
+    if open_shell:
+        o_bs, o_hs = fuzzy_sum(o_fz, "becke_fuzzy_spin"), fuzzy_sum(o_fz, "hirsh_fuzzy_spin")
+        if o_bs is not None and abs(o_bs - (mult - 1)) > 0.01:
+            rec["orig_flags"].append("spin_sum_wrong")
+        if o_hs is not None and o_hs > (mult - 1) + 0.5:
+            rec["orig_flags"].append("hirsh_spin_is_density")
+        o_b, n_b = (files["bond.json"][0] or {}).get("fuzzy_bond"), (files["bond.json"][1] or {}).get("fuzzy_bond")
+        if o_b and n_b:
+            ratios = [o_b[k] / n_b[k] for k in set(o_b) & set(n_b) if n_b[k]]
+            if ratios and 0.35 < float(np.median(ratios)) < 0.65:
+                rec["orig_flags"].append("fuzzy_bond_alpha_only")
+
+    # engine's own physics: spin sums = mult - 1, both partitions hold the same electrons
+    n_bd, n_hd = fuzzy_sum(n_fz, "becke_fuzzy_density"), fuzzy_sum(n_fz, "hirsh_fuzzy_density")
+    if n_bd is not None and n_hd is not None:
+        rec["engine_checks"]["density_sum_becke_minus_hirsh"] = abs(n_bd - n_hd)
+    if open_shell:
+        for step in ("becke_fuzzy_spin", "hirsh_fuzzy_spin"):
+            v = fuzzy_sum(n_fz, step)
+            if v is not None:
+                rec["engine_checks"][f"{step}_minus_mult1"] = abs(v - (mult - 1))
 
     for step, fname in FILE_OF.items():
         o_all, n_all = files[fname]
@@ -80,11 +152,8 @@ def compare_job(orig, new):
         if o_all != n_all:
             rec["untouched_changed"].append(fname)
 
-    o_t, n_t = files["timings.json"]
-    o_t, n_t = o_t or {}, n_t or {}
     mwfn = [o_t.get(r) for r in ENGINE_ROUTINES if isinstance(o_t.get(r), (int, float)) and o_t.get(r) > 0]
     rec["mwfn_engine_routines_s"] = sum(mwfn) if mwfn else None
-    rec["charge_engine_s"] = n_t.get("charge_engine")
     return rec
 
 
@@ -101,36 +170,55 @@ def main():
         jobs = [ln.strip() for ln in f if ln.strip() and not ln.startswith("#")]
 
     per_job = {}
-    no_engine = []
     for job in jobs:
         rel = os.path.relpath(job, args.root_omol_inputs)
-        orig, new = os.path.join(args.orig_root, rel), os.path.join(args.new_root, rel)
-        rec = compare_job(orig, new)
-        if not rec["charge_engine_s"]:
-            no_engine.append(rel)
-        per_job[rel] = rec
+        per_job[rel] = compare_job(os.path.join(args.orig_root, rel), os.path.join(args.new_root, rel))
+    done = {k: r for k, r in per_job.items() if r["complete"]}
+    print(f"jobs: {len(jobs)}  completed on both sides (compared): {len(done)}")
 
-    print(f"jobs: {len(jobs)}  without a charge_engine timing (not processed or failed): {len(no_engine)}")
-    print("\nscheme | jobs | values | median_abs_diff | max_abs_diff | pass (median<=0.005, max<=0.03)")
+    flag_counts = {}
+    for r in done.values():
+        for fl in r["orig_flags"]:
+            flag_counts[fl] = flag_counts.get(fl, 0) + 1
+    print(f"original records with a #28 bug signature: {flag_counts or 'none'}")
+
+    print("\nscheme | clean jobs | values | median_abs_diff | max_abs_diff | pass (median<=0.005, max<=0.03)"
+          " | #28-affected jobs | their max_abs_diff")
     for step in CHARGE + FUZZY + ("fuzzy_bond",):
-        d = [np.array(r["diffs"][step]) for r in per_job.values() if r["diffs"].get(step)]
-        if not d:
+        clean, bad = [], []
+        for r in done.values():
+            if not r["diffs"].get(step):
+                continue
+            (bad if AFFECTED_BY.get(step, set()) & set(r["orig_flags"]) else clean).append(np.array(r["diffs"][step]))
+        if not clean and not bad:
             continue
-        a = np.concatenate(d)
-        ok = np.median(a) <= MEDIAN_TOL and a.max() <= MAX_TOL
-        print(f"{step} | {len(d)} | {len(a)} | {np.median(a):.2e} | {a.max():.2e} | {ok}")
+        if clean:
+            a = np.concatenate(clean)
+            ok = np.median(a) <= MEDIAN_TOL and a.max() <= MAX_TOL
+            row = f"{step} | {len(clean)} | {len(a)} | {np.median(a):.2e} | {a.max():.2e} | {ok}"
+        else:
+            row = f"{step} | 0 | 0 | - | - | -"
+        bad_max = f"{np.concatenate(bad).max():.2e}" if bad else "-"
+        print(f"{row} | {len(bad)} | {bad_max}")
 
-    missing = sum(bool(r["missing"]) for r in per_job.values())
-    pairs = sum(r["pair_set_changes"] for r in per_job.values())
-    changed = [(k, r["untouched_changed"]) for k, r in per_job.items() if r["untouched_changed"]]
-    print(f"\njobs missing an engine routine: {missing}")
-    print(f"fuzzy_bond pairs present on one side only: {pairs}")
+    checks = {}
+    for r in done.values():
+        for k, v in r["engine_checks"].items():
+            checks[k] = max(checks.get(k, 0.0), v)
+    print("\nengine physical checks (max over jobs): "
+          + (", ".join(f"{k} {v:.2e}" for k, v in sorted(checks.items())) or "none"))
+
+    missing = sum(bool(r["missing"]) for r in done.values())
+    pairs = sum(r["pair_set_changes"] for r in done.values() if not {"spin_sum_wrong", "fuzzy_bond_alpha_only"} & set(r["orig_flags"]))
+    changed = [(k, r["untouched_changed"]) for k, r in done.items() if r["untouched_changed"]]
+    print(f"jobs missing an engine routine: {missing}")
+    print(f"fuzzy_bond pairs on one side only (clean originals): {pairs}")
     print(f"jobs where non-engine data changed: {len(changed)}")
     for k, v in changed[:10]:
         print(f"  {k}: {v[:5]}")
 
-    sp = [(r["mwfn_engine_routines_s"], r["charge_engine_s"]) for r in per_job.values()
-          if r["mwfn_engine_routines_s"] and r["charge_engine_s"]]
+    sp = [(r["mwfn_engine_routines_s"], r["charge_engine_s"]) for r in done.values()
+          if r.get("mwfn_engine_routines_s") and r["charge_engine_s"]]
     if sp:
         m, e = np.array(sp).T
         ratio = m / e
@@ -142,8 +230,7 @@ def main():
 
     if args.report:
         with open(args.report, "w") as f:
-            json.dump({"no_engine": no_engine, "jobs": {k: {kk: vv for kk, vv in v.items() if kk != "diffs"}
-                                                        for k, v in per_job.items()}}, f, indent=1)
+            json.dump({k: {kk: vv for kk, vv in v.items() if kk != "diffs"} for k, v in per_job.items()}, f, indent=1)
 
 
 if __name__ == "__main__":
