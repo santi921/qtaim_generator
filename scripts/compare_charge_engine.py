@@ -20,8 +20,9 @@ from qtaim_gen.source.core.omol import _parse_routine_out
 
 MEDIAN_TOL = 0.005
 MAX_TOL = 0.03
-FUZZY = ("becke_fuzzy_density", "hirsh_fuzzy_density", "becke_fuzzy_spin", "hirsh_fuzzy_spin")
-CHARGE = ("hirshfeld", "adch", "cm5", "becke")
+FUZZY = ("becke_fuzzy_density", "hirsh_fuzzy_density", "becke_fuzzy_spin", "hirsh_fuzzy_spin",
+         "mbis_fuzzy_density", "mbis_fuzzy_spin")
+CHARGE = ("hirshfeld", "adch", "cm5", "becke", "vdd", "mbis")
 BOND = ("fuzzy_bond",)
 
 
@@ -76,7 +77,7 @@ def main():
 
     print("job | scheme | atoms | median_abs_diff | max_abs_diff | worst_atom | extra | extra_abs_diff")
     for r in rows:
-        print(f"{r[0]} | {r[1]} | {r[2]} | {r[3]:.5f} | {r[4]:.5f} | {r[5]} | {r[6]} | {r[7]:.5f}")
+        print(f"{r[0]} | {r[1]} | {r[2]} | {r[3]:.2e} | {r[4]:.2e} | {r[5]} | {r[6]} | {r[7]:.2e}")
 
     print("\nscheme | jobs | atoms | median_abs_diff | max_abs_diff | pass (median<=0.005, max<=0.03)")
     for step in CHARGE + FUZZY + BOND:
@@ -84,7 +85,7 @@ def main():
             continue
         d = np.concatenate(diffs[step])
         ok = np.median(d) <= MEDIAN_TOL and d.max() <= MAX_TOL
-        print(f"{step} | {len(diffs[step])} | {len(d)} | {np.median(d):.5f} | {d.max():.5f} | {ok}")
+        print(f"{step} | {len(diffs[step])} | {len(d)} | {np.median(d):.2e} | {d.max():.2e} | {ok}")
 
 
 if __name__ == "__main__":

@@ -14,9 +14,9 @@ Driver mode (generator env) times, per wfx:
         --horton_python ~/miniconda3/envs/horton/bin/python --nthreads 4
 
 Results append to DIR/results.jsonl (one record per wfx x mode) and a summary
-table prints at the end. Steps are the production full_set=0 set: the four
-charge schemes, the fuzzy density (+ spin when mult != 1) integrals, and
-fuzzy_bond.
+table prints at the end. Steps are the production set of --full_set (default
+0: the four charge schemes, the fuzzy density (+ spin when mult != 1)
+integrals, and fuzzy_bond), optionally narrowed with --only.
 """
 
 import argparse
@@ -188,16 +188,18 @@ def horton_stages(args):
 # ---------------------------------------------------------------- driver mode
 
 
-def production_steps(mult):
+def production_steps(mult, full_set=0, only=None):
     from qtaim_gen.source.data.multiwfn import (
         bond_order_dict,
         charge_data_dict,
         fuzzy_data,
     )
 
-    steps = dict(charge_data_dict(full_set=0))
-    steps.update(fuzzy_data(spin=mult != 1, full_set=0))
-    steps["fuzzy_bond"] = bond_order_dict(full_set=0)["fuzzy_bond"]
+    steps = dict(charge_data_dict(full_set=full_set))
+    steps.update(fuzzy_data(spin=mult != 1, full_set=full_set))
+    steps.update(bond_order_dict(full_set=full_set))
+    if only:
+        steps = {k: v for k, v in steps.items() if k in only}
     return steps
 
 
@@ -270,7 +272,7 @@ def bench_one(wfx_src, args, results_path):
     write_settings_file(workdir, n_threads=args.nthreads)
 
     env = dict(os.environ, OMP_STACKSIZE="1G")
-    steps = production_steps(hdr["mult"])
+    steps = production_steps(hdr["mult"], args.full_set, args.only.split(",") if args.only else None)
     fuzzy_routines = {k for k in steps if "fuzzy" in k and k != "fuzzy_bond"}
     base = {"wfx": wfx_src, "name": name, "nthreads": args.nthreads, **hdr}
 
@@ -406,6 +408,8 @@ def main():
     p.add_argument("--multiwfn", default=os.path.expanduser("~/dev/Multiwfn_3_8/Multiwfn_noGUI"))
     p.add_argument("--horton_python", default=os.path.expanduser("~/miniconda3/envs/horton/bin/python"))
     p.add_argument("--nthreads", type=int, default=4)
+    p.add_argument("--full_set", type=int, default=0, help="production level whose steps are run")
+    p.add_argument("--only", help="comma list: run just these steps (e.g. vdd,mbis)")
     p.add_argument("--modes", default="mwfn_load,mwfn_sep,mwfn_comb,horton")
     p.add_argument("--grid", default="fine", help="HORTON MolGrid preset")
     p.add_argument("--chunk_gb", type=float, default=2.0, help="HORTON density-eval chunk size")

@@ -115,6 +115,7 @@ def test_worker_reproduces_multiwfn(tmp_path, name):
         ref = json.load(f)
 
     assert set(ref) <= set(eng), f"engine lacks {set(ref) - set(eng)}"
+    assert not {"vdd", "mbis", "mbis_fuzzy_density", "mbis_fuzzy_spin"} & set(eng), "full_set 0 ran level-1 schemes"
     for step, ref_d in ref.items():
         if step == "fuzzy_bond":
             assert set(eng[step]) == set(ref_d)
@@ -123,6 +124,38 @@ def test_worker_reproduces_multiwfn(tmp_path, name):
         elif "charge" in ref_d:
             for k, v in ref_d["charge"].items():
                 assert eng[step]["charge"][k] == pytest.approx(v, abs=CHARGE_TOL), (step, k)
+        else:
+            for k, v in ref_d[step].items():
+                assert eng[step][step][k] == pytest.approx(v, abs=CHARGE_TOL), (step, k)
+
+
+@pytest.mark.skipif(not HAS_NUMBA, reason="numba not installed")
+@pytest.mark.parametrize("name", _fixture_names())
+def test_worker_reproduces_multiwfn_level1(tmp_path, name):
+    """full_set 1 adds vdd, mbis and the MBIS fuzzy integrals; references are the
+    Multiwfn 3.8 outputs of the production inputs, parsed with the production parsers."""
+    folder = os.path.join(FIXTURES, name)
+    out = tmp_path / "engine.json"
+    subprocess.run(
+        [sys.executable, "-m", "qtaim_gen.source.core.charge_engine",
+         "--wfx", os.path.join(folder, "orca.wfx"), "--out", str(out), "--nthreads", "2",
+         "--full_set", "1"],
+        check=True,
+        capture_output=True,
+    )
+    with open(out) as f:
+        eng = json.load(f)
+    with open(os.path.join(folder, "multiwfn_reference_level1.json")) as f:
+        ref = json.load(f)
+
+    assert set(ref) <= set(eng), f"engine lacks {set(ref) - set(eng)}"
+    for step, ref_d in ref.items():
+        if "charge" in ref_d:
+            for k, v in ref_d["charge"].items():
+                assert eng[step]["charge"][k] == pytest.approx(v, abs=CHARGE_TOL), (step, k)
+            if "dipole" in ref_d:
+                # dipoles are printed with 6 decimals
+                assert eng[step]["dipole"]["mag"] == pytest.approx(ref_d["dipole"]["mag"], abs=BOND_TOL)
         else:
             for k, v in ref_d[step].items():
                 assert eng[step][step][k] == pytest.approx(v, abs=CHARGE_TOL), (step, k)

@@ -10,7 +10,10 @@ fuzzy-bond quantity from that pass (plus one coarser grid for bond orders):
     becke/hirsh_fuzzy_density, becke/hirsh_fuzzy_spin         fuzzy schema
     fuzzy_bond                                                 bond schema
 
-    charge-engine --wfx orca.wfx --out engine.json
+With full_set >= 1 it adds vdd (same grid pass), mbis (its own 30-60 x 302 grid,
+as MBIS_wrapper) and mbis_fuzzy_density/spin (MBIS refit on the main grid).
+
+    charge-engine --wfx orca.wfx --out engine.json [--full_set 1]
 
 The Multiwfn routines reproduced here, and the source lines they come from, are
 listed in docs/plans/2026-10-04-feat-one-pass-charge-engine-plan.md.
@@ -288,11 +291,16 @@ def _hirshfeld_mwfn(pts, atcoords, atnums, radpos, table, npts_of, cut_of):
     """Hirshfeld weights from Multiwfn's built-in radial densities, evaluated
     exactly as eleraddens/lagintpol do: zero beyond atmrhocut or the last grid
     point, linear extrapolation inside the first point, otherwise 4-point
-    Lagrange interpolation on the stencil lagintpol picks."""
+    Lagrange interpolation on the stencil lagintpol picks. Also returns the
+    unnormalized promolecular density (VDD needs rho - promol).
+
+    atnums only indexes the tables, so per-atom tables (MBIS) work with
+    atnums = arange(nat) and cut_of = inf (fdens_rad has no atmrhocut test)."""
     npts = pts.shape[0]
     nat = atcoords.shape[0]
     h = np.zeros((npts, nat))
     empty = np.zeros(npts, dtype=np.bool_)
+    promol = np.zeros(npts)
     for ip in prange(npts):
         tot = 0.0
         for a in range(nat):
@@ -327,12 +335,92 @@ def _hirshfeld_mwfn(pts, atcoords, atnums, radpos, table, npts_of, cut_of):
                     v += table[z, m] * poly
             h[ip, a] = v
             tot += v
+        promol[ip] = tot
         if tot != 0.0:
             for a in range(nat):
                 h[ip, a] /= tot
         else:
             empty[ip] = True
-    return h, empty
+    return h, empty, promol
+
+
+@njit(parallel=True, cache=True)
+def _voronoi_mask(pts, atcoords, center):
+    """VDD weight (spacecharge, chgtype 2): 1 unless another atom is strictly
+    closer to the point than the centre atom (ties stay with the centre)."""
+    npts = pts.shape[0]
+    nat = atcoords.shape[0]
+    mask = np.ones(npts)
+    for ip in prange(npts):
+        dx = pts[ip, 0] - atcoords[center, 0]
+        dy = pts[ip, 1] - atcoords[center, 1]
+        dz = pts[ip, 2] - atcoords[center, 2]
+        dc2 = dx * dx + dy * dy + dz * dz
+        for j in range(nat):
+            if j == center:
+                continue
+            dx = pts[ip, 0] - atcoords[j, 0]
+            dy = pts[ip, 1] - atcoords[j, 1]
+            dz = pts[ip, 2] - atcoords[j, 2]
+            if dx * dx + dy * dy + dz * dz < dc2:
+                mask[ip] = 0.0
+                break
+    return mask
+
+
+@njit(parallel=True, cache=True)
+def _mbis_cycle(grel, atcoords, tmpden, cut2, mshell, pop, sig):
+    """One MBIS iteration (MBIS, imode 0): new shell populations and the
+    integral part of the new widths (Eqs. 18-19 of the MBIS paper). tmpden[c, i]
+    is rho * quadrature weight * Becke weight of centre c at its point i; atoms
+    beyond atmrhocut are ignored (ignorefar=1), shell densities below 1e-10 are
+    zeroed and points with tmpden <= 1e-14 skipped, as Multiwfn does."""
+    nat = atcoords.shape[0]
+    m = grel.shape[0]
+    npts = nat * m
+    nblk = min(npts, 256)
+    chunk = (npts + nblk - 1) // nblk
+    ppop = np.zeros((nblk, nat, 6))
+    psig = np.zeros((nblk, nat, 6))
+    for blk in prange(nblk):
+        rho0sh = np.zeros((nat, 6))
+        dist = np.empty(nat)
+        for ip in range(blk * chunk, min(npts, (blk + 1) * chunk)):
+            c = ip // m
+            i = ip - c * m
+            td = tmpden[c, i]
+            if not td > 1e-14:
+                continue
+            x = grel[i, 0] + atcoords[c, 0]
+            y = grel[i, 1] + atcoords[c, 1]
+            z = grel[i, 2] + atcoords[c, 2]
+            rho0 = 0.0
+            for j in range(nat):
+                dx = x - atcoords[j, 0]
+                dy = y - atcoords[j, 1]
+                dz = z - atcoords[j, 2]
+                d2 = dx * dx + dy * dy + dz * dz
+                if d2 > cut2[j]:
+                    dist[j] = -1.0
+                    continue
+                d = np.sqrt(d2)
+                dist[j] = d
+                for k in range(mshell[j]):
+                    sv = sig[j, k]
+                    t = pop[j, k] / sv**3 / 8 / np.pi * np.exp(-d / sv)
+                    if t < 1e-10:
+                        t = 0.0
+                    rho0sh[j, k] = t
+                    rho0 += t
+            if rho0 > 0.0:
+                for j in range(nat):
+                    if dist[j] < 0.0:
+                        continue
+                    for k in range(mshell[j]):
+                        f = td * rho0sh[j, k] / rho0
+                        ppop[blk, j, k] += f
+                        psig[blk, j, k] += f * dist[j]
+    return ppop.sum(axis=0), psig.sum(axis=0)
 
 
 # ---------------------------------------------------------------- partitions
@@ -368,6 +456,86 @@ def mwfn_proatom_tables(atnums):
         npts_of[z] = len(vals)
     cut_of = np.array(R.ATMRHOCUT[: max(R.RHO) + 1])
     return (atnums.astype(np.int64), radpos, table, npts_of, cut_of), []
+
+
+def mbis_grid_size(atnums):
+    """MBIS_wrapper's own grid under iautointgrid=1: 302 angular points and
+    30 radial points, raised to 40/50/60 when any Z exceeds 18/36/54."""
+    zmax = int(atnums.max())
+    nrad = 60 if zmax > 54 else 50 if zmax > 36 else 40 if zmax > 18 else 30
+    return nrad, 302
+
+
+def mbis_initial_shells(atnums):
+    """MBIS initial guess (icore=1): shell count by period, populations 2/8/8/
+    18/18 for the core shells and the rest in the valence shell, widths from
+    1/(2Z) for the innermost to 1/2 for the valence shell. Uses the true Z."""
+    nat = len(atnums)
+    mshell = np.zeros(nat, dtype=np.int64)
+    pop = np.zeros((nat, 6))
+    sig = np.zeros((nat, 6))
+    core = {1: [], 2: [2], 3: [2, 8], 4: [2, 8, 8], 5: [2, 8, 8, 18], 6: [2, 8, 8, 18, 18]}
+    for a, z in enumerate(atnums):
+        z = int(z)
+        m = 1 if z <= 2 else 2 if z <= 10 else 3 if z <= 18 else 4 if z <= 36 else 5 if z <= 54 else 6
+        mshell[a] = m
+        pop[a, : m - 1] = core[m]
+        pop[a, m - 1] = z - sum(core[m])
+        sig[a, 0] = 1.0 / (2 * z)
+        if m == 3:
+            sig[a, 1] = 1.0 / (2 * np.sqrt(float(z)))
+        elif m > 3:
+            for k in range(1, m - 1):
+                sig[a, k] = 1.0 / (2 * z ** (1 - k / (m - 1)))
+        if m > 1:
+            sig[a, m - 1] = 0.5
+    return mshell, pop, sig
+
+
+def mbis_fit(grel, coords, tmpden, atnums, qbase, crit=1e-4, maxcyc=500):
+    """MBIS iterations until no charge moves by crit or maxcyc is reached.
+
+    Returns the last charges (qbase - population; not normalized, as printed
+    for imode 0), the shell parameters of the previous cycle (the loop exits
+    before replacing them, and those are what the radial tables are built
+    from), and the number of cycles."""
+    from qtaim_gen.source.data import multiwfn_atmraddens as R
+
+    mshell, pop, sig = mbis_initial_shells(atnums)
+    cut2 = np.array([R.ATMRHOCUT[int(z)] ** 2 for z in atnums])
+    last = np.zeros(len(atnums))
+    for icyc in range(1, maxcyc + 1):
+        popnew, signew = _mbis_cycle(grel, coords, tmpden, cut2, mshell, pop, sig)
+        pos = popnew > 0
+        signew[pos] /= 3 * popnew[pos]
+        charge = qbase - popnew.sum(axis=1)
+        varmax = np.abs(charge - last).max()
+        if varmax < crit or icyc == maxcyc:
+            return charge, mshell, pop, sig, icyc
+        last = charge
+        pop, sig = popnew, signew
+
+
+def mbis_radial_tables(mshell, pop, sig):
+    """Atomic radial densities MBIS(2, .) builds for fuzzy partitioning: the
+    shell sum on Multiwfn's radial positions, truncated after the first point
+    below 1e-8 (that point kept)."""
+    from qtaim_gen.source.data import multiwfn_atmraddens as R
+
+    radpos = np.array(R.RADPOS)
+    nat = len(mshell)
+    table = np.zeros((nat, len(radpos)))
+    npts_of = np.full(nat, len(radpos), dtype=np.int64)
+    for a in range(nat):
+        for ipt, r in enumerate(radpos):
+            v = 0.0
+            for k in range(mshell[a]):
+                v += pop[a, k] / sig[a, k] ** 3 / 8 / np.pi * np.exp(-r / sig[a, k])
+            table[a, ipt] = v
+            if v < 1e-8:
+                npts_of[a] = ipt + 1
+                break
+    return np.arange(nat, dtype=np.int64), radpos, table, npts_of, np.full(nat, np.inf)
 
 
 # ---------------------------------------------------------------- corrections
@@ -456,7 +624,7 @@ def normalize(charge, zeff, nelec):
 # ---------------------------------------------------------------- driver
 
 
-def run(wfx_path, nrad=75, nang=434, radcut=10.0, bond_nrad=45, bond_nang=170):
+def run(wfx_path, nrad=75, nang=434, radcut=10.0, bond_nrad=45, bond_nang=170, full_set=0):
     t = {}
     t0 = time.perf_counter()
     wfx = read_wfx(wfx_path)
@@ -483,6 +651,16 @@ def run(wfx_path, nrad=75, nang=434, radcut=10.0, bond_nrad=45, bond_nang=170):
         # valence-only density against all-electron proatoms would be inconsistent
         pro = None
         skipped.append({"schemes": "hirshfeld family", "reason": "ecp_without_edf"})
+    # full_set >= 1 adds vdd, mbis and the MBIS fuzzy integrals
+    level1 = full_set >= 1
+    mbis_ok = level1 and int(atnums.max()) <= 86 and not (has_ecp and not has_edf)
+    if level1 and not mbis_ok:
+        reason = "z_above_86" if int(atnums.max()) > 86 else "ecp_without_edf"
+        skipped.append({"schemes": "mbis family", "reason": reason})
+    if mbis_ok:
+        td_rho = np.zeros((nat, len(grid_wts)))
+        td_spin = np.zeros((nat, len(grid_wts))) if open_shell else None
+    q_vdd = np.zeros(nat)
 
     pop_b = np.zeros(nat)
     pop_h = np.zeros(nat)
@@ -510,12 +688,20 @@ def run(wfx_path, nrad=75, nang=434, radcut=10.0, bond_nrad=45, bond_nang=170):
         fz["bd"] += w.T @ (wb * rho)
         if open_shell:
             fz["bs"] += w.T @ (wb * spin)
+        if mbis_ok:
+            td_rho[b] = wb * rho
+            if open_shell:
+                td_spin[b] = wb * spin
         t["accumulate"] += time.perf_counter() - t0
 
         if pro is not None:
             t0 = time.perf_counter()
-            h, empty = _hirshfeld_mwfn(pts, coords, *pro)
+            h, empty, promol = _hirshfeld_mwfn(pts, coords, *pro)
             t["hirshfeld"] += time.perf_counter() - t0
+            if level1:
+                # VDD: Voronoi cell, every point (no promol != 0 test)
+                mask = _voronoi_mask(pts, coords, b)
+                q_vdd[b] = -(mask * (rho - promol) * grid_wts).sum()
             t0 = time.perf_counter()
             # charges skip zero-promolecule points; fuzzy gives them to the centre atom
             hw = h[:, b] * grid_wts
@@ -526,6 +712,36 @@ def run(wfx_path, nrad=75, nang=434, radcut=10.0, bond_nrad=45, bond_nang=170):
             if open_shell:
                 fz["hs"] += h.T @ (wb * spin)
             t["accumulate"] += time.perf_counter() - t0
+
+    if mbis_ok:
+        # q = Z_eff + EDF core electrons - population
+        qbase = atnums.astype(float) if has_edf else zeff
+        t0 = time.perf_counter()
+        # MBIS charges: MBIS_wrapper's own grid, Becke-weighted rho
+        mgrid_pts, mgrid_wts = multiwfn_atom_grid(*mbis_grid_size(atnums), radcut)
+        td_m = np.zeros((nat, len(mgrid_wts)))
+        for b in range(nat):
+            pts = mgrid_pts + coords[b]
+            rho, _ = density(pts, coords, basis, wfx)
+            td_m[b] = _becke(pts, coords, rinv, aij, BECKE_TOL)[:, b] * mgrid_wts * rho
+        q_mbis, _, _, _, ncyc_charge = mbis_fit(mgrid_pts, coords, td_m, atnums, qbase)
+        del td_m
+        t["mbis_charge"] = time.perf_counter() - t0
+        # MBIS fuzzy: refit on the main grid (fuzzyana calls MBIS(2,0) unwrapped),
+        # radial tables from the fit, then integrate like the Hirshfeld fuzzy steps
+        t0 = time.perf_counter()
+        _, mshell, spop, ssig, ncyc_fuzzy = mbis_fit(grid_pts, coords, td_rho, atnums, qbase)
+        mtab = mbis_radial_tables(mshell, spop, ssig)
+        fz["md"] = np.zeros(nat)
+        fz["ms"] = np.zeros(nat)
+        for b in range(nat):
+            h, empty, _ = _hirshfeld_mwfn(grid_pts + coords[b], coords, *mtab)
+            h[empty] = 0.0
+            h[empty, b] = 1.0
+            fz["md"] += h.T @ td_rho[b]
+            if open_shell:
+                fz["ms"] += h.T @ td_spin[b]
+        t["mbis_fuzzy"] = time.perf_counter() - t0
 
     t0 = time.perf_counter()
     labels = [f"{i + 1}_{T_SYMBOL[z]}" for i, z in enumerate(atnums)]
@@ -575,6 +791,14 @@ def run(wfx_path, nrad=75, nang=434, radcut=10.0, bond_nrad=45, bond_nang=170):
         out["hirsh_fuzzy_density"] = fuzzy("hirsh_fuzzy_density", fz["hd"])
         if open_shell:
             out["hirsh_fuzzy_spin"] = fuzzy("hirsh_fuzzy_spin", fz["hs"])
+        if level1:
+            # printed VDD dipole comes from the raw charges, before normalization
+            out["vdd"] = {"charge": chg(normalize(q_vdd, zeff, nelec)), "dipole": mol_dip(q_vdd)}
+    if mbis_ok:
+        out["mbis"] = {"charge": chg(q_mbis)}
+        out["mbis_fuzzy_density"] = fuzzy("mbis_fuzzy_density", fz["md"])
+        if open_shell:
+            out["mbis_fuzzy_spin"] = fuzzy("mbis_fuzzy_spin", fz["ms"])
     t["corrections"] = time.perf_counter() - t0
 
     t0 = time.perf_counter()
@@ -590,6 +814,8 @@ def run(wfx_path, nrad=75, nang=434, radcut=10.0, bond_nrad=45, bond_nang=170):
         "edf_electrons": float((atnums - zeff).sum()) if has_edf else 0.0,
         "open_shell": bool(open_shell),
         "has_ecp": has_ecp,
+        "full_set": full_set,
+        "mbis_cycles": {"charge": ncyc_charge, "fuzzy": ncyc_fuzzy} if mbis_ok else None,
         "skipped": skipped,
         "timings_s": {k: round(v, 3) for k, v in t.items()},
     }
@@ -615,6 +841,7 @@ def main(argv=None):
     p.add_argument("--bond_nrad", type=int, default=45, help="fuzzy_bond radial points (Multiwfn: 45)")
     p.add_argument("--bond_nang", type=int, default=170, help="fuzzy_bond Lebedev points (Multiwfn: 170)")
     p.add_argument("--nthreads", type=int, default=None)
+    p.add_argument("--full_set", type=int, default=0, help="1 adds vdd, mbis, mbis_fuzzy_density/spin")
     args = p.parse_args(argv)
 
     if args.nthreads:
@@ -623,7 +850,7 @@ def main(argv=None):
         numba.set_num_threads(args.nthreads)
 
     t0 = time.perf_counter()
-    out = run(args.wfx, args.nrad, args.nang, args.radcut, args.bond_nrad, args.bond_nang)
+    out = run(args.wfx, args.nrad, args.nang, args.radcut, args.bond_nrad, args.bond_nang, args.full_set)
     out["_meta"]["wall_s"] = round(time.perf_counter() - t0, 3)
 
     out_abs = os.path.abspath(args.out)
