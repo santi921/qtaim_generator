@@ -269,9 +269,10 @@ def validate_timing_dict(
     Check that it has the keys 'total', 'qtaim', 'charge', 'bond', and 'fuzzy_full'.
 
     A positive 'charge_engine' timing stands in for the per-routine timings of
-    ENGINE_ROUTINES (core/charge_engine.py computed them in one pass). With
-    charge_engine=True that timing is required, so folders whose charge/fuzzy/
-    bond data came from Multiwfn are not counted as done.
+    ENGINE_ROUTINES (core/charge_engine.py computed them in one pass), and a
+    positive 'surface_engine' timing for 'other' (core/surface_engine.py computed
+    other_alie). With charge_engine=True both are required, so folders whose
+    charge/fuzzy/bond or ALIE data came from Multiwfn are not counted as done.
     """
     timing_dict = _safe_json_load(timing_json_loc, logger=logger)
     if timing_dict is None:
@@ -284,8 +285,13 @@ def validate_timing_dict(
         isinstance(timing_dict.get("charge_engine"), (int, float))
         and timing_dict["charge_engine"] > 0
     )
-    if charge_engine and not engine_done:
-        msg = "No charge_engine timing: charge/fuzzy/bond data is not from the charge engine."
+    surface_done = (
+        isinstance(timing_dict.get("surface_engine"), (int, float))
+        and timing_dict["surface_engine"] > 0
+    )
+    if charge_engine and not (engine_done and surface_done):
+        missing = "charge_engine" if not engine_done else "surface_engine"
+        msg = f"No {missing} timing: data is not (all) from the charge/surface engines."
         if logger:
             logger.error(msg)
         if verbose:
@@ -301,7 +307,7 @@ def validate_timing_dict(
 
     for key in expected_keys:
         if key not in timing_dict:
-            if key == "other" and "other_alie" not in timing_dict: 
+            if key == "other" and "other_alie" not in timing_dict and not surface_done:
                 if logger:
                     logger.error(f"Missing expected key '{key}' or 'other_alie' in timing json.")
                 if verbose:
@@ -310,6 +316,9 @@ def validate_timing_dict(
             
             elif key == "other" and "other_alie" in timing_dict:
                 key = "other_alie"
+
+            elif key == "other" and surface_done:
+                key = "surface_engine"
 
             else: 
                 if logger:

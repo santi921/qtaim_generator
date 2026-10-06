@@ -20,7 +20,9 @@ from qtaim_gen.source.utils.atomic_write import atomic_json_write
 from qtaim_gen.source.core.horton import run_horton_analysis
 
 from qtaim_gen.source.data.multiwfn import (
+    ENGINE_LEVEL1_ROUTINES,
     ENGINE_ROUTINES,
+    SURFACE_ENGINE_ROUTINES,
     charge_data,
     charge_data_dict,
     bond_order_data,
@@ -1502,16 +1504,29 @@ def _extract_orca_out_from_archive(folder: str, logger: logging.Logger) -> bool:
                 logger.warning("Could not remove intermediate orca.tar: %s", e)
 
 
-def _engine_outputs_present(folder: str, spin_tf: bool) -> bool:
+def _engine_routines(full_set: int, spin_tf: bool) -> set:
+    """The charge-engine routines (core/charge_engine.py) a folder gets at this
+    full_set level; spin integrals only for open shells (check_spin)."""
+    routines = set(ENGINE_ROUTINES - SURFACE_ENGINE_ROUTINES)
+    if full_set < 1:
+        routines -= ENGINE_LEVEL1_ROUTINES
+    if not spin_tf:
+        routines -= {"becke_fuzzy_spin", "hirsh_fuzzy_spin", "mbis_fuzzy_spin"}
+    return routines
+
+
+def _engine_outputs_present(folder: str, spin_tf: bool, full_set: int = 0) -> bool:
     """True when generator/ holds a completed charge-engine run: a positive
     charge_engine timing and every engine routine in the compiled jsons."""
     gen = os.path.join(folder, "generator")
-    want = {
-        "charge.json": ["hirshfeld", "adch", "cm5", "becke"],
-        "bond.json": ["fuzzy_bond"],
-        "fuzzy_full.json": ["becke_fuzzy_density", "hirsh_fuzzy_density"]
-        + (["becke_fuzzy_spin", "hirsh_fuzzy_spin"] if spin_tf else []),
+    file_of = {
+        "hirshfeld": "charge.json", "adch": "charge.json", "cm5": "charge.json",
+        "becke": "charge.json", "vdd": "charge.json", "mbis": "charge.json",
+        "fuzzy_bond": "bond.json",
     }
+    want = {}
+    for routine in _engine_routines(full_set, spin_tf):
+        want.setdefault(file_of.get(routine, "fuzzy_full.json"), []).append(routine)
     try:
         with open(os.path.join(gen, "timings.json")) as f:
             if not json.load(f).get("charge_engine", 0) > 0:
@@ -1526,18 +1541,32 @@ def _engine_outputs_present(folder: str, spin_tf: bool) -> bool:
     return True
 
 
+def _update_timing(folder: str, key: str, seconds: float, logger: logging.Logger) -> None:
+    timings_path = os.path.join(folder, "timings.json")
+    timings = {}
+    if os.path.isfile(timings_path) and os.path.getsize(timings_path) > 0:
+        try:
+            with open(timings_path) as f:
+                timings = json.load(f)
+        except json.JSONDecodeError:
+            logger.warning("%s: unreadable %s, rewriting", key, timings_path)
+    timings[key] = seconds
+    atomic_json_write(timings_path, timings)
+
+
 def _run_charge_engine(
     folder: str,
     n_threads: int,
     logger: logging.Logger,
     restart: bool = False,
+    full_set: int = 0,
 ) -> bool:
-    """Compute ENGINE_ROUTINES with core/charge_engine.py and write each as the
-    per-step <routine>.json parse_multiwfn would have produced from Multiwfn,
-    plus a 'charge_engine' timing. parse_multiwfn then compiles them into
-    charge.json / bond.json / fuzzy_full.json unchanged."""
+    """Compute the charge-engine routines with core/charge_engine.py and write
+    each as the per-step <routine>.json parse_multiwfn would have produced from
+    Multiwfn, plus a 'charge_engine' timing. parse_multiwfn then compiles them
+    into charge.json / bond.json / fuzzy_full.json unchanged."""
     spin_tf = check_spin(folder)
-    if restart and _engine_outputs_present(folder, spin_tf):
+    if restart and _engine_outputs_present(folder, spin_tf, full_set):
         logger.info("charge_engine: completed run found in generator/ - skipping")
         return True
 
@@ -1552,7 +1581,7 @@ def _run_charge_engine(
     numba.set_num_threads(max(1, min(n_threads, numba.config.NUMBA_NUM_THREADS)))
     start = time.time()
     try:
-        out = charge_engine.run(wf_path)
+        out = charge_engine.run(wf_path, full_set=full_set)
     except Exception as e:
         logger.error("charge_engine failed on %s: %s", wf_path, e)
         return False
@@ -1561,33 +1590,69 @@ def _run_charge_engine(
     meta = out.get("_meta", {})
     if meta.get("skipped"):
         logger.error("charge_engine skipped schemes in %s: %s", folder, meta["skipped"])
-    spin_routines = {"becke_fuzzy_spin", "hirsh_fuzzy_spin"}
+    wanted = _engine_routines(full_set, spin_tf)
     written = []
-    for routine in sorted(ENGINE_ROUTINES):
-        if routine in spin_routines and not spin_tf:
-            continue
+    for routine in sorted(wanted):
         if routine not in out:
             logger.error("charge_engine produced no %s for %s", routine, folder)
             continue
         atomic_json_write(os.path.join(folder, f"{routine}.json"), out[routine])
         written.append(routine)
 
-    timings_path = os.path.join(folder, "timings.json")
-    timings = {}
-    if os.path.isfile(timings_path) and os.path.getsize(timings_path) > 0:
-        try:
-            with open(timings_path) as f:
-                timings = json.load(f)
-        except json.JSONDecodeError:
-            logger.warning("charge_engine: unreadable %s, rewriting", timings_path)
-    timings["charge_engine"] = elapsed
-    atomic_json_write(timings_path, timings)
+    _update_timing(folder, "charge_engine", elapsed, logger)
     logger.info(
         "charge_engine: %d routines in %.2f s (nelec grid %.4f of %.1f)",
         len(written), elapsed, meta.get("nelec_grid_becke", float("nan")),
         meta.get("nelec_wfx", float("nan")),
     )
-    return len(written) == len(ENGINE_ROUTINES) - (0 if spin_tf else len(spin_routines))
+    return len(written) == len(wanted)
+
+
+def _run_surface_engine(
+    folder: str,
+    n_threads: int,
+    logger: logging.Logger,
+    restart: bool = False,
+) -> bool:
+    """other_alie with core/surface_engine.py: writes other_alie.json (the flat
+    ALIE_* payload parse_other_doc_esp produces, compiled into other.json by
+    parse_multiwfn) and a 'surface_engine' timing."""
+    gen = os.path.join(folder, "generator")
+    if restart:
+        try:
+            with open(os.path.join(gen, "timings.json")) as f:
+                done = json.load(f).get("surface_engine", 0) > 0
+            with open(os.path.join(gen, "other.json")) as f:
+                done = done and json.load(f).get(_OTHER_MARKER_KEYS["other_alie"]) is not None
+        except (OSError, json.JSONDecodeError, TypeError, AttributeError):
+            done = False
+        if done:
+            logger.info("surface_engine: completed run found in generator/ - skipping")
+            return True
+
+    wf_path = _wavefunction_path(folder)
+    if wf_path is None or not wf_path.endswith(".wfx"):
+        logger.error("surface_engine: needs orca.wfx, found %s", wf_path)
+        return False
+
+    import numba
+    from qtaim_gen.source.core import surface_engine
+
+    numba.set_num_threads(max(1, min(n_threads, numba.config.NUMBA_NUM_THREADS)))
+    start = time.time()
+    try:
+        out, meta = surface_engine.alie_surface(wf_path)
+    except Exception as e:
+        logger.error("surface_engine failed on %s: %s", wf_path, e)
+        return False
+    elapsed = time.time() - start
+    atomic_json_write(os.path.join(folder, "other_alie.json"), out)
+    _update_timing(folder, "surface_engine", elapsed, logger)
+    logger.info(
+        "surface_engine: other_alie in %.2f s (grid %s, V/E/F %s)",
+        elapsed, meta.get("grid"), meta.get("vef_after"),
+    )
+    return True
 
 
 def _run_orca_parse(
@@ -2808,7 +2873,8 @@ def gbw_analysis(
         )
         # after run_jobs: its convert step is what produces orca.wfx
         if charge_engine:
-            _run_charge_engine(folder, n_threads=n_threads, logger=logger, restart=restart)
+            _run_charge_engine(folder, n_threads=n_threads, logger=logger, restart=restart, full_set=full_set)
+            _run_surface_engine(folder, n_threads=n_threads, logger=logger, restart=restart)
 
     print("... Parsing multiwfn output")
     # parse those jobs to jsons for 5 categories

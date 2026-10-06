@@ -4,14 +4,18 @@ Helpers to generate the data strings for the multiwfn program
 
 from typing import Optional, List
 
-# full_set=0 routines core/charge_engine.py computes in one pass, so the
-# charge-engine mode of gbw_analysis does not send them to Multiwfn
+# routines the charge-engine mode of gbw_analysis computes itself instead of
+# sending them to Multiwfn: charges, fuzzy integrals and fuzzy_bond in one pass
+# (core/charge_engine.py; vdd, mbis and mbis_fuzzy_* exist only at full_set >= 1)
+# and the ALIE surface analysis (core/surface_engine.py)
+ENGINE_LEVEL1_ROUTINES = frozenset({"vdd", "mbis", "mbis_fuzzy_density", "mbis_fuzzy_spin"})
+SURFACE_ENGINE_ROUTINES = frozenset({"other_alie"})
 ENGINE_ROUTINES = frozenset({
     "hirshfeld", "adch", "cm5", "becke",
     "becke_fuzzy_density", "hirsh_fuzzy_density",
     "becke_fuzzy_spin", "hirsh_fuzzy_spin",
     "fuzzy_bond",
-})
+}) | ENGINE_LEVEL1_ROUTINES | SURFACE_ENGINE_ROUTINES
 
 
 def charge_data() -> str:

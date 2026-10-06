@@ -162,7 +162,8 @@ def test_worker_reproduces_multiwfn_level1(tmp_path, name):
 
 
 class TestTimingValidation:
-    """A charge_engine timing stands in for the ENGINE_ROUTINES timings."""
+    """A charge_engine timing stands in for the ENGINE_ROUTINES timings and a
+    surface_engine timing for 'other'; engine mode requires both."""
 
     BASE = {"qtaim": 5.0, "other": 3.0}
     MWFN = {
@@ -186,7 +187,26 @@ class TestTimingValidation:
     def test_engine_timing_replaces_routine_keys(self, tmp_path):
         path = self._write(tmp_path, {**self.BASE, "charge_engine": 2.0})
         assert self._validate(path, spin_tf=True)
+        # engine mode also needs the ALIE from the surface engine
+        assert not self._validate(path, charge_engine=True)
+        path = self._write(tmp_path, {**self.BASE, "charge_engine": 2.0, "surface_engine": 1.0})
         assert self._validate(path, charge_engine=True)
+
+    def test_surface_engine_timing_stands_in_for_other(self, tmp_path):
+        path = self._write(tmp_path, {"qtaim": 5.0, "charge_engine": 2.0, "surface_engine": 1.0})
+        assert self._validate(path, charge_engine=True)
+        assert not self._validate(self._write(tmp_path, {"qtaim": 5.0, "charge_engine": 2.0}))
+
+    def test_engine_timing_covers_level1_routines(self, tmp_path):
+        from qtaim_gen.source.utils.validation import validate_timing_dict
+
+        timings = {**self.BASE, "charge_engine": 2.0, "surface_engine": 1.0,
+                   "chelpg": 1.0, "ibsi_bond": 1.0, "elf_fuzzy": 1.0}
+        path = self._write(tmp_path, timings)
+        assert validate_timing_dict(path, full_set=1, charge_engine=True)
+        # chelpg, ibsi_bond and elf_fuzzy still come from Multiwfn
+        del timings["chelpg"]
+        assert not validate_timing_dict(self._write(tmp_path, timings), full_set=1, charge_engine=True)
 
     def test_engine_mode_rejects_multiwfn_only(self, tmp_path):
         path = self._write(tmp_path, {**self.BASE, **self.MWFN})
@@ -239,3 +259,43 @@ def test_engine_jsons_compile_like_multiwfn(tmp_path, name):
             assert fuzzy[step][k] == pytest.approx(v, abs=CHARGE_TOL), (step, k)
     # per-step intermediates are removed once compiled
     assert not any((tmp_path / f"{r}.json").exists() for r in ENGINE_ROUTINES)
+
+
+@pytest.mark.skipif(not HAS_NUMBA, reason="numba not installed")
+@pytest.mark.parametrize("name", _fixture_names())
+def test_engine_jsons_compile_like_multiwfn_level1_and_alie(tmp_path, name):
+    """full_set 1: vdd/mbis/mbis_fuzzy_* from the charge engine and other_alie
+    from the surface engine compile into charge.json, fuzzy_full.json and
+    other.json with the values Multiwfn produces."""
+    import logging
+    import shutil
+
+    from qtaim_gen.source.core.omol import _run_charge_engine, _run_surface_engine, parse_multiwfn
+    from qtaim_gen.source.data.multiwfn import ENGINE_ROUTINES
+
+    src = os.path.join(FIXTURES, name)
+    for f in ("orca.wfx", "orca.inp"):
+        shutil.copy(os.path.join(src, f), tmp_path / f)
+    logger = logging.getLogger("test_charge_engine")
+    assert _run_charge_engine(str(tmp_path), n_threads=2, logger=logger, full_set=1)
+    assert _run_surface_engine(str(tmp_path), n_threads=2, logger=logger)
+    parse_multiwfn(str(tmp_path), separate=True, logger=logger, full_set=1, skip_routines=ENGINE_ROUTINES)
+
+    with open(os.path.join(src, "multiwfn_reference_level1.json")) as f:
+        ref = json.load(f)
+    with open(os.path.join(src, "multiwfn_reference_alie.json")) as f:
+        ref_alie = json.load(f)["other_alie"]
+    charge = json.loads((tmp_path / "charge.json").read_text())
+    fuzzy = json.loads((tmp_path / "fuzzy_full.json").read_text())
+    other = json.loads((tmp_path / "other.json").read_text())
+    timings = json.loads((tmp_path / "timings.json").read_text())
+
+    assert timings["charge_engine"] > 0 and timings["surface_engine"] > 0
+    for step in ("vdd", "mbis"):
+        for k, v in ref[step]["charge"].items():
+            assert charge[step]["charge"][k] == pytest.approx(v, abs=CHARGE_TOL), (step, k)
+    for step in (s for s in ref if "fuzzy" in s):
+        for k, v in ref[step][step].items():
+            assert fuzzy[step][k] == pytest.approx(v, abs=CHARGE_TOL), (step, k)
+    assert other["ALIE_Volume"] == pytest.approx(ref_alie["ALIE_Volume"], abs=1e-5)
+    assert other["ALIE_Overall_skewness"] == pytest.approx(ref_alie["ALIE_Overall_skewness"], abs=1e-9)
