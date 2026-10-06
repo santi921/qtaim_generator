@@ -30,8 +30,10 @@ sed "s#^#$SRC/#" $WORK/tm_react_${N_JOBS}_rel.txt > $WORK/jobs.txt
 head -200 $WORK/jobs.txt > $WORK/jobs_ref.txt
 echo "jobs: $(grep -c . $WORK/jobs.txt), ref subset: $(grep -c . $WORK/jobs_ref.txt)"
 
-# test A works on copies of the finished folders
+# test A works on copies of the finished folders. Skip only folders that already
+# hold a copied result: the runner creates a folder before a copy reaches it, and
+# a bare -d test then skipped it for good. cp of dir/. merges into an existing dir.
 while read rel; do
-  [ -d $WORK/merge/$rel ] || { mkdir -p $(dirname $WORK/merge/$rel); cp -a $RES/$rel $WORK/merge/$rel; }
+  [ -s $WORK/merge/$rel/generator/timings.json ] || { mkdir -p $WORK/merge/$rel; cp -a $RES/$rel/. $WORK/merge/$rel/; }
 done < $WORK/tm_react_${N_JOBS}_rel.txt
 echo "merge tree: $(du -sh $WORK/merge | cut -f1)"
