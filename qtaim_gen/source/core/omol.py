@@ -11,6 +11,8 @@ from qtaim_gen.source.utils.validation import (
     get_charge_spin_n_atoms_from_folder,
     get_expected_timing_keys,
     qtaim_run_status,
+    qtaim_all_alpha_defect,
+    all_electron_count,
     TIMINGS_PATCHED_KEY,
     TIMING_PLACEHOLDER,
 )
@@ -493,6 +495,7 @@ def run_jobs(
     check_bcp_count: bool = False,
     bcp_tolerance: int = 2,
     require_qtaim_provenance: bool = False,
+    recheck_allalpha_qtaim: bool = False,
 ) -> None:
     """
     Run conversion and multiwfn jobs
@@ -665,6 +668,9 @@ def run_jobs(
                 require_qtaim_provenance=require_qtaim_provenance,
                 charge=charge_for_skip,
                 fuzzy_routines=_fuzzy_routine_set,
+                recheck_allalpha_qtaim=recheck_allalpha_qtaim,
+                n_electrons=all_electron_count(dft_dict) if (recheck_allalpha_qtaim and dft_dict) else None,
+                mult=int(dft_dict["spin"]) if (dft_dict and dft_dict.get("spin") is not None) else None,
             )
             if step_done:
                 has_positive_timing = (
@@ -1896,12 +1902,61 @@ def _reject_wavefunction_with_wrong_electron_count(
     return True
 
 
+def _prepare_allalpha_qtaim_rerun(
+    folder: str, wfx: bool, preprocess_compressed: bool, logger: logging.Logger
+) -> bool:
+    """Set a folder up for a QTAIM rerun from a .wfx when its qtaim.json is all-alpha.
+
+    Removes every .wfn and loose CPprop.txt (folder and generator/) so the
+    reparse cannot rebuild the record and extraction rebuilds a .wfx from the
+    gbw source. False (do not run) when the rerun could only reproduce the
+    record: no --wfx, or no .wfx and no gbw source. True otherwise, including
+    when the record is fine and nothing is touched.
+    """
+    dft_dict = get_charge_spin_n_atoms_from_folder(folder, logger=logger)
+    mult = int(dft_dict["spin"]) if (dft_dict and dft_dict.get("spin") is not None) else None
+    n_electrons = all_electron_count(dft_dict) if dft_dict else None
+    defect = False
+    for base in (folder, os.path.join(folder, "generator")):
+        try:
+            with open(os.path.join(base, "qtaim.json"), "r") as f:
+                record = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            continue
+        if isinstance(record, dict) and qtaim_all_alpha_defect(record, n_electrons=n_electrons, mult=mult):
+            defect = True
+    if not defect:
+        return True
+    if not wfx:
+        logger.error("recheck_allalpha_qtaim: all-alpha qtaim.json in %s needs --wfx; not running", folder)
+        return False
+    existing = _wavefunction_path(folder)
+    if not (existing is not None and existing.endswith(".wfx")) and not _gbw_source_present(
+        folder, preprocess_compressed
+    ):
+        logger.error(
+            "recheck_allalpha_qtaim: all-alpha qtaim.json in %s and no .wfx or gbw source to rerun from; "
+            "not running", folder)
+        return False
+    for base in (folder, os.path.join(folder, "generator")):
+        if not os.path.isdir(base):
+            continue
+        for name in sorted(os.listdir(base)):
+            if name.endswith(".wfn") or name == "CPprop.txt":
+                os.remove(os.path.join(base, name))
+                logger.info("recheck_allalpha_qtaim: removed %s before the QTAIM rerun", os.path.join(base, name))
+    return True
+
+
 def _qtaim_output_complete(
     folder: str,
     n_atoms: Optional[int] = None,
     check_bcp_count: bool = False,
     bcp_tolerance: int = 2,
     require_qtaim_provenance: bool = False,
+    recheck_allalpha_qtaim: bool = False,
+    n_electrons: Optional[int] = None,
+    mult: Optional[int] = None,
 ) -> bool:
     """Whether qtaim.json looks complete enough to skip the QTAIM step.
 
@@ -1917,7 +1972,9 @@ def _qtaim_output_complete(
     consults qtaim.out, rejecting a run whose CP search or CPprop.txt export
     never finished or whose stored bond-CP count falls short of what Multiwfn
     reported; conversely, an empty BCP set is then acceptable when a complete
-    run itself reported none (genuinely non-interacting fragments).
+    run itself reported none (genuinely non-interacting fragments). With
+    recheck_allalpha_qtaim it rejects an all-alpha or partly all-alpha record,
+    the same rule validate_qtaim_dict applies.
     """
     for base in (folder, os.path.join(folder, "generator")):
         path = os.path.join(base, "qtaim.json")
@@ -1930,6 +1987,8 @@ def _qtaim_output_complete(
             continue
         if not data:
             continue
+        if recheck_allalpha_qtaim and qtaim_all_alpha_defect(data, n_electrons=n_electrons, mult=mult):
+            return False
 
         n_ncp = sum(1 for k in data if k != "_meta" and "_" not in k)
         n_bcp = sum(1 for k in data if k != "_meta" and "_" in k)
@@ -2081,6 +2140,9 @@ def _has_usable_step_output(
     require_qtaim_provenance: bool = False,
     charge: Optional[int] = None,
     fuzzy_routines: Optional[set] = None,
+    recheck_allalpha_qtaim: bool = False,
+    n_electrons: Optional[int] = None,
+    mult: Optional[int] = None,
 ) -> bool:
     """Check whether a sub-job appears to have produced usable output on disk.
 
@@ -2110,6 +2172,9 @@ def _has_usable_step_output(
             check_bcp_count=check_bcp_count,
             bcp_tolerance=bcp_tolerance,
             require_qtaim_provenance=require_qtaim_provenance,
+            recheck_allalpha_qtaim=recheck_allalpha_qtaim,
+            n_electrons=n_electrons,
+            mult=mult,
         )
 
     for base in (folder, os.path.join(folder, "generator")):
@@ -2272,6 +2337,7 @@ def gbw_analysis(
     patch_timings: bool = False,
     horton_python: str = "",
     recheck_fuzzy: bool = False,
+    recheck_allalpha_qtaim: bool = False,
 ) -> None:
     """
     Run a full analysis on a folder of gbw files
@@ -2302,6 +2368,11 @@ def gbw_analysis(
             fuzzy integrations / unrestricted fuzzy bond orders by reparsing the
             archived output where it is trustworthy, and invalidate the rest
             so the restart reruns only those steps (implies restart)
+        recheck_allalpha_qtaim(bool): treat an all-alpha or partly all-alpha
+            qtaim.json as incomplete and rerun QTAIM from a .wfx: the unrestricted
+            .wfn and loose CPprop.txt are removed before extraction, so neither the
+            reparse nor the rerun can reproduce the record (needs wfx and a gbw
+            source; implies restart)
     Writes:
         - settings.ini file with memory and n_threads
         - jobs for conversion to wfn/wfx and multiwfn analysis
@@ -2346,6 +2417,13 @@ def gbw_analysis(
                 return False
         else:
             logger.warning("recheck_fuzzy: multiplicity unreadable in %s - recheck skipped", folder)
+
+    # Also before extraction: a rejected all-alpha record came from an unrestricted
+    # .wfn, and the loose CPprop.txt holds the same values, so the reparse below
+    # would rebuild it and a rerun from that .wfn would reproduce it.
+    if recheck_allalpha_qtaim and not parse_only:
+        if not _prepare_allalpha_qtaim_rerun(folder, wfx, preprocess_compressed, logger):
+            return False
 
     # check if there is a .wfn or .gbw file in the folder. If there is an
     # option to preprocess compressed files
@@ -2493,7 +2571,7 @@ def gbw_analysis(
         else:
             logger.info("Timings file found at %s - restarting.", timings_path)
 
-    if recheck_fuzzy and not restart and not overwrite:
+    if (recheck_fuzzy or recheck_allalpha_qtaim) and not restart and not overwrite:
         # data presence drives the per-step skip; without restart every step
         # reruns. --overwrite asks for exactly that, so it is left alone.
         restart = True
@@ -2520,6 +2598,7 @@ def gbw_analysis(
                     bcp_tolerance=bcp_tolerance,
                     require_qtaim_provenance=require_qtaim_provenance,
                     recheck_fuzzy=recheck_fuzzy,
+                    recheck_allalpha_qtaim=recheck_allalpha_qtaim,
                 )
             except Exception as e:
                 logger.error(f"Error during validation checks: {e}")
@@ -2556,6 +2635,7 @@ def gbw_analysis(
                         bcp_tolerance=bcp_tolerance,
                         require_qtaim_provenance=require_qtaim_provenance,
                         recheck_fuzzy=recheck_fuzzy,
+                        recheck_allalpha_qtaim=recheck_allalpha_qtaim,
                     )
                 except Exception:
                     tf_without_orca = False
@@ -2589,6 +2669,7 @@ def gbw_analysis(
                             bcp_tolerance=bcp_tolerance,
                             require_qtaim_provenance=require_qtaim_provenance,
                             recheck_fuzzy=recheck_fuzzy,
+                            recheck_allalpha_qtaim=recheck_allalpha_qtaim,
                         )
                     except Exception as e:
                         logger.error(f"Error validating orca-only parse: {e}")
@@ -2646,6 +2727,7 @@ def gbw_analysis(
                         bcp_tolerance=bcp_tolerance,
                         require_qtaim_provenance=require_qtaim_provenance,
                         recheck_fuzzy=recheck_fuzzy,
+                        recheck_allalpha_qtaim=recheck_allalpha_qtaim,
                     )
 
                     if tf_validation:
@@ -2701,6 +2783,7 @@ def gbw_analysis(
             check_bcp_count=check_bcp_count,
             bcp_tolerance=bcp_tolerance,
             require_qtaim_provenance=require_qtaim_provenance,
+            recheck_allalpha_qtaim=recheck_allalpha_qtaim,
         )
 
     print("... Parsing multiwfn output")
@@ -2737,6 +2820,7 @@ def gbw_analysis(
         bcp_tolerance=bcp_tolerance,
         require_qtaim_provenance=require_qtaim_provenance,
         recheck_fuzzy=recheck_fuzzy,
+        recheck_allalpha_qtaim=recheck_allalpha_qtaim,
     )
 
     # Optional repair pass: if validation failed and patch_timings is on,

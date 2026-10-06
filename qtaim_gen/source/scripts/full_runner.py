@@ -164,6 +164,18 @@ def main(argv=None):
     )
 
     parser.add_argument(
+        "--recheck_allalpha_qtaim",
+        action="store_true",
+        help=(
+            "treat an all-alpha or partly all-alpha qtaim.json (density_beta == 0 where "
+            "density_all > 0, from an unrestricted .wfn read as all-alpha) as incomplete, "
+            "unless every electron is alpha. The QTAIM step then reruns from a .wfx: the "
+            "unrestricted .wfn and loose CPprop.txt are removed first (needs --wfx and a gbw "
+            "source). Run fix-allalpha-qtaim first; it repairs UKS singlets in place."
+        ),
+    )
+
+    parser.add_argument(
         "--require_qtaim_provenance",
         action="store_true",
         help=(
@@ -201,6 +213,7 @@ def main(argv=None):
     require_qtaim_provenance = bool(
         getattr(args, "require_qtaim_provenance", False)
     )
+    recheck_allalpha_qtaim = bool(getattr(args, "recheck_allalpha_qtaim", False))
     recheck_fuzzy = bool(getattr(args, "recheck_fuzzy", False))
     job_file = args.job_file
 
@@ -292,6 +305,7 @@ def main(argv=None):
                     check_bcp_count=check_bcp_count,
                     bcp_tolerance=bcp_tolerance,
                     require_qtaim_provenance=require_qtaim_provenance,
+                    recheck_allalpha_qtaim=recheck_allalpha_qtaim,
                     recheck_fuzzy=recheck_fuzzy,
                 )  # works!
             except Exception as e:

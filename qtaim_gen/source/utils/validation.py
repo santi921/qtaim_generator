@@ -706,6 +706,66 @@ def count_reported_bcps(folder: str) -> Optional[int]:
     return qtaim_run_status(folder)["reported_bcp"]
 
 
+QTAIM_ALL_ALPHA, QTAIM_RESOLVED, QTAIM_AMBIGUOUS = "all_alpha", "resolved", "ambiguous"
+
+
+def _num(x) -> bool:
+    return isinstance(x, (int, float)) and not isinstance(x, bool)
+
+
+def qtaim_spin_class(record: dict) -> str:
+    """How a qtaim.json record resolves alpha and beta density.
+
+    all_alpha: numeric density_beta == 0 and density_alpha == density_all at every CP with
+        density_all > 1e-6 -- what Multiwfn writes when it reads an unrestricted .wfn as all-alpha
+    resolved: no such CP has density_beta == 0 (or the record has no spin fields)
+    ambiguous: anything in between, e.g. a record merged from an all-alpha and a resolved run
+    """
+    cps = [v for v in record.values() if isinstance(v, dict) and _num(v.get("density_all"))
+           and v["density_all"] > 1e-6]
+    if not cps or not any("density_beta" in v for v in cps):
+        return QTAIM_RESOLVED
+    if not all(_num(v.get("density_beta")) for v in cps):
+        return QTAIM_AMBIGUOUS
+    zero = [abs(v["density_beta"]) < 1e-12 for v in cps]
+    if not any(zero):
+        return QTAIM_RESOLVED
+    if not all(zero):
+        return QTAIM_AMBIGUOUS
+    for v in cps:
+        alpha = v.get("density_alpha")
+        if not _num(alpha) or abs(alpha - v["density_all"]) > 1e-8 * max(1.0, abs(v["density_all"])):
+            return QTAIM_AMBIGUOUS
+    return QTAIM_ALL_ALPHA
+
+
+def all_electron_count(dft_dict) -> Optional[int]:
+    """sum(Z) - net charge of the parsed geometry input (core electrons included); None if unknown."""
+    from rdkit import Chem
+
+    try:
+        table = Chem.GetPeriodicTable()
+        z = sum(table.GetAtomicNumber(re.match(r"[A-Za-z]+", a["element"]).group(0))
+                for a in dft_dict["mol"].values())
+        return z - int(dft_dict.get("charge", 0))
+    except Exception:
+        return None
+
+
+def qtaim_all_alpha_defect(record: dict, n_electrons: Optional[int] = None, mult: Optional[int] = None) -> bool:
+    """True if the record is all-alpha or partly all-alpha and needs a QTAIM rerun from a .wfx.
+
+    An all-alpha record is right when every electron is alpha (n_electrons == mult - 1, e.g. an
+    H atom or triplet H2); with either count unknown it is treated as a defect.
+    """
+    spin_class = qtaim_spin_class(record)
+    if spin_class == QTAIM_AMBIGUOUS:
+        return True
+    if spin_class != QTAIM_ALL_ALPHA:
+        return False
+    return not (n_electrons is not None and mult is not None and n_electrons == mult - 1)
+
+
 def validate_qtaim_dict(
     qtaim_json_loc: str,
     n_atoms: int = None,
@@ -715,6 +775,9 @@ def validate_qtaim_dict(
     check_bcp_count: bool = False,
     bcp_tolerance: int = DEFAULT_BCP_TOLERANCE,
     require_provenance: bool = False,
+    reject_all_alpha: bool = False,
+    n_electrons: Optional[int] = None,
+    mult: Optional[int] = None,
 ):
     """
     Basic check that the qtaim json file has the expected structure
@@ -729,6 +792,17 @@ def validate_qtaim_dict(
     if not qtaim_dict:
         if verbose:
             print("QTAIM json file is empty.")
+        return False
+
+    if reject_all_alpha and qtaim_all_alpha_defect(qtaim_dict, n_electrons=n_electrons, mult=mult):
+        msg = (
+            f"QTAIM json is all-alpha or partly all-alpha (an unrestricted .wfn read as "
+            f"all-alpha); rerun QTAIM from a .wfx: {qtaim_json_loc}"
+        )
+        if verbose:
+            print(msg)
+        if logger:
+            logger.error(msg)
         return False
 
     # dict_ncps = {qtaim_dict[key] for key in qtaim_dict if "_" not in key}
@@ -1011,6 +1085,7 @@ def validation_checks(
     require_qtaim_provenance: bool = False,
     recheck_fuzzy: bool = False,
     orca_min_parser_version: Optional[int] = ORCA_PARSER_VERSION,
+    recheck_allalpha_qtaim: bool = False,
 ):
     """
     Run all validation checks on the json files in the given folder.
@@ -1035,6 +1110,8 @@ def validation_checks(
             are present but physically wrong (all-zero densities, spin not
             summing to multiplicity - 1, all-alpha or alpha-only fuzzy bonds).
             Dry run: nothing is written.
+        recheck_allalpha_qtaim (bool): fail an all-alpha or partly all-alpha qtaim.json
+            (an unrestricted .wfn read as all-alpha), unless every electron is alpha.
         orca_min_parser_version (Optional[int]): with check_orca, also fail when
             orca.json predates this parser version (orca_parser_version, 1 when
             absent), so the runner reparses it. None or 0 disables the gate.
@@ -1139,6 +1216,9 @@ def validation_checks(
         check_bcp_count=check_bcp_count,
         bcp_tolerance=bcp_tolerance,
         require_provenance=require_qtaim_provenance,
+        reject_all_alpha=recheck_allalpha_qtaim,
+        n_electrons=all_electron_count(dft_dict) if recheck_allalpha_qtaim else None,
+        mult=spin,
     ):
         if logger:
             logger.error(f"QTAIM json validation failed in folder: {folder}")

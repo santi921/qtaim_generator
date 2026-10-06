@@ -9,8 +9,10 @@ the wrong ones follow from them exactly:
   c = 2^(2/3) too big, while the kinetic terms were right, so
     e_loc_func = 1 / (1 + c^2 (1/ELF - 1))    (ELF = 1/(1+chi^2), chi = D/D0)
     lol        = t / (1 + t),  t = (LOL / (1 - LOL)) / c    (LOL = t/(1+t), t = D0/tau)
-Checked against fresh .wfx reruns (ani1xbb, trans1x, tm_react; 2026-10-06): at <S**2> < 0.05 the
-max error was 1.8e-6 (ELF), 2.6e-7 (LOL), 1.5e-3 e/bohr^3 (spin fields). Above that it is not exact.
+Checked against fresh .wfx reruns at <S**2> < 0.05 (2026-10-06): ani1xbb and trans1x, max error
+1.8e-6 (ELF), 2.6e-7 (LOL), 1.5e-3 e/bohr^3 (spin fields); tm_react, the same fields match the rerun
+except in folders whose rerun found a different CP set. Above <S**2> 0.05 it is not exact.
+Records left for a rerun are picked up by the runners' --recheck_allalpha_qtaim.
 
 Per folder, under the runners' .processing.lock (never broken as stale; no lock with --dry_run):
   1. every qtaim.json copy present (generator/ and a leftover root copy) is classified:
@@ -45,6 +47,9 @@ from typing import Dict, List, Optional, Tuple
 
 from tqdm import tqdm
 
+from qtaim_gen.source.utils.validation import (
+    QTAIM_ALL_ALPHA, QTAIM_AMBIGUOUS, QTAIM_RESOLVED, qtaim_spin_class)
+
 STATUS_FIXED = "fixed"
 STATUS_WOULD_FIX = "would_fix"
 STATUS_NOT_ALLALPHA = "not_allalpha"
@@ -63,7 +68,9 @@ STATUSES = (STATUS_FIXED, STATUS_WOULD_FIX, STATUS_NOT_ALLALPHA, STATUS_AMBIGUOU
 DONE = (STATUS_FIXED, STATUS_WOULD_FIX, STATUS_NOT_ALLALPHA)
 
 C = 2 ** (2 / 3)
-ALL_ALPHA, RESOLVED, AMBIGUOUS = "all_alpha", "resolved", "ambiguous"
+# one classifier for this tool and the runners' --recheck_allalpha_qtaim gate
+classify = qtaim_spin_class
+ALL_ALPHA, RESOLVED, AMBIGUOUS = QTAIM_ALL_ALPHA, QTAIM_RESOLVED, QTAIM_AMBIGUOUS
 QTAIM_COPIES = (os.path.join("generator", "qtaim.json"), "qtaim.json")
 
 
@@ -79,25 +86,6 @@ def _paths(entry: str, root_inputs: Optional[str], root_results: Optional[str]) 
         if entry.startswith(root_results):
             return entry, os.path.join(root_inputs, entry[len(root_results):].lstrip(os.sep))
     return entry, None
-
-
-def classify(record: dict) -> str:
-    cps = [v for v in record.values() if isinstance(v, dict) and _num(v.get("density_all"))
-           and v["density_all"] > 1e-6]
-    if not cps or not any("density_beta" in v for v in cps):
-        return RESOLVED
-    if not all(_num(v.get("density_beta")) for v in cps):
-        return AMBIGUOUS
-    zero = [abs(v["density_beta"]) < 1e-12 for v in cps]
-    if not any(zero):
-        return RESOLVED
-    if not all(zero):
-        return AMBIGUOUS
-    for v in cps:
-        alpha = v.get("density_alpha")
-        if not _num(alpha) or abs(alpha - v["density_all"]) > 1e-8 * max(1.0, abs(v["density_all"])):
-            return AMBIGUOUS
-    return ALL_ALPHA
 
 
 def elf_fix(elf: float) -> float:
