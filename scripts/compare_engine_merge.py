@@ -13,7 +13,9 @@ from scratch) and reports:
     charge_engine timing (new timings.json) on the same job
   - which original records carry the known Multiwfn fuzzy bugs (tracker #28:
     all-zero hirsh_fuzzy_density, open-shell spin sums != mult - 1,
-    hirsh_fuzzy_spin holding the density, alpha-only open-shell fuzzy_bond);
+    hirsh_fuzzy_spin holding the density, alpha-only fuzzy_bond at any
+    multiplicity, and doubled fuzzy_bond from an all-alpha .wfn of an
+    unrestricted singlet);
     those diffs are reported apart from the clean-original comparison, together
     with the engine's own physical checks (spin sums, density sums)
 
@@ -65,7 +67,7 @@ AFFECTED_BY = {
     "hirsh_fuzzy_density": {"hirsh_density_zero"},
     "becke_fuzzy_spin": {"spin_sum_wrong"},
     "hirsh_fuzzy_spin": {"spin_sum_wrong", "hirsh_spin_is_density"},
-    "fuzzy_bond": {"spin_sum_wrong", "fuzzy_bond_alpha_only"},
+    "fuzzy_bond": {"spin_sum_wrong", "fuzzy_bond_alpha_only", "fuzzy_bond_doubled"},
 }
 
 
@@ -112,11 +114,16 @@ def compare_job(orig, new):
             rec["orig_flags"].append("spin_sum_wrong")
         if o_hs is not None and o_hs > (mult - 1) + 0.5:
             rec["orig_flags"].append("hirsh_spin_is_density")
-        o_b, n_b = (files["bond.json"][0] or {}).get("fuzzy_bond"), (files["bond.json"][1] or {}).get("fuzzy_bond")
-        if o_b and n_b:
-            ratios = [o_b[k] / n_b[k] for k in set(o_b) & set(n_b) if n_b[k]]
-            if ratios and 0.35 < float(np.median(ratios)) < 0.65:
+    # unrestricted singlets carry both fuzzy_bond bugs too (the #28 recheck gates on mult > 1)
+    o_b, n_b = (files["bond.json"][0] or {}).get("fuzzy_bond"), (files["bond.json"][1] or {}).get("fuzzy_bond")
+    if o_b and n_b:
+        ratios = [o_b[k] / n_b[k] for k in set(o_b) & set(n_b) if n_b[k]]
+        if ratios:
+            r = float(np.median(ratios))
+            if 0.35 < r < 0.65:
                 rec["orig_flags"].append("fuzzy_bond_alpha_only")
+            elif 1.9 < r < 2.1:
+                rec["orig_flags"].append("fuzzy_bond_doubled")
 
     # engine's own physics: spin sums = mult - 1, both partitions hold the same electrons
     n_bd, n_hd = fuzzy_sum(n_fz, "becke_fuzzy_density"), fuzzy_sum(n_fz, "hirsh_fuzzy_density")
@@ -209,7 +216,7 @@ def main():
           + (", ".join(f"{k} {v:.2e}" for k, v in sorted(checks.items())) or "none"))
 
     missing = sum(bool(r["missing"]) for r in done.values())
-    pairs = sum(r["pair_set_changes"] for r in done.values() if not {"spin_sum_wrong", "fuzzy_bond_alpha_only"} & set(r["orig_flags"]))
+    pairs = sum(r["pair_set_changes"] for r in done.values() if not AFFECTED_BY["fuzzy_bond"] & set(r["orig_flags"]))
     changed = [(k, r["untouched_changed"]) for k, r in done.items() if r["untouched_changed"]]
     print(f"jobs missing an engine routine: {missing}")
     print(f"fuzzy_bond pairs on one side only (clean originals): {pairs}")
