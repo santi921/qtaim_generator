@@ -9,8 +9,10 @@ from scratch) and reports:
     and max <= 0.03, docs/plans/2026-10-04-feat-one-pass-charge-engine-plan.md)
   - whether every other key of charge/bond/fuzzy_full.json, and qtaim.json and
     other.json, is unchanged (merge mode must not touch them)
-  - wall time of the 9 Multiwfn routines (original timings.json) vs the
-    charge_engine timing (new timings.json) on the same job
+  - for other_alie from the surface engine, the eight ALIE_* values (volume and
+    areas relative, the rest absolute; other.json must be unchanged otherwise)
+  - wall time of the Multiwfn routines the engines cover (original timings.json)
+    vs the charge_engine + surface_engine timings (new timings.json) on the same job
   - which original records carry the known Multiwfn fuzzy bugs (tracker #28:
     all-zero hirsh_fuzzy_density, open-shell spin sums != mult - 1,
     hirsh_fuzzy_spin holding the density, alpha-only fuzzy_bond at any
@@ -41,8 +43,14 @@ from qtaim_gen.source.data.multiwfn import ENGINE_ROUTINES
 
 MEDIAN_TOL = 0.005
 MAX_TOL = 0.03
-CHARGE = ("hirshfeld", "adch", "cm5", "becke")
-FUZZY = ("becke_fuzzy_density", "hirsh_fuzzy_density", "becke_fuzzy_spin", "hirsh_fuzzy_spin")
+CHARGE = ("hirshfeld", "adch", "cm5", "becke", "vdd", "mbis")
+FUZZY = ("becke_fuzzy_density", "hirsh_fuzzy_density", "becke_fuzzy_spin", "hirsh_fuzzy_spin",
+         "mbis_fuzzy_density", "mbis_fuzzy_spin")
+# other_alie (surface engine): relative tolerance for volume/areas, absolute otherwise
+ALIE_TOL = {"ALIE_Volume": ("rel", 1e-4), "ALIE_Overall_surface_area": ("rel", 1e-4),
+            "ALIE_Positive_surface_area": ("rel", 1e-4), "ALIE_Negative_surface_area": ("abs", 1e-3),
+            "ALIE_Minimal_value": ("abs", 1e-3), "ALIE_Maximal_value": ("abs", 1e-3),
+            "ALIE_Overall_skewness": ("abs", 1e-3), "ALIE_Surface_Density": ("abs", 1e-3)}
 FILE_OF = {**{s: "charge.json" for s in CHARGE}, **{s: "fuzzy_full.json" for s in FUZZY},
            "fuzzy_bond": "bond.json"}
 PERIODIC_TABLE = Chem.GetPeriodicTable()
@@ -71,6 +79,7 @@ AFFECTED_BY = {
     "hirsh_fuzzy_density": {"hirsh_density_zero", "hirsh_density_rebuilt"},
     "becke_fuzzy_spin": {"spin_sum_wrong"},
     "hirsh_fuzzy_spin": {"spin_sum_wrong", "hirsh_spin_is_density"},
+    "mbis_fuzzy_spin": {"spin_sum_wrong"},
     "fuzzy_bond": {"spin_sum_wrong", "fuzzy_bond_alpha_only", "fuzzy_bond_doubled", "fuzzy_bond_empty"},
 }
 
@@ -149,7 +158,7 @@ def compare_job(orig, new):
     if n_bd is not None and n_hd is not None:
         rec["engine_checks"]["density_sum_becke_minus_hirsh"] = abs(n_bd - n_hd)
     if open_shell:
-        for step in ("becke_fuzzy_spin", "hirsh_fuzzy_spin"):
+        for step in ("becke_fuzzy_spin", "hirsh_fuzzy_spin", "mbis_fuzzy_spin"):
             v = fuzzy_sum(n_fz, step)
             if v is not None:
                 rec["engine_checks"][f"{step}_minus_mult1"] = abs(v - (mult - 1))
@@ -173,15 +182,25 @@ def compare_job(orig, new):
         for k in set(o_all or {}) - ENGINE_ROUTINES:
             if (n_all or {}).get(k) != o_all[k]:
                 rec["untouched_changed"].append(f"{fname}:{k}")
-    for fname in ("qtaim.json", "other.json"):
-        o_all, n_all = files[fname]
-        if fname == "qtaim.json":
-            o_all, n_all = strip_cp_num(o_all), strip_cp_num(n_all)
-        if o_all != n_all:
-            rec["untouched_changed"].append(fname)
+    o_q, n_q = files["qtaim.json"]
+    if strip_cp_num(o_q) != strip_cp_num(n_q):
+        rec["untouched_changed"].append("qtaim.json")
+    o_o, n_o = files["other.json"]
+    engine_alie = bool(n_t.get("surface_engine"))
+    if engine_alie:
+        # ALIE_* come from the surface engine; the rest of other.json must be unchanged
+        rec["alie_diffs"] = {}
+        for k, (kind, _) in ALIE_TOL.items():
+            if k in (o_o or {}) and k in (n_o or {}):
+                d = abs(n_o[k] - o_o[k])
+                rec["alie_diffs"][k] = d / abs(o_o[k]) if kind == "rel" and o_o[k] else d
+    strip = (lambda d: {k: v for k, v in (d or {}).items() if not k.startswith("ALIE_")}) if engine_alie else (lambda d: d)
+    if strip(o_o) != strip(n_o):
+        rec["untouched_changed"].append("other.json")
 
     mwfn = [o_t.get(r) for r in ENGINE_ROUTINES if isinstance(o_t.get(r), (int, float)) and o_t.get(r) > 0]
     rec["mwfn_engine_routines_s"] = sum(mwfn) if mwfn else None
+    rec["charge_engine_s"] += n_t.get("surface_engine") or 0.0
     return rec
 
 
@@ -229,6 +248,14 @@ def main():
         bad_max = f"{np.concatenate(bad).max():.2e}" if bad else "-"
         print(f"{row} | {len(bad)} | {bad_max}")
 
+    alie = [r["alie_diffs"] for r in done.values() if r.get("alie_diffs")]
+    if alie:
+        print("\nother_alie (surface engine) | jobs | max diff | tolerance | pass")
+        for k, (kind, tol) in ALIE_TOL.items():
+            vals = [a[k] for a in alie if k in a]
+            if vals:
+                print(f"{k} | {len(vals)} | {max(vals):.2e} {kind} | {tol:g} | {max(vals) <= tol}")
+
     checks = {}
     for r in done.values():
         for k, v in r["engine_checks"].items():
@@ -250,7 +277,7 @@ def main():
     if sp:
         m, e = np.array(sp).T
         ratio = m / e
-        print(f"\ntiming over {len(sp)} jobs: Multiwfn 9 routines {m.sum():.0f} s total "
+        print(f"\ntiming over {len(sp)} jobs: Multiwfn engine-covered routines {m.sum():.0f} s total "
               f"(median {np.median(m):.1f} s/job), engine {e.sum():.0f} s total "
               f"(median {np.median(e):.1f} s/job); speedup median {np.median(ratio):.1f}x, "
               f"p10 {np.percentile(ratio, 10):.1f}x, p90 {np.percentile(ratio, 90):.1f}x, "
