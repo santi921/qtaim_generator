@@ -238,6 +238,13 @@ class TestSingletFuzzyBond:
                    outs={"fuzzy_bond.out": truncated}, loose=["orca.gbw"])
         assert recheck_fuzzy(str(job), mult=1, dry_run=True)["rerun"] == ["fuzzy_bond"]
 
+    def test_overflowed_archive_reruns_instead_of_crashing(self, tmp_path):
+        bond = {"fuzzy_bond": {"4_C_to_5_C": 0.643844}}
+        bad = FUZZY_BOND_WFX.replace("Total:  0.899321", "Total:**********", 1)
+        job = _job(tmp_path, {}, bond=bond, outs={"fuzzy_bond.out": bad}, loose=["orca.gbw"])
+        rep = recheck_fuzzy(str(job), mult=2, dry_run=True)
+        assert rep["rerun"] == ["fuzzy_bond"] and rep["reparse"] == []
+
     def test_open_shell_without_archive_still_reruns(self, tmp_path):
         job = _job(tmp_path, {}, bond={"fuzzy_bond": {"4_C_to_5_C": 2.5}}, loose=["orca.gbw"])
         assert recheck_fuzzy(str(job), mult=2, dry_run=True)["rerun"] == ["fuzzy_bond"]

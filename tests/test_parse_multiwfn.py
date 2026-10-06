@@ -407,6 +407,15 @@ class TestMultiwfnParser:
         assert np.isclose(d["4_C_to_5_C"], 1.251987, atol=1e-6)
         assert np.isclose(d["1_H_to_2_Br"], 0.899321, atol=1e-6)
 
+    def test_fuzzy_bond_overflow_fails_the_parse(self, tmp_path):
+        # Multiwfn prints ********** for a value that overflows its field; a parse
+        # that dropped the bond would store an incomplete record that validates.
+        text = (TEST_FILES / "multiwfn" / "open_shell_wfx" / "fuzzy_bond.out").read_text()
+        bad = tmp_path / "fuzzy_bond.out"
+        bad.write_text(text.replace("Total:  0.899321", "Total:**********", 1))
+        with pytest.raises(ValueError, match="overflowed"):
+            parse_bond_order_fuzzy(str(bad))
+
     def test_fuzzy_real_space_keeps_first_block(self):
         # Output of the pre-fix hirsh_fuzzy_density input: a rho block, then an
         # all-zero block that used to overwrite it.
