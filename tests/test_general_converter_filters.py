@@ -542,9 +542,9 @@ class TestQTAIMDataParsing:
             bond_feats={},
         )
 
-        # Should have 22 atom feature keys
-        assert len(atom_keys) == 22, f"Expected 22 atom keys, got {len(atom_keys)}"
-        assert len(bond_keys) == 22, f"Expected 22 bond keys, got {len(bond_keys)}"
+        # 22 qtaim.json properties minus delta_g_promolecular (DROPPED_QTAIM_FIELDS)
+        assert len(atom_keys) == 21, f"Expected 21 atom keys, got {len(atom_keys)}"
+        assert len(bond_keys) == 21, f"Expected 21 bond keys, got {len(bond_keys)}"
 
         # Check some expected features
         expected_features = ["eta", "lol", "density_alpha", "density_beta"]
