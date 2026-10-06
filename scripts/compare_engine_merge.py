@@ -15,7 +15,9 @@ from scratch) and reports:
     all-zero hirsh_fuzzy_density, open-shell spin sums != mult - 1,
     hirsh_fuzzy_spin holding the density, alpha-only fuzzy_bond at any
     multiplicity, and doubled fuzzy_bond from an all-alpha .wfn of an
-    unrestricted singlet);
+    unrestricted singlet, hirsh_fuzzy_density rebuilt as Z - q_hirshfeld by
+    the #28 repair (commit 2105913; normalized charges, so not the integral),
+    and an empty stored fuzzy_bond);
     those diffs are reported apart from the clean-original comparison, together
     with the engine's own physical checks (spin sums, density sums)
 
@@ -31,6 +33,7 @@ import json
 import os
 
 import numpy as np
+from rdkit import Chem
 
 from qtaim_gen.source.core.parse_qtaim import dft_inp_to_dict
 
@@ -42,6 +45,7 @@ CHARGE = ("hirshfeld", "adch", "cm5", "becke")
 FUZZY = ("becke_fuzzy_density", "hirsh_fuzzy_density", "becke_fuzzy_spin", "hirsh_fuzzy_spin")
 FILE_OF = {**{s: "charge.json" for s in CHARGE}, **{s: "fuzzy_full.json" for s in FUZZY},
            "fuzzy_bond": "bond.json"}
+PERIODIC_TABLE = Chem.GetPeriodicTable()
 
 
 def load(path):
@@ -64,10 +68,10 @@ def values(step, d):
 
 # which original-record bug signature invalidates which scheme's comparison
 AFFECTED_BY = {
-    "hirsh_fuzzy_density": {"hirsh_density_zero"},
+    "hirsh_fuzzy_density": {"hirsh_density_zero", "hirsh_density_rebuilt"},
     "becke_fuzzy_spin": {"spin_sum_wrong"},
     "hirsh_fuzzy_spin": {"spin_sum_wrong", "hirsh_spin_is_density"},
-    "fuzzy_bond": {"spin_sum_wrong", "fuzzy_bond_alpha_only", "fuzzy_bond_doubled"},
+    "fuzzy_bond": {"spin_sum_wrong", "fuzzy_bond_alpha_only", "fuzzy_bond_doubled", "fuzzy_bond_empty"},
 }
 
 
@@ -85,6 +89,14 @@ def multiplicity(*folders):
 def fuzzy_sum(fz, step):
     v = (fz or {}).get(step) or {}
     return v.get("sum")
+
+
+def strip_cp_num(qtaim):
+    # Multiwfn's CP index follows search order, so two identical runs can number CPs differently
+    if not isinstance(qtaim, dict):
+        return qtaim
+    return {cp: ({k: v for k, v in d.items() if k != "cp_num"} if isinstance(d, dict) else d)
+            for cp, d in qtaim.items()}
 
 
 def compare_job(orig, new):
@@ -108,6 +120,11 @@ def compare_job(orig, new):
     o_h = values("hirsh_fuzzy_density", (o_fz or {}).get("hirsh_fuzzy_density"))
     if o_h is not None and sum(abs(v) for v in o_h.values()) < 1e-6:
         rec["orig_flags"].append("hirsh_density_zero")
+    elif o_h:
+        q = (((files["charge.json"][0] or {}).get("hirshfeld") or {}).get("charge")) or {}
+        if set(o_h) <= set(q) and all(
+                abs(o_h[a] - (PERIODIC_TABLE.GetAtomicNumber(a.split("_", 1)[1]) - q[a])) < 1e-6 for a in o_h):
+            rec["orig_flags"].append("hirsh_density_rebuilt")
     if open_shell:
         o_bs, o_hs = fuzzy_sum(o_fz, "becke_fuzzy_spin"), fuzzy_sum(o_fz, "hirsh_fuzzy_spin")
         if o_bs is not None and abs(o_bs - (mult - 1)) > 0.01:
@@ -116,6 +133,8 @@ def compare_job(orig, new):
             rec["orig_flags"].append("hirsh_spin_is_density")
     # unrestricted singlets carry both fuzzy_bond bugs too (the #28 recheck gates on mult > 1)
     o_b, n_b = (files["bond.json"][0] or {}).get("fuzzy_bond"), (files["bond.json"][1] or {}).get("fuzzy_bond")
+    if o_b == {} and n_b:
+        rec["orig_flags"].append("fuzzy_bond_empty")
     if o_b and n_b:
         ratios = [o_b[k] / n_b[k] for k in set(o_b) & set(n_b) if n_b[k]]
         if ratios:
@@ -156,6 +175,8 @@ def compare_job(orig, new):
                 rec["untouched_changed"].append(f"{fname}:{k}")
     for fname in ("qtaim.json", "other.json"):
         o_all, n_all = files[fname]
+        if fname == "qtaim.json":
+            o_all, n_all = strip_cp_num(o_all), strip_cp_num(n_all)
         if o_all != n_all:
             rec["untouched_changed"].append(fname)
 
