@@ -42,6 +42,7 @@ backfill-orca-into-json = "qtaim_gen.source.scripts.helpers.backfill_orca_into_j
 reparse-orca-json = "qtaim_gen.source.scripts.helpers.reparse_orca_json:main"
 recheck-fuzzy = "qtaim_gen.source.scripts.helpers.recheck_fuzzy_folders:main"
 requalify-qtaim = "qtaim_gen.source.scripts.helpers.requalify_qtaim_folders:main"
+fix-allalpha-qtaim = "qtaim_gen.source.scripts.helpers.fix_allalpha_qtaim:main"
 
 # Analysis (paper Stream G: comparator embedding)
 analysis-soap-featurize = "qtaim_gen.source.analysis.comparator_embedding.cli:main"
