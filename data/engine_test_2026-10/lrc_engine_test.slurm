@@ -17,6 +17,10 @@
 #   sbatch -J merge   --export=ALL,MODE=merge   --array=0-199%50 lrc_engine_test.slurm
 #   sbatch -J scratch --export=ALL,MODE=scratch --array=0-199%50 lrc_engine_test.slurm
 #   sbatch -J ref     --export=ALL,MODE=ref     --array=0-3      lrc_engine_test.slurm
+# Optional: FULL_SET (default 0), TREE (output tree under $WORK, default $MODE),
+# LIST (job list, default per mode), e.g. the full_set 1 check on the ref subset:
+#   sbatch -J ref1 --export=ALL,MODE=ref,FULL_SET=1,TREE=ref_l1 --array=0-3 lrc_engine_test.slurm
+#   sbatch -J scr1 --export=ALL,MODE=scratch,FULL_SET=1,TREE=scratch_l1,LIST=$WORK/jobs_ref.txt --array=0-3 lrc_engine_test.slurm
 
 source ~/.bashrc
 module load gcc
@@ -30,6 +34,7 @@ ulimit -s unlimited
 SRC=/global/scratch/users/santiagovargas/OMol4M_raw
 WORK=/global/scratch/users/santiagovargas/engine_test
 N=${N:-50}
+LIST_OVERRIDE=${LIST:-}
 ID=${SLURM_ARRAY_TASK_ID}
 case $MODE in
   merge)   RUNNER=full-runner-engine;     LIST=$WORK/jobs.txt;     EXTRA="--restart" ;;
@@ -37,7 +42,9 @@ case $MODE in
   ref)     RUNNER=full-runner-parsl-alcf; LIST=$WORK/jobs_ref.txt; EXTRA="" ;;
   *) echo "MODE must be merge, scratch or ref"; exit 1 ;;
 esac
-SLICE=$WORK/slices/${MODE}_${ID}.txt
+LIST=${LIST_OVERRIDE:-$LIST}
+TREE=${TREE:-$MODE}
+SLICE=$WORK/slices/${TREE}_${ID}.txt
 sed -n "$(( ID * N + 1 )),$(( (ID + 1) * N ))p" $LIST > $SLICE
 if [ ! -s $SLICE ]; then
   echo "task $ID: empty slice, nothing to do"
@@ -49,7 +56,7 @@ $RUNNER \
   --orca_2mkl_cmd /global/scratch/users/santiagovargas/orca_6_0_1_linux_x86-64_shared_openmpi416/orca_2mkl \
   --multiwfn_cmd /global/scratch/users/santiagovargas/Multiwfn/Multiwfn_3.8_dev_bin_Linux/Multiwfn \
   --clean --patch_timings \
-  --full_set 0 \
+  --full_set ${FULL_SET:-0} \
   --n_threads 1 \
   --n_threads_per_job ${SLURM_CPUS_PER_TASK} \
   --safety_factor 1.0 \
@@ -61,5 +68,5 @@ $RUNNER \
   --type_runner local \
   --job_file $SLICE \
   --preprocess_compressed \
-  --root_omol_results $WORK/$MODE/ \
+  --root_omol_results $WORK/$TREE/ \
   --root_omol_inputs $SRC/
