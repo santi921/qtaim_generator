@@ -140,10 +140,9 @@ def write_conversion(
             + "'" + str(Path.home().joinpath(out_folder, read_file)) + "'"
             + " -molden\n"
         )
-        # also have it clean up the gbw file, .molden.input file
-
-        if os.path.exists(str(Path.home().joinpath(out_folder, read_file + ".molden.input"))):
-            f.write("rm '{}.molden.input'\n".format(str(Path.home().joinpath(out_folder, read_file))))
+        # No rm of the .molden.input here: it would delete the molden orca_2mkl just
+        # wrote, before the convert step reads it (a leftover molden from a killed
+        # run made convert fail on every retry). clean_jobs removes it at the end.
 
         # check if gbw file exists
         if os.path.exists(str(Path.home().joinpath(out_folder, read_file + ".gbw"))):

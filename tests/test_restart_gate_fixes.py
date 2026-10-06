@@ -27,6 +27,7 @@ from qtaim_gen.source.core.omol import (
     _step_out_parses,
     _wavefunction_electrons,
     parse_multiwfn,
+    write_conversion,
     write_multiwfn_exe,
 )
 from qtaim_gen.source.core.parse_multiwfn import parse_charge_base, parse_charge_doc
@@ -332,3 +333,19 @@ def test_multiwfn_wrapper_passes_bare_wavefunction_name(tmp_path):
         )
         cmd = (folder / "props_hirshfeld.mfwn").read_text().splitlines()[-1]
         assert cmd.startswith("Multiwfn 'orca.wfx' < ")
+
+
+def test_conversion_script_keeps_molden_from_a_killed_run(tmp_path):
+    # A leftover orca.molden.input used to add an rm right after orca_2mkl, so the
+    # fresh molden was deleted before the convert step could read it (exit 24).
+    (tmp_path / "orca.gbw").write_text("gbw")
+    (tmp_path / "orca.molden.input").write_text("stale")
+    write_conversion(
+        out_folder=str(tmp_path),
+        read_file=str(tmp_path / "orca.gbw"),
+        overwrite=True,
+        orca_2mkl_cmd="orca_2mkl",
+    )
+    lines = (tmp_path / "convert.in").read_text().splitlines()
+    assert lines[1].startswith("orca_2mkl ") and lines[1].endswith(" -molden")
+    assert not any("molden.input" in line for line in lines)
