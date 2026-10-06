@@ -147,6 +147,109 @@ class TestRecheck:
             "reparse": [], "rerun": [], "derived": [], "wavefunction": "not needed", "ok": True}
 
 
+
+class TestSingletFuzzyBond:
+    """UKS singlets: the fuzzy_bond check used to run only for mult > 1."""
+
+    BANNER = "Total/Alpha/Beta electrons:     95.0000     48.0000     47.0000"
+
+    def _out(self, total, alpha, beta):
+        return FUZZY_BOND_WFX.replace(self.BANNER, f"Total/Alpha/Beta electrons: {total:11.4f} {alpha:11.4f} {beta:11.4f}")
+
+    def test_alpha_only_singlet_reparsed_to_total(self, tmp_path):
+        bond = {"fuzzy_bond": {"4_C_to_5_C": 0.643844}, "mayer_orca": {"4_C_to_5_C": 1.0}}
+        job = _job(tmp_path, {}, bond=bond, outs={"fuzzy_bond.out": self._out(96, 48, 48)})
+        rep = recheck_fuzzy(str(job), mult=1)
+        assert rep["reparse"] == ["fuzzy_bond"] and rep["rerun"] == [] and rep["ok"]
+        b = json.loads((job / "generator" / "bond.json").read_text())
+        assert b["fuzzy_bond"]["4_C_to_5_C"] == pytest.approx(1.251987)
+
+    def test_correct_singlet_left_alone(self, tmp_path):
+        from qtaim_gen.source.core.parse_multiwfn import parse_bond_order_fuzzy
+        total = parse_bond_order_fuzzy(str(MWFN / "open_shell_wfx" / "fuzzy_bond.out"))
+        job = _job(tmp_path, {}, bond={"fuzzy_bond": total}, outs={"fuzzy_bond.out": self._out(96, 48, 48)})
+        assert recheck_fuzzy(str(job), mult=1) == {
+            "reparse": [], "rerun": [], "derived": [], "wavefunction": "not needed", "ok": True}
+
+    def test_all_alpha_singlet_reruns_from_wfx_and_drops_the_wfn(self, tmp_path):
+        bond = {"fuzzy_bond": {"4_C_to_5_C": 2.5}, "mayer_orca": {"4_C_to_5_C": 1.0}}
+        job = _job(tmp_path, {}, bond=bond, outs={"fuzzy_bond.out": self._out(96, 96, 0)},
+                   loose=["orca.wfn", "orca.gbw"])
+        rep = recheck_fuzzy(str(job), mult=1)
+        assert rep["rerun"] == ["fuzzy_bond"] and rep["ok"] and "gbw source" in rep["wavefunction"]
+        assert not (job / "orca.wfn").exists()
+        assert "fuzzy_bond" not in json.loads((job / "generator" / "bond.json").read_text())
+
+    def test_all_alpha_singlet_refused_without_a_wfx_source(self, tmp_path):
+        bond = {"fuzzy_bond": {"4_C_to_5_C": 2.5}}
+        job = _job(tmp_path, {}, bond=bond, outs={"fuzzy_bond.out": self._out(96, 96, 0)}, loose=["orca.wfn"])
+        rep = recheck_fuzzy(str(job), mult=1)
+        assert rep["ok"] is False and rep["rerun"] == ["fuzzy_bond"]
+        assert (job / "orca.wfn").exists()
+        assert json.loads((job / "generator" / "bond.json").read_text()) == bond
+
+    def test_singlet_without_archive_is_left_alone(self, tmp_path):
+        job = _job(tmp_path, {}, bond={"fuzzy_bond": {"4_C_to_5_C": 2.5}})
+        assert recheck_fuzzy(str(job), mult=1) == {
+            "reparse": [], "rerun": [], "derived": [], "wavefunction": "not needed", "ok": True}
+
+    RESTRICTED_LINES = (
+        "#    1:    1(H )    2(Br)   0.899321\n"
+        "#    2:    4(C )    5(C )   1.251987\n"
+    )
+
+    def _inp(self, job, keyword):
+        (job / "orca.inp").write_text(f"! {keyword} wB97M-V def2-TZVPD\n*xyz 0 1\nH 0 0 0\nH 0 0 0.74\n*\n")
+
+    def _restricted_out(self, lines=True):
+        head = FUZZY_BOND_WFX.split("Orbitals from")[0].replace(
+            self.BANNER, "Total/Alpha/Beta electrons:     96.0000     48.0000     48.0000")
+        return head + ("The total bond order >=  0.050000\n" + self.RESTRICTED_LINES if lines else "")
+
+    def test_uks_singlet_without_archive_reruns(self, tmp_path):
+        job = _job(tmp_path, {}, bond={"fuzzy_bond": {"4_C_to_5_C": 2.5}}, loose=["orca.gbw"])
+        self._inp(job, "UKS")
+        rep = recheck_fuzzy(str(job), mult=1, dry_run=True)
+        assert rep["rerun"] == ["fuzzy_bond"] and rep["ok"]
+
+    def test_rks_singlet_never_parsed_or_rerun(self, tmp_path):
+        job = _job(tmp_path, {}, bond={"fuzzy_bond": {"4_C_to_5_C": 9.9}},
+                   outs={"fuzzy_bond.out": self._out(96, 96, 0)})
+        self._inp(job, "RKS")
+        assert recheck_fuzzy(str(job), mult=1) == {
+            "reparse": [], "rerun": [], "derived": [], "wavefunction": "not needed", "ok": True}
+
+    def test_restricted_single_column_output_is_clean(self, tmp_path):
+        job = _job(tmp_path, {}, bond={"fuzzy_bond": {"4_C_to_5_C": 9.9}},
+                   outs={"fuzzy_bond.out": self._restricted_out()})
+        assert recheck_fuzzy(str(job), mult=1)["reparse"] == []
+
+    def test_truncated_restricted_output_is_clean_and_keeps_the_wfn(self, tmp_path):
+        job = _job(tmp_path, {}, bond={"fuzzy_bond": {"4_C_to_5_C": 1.0}},
+                   outs={"fuzzy_bond.out": self._restricted_out(lines=False)}, loose=["input.wfn", "orca.gbw"])
+        rep = recheck_fuzzy(str(job), mult=1)
+        assert rep["rerun"] == [] and rep["reparse"] == []
+        assert (job / "input.wfn").exists()
+
+    def test_truncated_unrestricted_output_reruns(self, tmp_path):
+        truncated = FUZZY_BOND_WFX.split("The total bond order")[0].replace(
+            self.BANNER, "Total/Alpha/Beta electrons:     96.0000     48.0000     48.0000")
+        job = _job(tmp_path, {}, bond={"fuzzy_bond": {"4_C_to_5_C": 1.0}},
+                   outs={"fuzzy_bond.out": truncated}, loose=["orca.gbw"])
+        assert recheck_fuzzy(str(job), mult=1, dry_run=True)["rerun"] == ["fuzzy_bond"]
+
+    def test_overflowed_archive_reruns_instead_of_crashing(self, tmp_path):
+        bond = {"fuzzy_bond": {"4_C_to_5_C": 0.643844}}
+        bad = FUZZY_BOND_WFX.replace("Total:  0.899321", "Total:**********", 1)
+        job = _job(tmp_path, {}, bond=bond, outs={"fuzzy_bond.out": bad}, loose=["orca.gbw"])
+        rep = recheck_fuzzy(str(job), mult=2, dry_run=True)
+        assert rep["rerun"] == ["fuzzy_bond"] and rep["reparse"] == []
+
+    def test_open_shell_without_archive_still_reruns(self, tmp_path):
+        job = _job(tmp_path, {}, bond={"fuzzy_bond": {"4_C_to_5_C": 2.5}}, loose=["orca.gbw"])
+        assert recheck_fuzzy(str(job), mult=2, dry_run=True)["rerun"] == ["fuzzy_bond"]
+
+
 class TestReviewFixes:
     def test_job_path_with_generator_component(self, tmp_path):
         # e.g. /lus/eagle/projects/generator/...: the merged generator/ copy must win

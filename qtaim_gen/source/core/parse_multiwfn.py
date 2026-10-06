@@ -747,6 +747,8 @@ def parse_bond_order_fuzzy(bond_order_txt):
         bond_out_txt: str, path to the bond out file
     Returns:
         bond_dict: dict, dictionary with the bond orders
+    Raises:
+        ValueError: a bond order field overflowed (**********); the output is not usable
     """
 
     fuzzy_trigger = "The total bond order >=  0.050000"
@@ -775,6 +777,14 @@ def parse_bond_order_fuzzy(bond_order_txt):
 
                     # Last token is the bond order in both layouts; open-shell lines
                     # read "Alpha: a Beta: b Total: t" and the bond order is t.
+                    # Multiwfn prints ********** when a value overflows its 10-wide
+                    # field (>= 1000, only from a broken all-alpha .wfn run). Fail
+                    # the parse: dropping the bond would store an incomplete record
+                    # that still validates, while a failure reruns the step.
+                    if "*" in split_list[-1]:
+                        raise ValueError(
+                            f"overflowed bond order field in {bond_order_txt}: {line.strip()}"
+                        )
                     order = float(split_list[-1])
                     # fuzzy_bond_dict.append((a, b, order))
                     fuzzy_bond_dict["{}_to_{}".format(a, b)] = order

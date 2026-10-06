@@ -1052,10 +1052,11 @@ def validation_checks(
             the count Multiwfn reported in qtaim.out, and reject records whose
             critical points were lost between the search and the stored file.
             Off by default: it needs qtaim.out, which older runs may not retain.
-        recheck_fuzzy (bool): also fail when fuzzy integrations or open-shell
-            fuzzy bond orders are present but physically wrong (all-zero
-            densities, spin not summing to multiplicity - 1, all-alpha or
-            alpha-only fuzzy bonds). Dry run: nothing is written.
+        recheck_fuzzy (bool): also fail when fuzzy integrations or fuzzy bond
+            orders of an unrestricted wavefunction (open shell or UKS singlet)
+            are present but physically wrong (all-zero densities, spin not
+            summing to multiplicity - 1, all-alpha or alpha-only fuzzy bonds).
+            Dry run: nothing is written.
         orca_min_parser_version (Optional[int]): with check_orca, also fail when
             orca.json predates this parser version (orca_parser_version, 1 when
             absent), so the runner reparses it. None or 0 disables the gate.
