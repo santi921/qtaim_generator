@@ -1,0 +1,22 @@
+{
+ "other_alie": {
+  "ALIE_Volume": 1087.37476,
+  "ALIE_Surface_Density": 2.8145,
+  "ALIE_Minimal_value": 13.08637,
+  "ALIE_Maximal_value": 16.42253,
+  "ALIE_Overall_surface_area": 587.05597,
+  "ALIE_Positive_surface_area": 587.05597,
+  "ALIE_Negative_surface_area": 0.0,
+  "ALIE_Overall_skewness": 2.0920216601
+ },
+ "vef_after": [
+  19563,
+  58683,
+  39122
+ ],
+ "grid": [
+  103,
+  103,
+  70
+ ]
+}

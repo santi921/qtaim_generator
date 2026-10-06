@@ -79,6 +79,7 @@ def read_wfx(path):
         "spin_types": spin_types,
         "coeffs": coeffs,
         "mult": int(_section(text, "Electronic Spin Multiplicity")),
+        "mo_energy": nums("Molecular Orbital Energies") if _section(text, "Molecular Orbital Energies") else None,
         "edf_center": np.zeros(0, dtype=np.int64),
         "edf_exp": np.zeros(0),
         "edf_coef": np.zeros(0),
@@ -131,7 +132,9 @@ def prepare_basis(wfx):
         if len(idx):
             a_gstart[a], a_gend[a] = idx[0], idx[-1] + 1
             a_r2max[a] = EXP_CUTOFF / g_alpha[idx].min()
+    energy = wfx.get("mo_energy")
     return {
+        "occ": occ, "abs_energy": None if energy is None else np.abs(energy[keep]),
         "occ_a": occ_a, "occ_b": occ_b, "ct": ct, "lmn": lmn,
         "g_alpha": g_alpha, "g_start": g_start, "g_end": g_end,
         "a_gstart": a_gstart, "a_gend": a_gend, "a_r2max": a_r2max,

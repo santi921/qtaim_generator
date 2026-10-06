@@ -193,12 +193,15 @@ def production_steps(mult, full_set=0, only=None):
         bond_order_dict,
         charge_data_dict,
         fuzzy_data,
+        other_data_dict,
     )
 
     steps = dict(charge_data_dict(full_set=full_set))
     steps.update(fuzzy_data(spin=mult != 1, full_set=full_set))
     steps.update(bond_order_dict(full_set=full_set))
     if only:
+        # other_* (surface/geometry) steps are reachable only by name
+        steps.update(other_data_dict(full_set=full_set))
         steps = {k: v for k, v in steps.items() if k in only}
     return steps
 
