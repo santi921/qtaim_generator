@@ -20,6 +20,7 @@ listed in docs/plans/2026-10-04-feat-one-pass-charge-engine-plan.md.
 """
 
 import argparse
+import functools
 import json
 import os
 import re
@@ -27,6 +28,7 @@ import sys
 import tempfile
 import time
 
+import numba
 import numpy as np
 from numba import njit, prange
 
@@ -120,24 +122,11 @@ def prepare_basis(wfx):
     g_end = np.append(g_start[1:], len(order))
     g_center = center[g_start]
     g_alpha = alpha[g_start]
-
-    # per-atom group range plus the radius beyond which every group on that
-    # atom is below the exp cutoff (most diffuse exponent decides)
-    natoms = len(wfx["atnums"])
-    a_gstart = np.zeros(natoms, dtype=np.int64)
-    a_gend = np.zeros(natoms, dtype=np.int64)
-    a_r2max = np.full(natoms, -1.0)
-    for a in range(natoms):
-        idx = np.flatnonzero(g_center == a)
-        if len(idx):
-            a_gstart[a], a_gend[a] = idx[0], idx[-1] + 1
-            a_r2max[a] = EXP_CUTOFF / g_alpha[idx].min()
     energy = wfx.get("mo_energy")
     return {
         "occ": occ, "abs_energy": None if energy is None else np.abs(energy[keep]),
         "occ_a": occ_a, "occ_b": occ_b, "ct": ct, "lmn": lmn,
-        "g_alpha": g_alpha, "g_start": g_start, "g_end": g_end,
-        "a_gstart": a_gstart, "a_gend": a_gend, "a_r2max": a_r2max,
+        "g_alpha": g_alpha, "g_start": g_start, "g_end": g_end, "g_center": g_center,
         "nelec": float(occ.sum()),
     }
 
@@ -168,41 +157,42 @@ def multiwfn_atom_grid(nrad=75, nang=434, radcut=10.0):
 
 
 @njit(parallel=True, cache=True)
-def _orbitals(pts, atcoords, a_gstart, a_gend, a_r2max, g_alpha, g_start, g_end, lmn, ct):
-    """Occupied MO values at every point (orbderv), skipping Gaussians below
-    Multiwfn's exp cutoff and whole atoms beyond their most diffuse cutoff."""
-    npts = pts.shape[0]
-    nat = atcoords.shape[0]
-    nmo = ct.shape[1]
-    phi_all = np.zeros((npts, nmo))
-    nblk = (npts + 63) // 64
-    for blk in prange(nblk):
-        for ip in range(blk * 64, min(npts, (blk + 1) * 64)):
-            x, y, z = pts[ip, 0], pts[ip, 1], pts[ip, 2]
-            phi = phi_all[ip]
-            for a in range(nat):
+def _primitive_block(pts, atcoords, groups, g_center, g_alpha, g_start, g_end, lmn, ncols):
+    """Values of the primitives of `groups` (one column each, in group order) at
+    every point (orbderv's GTF part), zero where Multiwfn's exp cutoff drops
+    them. Callers pass only the groups whose cutoff sphere reaches the block."""
+    n = pts.shape[0]
+    out = np.zeros((n, ncols))
+    for ip in prange(n):
+        x, y, z = pts[ip, 0], pts[ip, 1], pts[ip, 2]
+        col = 0
+        last = -1
+        dx = dy = dz = r2 = 0.0
+        for gi in range(groups.shape[0]):
+            g = groups[gi]
+            a = g_center[g]
+            if a != last:
                 dx = x - atcoords[a, 0]
                 dy = y - atcoords[a, 1]
                 dz = z - atcoords[a, 2]
                 r2 = dx * dx + dy * dy + dz * dz
-                if r2 > a_r2max[a]:
-                    continue
-                for g in range(a_gstart[a], a_gend[a]):
-                    ar2 = g_alpha[g] * r2
-                    if ar2 > 40.0:
-                        continue
-                    e = np.exp(-ar2)
-                    for p in range(g_start[g], g_end[g]):
-                        v = e
-                        for _ in range(lmn[p, 0]):
-                            v *= dx
-                        for _ in range(lmn[p, 1]):
-                            v *= dy
-                        for _ in range(lmn[p, 2]):
-                            v *= dz
-                        for i in range(nmo):
-                            phi[i] += ct[p, i] * v
-    return phi_all
+                last = a
+            ar2 = g_alpha[g] * r2
+            if ar2 > EXP_CUTOFF:
+                col += g_end[g] - g_start[g]
+                continue
+            e = np.exp(-ar2)
+            for p in range(g_start[g], g_end[g]):
+                v = e
+                for _ in range(lmn[p, 0]):
+                    v *= dx
+                for _ in range(lmn[p, 1]):
+                    v *= dy
+                for _ in range(lmn[p, 2]):
+                    v *= dz
+                out[ip, col] = v
+                col += 1
+    return out
 
 
 @njit(parallel=True, cache=True)
@@ -224,11 +214,57 @@ def _edf(pts, atcoords, e_center, e_alpha, e_coef):
     return out
 
 
-def orbital_values(pts, coords, basis):
-    return _orbitals(
-        pts, coords, basis["a_gstart"], basis["a_gend"], basis["a_r2max"],
-        basis["g_alpha"], basis["g_start"], basis["g_end"], basis["lmn"], basis["ct"],
-    )
+def _morton_order(pts, cell=1.0):
+    """Points sorted along a Z-order curve on a `cell`-Bohr lattice, so each
+    block of consecutive points is spatially compact."""
+    q = np.floor((pts - pts.min(axis=0)) / cell).astype(np.int64)
+    key = np.zeros(len(pts), dtype=np.int64)
+    for bit in range(20):
+        for k in range(3):
+            key |= ((q[:, k] >> bit) & 1) << (3 * bit + k)
+    return np.argsort(key, kind="stable")
+
+
+def orbital_values(pts, coords, basis, block=512):
+    """Occupied MO values at every point. Points are taken in spatially compact
+    blocks; per block only primitive groups whose exp-cutoff sphere reaches the
+    block's bounding box are evaluated, and the MOs follow from one dense
+    matrix product with their coefficients (BLAS)."""
+    pts = np.asarray(pts, dtype=float)
+    ct = basis["ct"]
+    out = np.empty((len(pts), ct.shape[1]))
+    if not len(pts):
+        return out
+    order = _morton_order(pts)
+    sorted_pts = np.ascontiguousarray(pts[order])
+    gs, ge, ga, gc = basis["g_start"], basis["g_end"], basis["g_alpha"], basis["g_center"]
+    glen = ge - gs
+    for s0 in range(0, len(pts), block):
+        blk = sorted_pts[s0 : s0 + block]
+        lo, hi = blk.min(axis=0), blk.max(axis=0)
+        d2 = (np.maximum(0.0, np.maximum(lo - coords, coords - hi)) ** 2).sum(axis=1)
+        groups = np.flatnonzero(ga * d2[gc] <= EXP_CUTOFF)
+        n = glen[groups]
+        cols = np.arange(n.sum()) + np.repeat(gs[groups] - (np.cumsum(n) - n), n)
+        prim = _primitive_block(blk, coords, groups, gc, ga, gs, ge, basis["lmn"], len(cols))
+        out[order[s0 : s0 + block]] = prim @ ct[cols]
+    return out
+
+
+def limit_blas_threads(fn):
+    """Run fn with BLAS (numpy matmul) threads capped at numba's thread count,
+    so the two thread pools do not oversubscribe the cores."""
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        try:
+            from threadpoolctl import threadpool_limits
+        except ImportError:
+            return fn(*args, **kwargs)
+        with threadpool_limits(numba.get_num_threads()):
+            return fn(*args, **kwargs)
+
+    return wrapper
 
 
 def density(pts, coords, basis, wfx):
@@ -627,6 +663,7 @@ def normalize(charge, zeff, nelec):
 # ---------------------------------------------------------------- driver
 
 
+@limit_blas_threads
 def run(wfx_path, nrad=75, nang=434, radcut=10.0, bond_nrad=45, bond_nang=170, full_set=0):
     t = {}
     t0 = time.perf_counter()

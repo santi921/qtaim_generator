@@ -28,9 +28,11 @@ import tempfile
 import time
 
 import numpy as np
-from numba import njit, prange
+from numba import njit
 
-from qtaim_gen.source.core.charge_engine import B2A, _edf, prepare_basis, read_wfx
+from qtaim_gen.source.core.charge_engine import (
+    B2A, _edf, limit_blas_threads, orbital_values, prepare_basis, read_wfx,
+)
 from qtaim_gen.source.data import multiwfn_tables as T
 
 ISOVALUE = 0.001  # surfisoval
@@ -53,70 +55,19 @@ TETRAHEDRA = np.array(
 ) - 1
 
 
-# ---------------------------------------------------------------- functions
-
-
-@njit(parallel=True, cache=True)
-def _rho_alie(pts, atcoords, a_gstart, a_gend, a_r2max, g_alpha, g_start, g_end, lmn, ct, occ, wene, with_alie):
-    """MO density sum n_i phi_i^2 and, with with_alie, the ALIE numerator
-    sum |e_i| n_i phi_i^2 (avglocion), point by point without storing the MO
-    matrix. Orbitals are evaluated as charge_engine._orbitals does."""
-    npts = pts.shape[0]
-    nat = atcoords.shape[0]
-    nmo = ct.shape[1]
-    rho = np.zeros(npts)
-    num = np.zeros(npts if with_alie else 0)
-    nblk = (npts + 63) // 64
-    for blk in prange(nblk):
-        phi = np.empty(nmo)
-        for ip in range(blk * 64, min(npts, (blk + 1) * 64)):
-            x, y, z = pts[ip, 0], pts[ip, 1], pts[ip, 2]
-            for i in range(nmo):
-                phi[i] = 0.0
-            for a in range(nat):
-                dx = x - atcoords[a, 0]
-                dy = y - atcoords[a, 1]
-                dz = z - atcoords[a, 2]
-                r2 = dx * dx + dy * dy + dz * dz
-                if r2 > a_r2max[a]:
-                    continue
-                for g in range(a_gstart[a], a_gend[a]):
-                    ar2 = g_alpha[g] * r2
-                    if ar2 > 40.0:
-                        continue
-                    e = np.exp(-ar2)
-                    for p in range(g_start[g], g_end[g]):
-                        v = e
-                        for _ in range(lmn[p, 0]):
-                            v *= dx
-                        for _ in range(lmn[p, 1]):
-                            v *= dy
-                        for _ in range(lmn[p, 2]):
-                            v *= dz
-                        for i in range(nmo):
-                            phi[i] += ct[p, i] * v
-            s = 0.0
-            t = 0.0
-            for i in range(nmo):
-                p2 = phi[i] * phi[i]
-                s += occ[i] * p2
-                if with_alie:
-                    t += wene[i] * p2
-            rho[ip] = s
-            if with_alie:
-                num[ip] = t
-    return rho, num
-
-
-def _evaluate(pts, coords, basis, wfx, with_alie=False):
-    """fdens (MO density + EDF) and, optionally, the ALIE numerator."""
-    wene = basis["abs_energy"] * basis["occ"] if with_alie else np.zeros(0)
-    rho, num = _rho_alie(
-        np.ascontiguousarray(pts), coords, basis["a_gstart"], basis["a_gend"], basis["a_r2max"],
-        basis["g_alpha"], basis["g_start"], basis["g_end"], basis["lmn"], basis["ct"],
-        basis["occ"], wene, with_alie,
-    )
-    rho_mo = rho
+def _evaluate(pts, coords, basis, wfx, with_alie=False, chunk=32768):
+    """fdens (MO density + EDF), the MO-only density and, with with_alie, the
+    ALIE numerator sum |e_i| n_i phi_i^2 (avglocion), in chunks of points."""
+    n = len(pts)
+    rho_mo = np.empty(n)
+    num = np.empty(n) if with_alie else None
+    wene = basis["abs_energy"] * basis["occ"] if with_alie else None
+    for s0 in range(0, n, chunk):
+        phi2 = orbital_values(pts[s0 : s0 + chunk], coords, basis) ** 2
+        rho_mo[s0 : s0 + chunk] = phi2 @ basis["occ"]
+        if with_alie:
+            num[s0 : s0 + chunk] = phi2 @ wene
+    rho = rho_mo
     if len(wfx["edf_center"]):
         rho = rho + _edf(np.ascontiguousarray(pts), coords, wfx["edf_center"], wfx["edf_exp"], wfx["edf_coef"])
     return rho, rho_mo, num
@@ -491,6 +442,7 @@ def _d20_13(v):
     return float(f"{v:.12E}")
 
 
+@limit_blas_threads
 def alie_surface(wfx_path, chunk_points=262144):
     t = {}
     t0 = time.perf_counter()
