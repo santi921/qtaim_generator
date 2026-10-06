@@ -12,16 +12,19 @@ the wrong ones follow from them exactly:
 Checked against fresh .wfx reruns (ani1xbb, trans1x, tm_react; 2026-10-06): at <S**2> < 0.05 the
 max error was 1.8e-6 (ELF), 2.6e-7 (LOL), 1.5e-3 e/bohr^3 (spin fields). Above that it is not exact.
 
-Per folder, under the runners' .processing.lock (no lock with --dry_run):
-  1. qtaim.json must be all-alpha: density_beta == 0 at every CP with density_all > 1e-6
+Per folder, under the runners' .processing.lock (never broken as stale; no lock with --dry_run):
+  1. every qtaim.json copy present (generator/ and a leftover root copy) is classified:
+     all-alpha = numeric density_beta == 0 and density_alpha == density_all at every CP with
+     density_all > 1e-6; resolved = no CP with beta == 0 (or no spin fields); anything in between
+     is ambiguous and nothing is written
   2. multiplicity 1 (geometry input, results folder first, then the input folder)
-  3. ORCA <S**2> (orca.json s_squared) below --max_s2
-  4. rewrite the five fields at every CP, and record what was done in qtaim_allalpha_fix.json
-     next to qtaim.json (the archived CPprop.txt keeps the all-alpha values)
-A fixed record is no longer all-alpha, so a second pass reports not_allalpha.
+  3. ORCA <S**2> (orca.json s_squared, results folder first, then the input folder) below --max_s2
+  4. rewrite the five fields at every CP of every all-alpha copy
+The archived CPprop.txt keeps the all-alpha values; keep the --report as the record of what was
+fixed. A fixed record is no longer all-alpha, so a second pass reports not_allalpha.
 
-Statuses: fixed, would_fix (--dry_run), not_allalpha (nothing to do), open_shell, high_s2,
-no_s2, no_inp (multiplicity unknown), no_qtaim_json, missing (no folder), locked, failed.
+Statuses: fixed, would_fix (--dry_run), not_allalpha (nothing to do), ambiguous, open_shell,
+high_s2, no_s2, no_inp (multiplicity unknown), no_qtaim_json, missing (no folder), locked, failed.
 --list_remaining writes the entries (as given) that need a QTAIM rerun or a look: everything except
 fixed, would_fix and not_allalpha.
 
@@ -45,6 +48,7 @@ from tqdm import tqdm
 STATUS_FIXED = "fixed"
 STATUS_WOULD_FIX = "would_fix"
 STATUS_NOT_ALLALPHA = "not_allalpha"
+STATUS_AMBIGUOUS = "ambiguous"
 STATUS_OPEN_SHELL = "open_shell"
 STATUS_HIGH_S2 = "high_s2"
 STATUS_NO_S2 = "no_s2"
@@ -53,13 +57,14 @@ STATUS_NO_QTAIM_JSON = "no_qtaim_json"
 STATUS_MISSING = "missing"
 STATUS_LOCKED = "locked"
 STATUS_FAILED = "failed"
-STATUSES = (STATUS_FIXED, STATUS_WOULD_FIX, STATUS_NOT_ALLALPHA, STATUS_OPEN_SHELL, STATUS_HIGH_S2,
-            STATUS_NO_S2, STATUS_NO_INP, STATUS_NO_QTAIM_JSON, STATUS_MISSING, STATUS_LOCKED, STATUS_FAILED)
+STATUSES = (STATUS_FIXED, STATUS_WOULD_FIX, STATUS_NOT_ALLALPHA, STATUS_AMBIGUOUS, STATUS_OPEN_SHELL,
+            STATUS_HIGH_S2, STATUS_NO_S2, STATUS_NO_INP, STATUS_NO_QTAIM_JSON, STATUS_MISSING, STATUS_LOCKED,
+            STATUS_FAILED)
 DONE = (STATUS_FIXED, STATUS_WOULD_FIX, STATUS_NOT_ALLALPHA)
 
 C = 2 ** (2 / 3)
-SIDECAR = "qtaim_allalpha_fix.json"
-FIELDS = ("density_alpha", "density_beta", "spin_density", "e_loc_func", "lol")
+ALL_ALPHA, RESOLVED, AMBIGUOUS = "all_alpha", "resolved", "ambiguous"
+QTAIM_COPIES = (os.path.join("generator", "qtaim.json"), "qtaim.json")
 
 
 def _num(x) -> bool:
@@ -76,20 +81,23 @@ def _paths(entry: str, root_inputs: Optional[str], root_results: Optional[str]) 
     return entry, None
 
 
-def _first_file(folder: str, name: str) -> Optional[str]:
-    for rel in (os.path.join("generator", name), name):
-        p = os.path.join(folder, rel)
-        if os.path.isfile(p):
-            return p
-    return None
-
-
-def is_all_alpha(record: dict) -> bool:
+def classify(record: dict) -> str:
     cps = [v for v in record.values() if isinstance(v, dict) and _num(v.get("density_all"))
            and v["density_all"] > 1e-6]
-    if not cps or not any(_num(v.get("density_beta")) for v in cps):
-        return False
-    return all(abs(v.get("density_beta") or 0.0) < 1e-12 for v in cps)
+    if not cps or not any("density_beta" in v for v in cps):
+        return RESOLVED
+    if not all(_num(v.get("density_beta")) for v in cps):
+        return AMBIGUOUS
+    zero = [abs(v["density_beta"]) < 1e-12 for v in cps]
+    if not any(zero):
+        return RESOLVED
+    if not all(zero):
+        return AMBIGUOUS
+    for v in cps:
+        alpha = v.get("density_alpha")
+        if not _num(alpha) or abs(alpha - v["density_all"]) > 1e-8 * max(1.0, abs(v["density_all"])):
+            return AMBIGUOUS
+    return ALL_ALPHA
 
 
 def elf_fix(elf: float) -> float:
@@ -140,8 +148,10 @@ def _s_squared(bases: List[Optional[str]]) -> Optional[float]:
     for base in bases:
         if not (base and os.path.isdir(base)):
             continue
-        path = _first_file(base, "orca.json")
-        if path:
+        for rel in (os.path.join("generator", "orca.json"), "orca.json"):
+            path = os.path.join(base, rel)
+            if not os.path.isfile(path):
+                continue
             try:
                 with open(path) as f:
                     s2 = json.load(f).get("s_squared")
@@ -152,26 +162,33 @@ def _s_squared(bases: List[Optional[str]]) -> Optional[float]:
     return None
 
 
-def _plan(folder: str, inputs: Optional[str], max_s2: float) -> Tuple[str, Optional[dict], str, Optional[float]]:
-    """(status, fixed record to write or None, qtaim.json path, s_squared)."""
-    path = _first_file(folder, "qtaim.json")
-    if path is None:
-        return STATUS_NO_QTAIM_JSON, None, "", None
-    with open(path) as f:
-        record = json.load(f)
-    if not is_all_alpha(record):
-        return STATUS_NOT_ALLALPHA, None, path, None
+def _plan(folder: str, inputs: Optional[str], max_s2: float) -> Tuple[str, Dict[str, dict], Optional[float]]:
+    """(status, {qtaim.json path: fixed record} to write, s_squared)."""
+    records = {}
+    for rel in QTAIM_COPIES:
+        path = os.path.join(folder, rel)
+        if os.path.isfile(path):
+            with open(path) as f:
+                records[path] = json.load(f)
+    if not records:
+        return STATUS_NO_QTAIM_JSON, {}, None
+    classes = {path: classify(rec) for path, rec in records.items()}
+    if AMBIGUOUS in classes.values():
+        return STATUS_AMBIGUOUS, {}, None
+    if ALL_ALPHA not in classes.values():
+        return STATUS_NOT_ALLALPHA, {}, None
     mult = _multiplicity([folder, inputs])
     if mult is None:
-        return STATUS_NO_INP, None, path, None
+        return STATUS_NO_INP, {}, None
     if mult != 1:
-        return STATUS_OPEN_SHELL, None, path, None
+        return STATUS_OPEN_SHELL, {}, None
     s2 = _s_squared([folder, inputs])
     if s2 is None:
-        return STATUS_NO_S2, None, path, None
+        return STATUS_NO_S2, {}, None
     if s2 >= max_s2:
-        return STATUS_HIGH_S2, None, path, s2
-    return STATUS_FIXED, fix_record(record), path, s2
+        return STATUS_HIGH_S2, {}, s2
+    fixed = {path: fix_record(rec) for path, rec in records.items() if classes[path] == ALL_ALPHA}
+    return STATUS_FIXED, fixed, s2
 
 
 def process_folder(entry: str, root_inputs: Optional[str], root_results: Optional[str],
@@ -181,31 +198,33 @@ def process_folder(entry: str, root_inputs: Optional[str], root_results: Optiona
 
     folder, inputs = _paths(entry, root_inputs, root_results)
     result: Dict[str, object] = {"entry": entry, "folder": folder, "status": "", "s_squared": None,
-                                 "error": ""}
+                                 "copies": [], "error": ""}
     if not os.path.isdir(folder):
         result["status"] = STATUS_MISSING
         return result
-    if not dry_run and not acquire_lock(folder):
-        result["status"] = STATUS_LOCKED
-        return result
+    locked = False
     try:
-        status, fixed, path, s2 = _plan(folder, inputs, max_s2)
+        if not dry_run:
+            # a runner's lock is never broken: a stalled heavy job can hold it for days
+            if not acquire_lock(folder, max_age_s=float("inf")):
+                result["status"] = STATUS_LOCKED
+                return result
+            locked = True
+        status, fixed, s2 = _plan(folder, inputs, max_s2)
         result["s_squared"] = s2
-        if fixed is not None:
+        result["copies"] = sorted(os.path.relpath(p, folder) for p in fixed)
+        if fixed:
             if dry_run:
                 status = STATUS_WOULD_FIX
             else:
-                atomic_json_write(os.path.join(os.path.dirname(path), SIDECAR), {
-                    "tool": "fix-allalpha-qtaim", "fixed_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
-                    "s_squared": s2, "max_s2": max_s2, "fields": list(FIELDS),
-                    "n_cps": sum(1 for v in fixed.values() if isinstance(v, dict))})
-                atomic_json_write(path, fixed)
+                for path, record in fixed.items():
+                    atomic_json_write(path, record)
         result["status"] = status
     except Exception as e:
         result["status"] = STATUS_FAILED
         result["error"] = f"{type(e).__name__}: {e}"
     finally:
-        if not dry_run:
+        if locked:
             release_lock(folder)
     return result
 
@@ -255,9 +274,15 @@ def main() -> int:
                 bar.update(1)
         else:
             with ProcessPoolExecutor(max_workers=workers) as pool:
-                futs = [pool.submit(process_folder, e, **kwargs) for e in entries]
+                futs = {pool.submit(process_folder, e, **kwargs): e for e in entries}
                 for fut in as_completed(futs):
-                    results.append(fut.result())
+                    try:
+                        results.append(fut.result())
+                    except Exception as err:
+                        # a dead worker must not cost the report of everything already fixed
+                        results.append({"entry": futs[fut], "folder": futs[fut], "status": STATUS_FAILED,
+                                        "s_squared": None, "copies": [],
+                                        "error": f"{type(err).__name__}: {err}"})
                     bar.update(1)
 
     agg: Dict[str, object] = {"folders_total": n}
@@ -273,7 +298,9 @@ def main() -> int:
     if args.report:
         os.makedirs(os.path.dirname(args.report) or ".", exist_ok=True)
         with open(args.report, "w") as f:
-            json.dump({"aggregate": agg, "per_folder": results}, f, indent=2, default=str)
+            json.dump({"aggregate": agg, "max_s2": args.max_s2, "dry_run": args.dry_run,
+                       "finished_at": time.strftime("%Y-%m-%dT%H:%M:%S"), "per_folder": results},
+                      f, indent=2, default=str)
         print(f"\nReport written: {args.report}", file=sys.stderr)
     if args.list_remaining:
         os.makedirs(os.path.dirname(args.list_remaining) or ".", exist_ok=True)
