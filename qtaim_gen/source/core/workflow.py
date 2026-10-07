@@ -45,8 +45,8 @@ def acquire_lock(folder: str, max_age_s: float = _LOCK_MAX_AGE_S) -> bool:
         except OSError:
             age = float("inf")  # can't stat → treat as stale
 
-        if age < max_age_s:
-            return False  # not stale, genuinely locked
+        if age < max_age_s or max_age_s == float("inf"):
+            return False  # not stale, genuinely locked (or the caller never breaks locks)
 
         # Stale → break it
         logging.getLogger("lock").warning(
