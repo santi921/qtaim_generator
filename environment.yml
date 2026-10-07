@@ -13,6 +13,9 @@ dependencies:
   - numpy>=2.0
   - pyarrow
   - tqdm
+  # charge/surface engines (core/charge_engine.py, core/surface_engine.py)
+  - numba>=0.60
+  - threadpoolctl>=3
 
   - pip:
       - bson
