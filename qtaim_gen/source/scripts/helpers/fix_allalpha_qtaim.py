@@ -15,17 +15,17 @@ except in folders whose rerun found a different CP set. Above <S**2> 0.05 it is 
 Records left for a rerun are picked up by the runners' --recheck_allalpha_qtaim.
 
 Per folder, under the runners' .processing.lock (never broken as stale; no lock with --dry_run):
-  1. every qtaim.json copy present (generator/ and a leftover root copy) is classified:
-     all-alpha = numeric density_beta == 0 and density_alpha == density_all at every CP with
-     density_all > 1e-6; resolved = no CP with beta == 0 (or no spin fields); anything in between
-     is ambiguous and nothing is written
+  1. every qtaim.json copy present (generator/ and a leftover root copy) is classified by
+     validation.qtaim_spin_class (the runners' gate uses the same function): all_alpha is fixed;
+     all_alpha_ecp (ECP nuclei carrying the split EDF core density) and ambiguous (partly
+     all-alpha) are left for a rerun and nothing is written
   2. multiplicity 1 (geometry input, results folder first, then the input folder)
   3. ORCA <S**2> (orca.json s_squared, results folder first, then the input folder) below --max_s2
   4. rewrite the five fields at every CP of every all-alpha copy
 The archived CPprop.txt keeps the all-alpha values; keep the --report as the record of what was
 fixed. A fixed record is no longer all-alpha, so a second pass reports not_allalpha.
 
-Statuses: fixed, would_fix (--dry_run), not_allalpha (nothing to do), ambiguous, open_shell,
+Statuses: fixed, would_fix (--dry_run), not_allalpha (nothing to do), ambiguous, all_alpha_ecp, open_shell,
 high_s2, no_s2, no_inp (multiplicity unknown), no_qtaim_json, missing (no folder), locked, failed.
 --list_remaining writes the entries (as given) that need a QTAIM rerun or a look: everything except
 fixed, would_fix and not_allalpha.
@@ -48,12 +48,13 @@ from typing import Dict, List, Optional, Tuple
 from tqdm import tqdm
 
 from qtaim_gen.source.utils.validation import (
-    QTAIM_ALL_ALPHA, QTAIM_AMBIGUOUS, QTAIM_RESOLVED, qtaim_spin_class)
+    QTAIM_ALL_ALPHA, QTAIM_ALL_ALPHA_ECP, QTAIM_AMBIGUOUS, QTAIM_RESOLVED, qtaim_spin_class)
 
 STATUS_FIXED = "fixed"
 STATUS_WOULD_FIX = "would_fix"
 STATUS_NOT_ALLALPHA = "not_allalpha"
 STATUS_AMBIGUOUS = "ambiguous"
+STATUS_ALL_ALPHA_ECP = "all_alpha_ecp"
 STATUS_OPEN_SHELL = "open_shell"
 STATUS_HIGH_S2 = "high_s2"
 STATUS_NO_S2 = "no_s2"
@@ -62,7 +63,8 @@ STATUS_NO_QTAIM_JSON = "no_qtaim_json"
 STATUS_MISSING = "missing"
 STATUS_LOCKED = "locked"
 STATUS_FAILED = "failed"
-STATUSES = (STATUS_FIXED, STATUS_WOULD_FIX, STATUS_NOT_ALLALPHA, STATUS_AMBIGUOUS, STATUS_OPEN_SHELL,
+STATUSES = (STATUS_FIXED, STATUS_WOULD_FIX, STATUS_NOT_ALLALPHA, STATUS_AMBIGUOUS, STATUS_ALL_ALPHA_ECP,
+            STATUS_OPEN_SHELL,
             STATUS_HIGH_S2, STATUS_NO_S2, STATUS_NO_INP, STATUS_NO_QTAIM_JSON, STATUS_MISSING, STATUS_LOCKED,
             STATUS_FAILED)
 DONE = (STATUS_FIXED, STATUS_WOULD_FIX, STATUS_NOT_ALLALPHA)
@@ -70,7 +72,7 @@ DONE = (STATUS_FIXED, STATUS_WOULD_FIX, STATUS_NOT_ALLALPHA)
 C = 2 ** (2 / 3)
 # one classifier for this tool and the runners' --recheck_allalpha_qtaim gate
 classify = qtaim_spin_class
-ALL_ALPHA, RESOLVED, AMBIGUOUS = QTAIM_ALL_ALPHA, QTAIM_RESOLVED, QTAIM_AMBIGUOUS
+ALL_ALPHA, ALL_ALPHA_ECP, RESOLVED, AMBIGUOUS = QTAIM_ALL_ALPHA, QTAIM_ALL_ALPHA_ECP, QTAIM_RESOLVED, QTAIM_AMBIGUOUS
 QTAIM_COPIES = (os.path.join("generator", "qtaim.json"), "qtaim.json")
 
 
@@ -163,6 +165,9 @@ def _plan(folder: str, inputs: Optional[str], max_s2: float) -> Tuple[str, Dict[
     classes = {path: classify(rec) for path, rec in records.items()}
     if AMBIGUOUS in classes.values():
         return STATUS_AMBIGUOUS, {}, None
+    if ALL_ALPHA_ECP in classes.values():
+        # not validated where the ECP core density is split between alpha and beta
+        return STATUS_ALL_ALPHA_ECP, {}, None
     if ALL_ALPHA not in classes.values():
         return STATUS_NOT_ALLALPHA, {}, None
     mult = _multiplicity([folder, inputs])

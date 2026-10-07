@@ -144,6 +144,11 @@ class TestProcessFolder:
         assert _run(job)["status"] == fa.STATUS_AMBIGUOUS
         assert _stored(job) == ALLALPHA and _stored(job, "qtaim.json") == bad
 
+    def test_ecp_record_is_left_for_a_rerun(self, tmp_path):
+        ecp = _with(ALLALPHA, "0", element="Pt", density_all=1.6e5, density_alpha=8.0e4, density_beta=8.0e4)
+        job = _job(tmp_path, record=ecp)
+        assert _run(job)["status"] == fa.STATUS_ALL_ALPHA_ECP and _stored(job) == ecp
+
     def test_dry_run_writes_nothing_and_takes_no_lock(self, tmp_path):
         job = _job(tmp_path)
         (job / ".processing.lock").write_text("other job")

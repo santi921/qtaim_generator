@@ -7,8 +7,8 @@ import pytest
 
 from qtaim_gen.source.core.omol import _prepare_allalpha_qtaim_rerun, _qtaim_output_complete, gbw_analysis
 from qtaim_gen.source.utils.validation import (
-    QTAIM_ALL_ALPHA, QTAIM_AMBIGUOUS, QTAIM_RESOLVED, all_electron_count, qtaim_all_alpha_defect,
-    qtaim_spin_class, validate_qtaim_dict)
+    QTAIM_ALL_ALPHA, QTAIM_ALL_ALPHA_ECP, QTAIM_AMBIGUOUS, QTAIM_RESOLVED, all_electron_count,
+    qtaim_all_alpha_defect, qtaim_spin_class, validate_qtaim_dict)
 
 LOG = logging.getLogger("test_recheck_allalpha")
 
@@ -46,6 +46,35 @@ class TestClassification:
         assert qtaim_spin_class(ALL_ALPHA) == QTAIM_ALL_ALPHA
         assert qtaim_spin_class(RESOLVED) == QTAIM_RESOLVED
         assert qtaim_spin_class(PARTLY) == QTAIM_AMBIGUOUS
+
+    def test_rounding_noise_counts_as_zero(self):
+        # seen in production: 5.7e-10 at an N nucleus (density 199), 1.6e-11 at Br (28,789)
+        noisy = {"0": dict(_cp(199.24, 199.24, 5.7e-10), element="N"),
+                 "1": dict(_cp(28789.3, 28789.3, 1.6e-11), element="Br"), "0_1": _cp(0.25, 0.25, -3e-17)}
+        assert qtaim_spin_class(noisy) == QTAIM_ALL_ALPHA
+
+    def test_ecp_nucleus_with_split_core_density(self):
+        w = {"0": dict(_cp(3.1295e6, 1564749.281, 1564749.281), element="W"),
+             "1": dict(_cp(122.6, 122.6, 3.5e-14), element="C"), "0_1": _cp(0.12, 0.12, 0.0)}
+        assert qtaim_spin_class(w) == QTAIM_ALL_ALPHA_ECP
+        assert qtaim_all_alpha_defect(w, n_electrons=80, mult=1)
+
+    def test_ecp_nucleus_without_edf_is_plain_all_alpha(self):
+        w = {"0": dict(_cp(5000.0, 5000.0, 0.0), element="W"), "1": dict(_cp(122.6, 122.6, 0.0), element="C")}
+        assert qtaim_spin_class(w) == QTAIM_ALL_ALPHA
+
+    def test_resolved_record_with_ecp_atoms_stays_resolved(self):
+        w = {"0": dict(_cp(3.1e6, 1.55e6, 1.55e6), element="W"), "1": dict(_cp(122.6, 61.3, 61.3), element="C")}
+        assert qtaim_spin_class(w) == QTAIM_RESOLVED
+
+    def test_light_nucleus_with_beta_is_not_exempt(self):
+        mixed = {"0": dict(_cp(122.6, 61.3, 61.3), element="C"), "1": dict(_cp(0.4, 0.4, 0.0), element="H")}
+        assert qtaim_spin_class(mixed) == QTAIM_AMBIGUOUS
+
+    def test_stale_all_alpha_self_pair_in_a_resolved_record(self):
+        # rgd_uks: mapper-bug pairs like '10_10' carried over from an older all-alpha run
+        stale = dict(RESOLVED, **{"1_1": _cp(0.215, 0.215, 2.8e-17)})
+        assert qtaim_spin_class(stale) == QTAIM_AMBIGUOUS
 
     def test_defects(self):
         assert qtaim_all_alpha_defect(ALL_ALPHA, n_electrons=10, mult=1)

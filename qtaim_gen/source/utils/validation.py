@@ -706,37 +706,61 @@ def count_reported_bcps(folder: str) -> Optional[int]:
     return qtaim_run_status(folder)["reported_bcp"]
 
 
-QTAIM_ALL_ALPHA, QTAIM_RESOLVED, QTAIM_AMBIGUOUS = "all_alpha", "resolved", "ambiguous"
+QTAIM_ALL_ALPHA, QTAIM_ALL_ALPHA_ECP = "all_alpha", "all_alpha_ecp"
+QTAIM_RESOLVED, QTAIM_AMBIGUOUS = "resolved", "ambiguous"
+# Multiwfn adds an ECP atom's EDF core density to alpha and beta evenly, so even an all-alpha read
+# has beta ~ alpha at the nucleus of an atom at or beyond Rb (the first def2 ECP element)
+_FIRST_ECP_Z = 37
 
 
 def _num(x) -> bool:
     return isinstance(x, (int, float)) and not isinstance(x, bool)
 
 
+def _atomic_number(element) -> int:
+    from rdkit import Chem
+
+    try:
+        return Chem.GetPeriodicTable().GetAtomicNumber(re.match(r"[A-Za-z]+", element or "").group(0))
+    except Exception:
+        return 0
+
+
+def _beta_zero(cp: dict) -> bool:
+    # rounding noise in a stored zero scales with the density (up to ~3e-12 relative seen)
+    return abs(cp["density_beta"]) <= 1e-9 * max(1.0, abs(cp["density_all"]))
+
+
 def qtaim_spin_class(record: dict) -> str:
     """How a qtaim.json record resolves alpha and beta density.
 
-    all_alpha: numeric density_beta == 0 and density_alpha == density_all at every CP with
-        density_all > 1e-6 -- what Multiwfn writes when it reads an unrestricted .wfn as all-alpha
+    Among CPs with density_all > 1e-6, leaving out the nuclear CPs of ECP atoms (Z >= 37) whose
+    beta is non-zero (the EDF core density, split evenly):
+    all_alpha: density_beta == 0 (to rounding) and density_alpha == density_all at every CP --
+        what Multiwfn writes when it reads an unrestricted .wfn as all-alpha
+    all_alpha_ecp: the same, in a record whose ECP nuclei carry the split core density
     resolved: no such CP has density_beta == 0 (or the record has no spin fields)
-    ambiguous: anything in between, e.g. a record merged from an all-alpha and a resolved run
+    ambiguous: anything in between, e.g. stale all-alpha CPs merged into a resolved record
     """
-    cps = [v for v in record.values() if isinstance(v, dict) and _num(v.get("density_all"))
-           and v["density_all"] > 1e-6]
-    if not cps or not any("density_beta" in v for v in cps):
+    cps = {k: v for k, v in record.items() if isinstance(v, dict) and _num(v.get("density_all"))
+           and v["density_all"] > 1e-6}
+    split = {k for k, v in cps.items() if "_" not in k and _num(v.get("density_beta")) and not _beta_zero(v)
+             and _atomic_number(v.get("element")) >= _FIRST_ECP_Z}
+    rest = [v for k, v in cps.items() if k not in split]
+    if not rest or not any("density_beta" in v for v in rest):
         return QTAIM_RESOLVED
-    if not all(_num(v.get("density_beta")) for v in cps):
+    if not all(_num(v.get("density_beta")) for v in rest):
         return QTAIM_AMBIGUOUS
-    zero = [abs(v["density_beta"]) < 1e-12 for v in cps]
+    zero = [_beta_zero(v) for v in rest]
     if not any(zero):
         return QTAIM_RESOLVED
     if not all(zero):
         return QTAIM_AMBIGUOUS
-    for v in cps:
+    for v in rest:
         alpha = v.get("density_alpha")
         if not _num(alpha) or abs(alpha - v["density_all"]) > 1e-8 * max(1.0, abs(v["density_all"])):
             return QTAIM_AMBIGUOUS
-    return QTAIM_ALL_ALPHA
+    return QTAIM_ALL_ALPHA_ECP if split else QTAIM_ALL_ALPHA
 
 
 def all_electron_count(dft_dict) -> Optional[int]:
@@ -759,7 +783,7 @@ def qtaim_all_alpha_defect(record: dict, n_electrons: Optional[int] = None, mult
     H atom or triplet H2); with either count unknown it is treated as a defect.
     """
     spin_class = qtaim_spin_class(record)
-    if spin_class == QTAIM_AMBIGUOUS:
+    if spin_class in (QTAIM_AMBIGUOUS, QTAIM_ALL_ALPHA_ECP):
         return True
     if spin_class != QTAIM_ALL_ALPHA:
         return False
