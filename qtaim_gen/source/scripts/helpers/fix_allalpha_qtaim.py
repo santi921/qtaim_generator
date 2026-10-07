@@ -18,14 +18,15 @@ Per folder, under the runners' .processing.lock (never broken as stale; no lock 
   1. every qtaim.json copy present (generator/ and a leftover root copy) is classified by
      validation.qtaim_spin_class (the runners' gate uses the same function): all_alpha is fixed;
      all_alpha_ecp (ECP nuclei carrying the split EDF core density) and ambiguous (partly
-     all-alpha) are left for a rerun and nothing is written
+     all-alpha) are left for a rerun and nothing is written; so is an all_alpha record whose
+     qtaim.out banner shows beta > 0 (stale_mismatch: the record is not from that resolved run)
   2. multiplicity 1 (geometry input, results folder first, then the input folder)
   3. ORCA <S**2> (orca.json s_squared, results folder first, then the input folder) below --max_s2
   4. rewrite the five fields at every CP of every all-alpha copy
 The archived CPprop.txt keeps the all-alpha values; keep the --report as the record of what was
 fixed. A fixed record is no longer all-alpha, so a second pass reports not_allalpha.
 
-Statuses: fixed, would_fix (--dry_run), not_allalpha (nothing to do), ambiguous, all_alpha_ecp, open_shell,
+Statuses: fixed, would_fix (--dry_run), not_allalpha (nothing to do), ambiguous, all_alpha_ecp, stale_mismatch, open_shell,
 high_s2, no_s2, no_inp (multiplicity unknown), no_qtaim_json, missing (no folder), locked, failed.
 --list_remaining writes the entries (as given) that need a QTAIM rerun or a look: everything except
 fixed, would_fix and not_allalpha.
@@ -48,13 +49,14 @@ from typing import Dict, List, Optional, Tuple
 from tqdm import tqdm
 
 from qtaim_gen.source.utils.validation import (
-    QTAIM_ALL_ALPHA, QTAIM_ALL_ALPHA_ECP, QTAIM_AMBIGUOUS, QTAIM_RESOLVED, qtaim_spin_class)
+    QTAIM_ALL_ALPHA, QTAIM_ALL_ALPHA_ECP, QTAIM_AMBIGUOUS, QTAIM_RESOLVED, qtaim_out_banner, qtaim_spin_class)
 
 STATUS_FIXED = "fixed"
 STATUS_WOULD_FIX = "would_fix"
 STATUS_NOT_ALLALPHA = "not_allalpha"
 STATUS_AMBIGUOUS = "ambiguous"
 STATUS_ALL_ALPHA_ECP = "all_alpha_ecp"
+STATUS_STALE_MISMATCH = "stale_mismatch"
 STATUS_OPEN_SHELL = "open_shell"
 STATUS_HIGH_S2 = "high_s2"
 STATUS_NO_S2 = "no_s2"
@@ -63,7 +65,7 @@ STATUS_NO_QTAIM_JSON = "no_qtaim_json"
 STATUS_MISSING = "missing"
 STATUS_LOCKED = "locked"
 STATUS_FAILED = "failed"
-STATUSES = (STATUS_FIXED, STATUS_WOULD_FIX, STATUS_NOT_ALLALPHA, STATUS_AMBIGUOUS, STATUS_ALL_ALPHA_ECP,
+STATUSES = (STATUS_FIXED, STATUS_WOULD_FIX, STATUS_NOT_ALLALPHA, STATUS_AMBIGUOUS, STATUS_ALL_ALPHA_ECP, STATUS_STALE_MISMATCH,
             STATUS_OPEN_SHELL,
             STATUS_HIGH_S2, STATUS_NO_S2, STATUS_NO_INP, STATUS_NO_QTAIM_JSON, STATUS_MISSING, STATUS_LOCKED,
             STATUS_FAILED)
@@ -170,6 +172,10 @@ def _plan(folder: str, inputs: Optional[str], max_s2: float) -> Tuple[str, Dict[
         return STATUS_ALL_ALPHA_ECP, {}, None
     if ALL_ALPHA not in classes.values():
         return STATUS_NOT_ALLALPHA, {}, None
+    banner = qtaim_out_banner(folder)
+    if banner is not None and banner[1] > 0:
+        # the latest QTAIM run read a resolved wavefunction: this record is not from that run
+        return STATUS_STALE_MISMATCH, {}, None
     mult = _multiplicity([folder, inputs])
     if mult is None:
         return STATUS_NO_INP, {}, None

@@ -281,3 +281,61 @@ class TestPlumbing:
         out = subprocess.run([sys.executable, "-m", f"qtaim_gen.source.scripts.{module}", "--help"],
                              capture_output=True, text=True)
         assert "--recheck_allalpha_qtaim" in out.stdout, out.stderr[-500:]
+
+
+def _banner(alpha, beta):
+    return f" Total/Alpha/Beta electrons:  {alpha + beta:.4f}  {alpha:.4f}  {beta:.4f}\n"
+
+
+class TestBanner:
+    """With a qtaim.out the banner decides (no loop: a .wfx rerun shows beta > 0)."""
+
+    def test_banner_is_read_loose_and_from_the_archive(self, tmp_path):
+        import zipfile
+        from qtaim_gen.source.utils.validation import qtaim_out_banner
+        (tmp_path / "generator").mkdir()
+        assert qtaim_out_banner(str(tmp_path)) is None
+        with zipfile.ZipFile(tmp_path / "generator" / "out_files.zip", "w") as zf:
+            zf.writestr("qtaim.out", _banner(9, 0))
+        assert qtaim_out_banner(str(tmp_path)) == (9.0, 0.0)
+        (tmp_path / "qtaim.out").write_text(_banner(5, 4))
+        assert qtaim_out_banner(str(tmp_path)) == (5.0, 4.0)
+
+    @pytest.mark.parametrize("record, banner, mult, rejected", [
+        (ALL_ALPHA, (9, 0), 1, True),                       # all-alpha run
+        (PARTLY, (9, 0), 1, True),
+        ({"0": _cp(0.4, 0.2000001, 0.1999999)}, (9, 0), 1, True),  # resolved-looking, but not the fix's exact zeros
+        (ALL_ALPHA, (9, 0), 10, False),                     # every electron alpha
+        (ALL_ALPHA, (5, 4), 2, False),                      # resolved run: stale record, never rejected by the gate
+        (PARTLY, (5, 4), 2, False),
+    ])
+    def test_validator_and_gate_follow_the_banner(self, tmp_path, record, banner, mult, rejected):
+        (tmp_path / "qtaim.json").write_text(json.dumps(record))
+        (tmp_path / "qtaim.out").write_text(_banner(*banner))
+        valid = validate_qtaim_dict(str(tmp_path / "qtaim.json"), reject_all_alpha=True, folder=str(tmp_path),
+                                    n_electrons=9, mult=mult)
+        gate = _qtaim_output_complete(str(tmp_path), recheck_allalpha_qtaim=True, n_electrons=9, mult=mult)
+        assert valid is (not rejected) and gate is (not rejected)
+
+    def test_records_fixed_in_place_are_not_rerun(self, tmp_path, monkeypatch):
+        # the archived qtaim.out of a fixed record still shows beta == 0
+        from qtaim_gen.source.scripts.helpers.fix_allalpha_qtaim import fix_record
+        from qtaim_gen.source.utils import validation
+        job = _folder(tmp_path, fix_record(ALL_ALPHA))
+        (job / "generator" / "qtaim.out").write_text(_banner(9, 0))
+        for name in ("timings", "fuzzy_full", "other", "charge", "bond"):
+            (job / "generator" / f"{name}.json").write_text("{}")
+        for check in ("validate_timing_dict", "validate_fuzzy_dict", "validate_other_dict",
+                      "validate_charge_dict", "validate_bond_dict"):
+            monkeypatch.setattr(validation, check, lambda *a, **k: True)
+        assert validation.validation_checks(str(job), move_results=True, recheck_allalpha_qtaim=True)
+        assert _qtaim_output_complete(str(job), recheck_allalpha_qtaim=True, n_electrons=9, mult=1)
+        assert _prepare_allalpha_qtaim_rerun(str(job), wfx=True, preprocess_compressed=False, logger=LOG)
+        assert (job / "orca.wfn").exists() and (job / "generator" / "qtaim.out").exists()
+
+    def test_rerun_preparation_removes_the_loose_qtaim_out(self, tmp_path):
+        job = _folder(tmp_path, ALL_ALPHA)
+        (job / "qtaim.out").write_text(_banner(9, 0))
+        (job / "generator" / "qtaim.out").write_text(_banner(9, 0))
+        assert _prepare_allalpha_qtaim_rerun(str(job), wfx=True, preprocess_compressed=False, logger=LOG)
+        assert not (job / "qtaim.out").exists() and not (job / "generator" / "qtaim.out").exists()

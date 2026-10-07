@@ -1910,9 +1910,10 @@ def _prepare_allalpha_qtaim_rerun(
 ) -> bool:
     """Set a folder up for a QTAIM rerun from a .wfx when its qtaim.json is all-alpha.
 
-    Removes every .wfn and loose CPprop.txt (folder and generator/) so the
-    reparse cannot rebuild the record and extraction rebuilds a .wfx from the
-    gbw source. False (do not run) when the rerun could only reproduce the
+    Removes every .wfn and loose CPprop.txt and qtaim.out (folder and
+    generator/) so the reparse cannot rebuild the record, extraction rebuilds a
+    .wfx from the gbw source, and the old all-alpha banner cannot outrank the
+    rerun's qtaim.out. False (do not run) when the rerun could only reproduce the
     record: no --wfx, or no .wfx and no gbw source. True otherwise, including
     when the record is fine and nothing is touched.
     """
@@ -1936,7 +1937,8 @@ def _prepare_allalpha_qtaim_rerun(
         if not os.path.isdir(base):
             continue
         for name in sorted(os.listdir(base)):
-            if name.endswith(".wfn") or name == "CPprop.txt":
+            # a loose qtaim.out would outrank the rerun's copy in out_files.zip
+            if name.endswith(".wfn") or name in ("CPprop.txt", "qtaim.out"):
                 os.remove(os.path.join(base, name))
                 logger.info("recheck_allalpha_qtaim: removed %s before the QTAIM rerun", os.path.join(base, name))
     return True

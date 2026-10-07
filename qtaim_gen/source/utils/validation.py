@@ -785,12 +785,53 @@ def all_electron_count(dft_dict) -> Optional[int]:
         return None
 
 
-def qtaim_all_alpha_defect(record: dict, n_electrons: Optional[int] = None, mult: Optional[int] = None) -> bool:
-    """True if the record is all-alpha or partly all-alpha and needs a QTAIM rerun from a .wfx.
+_QTAIM_BANNER = re.compile(r"Total/Alpha/Beta electrons:\s*(\S+)\s+(\S+)\s+(\S+)")
 
-    An all-alpha record is right when every electron is alpha (n_electrons == mult - 1, e.g. an
-    H atom or triplet H2); with either count unknown it is treated as a defect.
+
+def qtaim_out_banner(folder: Optional[str]) -> Optional[tuple]:
+    """(alpha, beta) electrons Multiwfn loaded for the QTAIM run, from qtaim.out; None if unknown.
+    An unrestricted .wfn read as all-alpha shows beta == 0 here."""
+    text = read_qtaim_out(folder) if folder else None
+    m = _QTAIM_BANNER.search(text or "")
+    if not m:
+        return None
+    try:
+        return float(m.group(2)), float(m.group(3))
+    except ValueError:
+        return None
+
+
+def qtaim_fixed_in_place(record: dict) -> bool:
+    """fix-allalpha-qtaim's signature: density_alpha == density_beta and spin_density == 0 exactly at
+    every CP. Such a record keeps the all-alpha banner in its archived qtaim.out; no unrestricted run
+    gives exact zeros, and a restricted one shows beta > 0 in the banner."""
+    cps = [v for v in record.values() if isinstance(v, dict) and _num(v.get("density_all"))]
+    return bool(cps) and all(
+        _num(v.get("density_alpha")) and v.get("density_alpha") == v.get("density_beta")
+        and v.get("spin_density") == 0.0 for v in cps)
+
+
+def qtaim_all_alpha_defect(
+    record: dict,
+    n_electrons: Optional[int] = None,
+    mult: Optional[int] = None,
+    banner: Optional[tuple] = None,
+) -> bool:
+    """True if the record needs a QTAIM rerun from a .wfx because Multiwfn read the wavefunction as all-alpha.
+
+    With the qtaim.out banner (alpha, beta electrons) the banner decides: beta > 0 is a resolved run
+    (never rejected, so a .wfx rerun cannot loop); beta == 0 is an all-alpha run, a defect unless every
+    electron is alpha (alpha == mult - 1) or fix-allalpha-qtaim already repaired the record.
+    Without a banner the densities decide: all_alpha, all_alpha_ecp and ambiguous are defects, unless
+    every electron is alpha (n_electrons == mult - 1, e.g. an H atom); unknown counts count as a defect.
     """
+    if banner is not None:
+        alpha_e, beta_e = banner
+        if beta_e > 0:
+            return False
+        if mult is not None and alpha_e == mult - 1:
+            return False
+        return not qtaim_fixed_in_place(record)
     spin_class = qtaim_spin_class(record)
     if spin_class in (QTAIM_AMBIGUOUS, QTAIM_ALL_ALPHA_ECP):
         return True
@@ -807,13 +848,15 @@ def qtaim_copy_has_all_alpha_defect(folder: str, n_electrons: Optional[int] = No
     clean=False a stale root copy survives next to generator/, and checking only one copy
     let the gate skip QTAIM while the validator failed the folder, every pass.
     """
+    banner = qtaim_out_banner(folder)
     for base in (folder, os.path.join(folder, "generator")):
         try:
             with open(os.path.join(base, "qtaim.json"), "r") as f:
                 record = json.load(f)
         except (OSError, json.JSONDecodeError):
             continue
-        if isinstance(record, dict) and qtaim_all_alpha_defect(record, n_electrons=n_electrons, mult=mult):
+        if isinstance(record, dict) and qtaim_all_alpha_defect(
+                record, n_electrons=n_electrons, mult=mult, banner=banner):
             return True
     return False
 
@@ -846,7 +889,8 @@ def validate_qtaim_dict(
             print("QTAIM json file is empty.")
         return False
 
-    if reject_all_alpha and qtaim_all_alpha_defect(qtaim_dict, n_electrons=n_electrons, mult=mult):
+    if reject_all_alpha and qtaim_all_alpha_defect(
+            qtaim_dict, n_electrons=n_electrons, mult=mult, banner=qtaim_out_banner(folder)):
         msg = (
             f"QTAIM json is all-alpha or partly all-alpha (an unrestricted .wfn read as "
             f"all-alpha); rerun QTAIM from a .wfx: {qtaim_json_loc}"
