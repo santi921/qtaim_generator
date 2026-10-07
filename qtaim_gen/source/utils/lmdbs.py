@@ -692,7 +692,7 @@ def parse_qtaim_data(
             if rem in bond_keys:
                 bond_keys.remove(rem)
 
-    # never a feature, even when a config still lists it (LMDBs built before the drop carry it)
+    # never a feature, even when the caller lists it (LMDBs built before the drop carry it)
     atom_keys = [k for k in atom_keys if k not in DROPPED_QTAIM_FIELDS]
     bond_keys = [k for k in bond_keys if k not in DROPPED_QTAIM_FIELDS]
 

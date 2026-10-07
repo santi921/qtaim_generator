@@ -56,3 +56,21 @@ def test_explicit_key_list_is_not_mutated():
     keys = ["density_all", "delta_g_promolecular"]
     parse_qtaim_data(QTAIM, {}, {}, atom_keys=keys, bond_keys=keys)
     assert keys == ["density_all", "delta_g_promolecular"]
+
+
+def test_converter_config_listing_the_field_still_builds_graphs(tmp_path):
+    from qtaim_gen.source.core.converter import QTAIMConverter
+
+    base = os.path.join(os.path.dirname(__file__), "test_files", "lmdb_tests", "generator_lmdbs_merged")
+    keys = ["eta", "delta_g_promolecular"]
+    cfg = {"chunk": -1, "filter_list": ["scaled", "length"], "restart": False,
+           "allowed_ring_size": [3, 4, 5, 6, 7, 8], "allowed_charges": None, "allowed_spins": None,
+           "keys_target": {"atom": [], "bond": [], "global": ["n_atoms"]},
+           "keys_data": {"atom": list(keys), "bond": list(keys), "global": ["n_atoms"]},
+           "lmdb_path": str(tmp_path), "lmdb_name": "g.lmdb",
+           "lmdb_locations": {"geom_lmdb": os.path.join(base, "merged_geom.lmdb"),
+                              "qtaim_lmdb": os.path.join(base, "merged_qtaim.lmdb")}}
+    converter = QTAIMConverter(cfg, config_path=str(tmp_path / "cfg.json"))
+    assert converter.keys_data["atom"] == ["eta"] and converter.keys_data["bond"] == ["eta"]
+    converter.process()
+    assert not converter.fail_log_dict["graph"] and not converter.fail_log_dict["qtaim"]
