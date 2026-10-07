@@ -20,7 +20,8 @@ def _ncp(atom, rho, dx=0.01):
 
 def _bcp(a, b, rho):
     pa, pb = ATOMS[a][1], ATOMS[b][1]
-    return {"pos_ang": [(x + y) / 2 for x, y in zip(pa, pb)], "density_all": rho}
+    return {"connected_bond_paths": [a + 1, b + 1], "pos_ang": [(x + y) / 2 for x, y in zip(pa, pb)],
+            "density_all": rho}
 
 
 # what a correct parse gives
@@ -77,9 +78,17 @@ class TestPermutation:
         off = dict(RIGHT, **{"1": dict(RIGHT["1"], pos_ang=[1.3, 0.3, 0.0])})
         assert rq.permutation(off, ATOMS) is None
 
-    def test_self_pairs(self):
-        assert rq.self_pairs(dict(RIGHT, **{"2_2": _bcp(2, 2, 0.2)})) == 1
-        assert rq.self_pairs(RIGHT) == 0
+    def test_stale_bond_keys(self):
+        assert rq.stale_bond_keys(RIGHT) == 0
+        assert rq.stale_bond_keys(dict(RIGHT, **{"2_2": _bcp(1, 2, 0.2)})) == 1
+        # a wrong-pair key a key-by-key merge kept next to the correct one
+        assert rq.stale_bond_keys(dict(RIGHT, **{"1_3": RIGHT["0_3"]})) == 1
+        # a swapped record's bond keys are stale until relabeled
+        assert rq.stale_bond_keys(SWAPPED) == 2
+        assert rq.stale_bond_keys(rq.relabel(SWAPPED, rq.permutation(SWAPPED, ATOMS))) == 0
+
+    def test_record_from_another_geometry_is_not_clean(self):
+        assert rq.permutation(dict(RIGHT, **{"7": _ncp(1, 0.4)}), ATOMS) is None
 
 
 class TestCycles:
@@ -150,10 +159,24 @@ class TestFolder:
         assert lock.exists() and _stored(job) == SWAPPED
 
     def test_self_pairs_are_reported_after_the_relabel(self, tmp_path):
-        job = _job(tmp_path, record=dict(SWAPPED, **{"1_1": _bcp(1, 1, 0.2)}))
+        job = _job(tmp_path, record=dict(SWAPPED, **{"1_1": _bcp(1, 2, 0.2)}))
         r = _run(job)
-        assert r["status"] == rq.STATUS_RELABELED and r["self_pairs"] == 1
+        assert r["status"] == rq.STATUS_RELABELED and r["stale_bond_keys"] == 1
         assert "2_2" in _stored(job)
+
+    def test_clean_nuclear_cps_with_a_stale_bond_key(self, tmp_path):
+        job = _job(tmp_path, record=dict(RIGHT, **{"1_3": RIGHT["0_3"]}))
+        r = _run(job)
+        assert r["status"] == rq.STATUS_CLEAN and r["stale_bond_keys"] == 1
+
+    def test_unstattable_lock_is_not_broken(self, tmp_path, monkeypatch):
+        from qtaim_gen.source.core import workflow
+        job = _job(tmp_path)
+        (job / ".processing.lock").write_text("other job")
+        real = os.path.getmtime
+        monkeypatch.setattr(workflow.os.path, "getmtime",
+                            lambda p: (_ for _ in ()).throw(OSError("ESTALE")) if p.endswith(".lock") else real(p))
+        assert _run(job)["status"] == rq.STATUS_LOCKED and (job / ".processing.lock").exists()
 
     @pytest.mark.parametrize("kwargs,status", [({"inp": False}, rq.STATUS_NO_INP)])
     def test_no_geometry(self, tmp_path, kwargs, status):
@@ -178,7 +201,7 @@ class TestMain:
 
     def _main(self, tmp_path, monkeypatch, *extra):
         jobs = []
-        for name, record in (("a", SWAPPED), ("b", RIGHT), ("c", dict(SWAPPED, **{"1_1": _bcp(1, 1, 0.2)})),
+        for name, record in (("a", SWAPPED), ("b", RIGHT), ("c", dict(SWAPPED, **{"1_1": _bcp(1, 2, 0.2)})),
                              ("d", dict(RIGHT, **{"1": RIGHT["2"]}))):
             job = _job(tmp_path / name, record=record)
             jobs.append(str(job))
@@ -193,7 +216,7 @@ class TestMain:
     @pytest.mark.parametrize("workers", ["1", "2"])
     def test_counts_and_remaining(self, tmp_path, monkeypatch, workers):
         jobs, agg, remaining = self._main(tmp_path, monkeypatch, "--workers", workers)
-        assert (agg["relabeled"], agg["clean"], agg["not_clean"], agg["with_self_pairs"]) == (2, 1, 1, 1)
+        assert (agg["relabeled"], agg["clean"], agg["not_clean"], agg["with_stale_bond_keys"]) == (2, 1, 1, 1)
         assert sorted(remaining) == sorted([jobs[2], jobs[3]])
 
     def test_dry_run(self, tmp_path, monkeypatch):

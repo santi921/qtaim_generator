@@ -19,11 +19,12 @@ Per folder, under the runners' .processing.lock (never broken as stale; no lock 
 Anything else (a CP sitting on an atom whose own CP did not move, a different element, no
 geometry) is left for a QTAIM rerun. A relabeled record is clean, so a second pass reports clean.
 
-Statuses: relabeled, would_relabel (--dry_run), clean (nothing to do), not_clean, no_inp,
-no_qtaim_json, missing (no folder), locked, failed. Each result also counts self pairs (bond keys
-i_i, stale CPs from an earlier run that a relabel cannot remove).
---list_remaining writes the entries (as given) that need a QTAIM rerun or a look: not_clean, no_inp,
-no_qtaim_json, missing, locked, failed, and any folder left with self pairs.
+Statuses: relabeled, would_relabel (--dry_run), clean (no nuclear CP to move), not_clean, no_inp,
+no_qtaim_json, missing (no folder), locked, failed. Each result also counts stale bond keys left
+after the relabel: keys that do not name the atoms in their CP's connected_bond_paths (self pairs
+like 9_9, wrong-pair keys kept by a pre-4c79864 key-by-key merge). A relabel cannot remove them.
+--list_remaining writes the entries (as given) that need requalify-qtaim, a QTAIM rerun or a look:
+not_clean, no_inp, no_qtaim_json, missing, locked, failed, and any folder left with stale bond keys.
 
 Example:
     relabel-qtaim-cps --folder_list scan/tm_react_cp_mislabeled.txt --workers 32 --dry_run \\
@@ -92,7 +93,9 @@ def permutation(record: dict, atoms: Dict[int, Tuple[str, List[float]]]) -> Opti
         if not all(isinstance(x, (int, float)) and math.isfinite(x) for x in cp["pos_ang"]):
             return None
         k = int(key)
-        if k not in atoms or math.dist(cp["pos_ang"], atoms[k][1]) <= MOVED_A:
+        if k not in atoms:
+            return None  # a record from a different geometry
+        if math.dist(cp["pos_ang"], atoms[k][1]) <= MOVED_A:
             continue
         j = min(atoms, key=lambda n: math.dist(cp["pos_ang"], atoms[n][1]))
         if math.dist(cp["pos_ang"], atoms[j][1]) > ON_ATOM_A or atoms[j][0] != atoms[k][0]:
@@ -125,12 +128,27 @@ def relabel(record: dict, pi: Dict[int, int]) -> dict:
     return out
 
 
-def self_pairs(record: dict) -> int:
-    return sum(1 for k in record if "_" in k and len(set(k.split("_"))) == 1)
+def stale_bond_keys(record: dict) -> int:
+    """Bond keys that do not name the atoms their CP connects (connected_bond_paths, Multiwfn's 1-based
+    atom numbers): self pairs like 9_9 and wrong-pair keys a pre-4c79864 key-by-key merge kept next to
+    a correct reparse. A relabel cannot remove them; they need requalify-qtaim or a rerun."""
+    n = 0
+    for key, cp in record.items():
+        if "_" not in key or not isinstance(cp, dict):
+            continue
+        parts = key.split("_")
+        if len(parts) == 2 and len(set(parts)) == 1:
+            n += 1
+            continue
+        paths = cp.get("connected_bond_paths")
+        if (isinstance(paths, list) and len(paths) == 2 and all(isinstance(p, int) for p in paths)
+                and parts != [str(x) for x in sorted(p - 1 for p in paths)]):
+            n += 1
+    return n
 
 
 def _plan(folder: str, inputs: Optional[str]) -> Tuple[str, Dict[str, dict], Dict[str, dict], int]:
-    """(status, {path: relabeled record} to write, {relpath: permutation}, self pairs left)."""
+    """(status, {path: relabeled record} to write, {relpath: permutation}, stale bond keys left)."""
     records = {}
     for rel in QTAIM_COPIES:
         path = os.path.join(folder, rel)
@@ -146,11 +164,11 @@ def _plan(folder: str, inputs: Optional[str]) -> Tuple[str, Dict[str, dict], Dic
     for path, record in records.items():
         pi = permutation(record, atoms)
         if pi is None:
-            return STATUS_NOT_CLEAN, {}, {}, max(self_pairs(r) for r in records.values())
+            return STATUS_NOT_CLEAN, {}, {}, max(stale_bond_keys(r) for r in records.values())
         if pi:
             fixed[path] = relabel(record, pi)
             perms[os.path.relpath(path, folder)] = {str(k): v for k, v in sorted(pi.items())}
-    left = max(self_pairs(fixed.get(p, r)) for p, r in records.items())
+    left = max(stale_bond_keys(fixed.get(p, r)) for p, r in records.items())
     return (STATUS_RELABELED if fixed else STATUS_CLEAN), fixed, perms, left
 
 
@@ -161,7 +179,7 @@ def process_folder(entry: str, root_inputs: Optional[str], root_results: Optiona
 
     folder, inputs = _paths(entry, root_inputs, root_results)
     result: Dict[str, object] = {"entry": entry, "folder": folder, "status": "", "permutation": {},
-                                 "self_pairs": 0, "error": ""}
+                                 "stale_bond_keys": 0, "error": ""}
     if not os.path.isdir(folder):
         result["status"] = STATUS_MISSING
         return result
@@ -174,7 +192,7 @@ def process_folder(entry: str, root_inputs: Optional[str], root_results: Optiona
                 return result
             locked = True
         status, fixed, perms, left = _plan(folder, inputs)
-        result["permutation"], result["self_pairs"] = perms, left
+        result["permutation"], result["stale_bond_keys"] = perms, left
         if fixed:
             if dry_run:
                 status = STATUS_WOULD_RELABEL
@@ -205,7 +223,7 @@ def main() -> int:
     ap.add_argument("--report", default=None, help="Write a JSON report of per-folder results.")
     ap.add_argument("--list_remaining", default=None,
                     help="Write the entries that need a QTAIM rerun or a look (every status except "
-                         + ", ".join(DONE) + ", plus folders left with self pairs).")
+                         + ", ".join(DONE) + ", plus folders left with stale bond keys).")
     args = ap.parse_args()
 
     logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(message)s")
@@ -240,14 +258,14 @@ def main() -> int:
                     except Exception as err:
                         # a dead worker must not cost the report of everything already relabeled
                         results.append({"entry": futs[fut], "folder": futs[fut], "status": STATUS_FAILED,
-                                        "permutation": {}, "self_pairs": 0,
+                                        "permutation": {}, "stale_bond_keys": 0,
                                         "error": f"{type(err).__name__}: {err}"})
                     bar.update(1)
 
     agg: Dict[str, object] = {"folders_total": n}
     for s in STATUSES:
         agg[s] = sum(1 for r in results if r["status"] == s)
-    agg["with_self_pairs"] = sum(1 for r in results if r["self_pairs"])
+    agg["with_stale_bond_keys"] = sum(1 for r in results if r["stale_bond_keys"])
     agg["elapsed_sec"] = round(time.time() - t0, 2)
     print("\nRelabel summary:", file=sys.stderr)
     for k, v in agg.items():
@@ -264,7 +282,7 @@ def main() -> int:
         print(f"\nReport written: {args.report}", file=sys.stderr)
     if args.list_remaining:
         os.makedirs(os.path.dirname(args.list_remaining) or ".", exist_ok=True)
-        remaining = [r["entry"] for r in results if r["status"] not in DONE or r["self_pairs"]]
+        remaining = [r["entry"] for r in results if r["status"] not in DONE or r["stale_bond_keys"]]
         with open(args.list_remaining, "w") as f:
             f.write("\n".join(remaining) + ("\n" if remaining else ""))
         print(f"{len(remaining)} folders need a QTAIM rerun or a look: {args.list_remaining}", file=sys.stderr)
