@@ -40,6 +40,7 @@ from qtaim_gen.source.utils.lmdbs import (
     parse_orca_data,
     gather_structure_info,
     StaleOrcaParseError,
+    DROPPED_QTAIM_FIELDS,
 )
 from qtaim_gen.source.core.parse_orca import ORCA_PARSER_VERSION
 from qtaim_gen.source.core.qtaim_embed import (
@@ -190,6 +191,11 @@ class Converter:
 
         self.keys_target = config_dict.get("keys_target", self.keys_target)
         self.keys_data = config_dict.get("keys_data", self.keys_data)
+        # a config written before the drop still lists the field; the grapher would expect it
+        for node_type in ("atom", "bond"):
+            self.keys_data[node_type] = [
+                k for k in self.keys_data.get(node_type, []) if k not in DROPPED_QTAIM_FIELDS
+            ]
 
         self.index_dict = {}
         
