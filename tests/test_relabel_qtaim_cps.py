@@ -82,6 +82,38 @@ class TestPermutation:
         assert rq.self_pairs(RIGHT) == 0
 
 
+class TestCycles:
+    """Three close H atoms: the old map could rotate CPs among them, and pi is then not its own inverse."""
+
+    A3 = {0: ("C", [0.0, 0.0, 0.0]), 1: ("H", [1.09, 0.0, 0.0]), 2: ("H", [1.5, 0.62, 0.0]),
+          3: ("H", [1.6, -0.5, 0.0])}
+
+    def _cp(self, atom, rho):
+        el, pos = self.A3[atom]
+        return {"element": el, "number": str(atom + 1), "pos_ang": [pos[0] + 0.01, pos[1], pos[2]], "density_all": rho}
+
+    def _bond(self, a, b, rho):
+        return {"connected_bond_paths": [a + 1, b + 1], "density_all": rho}
+
+    def test_three_cycle(self):
+        right = {"0": self._cp(0, 120.0), "1": self._cp(1, 0.42), "2": self._cp(2, 0.31), "3": self._cp(3, 0.36),
+                 "0_1": self._bond(0, 1, 0.28), "0_2": self._bond(0, 2, 0.20), "0_3": self._bond(0, 3, 0.22),
+                 "1_2": self._bond(1, 2, 0.15)}
+        pi = {1: 2, 2: 3, 3: 1}
+        # the old mapper: stored nuclear key k holds atom pi(k)'s CP; real bond r-s stored under pi(r)_pi(s)
+        stored = {str(k): right[str(pi.get(k, k))] for k in range(4)}
+        for key in ("0_1", "0_2", "0_3", "1_2"):
+            r, s_ = (int(x) for x in key.split("_"))
+            i, j = sorted((pi.get(r, r), pi.get(s_, s_)))
+            stored[f"{i}_{j}"] = right[key]
+        assert rq.permutation(stored, self.A3) == pi
+        assert rq.relabel(stored, pi) == right
+
+    def test_nan_position_is_not_clean(self):
+        nan = dict(RIGHT, **{"1": dict(RIGHT["1"], pos_ang=[float("nan"), 0.0, 0.0])})
+        assert rq.permutation(nan, ATOMS) is None
+
+
 class TestFolder:
 
     def test_relabels_and_a_second_pass_is_clean(self, tmp_path):

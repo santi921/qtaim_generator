@@ -14,7 +14,8 @@ Per folder, under the runners' .processing.lock (never broken as stale; no lock 
      atom, which must be within 0.05 A, have the same element, and match the CP's own Multiwfn atom
      label (number == j + 1) when the record carries one
   3. write only when the moves form a clean exchange (a permutation of the moved keys); then
-     nuclear key k -> pi(k) and bond key i_j -> sorted(pi(i), pi(j))
+     nuclear key k -> pi(k) and bond key i_j -> sorted(pi^-1(i), pi^-1(j)) (the old map sent real
+     atom r to stored index pi(r))
 Anything else (a CP sitting on an atom whose own CP did not move, a different element, no
 geometry) is left for a QTAIM rerun. A relabeled record is clean, so a second pass reports clean.
 
@@ -88,6 +89,8 @@ def permutation(record: dict, atoms: Dict[int, Tuple[str, List[float]]]) -> Opti
     for key, cp in record.items():
         if "_" in key or not key.isdigit() or not isinstance(cp, dict) or not cp.get("pos_ang"):
             continue
+        if not all(isinstance(x, (int, float)) and math.isfinite(x) for x in cp["pos_ang"]):
+            return None
         k = int(key)
         if k not in atoms or math.dist(cp["pos_ang"], atoms[k][1]) <= MOVED_A:
             continue
@@ -103,6 +106,10 @@ def permutation(record: dict, atoms: Dict[int, Tuple[str, List[float]]]) -> Opti
 
 
 def relabel(record: dict, pi: Dict[int, int]) -> dict:
+    # Nuclear key k holds the CP of atom pi(k). A bond key was built through the same wrong map
+    # (merge_qtaim_inds: real atom r -> stored index pi(r)), so stored index s means atom pi^-1(s).
+    # A swap is its own inverse; a 3-cycle is not.
+    inv = {v: k for k, v in pi.items()}
     out = {}
     for key, cp in record.items():
         if "_" not in key:
@@ -110,7 +117,7 @@ def relabel(record: dict, pi: Dict[int, int]) -> dict:
         else:
             parts = key.split("_")
             if len(parts) == 2 and all(p.isdigit() for p in parts):
-                i, j = sorted(pi.get(int(p), int(p)) for p in parts)
+                i, j = sorted(inv.get(int(p), int(p)) for p in parts)
                 new = f"{i}_{j}"
             else:
                 new = key
