@@ -100,12 +100,38 @@ def fuzzy_sum(fz, step):
     return v.get("sum")
 
 
-def strip_cp_num(qtaim):
-    # Multiwfn's CP index follows search order, so two identical runs can number CPs differently
-    if not isinstance(qtaim, dict):
-        return qtaim
-    return {cp: ({k: v for k, v in d.items() if k != "cp_num"} if isinstance(d, dict) else d)
-            for cp, d in qtaim.items()}
+def _leaves(d, prefix=""):
+    if isinstance(d, dict):
+        for k, v in d.items():
+            yield from _leaves(v, f"{prefix}/{k}")
+    elif isinstance(d, (list, tuple)):
+        for i, v in enumerate(d):
+            yield from _leaves(v, f"{prefix}/{i}")
+    else:
+        yield prefix, d
+
+
+def qtaim_same(o, n, rtol=1e-10, atol=1e-12):
+    """Same CP set and every field equal, numbers within rtol/atol: two Multiwfn
+    runs of one job differ at ~1e-15 (summation order). cp_num is ignored, as
+    Multiwfn's CP index follows search order."""
+    if not isinstance(o, dict) or not isinstance(n, dict):
+        return o == n
+    if set(o) != set(n):
+        return False
+    for cp in o:
+        lo = {k: v for k, v in _leaves(o[cp]) if not k.endswith("/cp_num")}
+        ln = {k: v for k, v in _leaves(n[cp]) if not k.endswith("/cp_num")}
+        if set(lo) != set(ln):
+            return False
+        for k, a in lo.items():
+            b = ln[k]
+            if isinstance(a, (int, float)) and isinstance(b, (int, float)) and not isinstance(a, bool):
+                if not abs(a - b) <= atol + rtol * max(abs(a), abs(b)):
+                    return False
+            elif a != b:
+                return False
+    return True
 
 
 def compare_job(orig, new):
@@ -183,7 +209,7 @@ def compare_job(orig, new):
             if (n_all or {}).get(k) != o_all[k]:
                 rec["untouched_changed"].append(f"{fname}:{k}")
     o_q, n_q = files["qtaim.json"]
-    if strip_cp_num(o_q) != strip_cp_num(n_q):
+    if not qtaim_same(o_q, n_q):
         rec["untouched_changed"].append("qtaim.json")
     o_o, n_o = files["other.json"]
     engine_alie = bool(n_t.get("surface_engine"))
