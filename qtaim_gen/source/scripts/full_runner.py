@@ -164,6 +164,19 @@ def main(argv=None):
     )
 
     parser.add_argument(
+        "--recheck_allalpha_qtaim",
+        action="store_true",
+        help=(
+            "treat a qtaim.json from an unrestricted .wfn read as all-alpha as incomplete: the "
+            "qtaim.out banner of a finished run shows beta == 0 (or, without one, the densities "
+            "are all-alpha), unless every electron is alpha or fix-allalpha-qtaim repaired it. "
+            "The QTAIM step then reruns from a .wfx: the unrestricted .wfn is set aside as "
+            "*.wfn.allalpha and the loose CPprop.txt and qtaim.out are removed first (needs --wfx "
+            "and a gbw source). Run fix-allalpha-qtaim first; it repairs UKS singlets in place."
+        ),
+    )
+
+    parser.add_argument(
         "--require_qtaim_provenance",
         action="store_true",
         help=(
@@ -201,6 +214,7 @@ def main(argv=None):
     require_qtaim_provenance = bool(
         getattr(args, "require_qtaim_provenance", False)
     )
+    recheck_allalpha_qtaim = bool(getattr(args, "recheck_allalpha_qtaim", False))
     recheck_fuzzy = bool(getattr(args, "recheck_fuzzy", False))
     job_file = args.job_file
 
@@ -292,6 +306,7 @@ def main(argv=None):
                     check_bcp_count=check_bcp_count,
                     bcp_tolerance=bcp_tolerance,
                     require_qtaim_provenance=require_qtaim_provenance,
+                    recheck_allalpha_qtaim=recheck_allalpha_qtaim,
                     recheck_fuzzy=recheck_fuzzy,
                 )  # works!
             except Exception as e:

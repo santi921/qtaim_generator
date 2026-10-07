@@ -545,26 +545,30 @@ QTAIM_EXPORT_MARKER = "have been outputted to CPprop.txt"
 QTAIM_COUNT_PATTERN = re.compile(r"Number of \(3,-1\) CPs:\s*(\d+)")
 
 
-def read_multiwfn_out(folder: str, name: str) -> Optional[str]:
-    """Text of a Multiwfn `<step>.out`, or None. Checks root, generator/, then
-    the out_files.zip that survives cleanup."""
+def _multiwfn_out_texts(folder: str, name: str):
+    """Every copy of a Multiwfn `<step>.out`, most recent location first: root, generator/,
+    generator/out_files.zip (move_results), then the root out_files.zip (move_results=False)."""
     for rel in (name, os.path.join("generator", name)):
         path = os.path.join(folder, rel)
         if os.path.isfile(path) and os.path.getsize(path) > 0:
             try:
                 with open(path, "r", errors="replace") as f:
-                    return f.read()
+                    yield f.read()
             except OSError:
                 pass
-    zip_path = os.path.join(folder, "generator", "out_files.zip")
-    if os.path.isfile(zip_path):
-        try:
-            with zipfile.ZipFile(zip_path, "r") as zf:
-                if name in zf.namelist():
-                    return zf.read(name).decode("utf-8", errors="replace")
-        except (zipfile.BadZipFile, OSError, KeyError):
-            pass
-    return None
+    for zip_path in (os.path.join(folder, "generator", "out_files.zip"), os.path.join(folder, "out_files.zip")):
+        if os.path.isfile(zip_path):
+            try:
+                with zipfile.ZipFile(zip_path, "r") as zf:
+                    if name in zf.namelist():
+                        yield zf.read(name).decode("utf-8", errors="replace")
+            except (zipfile.BadZipFile, OSError, KeyError):
+                pass
+
+
+def read_multiwfn_out(folder: str, name: str) -> Optional[str]:
+    """Text of a Multiwfn `<step>.out`, or None: the first copy _multiwfn_out_texts finds."""
+    return next(_multiwfn_out_texts(folder, name), None)
 
 
 def read_qtaim_out(folder: str) -> Optional[str]:
@@ -704,6 +708,173 @@ def count_reported_bcps(folder: str) -> Optional[int]:
     count cannot provide.
     """
     return qtaim_run_status(folder)["reported_bcp"]
+
+
+QTAIM_ALL_ALPHA, QTAIM_ALL_ALPHA_ECP = "all_alpha", "all_alpha_ecp"
+QTAIM_RESOLVED, QTAIM_AMBIGUOUS = "resolved", "ambiguous"
+# Multiwfn adds an ECP atom's EDF core density to alpha and beta evenly, so even an all-alpha read
+# has beta ~ alpha at the nucleus of an atom at or beyond Rb (the first def2 ECP element)
+_FIRST_ECP_Z = 37
+
+
+def _num(x) -> bool:
+    return isinstance(x, (int, float)) and not isinstance(x, bool)
+
+
+_PERIODIC_TABLE = None
+
+
+def _atomic_number(element) -> int:
+    global _PERIODIC_TABLE
+    if _PERIODIC_TABLE is None:
+        from rdkit import Chem
+
+        _PERIODIC_TABLE = Chem.GetPeriodicTable()
+    try:
+        return _PERIODIC_TABLE.GetAtomicNumber(re.match(r"[A-Za-z]+", element or "").group(0))
+    except Exception:
+        return 0
+
+
+def _beta_zero(cp: dict) -> bool:
+    # rounding noise in a stored zero scales with the density (up to ~3e-12 relative seen)
+    return abs(cp["density_beta"]) <= 1e-9 * max(1.0, abs(cp["density_all"]))
+
+
+def qtaim_spin_class(record: dict) -> str:
+    """How a qtaim.json record resolves alpha and beta density.
+
+    Among CPs with density_all > 1e-6, leaving out the nuclear CPs of ECP atoms (Z >= 37) whose
+    beta is non-zero (the EDF core density, split evenly):
+    all_alpha: density_beta == 0 (to rounding) and density_alpha == density_all at every CP --
+        what Multiwfn writes when it reads an unrestricted .wfn as all-alpha
+    all_alpha_ecp: the same, in a record whose ECP nuclei carry the split core density
+    resolved: no such CP has density_beta == 0 (or the record has no spin fields)
+    ambiguous: anything in between, e.g. stale all-alpha CPs merged into a resolved record
+    """
+    cps = {k: v for k, v in record.items() if isinstance(v, dict) and _num(v.get("density_all"))
+           and v["density_all"] > 1e-6}
+    # the common case, decided without element lookups: no CP is missing beta or has it at zero
+    if cps and all(_num(v.get("density_beta")) and not _beta_zero(v) for v in cps.values()):
+        return QTAIM_RESOLVED
+    split = {k for k, v in cps.items() if "_" not in k and _num(v.get("density_beta")) and not _beta_zero(v)
+             and _atomic_number(v.get("element")) >= _FIRST_ECP_Z}
+    rest = [v for k, v in cps.items() if k not in split]
+    if not rest or not any("density_beta" in v for v in rest):
+        return QTAIM_RESOLVED
+    if not all(_num(v.get("density_beta")) for v in rest):
+        return QTAIM_AMBIGUOUS
+    zero = [_beta_zero(v) for v in rest]
+    if not any(zero):
+        return QTAIM_RESOLVED
+    if not all(zero):
+        return QTAIM_AMBIGUOUS
+    for v in rest:
+        alpha = v.get("density_alpha")
+        if not _num(alpha) or abs(alpha - v["density_all"]) > 1e-8 * max(1.0, abs(v["density_all"])):
+            return QTAIM_AMBIGUOUS
+    return QTAIM_ALL_ALPHA_ECP if split else QTAIM_ALL_ALPHA
+
+
+def all_electron_count(dft_dict) -> Optional[int]:
+    """sum(Z) - net charge of the parsed geometry input (core electrons included); None if unknown."""
+    try:
+        zs = [_atomic_number(a["element"]) for a in dft_dict["mol"].values()]
+        if not zs or 0 in zs:
+            return None
+        return sum(zs) - int(dft_dict.get("charge", 0))
+    except Exception:
+        return None
+
+
+_QTAIM_BANNER = re.compile(r"Total/Alpha/Beta electrons:\s*(\S+)\s+(\S+)\s+(\S+)")
+
+
+def qtaim_out_banner(folder: Optional[str]) -> Optional[tuple]:
+    """(alpha, beta) electrons Multiwfn loaded for the QTAIM run; None if unknown.
+
+    Taken from the first qtaim.out copy whose run finished (CP count and CPprop.txt export both
+    printed). Multiwfn prints the banner as soon as it loads the wavefunction, so a rerun killed
+    mid-search leaves a beta > 0 banner next to the old all-alpha record; that copy is skipped and
+    the archived one decides. An unrestricted .wfn read as all-alpha shows beta == 0.
+    """
+    if not folder:
+        return None
+    for text in _multiwfn_out_texts(folder, "qtaim.out"):
+        if not (QTAIM_COUNT_PATTERN.search(text) and QTAIM_EXPORT_MARKER in text):
+            continue
+        m = _QTAIM_BANNER.search(text)
+        if m:
+            try:
+                return float(m.group(2)), float(m.group(3))
+            except ValueError:
+                return None
+    return None
+
+
+def qtaim_fixed_in_place(record: dict) -> bool:
+    """fix-allalpha-qtaim's signature: density_alpha == density_beta and spin_density == 0 exactly at
+    every CP. Such a record keeps the all-alpha banner in its archived qtaim.out; no unrestricted run
+    gives exact zeros, and a restricted one shows beta > 0 in the banner."""
+    cps = [v for v in record.values() if isinstance(v, dict) and _num(v.get("density_all"))]
+    return bool(cps) and all(
+        _num(v.get("density_alpha")) and v.get("density_alpha") == v.get("density_beta")
+        and v.get("spin_density") == 0.0 for v in cps)
+
+
+def qtaim_all_alpha_defect(
+    record: dict,
+    n_electrons: Optional[int] = None,
+    mult: Optional[int] = None,
+    banner: Optional[tuple] = None,
+) -> bool:
+    """True if the record needs a QTAIM rerun from a .wfx because Multiwfn read the wavefunction as all-alpha.
+
+    With the banner of a finished QTAIM run (qtaim_out_banner: alpha, beta electrons):
+    - beta > 0, a resolved run: a defect only if the record is all_alpha or all_alpha_ecp, i.e. not from
+      that run. A resolved .wfx run has beta at every CP, so its own record always passes (no loop).
+      An ambiguous record (stale all-alpha CPs in a resolved one) passes: a density cutoff there could
+      reject a correct, strongly spin-polarized record after every rerun; those go to a rerun list.
+    - beta == 0, an all-alpha run: a defect unless every electron is alpha (alpha == mult - 1),
+      fix-allalpha-qtaim already repaired the record, or the multiplicity is unknown (a rerun of a
+      genuinely all-alpha system would reproduce beta == 0 forever).
+    Without a banner the densities decide: all_alpha, all_alpha_ecp and ambiguous are defects, unless
+    every electron is alpha (n_electrons == mult - 1, e.g. an H atom); unknown counts count as a defect.
+    """
+    if banner is not None:
+        alpha_e, beta_e = banner
+        if beta_e > 0:
+            return qtaim_spin_class(record) in (QTAIM_ALL_ALPHA, QTAIM_ALL_ALPHA_ECP)
+        if mult is None or alpha_e == mult - 1:
+            return False
+        return not qtaim_fixed_in_place(record)
+    spin_class = qtaim_spin_class(record)
+    if spin_class in (QTAIM_AMBIGUOUS, QTAIM_ALL_ALPHA_ECP):
+        return True
+    if spin_class != QTAIM_ALL_ALPHA:
+        return False
+    return not (n_electrons is not None and mult is not None and n_electrons == mult - 1)
+
+
+def qtaim_copy_has_all_alpha_defect(folder: str, n_electrons: Optional[int] = None,
+                                     mult: Optional[int] = None) -> bool:
+    """True if either qtaim.json copy (folder root or generator/) is an all-alpha defect.
+
+    One rule for the validator, the restart gate and the pre-extraction cleanup: with
+    clean=False a stale root copy survives next to generator/, and checking only one copy
+    let the gate skip QTAIM while the validator failed the folder, every pass.
+    """
+    banner = qtaim_out_banner(folder)
+    for base in (folder, os.path.join(folder, "generator")):
+        try:
+            with open(os.path.join(base, "qtaim.json"), "r") as f:
+                record = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            continue
+        if isinstance(record, dict) and qtaim_all_alpha_defect(
+                record, n_electrons=n_electrons, mult=mult, banner=banner):
+            return True
+    return False
 
 
 def validate_qtaim_dict(
@@ -1011,6 +1182,7 @@ def validation_checks(
     require_qtaim_provenance: bool = False,
     recheck_fuzzy: bool = False,
     orca_min_parser_version: Optional[int] = ORCA_PARSER_VERSION,
+    recheck_allalpha_qtaim: bool = False,
 ):
     """
     Run all validation checks on the json files in the given folder.
@@ -1035,6 +1207,8 @@ def validation_checks(
             are present but physically wrong (all-zero densities, spin not
             summing to multiplicity - 1, all-alpha or alpha-only fuzzy bonds).
             Dry run: nothing is written.
+        recheck_allalpha_qtaim (bool): fail an all-alpha or partly all-alpha qtaim.json
+            (an unrestricted .wfn read as all-alpha), unless every electron is alpha.
         orca_min_parser_version (Optional[int]): with check_orca, also fail when
             orca.json predates this parser version (orca_parser_version, 1 when
             absent), so the runner reparses it. None or 0 disables the gate.
@@ -1142,6 +1316,17 @@ def validation_checks(
     ):
         if logger:
             logger.error(f"QTAIM json validation failed in folder: {folder}")
+        tf_cond = False
+    elif recheck_allalpha_qtaim and qtaim_copy_has_all_alpha_defect(
+        folder, n_electrons=all_electron_count(dft_dict), mult=spin
+    ):
+        # both copies (root and generator/) and the qtaim.out banner, the restart gate's rule
+        msg = (f"QTAIM json is all-alpha or partly all-alpha (an unrestricted .wfn read as "
+               f"all-alpha); rerun QTAIM from a .wfx: {folder}")
+        if verbose:
+            print(msg)
+        if logger:
+            logger.error(msg)
         tf_cond = False
 
     if not validate_bond_dict(

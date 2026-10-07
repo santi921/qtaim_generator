@@ -144,6 +144,25 @@ class TestProcessFolder:
         assert _run(job)["status"] == fa.STATUS_AMBIGUOUS
         assert _stored(job) == ALLALPHA and _stored(job, "qtaim.json") == bad
 
+    def test_ecp_record_is_left_for_a_rerun(self, tmp_path):
+        ecp = _with(ALLALPHA, "0", element="Pt", density_all=1.6e5, density_alpha=8.0e4, density_beta=8.0e4)
+        job = _job(tmp_path, record=ecp)
+        assert _run(job)["status"] == fa.STATUS_ALL_ALPHA_ECP and _stored(job) == ecp
+
+    def test_all_alpha_record_from_a_resolved_run_is_not_fixed(self, tmp_path):
+        job = _job(tmp_path)
+        (job / "generator" / "qtaim.out").write_text(
+            " Total/Alpha/Beta electrons:  2.0  1.0  1.0\n Number of (3,-1) CPs:     1\n"
+            " Done! The results have been outputted to CPprop.txt in current folder\n")
+        assert _run(job)["status"] == fa.STATUS_STALE_MISMATCH and _stored(job) == ALLALPHA
+
+    def test_all_alpha_banner_is_fixed(self, tmp_path):
+        job = _job(tmp_path)
+        (job / "generator" / "qtaim.out").write_text(
+            " Total/Alpha/Beta electrons:  2.0  2.0  0.0\n Number of (3,-1) CPs:     1\n"
+            " Done! The results have been outputted to CPprop.txt in current folder\n")
+        assert _run(job)["status"] == fa.STATUS_FIXED
+
     def test_dry_run_writes_nothing_and_takes_no_lock(self, tmp_path):
         job = _job(tmp_path)
         (job / ".processing.lock").write_text("other job")

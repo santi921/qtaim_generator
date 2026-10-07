@@ -221,6 +221,7 @@ def process_folder(
     check_bcp_count: bool = False,
     bcp_tolerance: int = 2,
     require_qtaim_provenance: bool = False,
+    recheck_allalpha_qtaim: bool = False,
     exhaustive_qtaim: bool = False,
     patch_timings: bool = False,
     horton_python: str = "",
@@ -287,6 +288,7 @@ def process_folder(
                     move_results=move_results,
                     logger=logger,
                     recheck_fuzzy=recheck_fuzzy,
+                    recheck_allalpha_qtaim=recheck_allalpha_qtaim,
                 )
 
                 if not tf_validation:
@@ -329,6 +331,7 @@ def process_folder(
             check_bcp_count=check_bcp_count,
             bcp_tolerance=bcp_tolerance,
             require_qtaim_provenance=require_qtaim_provenance,
+            recheck_allalpha_qtaim=recheck_allalpha_qtaim,
             exhaustive_qtaim=exhaustive_qtaim,
             subprocess_env=subprocess_env,
             patch_timings=patch_timings,
@@ -414,6 +417,7 @@ def process_folder_alcf(
     check_bcp_count: bool = False,
     bcp_tolerance: int = 2,
     require_qtaim_provenance: bool = False,
+    recheck_allalpha_qtaim: bool = False,
     exhaustive_qtaim: bool = False,
     patch_timings: bool = False,
     horton_python: str = "",
@@ -534,6 +538,7 @@ def process_folder_alcf(
                 check_bcp_count=check_bcp_count,
                 bcp_tolerance=bcp_tolerance,
                 require_qtaim_provenance=require_qtaim_provenance,
+                recheck_allalpha_qtaim=recheck_allalpha_qtaim,
                 recheck_fuzzy=recheck_fuzzy,
             )
 
@@ -610,6 +615,7 @@ def process_folder_alcf(
             check_bcp_count=check_bcp_count,
             bcp_tolerance=bcp_tolerance,
             require_qtaim_provenance=require_qtaim_provenance,
+            recheck_allalpha_qtaim=recheck_allalpha_qtaim,
             exhaustive_qtaim=exhaustive_qtaim,
             subprocess_env=subprocess_env,
             patch_timings=patch_timings,
