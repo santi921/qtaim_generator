@@ -1,4 +1,5 @@
 from asyncio.log import logger
+import math
 import os
 import json
 import re
@@ -877,6 +878,56 @@ def qtaim_copy_has_all_alpha_defect(folder: str, n_electrons: Optional[int] = No
     return False
 
 
+# A nuclear CP more than CP_MOVED_A from its own atom and within CP_ON_ATOM_A of another atom was
+# filed under the wrong atom: records parsed before find_cp_map's exact-index pass (swaps and
+# duplicates of close same-element atoms). The current mapper matches Multiwfn's own atom label first,
+# so a fresh parse cannot produce this, and a rerun cannot loop. relabel-qtaim-cps uses the same limits.
+CP_MOVED_A = 0.1
+CP_ON_ATOM_A = 0.05
+
+
+def misplaced_nuclear_cps(record: dict, atoms: dict) -> dict:
+    """{stored atom index: atom the nuclear CP actually sits on} for CPs filed under the wrong atom.
+    atoms: {index: position (Angstrom)}."""
+    def point(p):
+        return isinstance(p, (list, tuple)) and len(p) == 3 and all(
+            isinstance(x, (int, float)) and math.isfinite(x) for x in p)
+
+    atoms = {n: p for n, p in atoms.items() if point(p)}
+    out = {}
+    for key, cp in record.items():
+        if not key.isdigit() or not isinstance(cp, dict):
+            continue
+        pos, k = cp.get("pos_ang"), int(key)
+        if k not in atoms or not point(pos):
+            continue
+        if math.dist(pos, atoms[k]) <= CP_MOVED_A:
+            continue
+        j = min(atoms, key=lambda n: math.dist(pos, atoms[n]))
+        if j != k and math.dist(pos, atoms[j]) <= CP_ON_ATOM_A:
+            out[k] = j
+    return out
+
+
+def qtaim_copy_has_mislabeled_cps(folder: str, atoms: Optional[dict] = None) -> bool:
+    """True if either qtaim.json copy (folder root or generator/) has a nuclear CP filed under the
+    wrong atom. atoms: {index: position}; read from the folder's geometry input when not given."""
+    if atoms is None:
+        parsed = get_charge_spin_n_atoms_from_folder(folder)
+        if not parsed:
+            return False
+        atoms = {int(i): a["pos"] for i, a in parsed["mol"].items()}
+    for base in (folder, os.path.join(folder, "generator")):
+        try:
+            with open(os.path.join(base, "qtaim.json"), "r") as f:
+                record = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            continue
+        if isinstance(record, dict) and misplaced_nuclear_cps(record, atoms):
+            return True
+    return False
+
+
 def validate_qtaim_dict(
     qtaim_json_loc: str,
     n_atoms: int = None,
@@ -1183,6 +1234,7 @@ def validation_checks(
     recheck_fuzzy: bool = False,
     orca_min_parser_version: Optional[int] = ORCA_PARSER_VERSION,
     recheck_allalpha_qtaim: bool = False,
+    recheck_cp_labels: bool = False,
 ):
     """
     Run all validation checks on the json files in the given folder.
@@ -1207,6 +1259,8 @@ def validation_checks(
             are present but physically wrong (all-zero densities, spin not
             summing to multiplicity - 1, all-alpha or alpha-only fuzzy bonds).
             Dry run: nothing is written.
+        recheck_cp_labels (bool): fail a qtaim.json (either copy) whose nuclear CP sits on
+            another atom (misplaced_nuclear_cps), so the runner reruns QTAIM.
         recheck_allalpha_qtaim (bool): fail an all-alpha or partly all-alpha qtaim.json
             (an unrestricted .wfn read as all-alpha), unless every electron is alpha.
         orca_min_parser_version (Optional[int]): with check_orca, also fail when
@@ -1323,6 +1377,16 @@ def validation_checks(
         # both copies (root and generator/) and the qtaim.out banner, the restart gate's rule
         msg = (f"QTAIM json is all-alpha or partly all-alpha (an unrestricted .wfn read as "
                f"all-alpha); rerun QTAIM from a .wfx: {folder}")
+        if verbose:
+            print(msg)
+        if logger:
+            logger.error(msg)
+        tf_cond = False
+    elif recheck_cp_labels and qtaim_copy_has_mislabeled_cps(
+        folder, atoms={int(i): a["pos"] for i, a in dft_dict["mol"].items()}
+    ):
+        msg = (f"QTAIM json has a nuclear CP filed under the wrong atom (pre-fix CP mapper); "
+               f"rerun QTAIM: {folder}")
         if verbose:
             print(msg)
         if logger:

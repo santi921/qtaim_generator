@@ -44,6 +44,8 @@ from typing import Dict, List, Optional, Tuple
 
 from tqdm import tqdm
 
+from qtaim_gen.source.utils.validation import CP_MOVED_A as MOVED_A, CP_ON_ATOM_A as ON_ATOM_A
+
 STATUS_RELABELED = "relabeled"
 STATUS_WOULD_RELABEL = "would_relabel"
 STATUS_CLEAN = "clean"
@@ -57,8 +59,6 @@ STATUSES = (STATUS_RELABELED, STATUS_WOULD_RELABEL, STATUS_CLEAN, STATUS_NOT_CLE
             STATUS_NO_QTAIM_JSON, STATUS_MISSING, STATUS_LOCKED, STATUS_FAILED)
 DONE = (STATUS_RELABELED, STATUS_WOULD_RELABEL, STATUS_CLEAN)
 
-MOVED_A = 0.1
-ON_ATOM_A = 0.05
 QTAIM_COPIES = (os.path.join("generator", "qtaim.json"), "qtaim.json")
 
 
