@@ -889,13 +889,17 @@ CP_ON_ATOM_A = 0.05
 def misplaced_nuclear_cps(record: dict, atoms: dict) -> dict:
     """{stored atom index: atom the nuclear CP actually sits on} for CPs filed under the wrong atom.
     atoms: {index: position (Angstrom)}."""
+    def point(p):
+        return isinstance(p, (list, tuple)) and len(p) == 3 and all(
+            isinstance(x, (int, float)) and math.isfinite(x) for x in p)
+
+    atoms = {n: p for n, p in atoms.items() if point(p)}
     out = {}
     for key, cp in record.items():
-        if "_" in key or not key.isdigit() or not isinstance(cp, dict):
+        if not key.isdigit() or not isinstance(cp, dict):
             continue
         pos, k = cp.get("pos_ang"), int(key)
-        if k not in atoms or not isinstance(pos, list) or len(pos) != 3 or not all(
-                isinstance(x, (int, float)) and math.isfinite(x) for x in pos):
+        if k not in atoms or not point(pos):
             continue
         if math.dist(pos, atoms[k]) <= CP_MOVED_A:
             continue
@@ -1378,7 +1382,7 @@ def validation_checks(
         if logger:
             logger.error(msg)
         tf_cond = False
-    if recheck_cp_labels and qtaim_copy_has_mislabeled_cps(
+    elif recheck_cp_labels and qtaim_copy_has_mislabeled_cps(
         folder, atoms={int(i): a["pos"] for i, a in dft_dict["mol"].items()}
     ):
         msg = (f"QTAIM json has a nuclear CP filed under the wrong atom (pre-fix CP mapper); "

@@ -652,6 +652,8 @@ def run_jobs(
     _fuzzy_routine_set = set(fuzzy_dict.keys()) if separate else set()
     n_electrons_for_skip = all_electron_count(dft_dict) if (recheck_allalpha_qtaim and dft_dict) else None
     mult_for_skip = int(dft_dict["spin"]) if (dft_dict and dft_dict.get("spin") is not None) else None
+    atoms_for_skip = ({int(i): a["pos"] for i, a in dft_dict["mol"].items()}
+                      if (recheck_cp_labels and dft_dict and dft_dict.get("mol")) else None)
 
     for order in order_of_operations:
         # Per-sub-job restart: data presence is the primary skip signal; timing
@@ -678,6 +680,7 @@ def run_jobs(
                 recheck_cp_labels=recheck_cp_labels,
                 n_electrons=n_electrons_for_skip,
                 mult=mult_for_skip,
+                atoms=atoms_for_skip,
             )
             if step_done:
                 has_positive_timing = (
@@ -713,16 +716,17 @@ def run_jobs(
 
         mfwn_file = os.path.join(folder, "props_{}.mfwn".format(order))
 
-        # Under --recheck_allalpha_qtaim QTAIM never reads an unrestricted .wfn: Multiwfn would read it
-        # as all-alpha and overwrite a good record. A rerun for another reason (CP counts) needs a .wfx.
-        if order == "qtaim" and recheck_allalpha_qtaim:
+        # Under --recheck_allalpha_qtaim or --recheck_cp_labels QTAIM never reads an unrestricted .wfn:
+        # Multiwfn would read it as all-alpha and overwrite a good record. A rerun for another reason
+        # (CP counts, CP labels) needs a .wfx.
+        if order == "qtaim" and (recheck_allalpha_qtaim or recheck_cp_labels):
             wf_path = _wavefunction_path(folder)
             if wf_path is not None and wf_path.endswith(".wfn"):
                 from qtaim_gen.source.utils.fuzzy_recheck import unrestricted_input
 
                 if (mult_for_skip is not None and mult_for_skip > 1) or unrestricted_input(folder):
                     logger.error(
-                        f"recheck_allalpha_qtaim: refusing to run qtaim from the unrestricted {wf_path}; "
+                        f"refusing to run qtaim from the unrestricted {wf_path}; "
                         f"needs a .wfx (rerun with --wfx after removing the .wfn)")
                     timings[order] = -1
                     # recorded now: steps after this one may all be skipped, and they are what saves
@@ -1940,9 +1944,13 @@ ALLALPHA_WFN_SUFFIX = ".allalpha"
 
 
 def _prepare_allalpha_qtaim_rerun(
-    folder: str, wfx: bool, preprocess_compressed: bool, logger: logging.Logger
+    folder: str, wfx: bool, preprocess_compressed: bool, logger: logging.Logger,
+    recheck_allalpha_qtaim: bool = True, recheck_cp_labels: bool = False,
 ) -> bool:
     """Set a folder with an all-alpha qtaim.json up for a QTAIM rerun from a .wfx.
+
+    With recheck_cp_labels a mislabeled record of an unrestricted calculation gets the same
+    treatment: it reruns QTAIM, and run_jobs refuses an unrestricted .wfn.
 
     Every .wfn (folder and generator/) is set aside as *.wfn.allalpha and the loose CPprop.txt and
     qtaim.out are removed, so the reparse cannot rebuild the record, extraction rebuilds a .wfx from
@@ -1952,23 +1960,29 @@ def _prepare_allalpha_qtaim_rerun(
     False (do not run) when the record could only be reproduced: no --wfx, or no .wfx and no gbw
     source. True otherwise.
     """
+    from qtaim_gen.source.utils.fuzzy_recheck import unrestricted_input
+
     dft_dict = get_charge_spin_n_atoms_from_folder(folder, logger=logger)
     mult = int(dft_dict["spin"]) if (dft_dict and dft_dict.get("spin") is not None) else None
     n_electrons = all_electron_count(dft_dict) if dft_dict else None
-    if not qtaim_copy_has_all_alpha_defect(folder, n_electrons=n_electrons, mult=mult):
+    if recheck_allalpha_qtaim and qtaim_copy_has_all_alpha_defect(folder, n_electrons=n_electrons, mult=mult):
+        what = "all-alpha qtaim.json"
+    elif (recheck_cp_labels and dft_dict and dft_dict.get("mol")
+          and ((mult is not None and mult > 1) or unrestricted_input(folder))
+          and qtaim_copy_has_mislabeled_cps(folder, atoms={int(i): a["pos"] for i, a in dft_dict["mol"].items()})):
+        what = "mislabeled unrestricted qtaim.json"
+    else:
         # a sound record is left alone: setting its .wfn aside made extraction unpack and
         # decompress folders that then returned early as valid
         return True
     if not wfx:
-        logger.error("recheck_allalpha_qtaim: all-alpha qtaim.json in %s needs --wfx; not running", folder)
+        logger.error("%s in %s needs --wfx; not running", what, folder)
         return False
     existing = _wavefunction_path(folder)
     if not (existing is not None and existing.endswith(".wfx")) and not _gbw_source_present(
         folder, preprocess_compressed
     ):
-        logger.error(
-            "recheck_allalpha_qtaim: all-alpha qtaim.json in %s and no .wfx or gbw source to rerun from; "
-            "not running", folder)
+        logger.error("%s in %s and no .wfx or gbw source to rerun from; not running", what, folder)
         return False
     for base in (folder, os.path.join(folder, "generator")):
         if not os.path.isdir(base):
@@ -1977,11 +1991,11 @@ def _prepare_allalpha_qtaim_rerun(
             path = os.path.join(base, name)
             if name.endswith(".wfn"):
                 os.replace(path, path + ALLALPHA_WFN_SUFFIX)
-                logger.info("recheck_allalpha_qtaim: set %s aside before QTAIM", path)
+                logger.info("%s: set %s aside before QTAIM", what, path)
             elif name in ("CPprop.txt", "qtaim.out"):
                 # a loose qtaim.out would outrank the rerun's copy in out_files.zip
                 os.remove(path)
-                logger.info("recheck_allalpha_qtaim: removed %s before the QTAIM rerun", path)
+                logger.info("%s: removed %s before the QTAIM rerun", what, path)
     return True
 
 
@@ -1995,6 +2009,7 @@ def _qtaim_output_complete(
     recheck_cp_labels: bool = False,
     n_electrons: Optional[int] = None,
     mult: Optional[int] = None,
+    atoms: Optional[dict] = None,
 ) -> bool:
     """Whether qtaim.json looks complete enough to skip the QTAIM step.
 
@@ -2015,11 +2030,12 @@ def _qtaim_output_complete(
     the same rule validation_checks applies: any defective copy (root or
     generator/) rejects, so the gate, the validator and the pre-extraction
     cleanup can never disagree about a folder. With recheck_cp_labels it
-    rejects a record whose nuclear CP sits on another atom, again on either copy.
+    rejects a record whose nuclear CP sits on another atom, again on either copy
+    (atoms: {index: position}, read from the geometry input when not given).
     """
     if recheck_allalpha_qtaim and qtaim_copy_has_all_alpha_defect(folder, n_electrons=n_electrons, mult=mult):
         return False
-    if recheck_cp_labels and qtaim_copy_has_mislabeled_cps(folder):
+    if recheck_cp_labels and qtaim_copy_has_mislabeled_cps(folder, atoms=atoms):
         return False
     for base in (folder, os.path.join(folder, "generator")):
         path = os.path.join(base, "qtaim.json")
@@ -2187,6 +2203,7 @@ def _has_usable_step_output(
     recheck_cp_labels: bool = False,
     n_electrons: Optional[int] = None,
     mult: Optional[int] = None,
+    atoms: Optional[dict] = None,
 ) -> bool:
     """Check whether a sub-job appears to have produced usable output on disk.
 
@@ -2220,6 +2237,7 @@ def _has_usable_step_output(
             recheck_cp_labels=recheck_cp_labels,
             n_electrons=n_electrons,
             mult=mult,
+            atoms=atoms,
         )
 
     for base in (folder, os.path.join(folder, "generator")):
@@ -2469,8 +2487,11 @@ def gbw_analysis(
     # Also before extraction: a rejected all-alpha record came from an unrestricted
     # .wfn, and the loose CPprop.txt holds the same values, so the reparse below
     # would rebuild it and a rerun from that .wfn would reproduce it.
-    if recheck_allalpha_qtaim and not parse_only:
-        if not _prepare_allalpha_qtaim_rerun(folder, wfx, preprocess_compressed, logger):
+    if (recheck_allalpha_qtaim or recheck_cp_labels) and not parse_only:
+        if not _prepare_allalpha_qtaim_rerun(
+            folder, wfx, preprocess_compressed, logger,
+            recheck_allalpha_qtaim=recheck_allalpha_qtaim, recheck_cp_labels=recheck_cp_labels,
+        ):
             return False
 
     # check if there is a .wfn or .gbw file in the folder. If there is an
