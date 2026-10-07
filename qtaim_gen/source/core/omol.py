@@ -12,6 +12,7 @@ from qtaim_gen.source.utils.validation import (
     get_expected_timing_keys,
     qtaim_run_status,
     qtaim_copy_has_all_alpha_defect,
+    qtaim_copy_has_mislabeled_cps,
     all_electron_count,
     _FIRST_ECP_Z,
     TIMINGS_PATCHED_KEY,
@@ -498,6 +499,7 @@ def run_jobs(
     bcp_tolerance: int = 2,
     require_qtaim_provenance: bool = False,
     recheck_allalpha_qtaim: bool = False,
+    recheck_cp_labels: bool = False,
 ) -> None:
     """
     Run conversion and multiwfn jobs
@@ -673,6 +675,7 @@ def run_jobs(
                 charge=charge_for_skip,
                 fuzzy_routines=_fuzzy_routine_set,
                 recheck_allalpha_qtaim=recheck_allalpha_qtaim,
+                recheck_cp_labels=recheck_cp_labels,
                 n_electrons=n_electrons_for_skip,
                 mult=mult_for_skip,
             )
@@ -1989,6 +1992,7 @@ def _qtaim_output_complete(
     bcp_tolerance: int = 2,
     require_qtaim_provenance: bool = False,
     recheck_allalpha_qtaim: bool = False,
+    recheck_cp_labels: bool = False,
     n_electrons: Optional[int] = None,
     mult: Optional[int] = None,
 ) -> bool:
@@ -2010,9 +2014,12 @@ def _qtaim_output_complete(
     recheck_allalpha_qtaim it rejects an all-alpha or partly all-alpha record,
     the same rule validation_checks applies: any defective copy (root or
     generator/) rejects, so the gate, the validator and the pre-extraction
-    cleanup can never disagree about a folder.
+    cleanup can never disagree about a folder. With recheck_cp_labels it
+    rejects a record whose nuclear CP sits on another atom, again on either copy.
     """
     if recheck_allalpha_qtaim and qtaim_copy_has_all_alpha_defect(folder, n_electrons=n_electrons, mult=mult):
+        return False
+    if recheck_cp_labels and qtaim_copy_has_mislabeled_cps(folder):
         return False
     for base in (folder, os.path.join(folder, "generator")):
         path = os.path.join(base, "qtaim.json")
@@ -2177,6 +2184,7 @@ def _has_usable_step_output(
     charge: Optional[int] = None,
     fuzzy_routines: Optional[set] = None,
     recheck_allalpha_qtaim: bool = False,
+    recheck_cp_labels: bool = False,
     n_electrons: Optional[int] = None,
     mult: Optional[int] = None,
 ) -> bool:
@@ -2209,6 +2217,7 @@ def _has_usable_step_output(
             bcp_tolerance=bcp_tolerance,
             require_qtaim_provenance=require_qtaim_provenance,
             recheck_allalpha_qtaim=recheck_allalpha_qtaim,
+            recheck_cp_labels=recheck_cp_labels,
             n_electrons=n_electrons,
             mult=mult,
         )
@@ -2374,6 +2383,7 @@ def gbw_analysis(
     horton_python: str = "",
     recheck_fuzzy: bool = False,
     recheck_allalpha_qtaim: bool = False,
+    recheck_cp_labels: bool = False,
 ) -> None:
     """
     Run a full analysis on a folder of gbw files
@@ -2404,6 +2414,9 @@ def gbw_analysis(
             fuzzy integrations / unrestricted fuzzy bond orders by reparsing the
             archived output where it is trustworthy, and invalidate the rest
             so the restart reruns only those steps (implies restart)
+        recheck_cp_labels(bool): treat a qtaim.json whose nuclear CP sits on another
+            atom (parsed before the exact-index mapper fix) as incomplete and rerun
+            the QTAIM step (implies restart)
         recheck_allalpha_qtaim(bool): treat an all-alpha qtaim.json (decided by
             the qtaim.out banner of a finished run, else the densities) as
             incomplete and rerun QTAIM from a .wfx. Before extraction the
@@ -2609,7 +2622,7 @@ def gbw_analysis(
         else:
             logger.info("Timings file found at %s - restarting.", timings_path)
 
-    if (recheck_fuzzy or recheck_allalpha_qtaim) and not restart and not overwrite:
+    if (recheck_fuzzy or recheck_allalpha_qtaim or recheck_cp_labels) and not restart and not overwrite:
         # data presence drives the per-step skip; without restart every step
         # reruns. --overwrite asks for exactly that, so it is left alone.
         restart = True
@@ -2637,6 +2650,7 @@ def gbw_analysis(
                     require_qtaim_provenance=require_qtaim_provenance,
                     recheck_fuzzy=recheck_fuzzy,
                     recheck_allalpha_qtaim=recheck_allalpha_qtaim,
+                    recheck_cp_labels=recheck_cp_labels,
                 )
             except Exception as e:
                 logger.error(f"Error during validation checks: {e}")
@@ -2674,6 +2688,7 @@ def gbw_analysis(
                         require_qtaim_provenance=require_qtaim_provenance,
                         recheck_fuzzy=recheck_fuzzy,
                         recheck_allalpha_qtaim=recheck_allalpha_qtaim,
+                        recheck_cp_labels=recheck_cp_labels,
                     )
                 except Exception:
                     tf_without_orca = False
@@ -2708,6 +2723,7 @@ def gbw_analysis(
                             require_qtaim_provenance=require_qtaim_provenance,
                             recheck_fuzzy=recheck_fuzzy,
                             recheck_allalpha_qtaim=recheck_allalpha_qtaim,
+                            recheck_cp_labels=recheck_cp_labels,
                         )
                     except Exception as e:
                         logger.error(f"Error validating orca-only parse: {e}")
@@ -2766,6 +2782,7 @@ def gbw_analysis(
                         require_qtaim_provenance=require_qtaim_provenance,
                         recheck_fuzzy=recheck_fuzzy,
                         recheck_allalpha_qtaim=recheck_allalpha_qtaim,
+                        recheck_cp_labels=recheck_cp_labels,
                     )
 
                     if tf_validation:
@@ -2822,6 +2839,7 @@ def gbw_analysis(
             bcp_tolerance=bcp_tolerance,
             require_qtaim_provenance=require_qtaim_provenance,
             recheck_allalpha_qtaim=recheck_allalpha_qtaim,
+            recheck_cp_labels=recheck_cp_labels,
         )
 
     print("... Parsing multiwfn output")
@@ -2859,6 +2877,7 @@ def gbw_analysis(
         require_qtaim_provenance=require_qtaim_provenance,
         recheck_fuzzy=recheck_fuzzy,
         recheck_allalpha_qtaim=recheck_allalpha_qtaim,
+        recheck_cp_labels=recheck_cp_labels,
     )
 
     # Optional repair pass: if validation failed and patch_timings is on,
@@ -2898,6 +2917,7 @@ def gbw_analysis(
                 require_qtaim_provenance=require_qtaim_provenance,
                 recheck_fuzzy=recheck_fuzzy,
                 recheck_allalpha_qtaim=recheck_allalpha_qtaim,
+                recheck_cp_labels=recheck_cp_labels,
             )
 
     logger.info("gbw_analysis completed in folder: {}".format(folder))

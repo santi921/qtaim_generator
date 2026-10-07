@@ -203,6 +203,7 @@ def get_folders_from_file(
     bcp_tolerance: int = 2,
     require_qtaim_provenance: bool = False,
     recheck_allalpha_qtaim: bool = False,
+    recheck_cp_labels: bool = False,
     recheck_fuzzy: bool = False,
     check_ecp: bool = False,
     checkpoint_path: Optional[str] = None,
@@ -252,6 +253,7 @@ def get_folders_from_file(
                     bcp_tolerance=bcp_tolerance,
                     require_qtaim_provenance=require_qtaim_provenance,
                     recheck_allalpha_qtaim=recheck_allalpha_qtaim,
+                    recheck_cp_labels=recheck_cp_labels,
                     recheck_fuzzy=recheck_fuzzy,
                 )
                 if not tf_validation:

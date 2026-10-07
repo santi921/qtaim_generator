@@ -180,6 +180,17 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
 
     parser.add_argument(
+        "--recheck_cp_labels",
+        action="store_true",
+        help=(
+            "treat a qtaim.json whose nuclear CP sits on another atom as incomplete (records parsed "
+            "before the exact-index mapper fix: swapped or duplicated close same-element atoms) and rerun "
+            "the QTAIM step. Run relabel-qtaim-cps first; it repairs clean swaps in place. Combine with "
+            "--recheck_allalpha_qtaim so an open-shell folder reruns from a .wfx."
+        ),
+    )
+
+    parser.add_argument(
         "--recheck_allalpha_qtaim",
         action="store_true",
         help=(
@@ -234,6 +245,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         getattr(args, "require_qtaim_provenance", False)
     )
     recheck_allalpha_qtaim = bool(getattr(args, "recheck_allalpha_qtaim", False))
+    recheck_cp_labels = bool(getattr(args, "recheck_cp_labels", False))
     check_ecp: bool = bool(getattr(args, "check_ecp", False))
     n_workers: int = int(getattr(args, "n_workers", 8))
     refined_job_file: str = getattr(args, "refined_job_file", "refined_jobs.txt")
@@ -279,6 +291,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         bcp_tolerance=bcp_tolerance,
         require_qtaim_provenance=require_qtaim_provenance,
         recheck_allalpha_qtaim=recheck_allalpha_qtaim,
+        recheck_cp_labels=recheck_cp_labels,
         recheck_fuzzy=recheck_fuzzy,
         check_ecp=check_ecp,
         logger=logger,
