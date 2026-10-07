@@ -183,11 +183,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         "--recheck_allalpha_qtaim",
         action="store_true",
         help=(
-            "treat an all-alpha or partly all-alpha qtaim.json (density_beta == 0 where "
-            "density_all > 0, from an unrestricted .wfn read as all-alpha) as incomplete, "
-            "unless every electron is alpha. The QTAIM step then reruns from a .wfx: the "
-            "unrestricted .wfn and loose CPprop.txt are removed first (needs --wfx and a gbw "
-            "source). Run fix-allalpha-qtaim first; it repairs UKS singlets in place."
+            "treat a qtaim.json from an unrestricted .wfn read as all-alpha as incomplete: the "
+            "qtaim.out banner of a finished run shows beta == 0 (or, without one, the densities "
+            "are all-alpha), unless every electron is alpha or fix-allalpha-qtaim repaired it. "
+            "The QTAIM step then reruns from a .wfx: the unrestricted .wfn is set aside as "
+            "*.wfn.allalpha and the loose CPprop.txt and qtaim.out are removed first (needs --wfx "
+            "and a gbw source). Run fix-allalpha-qtaim first; it repairs UKS singlets in place."
         ),
     )
 

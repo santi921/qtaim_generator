@@ -12,7 +12,8 @@ the wrong ones follow from them exactly:
 Checked against fresh .wfx reruns at <S**2> < 0.05 (2026-10-06): ani1xbb and trans1x, max error
 1.8e-6 (ELF), 2.6e-7 (LOL), 1.5e-3 e/bohr^3 (spin fields); tm_react, the same fields match the rerun
 except in folders whose rerun found a different CP set. Above <S**2> 0.05 it is not exact.
-Records left for a rerun are picked up by the runners' --recheck_allalpha_qtaim.
+Records left for a rerun are picked up by the runners' --recheck_allalpha_qtaim, except an ambiguous
+record whose latest qtaim.out is a resolved run (stale all-alpha CPs): those need their own rerun list.
 
 Per folder, under the runners' .processing.lock (never broken as stale; no lock with --dry_run):
   1. every qtaim.json copy present (generator/ and a leftover root copy) is classified by
@@ -49,7 +50,8 @@ from typing import Dict, List, Optional, Tuple
 from tqdm import tqdm
 
 from qtaim_gen.source.utils.validation import (
-    QTAIM_ALL_ALPHA, QTAIM_ALL_ALPHA_ECP, QTAIM_AMBIGUOUS, QTAIM_RESOLVED, qtaim_out_banner, qtaim_spin_class)
+    QTAIM_ALL_ALPHA, QTAIM_ALL_ALPHA_ECP, QTAIM_AMBIGUOUS, QTAIM_RESOLVED, _num, qtaim_out_banner,
+    qtaim_spin_class)
 
 STATUS_FIXED = "fixed"
 STATUS_WOULD_FIX = "would_fix"
@@ -77,9 +79,6 @@ classify = qtaim_spin_class
 ALL_ALPHA, ALL_ALPHA_ECP, RESOLVED, AMBIGUOUS = QTAIM_ALL_ALPHA, QTAIM_ALL_ALPHA_ECP, QTAIM_RESOLVED, QTAIM_AMBIGUOUS
 QTAIM_COPIES = (os.path.join("generator", "qtaim.json"), "qtaim.json")
 
-
-def _num(x) -> bool:
-    return isinstance(x, (int, float)) and not isinstance(x, bool)
 
 
 def _paths(entry: str, root_inputs: Optional[str], root_results: Optional[str]) -> Tuple[str, Optional[str]]:

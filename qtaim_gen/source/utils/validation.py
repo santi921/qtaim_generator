@@ -545,26 +545,30 @@ QTAIM_EXPORT_MARKER = "have been outputted to CPprop.txt"
 QTAIM_COUNT_PATTERN = re.compile(r"Number of \(3,-1\) CPs:\s*(\d+)")
 
 
-def read_multiwfn_out(folder: str, name: str) -> Optional[str]:
-    """Text of a Multiwfn `<step>.out`, or None. Checks root, generator/, then
-    the out_files.zip that survives cleanup."""
+def _multiwfn_out_texts(folder: str, name: str):
+    """Every copy of a Multiwfn `<step>.out`, most recent location first: root, generator/,
+    generator/out_files.zip (move_results), then the root out_files.zip (move_results=False)."""
     for rel in (name, os.path.join("generator", name)):
         path = os.path.join(folder, rel)
         if os.path.isfile(path) and os.path.getsize(path) > 0:
             try:
                 with open(path, "r", errors="replace") as f:
-                    return f.read()
+                    yield f.read()
             except OSError:
                 pass
-    zip_path = os.path.join(folder, "generator", "out_files.zip")
-    if os.path.isfile(zip_path):
-        try:
-            with zipfile.ZipFile(zip_path, "r") as zf:
-                if name in zf.namelist():
-                    return zf.read(name).decode("utf-8", errors="replace")
-        except (zipfile.BadZipFile, OSError, KeyError):
-            pass
-    return None
+    for zip_path in (os.path.join(folder, "generator", "out_files.zip"), os.path.join(folder, "out_files.zip")):
+        if os.path.isfile(zip_path):
+            try:
+                with zipfile.ZipFile(zip_path, "r") as zf:
+                    if name in zf.namelist():
+                        yield zf.read(name).decode("utf-8", errors="replace")
+            except (zipfile.BadZipFile, OSError, KeyError):
+                pass
+
+
+def read_multiwfn_out(folder: str, name: str) -> Optional[str]:
+    """Text of a Multiwfn `<step>.out`, or None: the first copy _multiwfn_out_texts finds."""
+    return next(_multiwfn_out_texts(folder, name), None)
 
 
 def read_qtaim_out(folder: str) -> Optional[str]:
@@ -774,13 +778,11 @@ def qtaim_spin_class(record: dict) -> str:
 
 def all_electron_count(dft_dict) -> Optional[int]:
     """sum(Z) - net charge of the parsed geometry input (core electrons included); None if unknown."""
-    from rdkit import Chem
-
     try:
-        table = Chem.GetPeriodicTable()
-        z = sum(table.GetAtomicNumber(re.match(r"[A-Za-z]+", a["element"]).group(0))
-                for a in dft_dict["mol"].values())
-        return z - int(dft_dict.get("charge", 0))
+        zs = [_atomic_number(a["element"]) for a in dft_dict["mol"].values()]
+        if not zs or 0 in zs:
+            return None
+        return sum(zs) - int(dft_dict.get("charge", 0))
     except Exception:
         return None
 
@@ -789,16 +791,25 @@ _QTAIM_BANNER = re.compile(r"Total/Alpha/Beta electrons:\s*(\S+)\s+(\S+)\s+(\S+)
 
 
 def qtaim_out_banner(folder: Optional[str]) -> Optional[tuple]:
-    """(alpha, beta) electrons Multiwfn loaded for the QTAIM run, from qtaim.out; None if unknown.
-    An unrestricted .wfn read as all-alpha shows beta == 0 here."""
-    text = read_qtaim_out(folder) if folder else None
-    m = _QTAIM_BANNER.search(text or "")
-    if not m:
+    """(alpha, beta) electrons Multiwfn loaded for the QTAIM run; None if unknown.
+
+    Taken from the first qtaim.out copy whose run finished (CP count and CPprop.txt export both
+    printed). Multiwfn prints the banner as soon as it loads the wavefunction, so a rerun killed
+    mid-search leaves a beta > 0 banner next to the old all-alpha record; that copy is skipped and
+    the archived one decides. An unrestricted .wfn read as all-alpha shows beta == 0.
+    """
+    if not folder:
         return None
-    try:
-        return float(m.group(2)), float(m.group(3))
-    except ValueError:
-        return None
+    for text in _multiwfn_out_texts(folder, "qtaim.out"):
+        if not (QTAIM_COUNT_PATTERN.search(text) and QTAIM_EXPORT_MARKER in text):
+            continue
+        m = _QTAIM_BANNER.search(text)
+        if m:
+            try:
+                return float(m.group(2)), float(m.group(3))
+            except ValueError:
+                return None
+    return None
 
 
 def qtaim_fixed_in_place(record: dict) -> bool:
@@ -819,17 +830,22 @@ def qtaim_all_alpha_defect(
 ) -> bool:
     """True if the record needs a QTAIM rerun from a .wfx because Multiwfn read the wavefunction as all-alpha.
 
-    With the qtaim.out banner (alpha, beta electrons) the banner decides: beta > 0 is a resolved run
-    (never rejected, so a .wfx rerun cannot loop); beta == 0 is an all-alpha run, a defect unless every
-    electron is alpha (alpha == mult - 1) or fix-allalpha-qtaim already repaired the record.
+    With the banner of a finished QTAIM run (qtaim_out_banner: alpha, beta electrons):
+    - beta > 0, a resolved run: a defect only if the record is all_alpha or all_alpha_ecp, i.e. not from
+      that run. A resolved .wfx run has beta at every CP, so its own record always passes (no loop).
+      An ambiguous record (stale all-alpha CPs in a resolved one) passes: a density cutoff there could
+      reject a correct, strongly spin-polarized record after every rerun; those go to a rerun list.
+    - beta == 0, an all-alpha run: a defect unless every electron is alpha (alpha == mult - 1),
+      fix-allalpha-qtaim already repaired the record, or the multiplicity is unknown (a rerun of a
+      genuinely all-alpha system would reproduce beta == 0 forever).
     Without a banner the densities decide: all_alpha, all_alpha_ecp and ambiguous are defects, unless
     every electron is alpha (n_electrons == mult - 1, e.g. an H atom); unknown counts count as a defect.
     """
     if banner is not None:
         alpha_e, beta_e = banner
         if beta_e > 0:
-            return False
-        if mult is not None and alpha_e == mult - 1:
+            return qtaim_spin_class(record) in (QTAIM_ALL_ALPHA, QTAIM_ALL_ALPHA_ECP)
+        if mult is None or alpha_e == mult - 1:
             return False
         return not qtaim_fixed_in_place(record)
     spin_class = qtaim_spin_class(record)
@@ -870,9 +886,6 @@ def validate_qtaim_dict(
     check_bcp_count: bool = False,
     bcp_tolerance: int = DEFAULT_BCP_TOLERANCE,
     require_provenance: bool = False,
-    reject_all_alpha: bool = False,
-    n_electrons: Optional[int] = None,
-    mult: Optional[int] = None,
 ):
     """
     Basic check that the qtaim json file has the expected structure
@@ -887,18 +900,6 @@ def validate_qtaim_dict(
     if not qtaim_dict:
         if verbose:
             print("QTAIM json file is empty.")
-        return False
-
-    if reject_all_alpha and qtaim_all_alpha_defect(
-            qtaim_dict, n_electrons=n_electrons, mult=mult, banner=qtaim_out_banner(folder)):
-        msg = (
-            f"QTAIM json is all-alpha or partly all-alpha (an unrestricted .wfn read as "
-            f"all-alpha); rerun QTAIM from a .wfx: {qtaim_json_loc}"
-        )
-        if verbose:
-            print(msg)
-        if logger:
-            logger.error(msg)
         return False
 
     # dict_ncps = {qtaim_dict[key] for key in qtaim_dict if "_" not in key}
@@ -1312,9 +1313,6 @@ def validation_checks(
         check_bcp_count=check_bcp_count,
         bcp_tolerance=bcp_tolerance,
         require_provenance=require_qtaim_provenance,
-        reject_all_alpha=recheck_allalpha_qtaim,
-        n_electrons=all_electron_count(dft_dict) if recheck_allalpha_qtaim else None,
-        mult=spin,
     ):
         if logger:
             logger.error(f"QTAIM json validation failed in folder: {folder}")
@@ -1322,9 +1320,13 @@ def validation_checks(
     elif recheck_allalpha_qtaim and qtaim_copy_has_all_alpha_defect(
         folder, n_electrons=all_electron_count(dft_dict), mult=spin
     ):
-        # the copy validate_qtaim_dict did not read (a stale root copy under clean=False)
+        # both copies (root and generator/) and the qtaim.out banner, the restart gate's rule
+        msg = (f"QTAIM json is all-alpha or partly all-alpha (an unrestricted .wfn read as "
+               f"all-alpha); rerun QTAIM from a .wfx: {folder}")
+        if verbose:
+            print(msg)
         if logger:
-            logger.error(f"All-alpha qtaim.json copy left in folder: {folder}")
+            logger.error(msg)
         tf_cond = False
 
     if not validate_bond_dict(

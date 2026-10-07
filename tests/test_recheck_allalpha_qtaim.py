@@ -8,7 +8,7 @@ import pytest
 from qtaim_gen.source.core.omol import _prepare_allalpha_qtaim_rerun, _qtaim_output_complete, gbw_analysis
 from qtaim_gen.source.utils.validation import (
     QTAIM_ALL_ALPHA, QTAIM_ALL_ALPHA_ECP, QTAIM_AMBIGUOUS, QTAIM_RESOLVED, all_electron_count,
-    qtaim_all_alpha_defect, qtaim_spin_class, validate_qtaim_dict)
+    qtaim_all_alpha_defect, qtaim_copy_has_all_alpha_defect, qtaim_spin_class, validate_qtaim_dict)
 
 LOG = logging.getLogger("test_recheck_allalpha")
 
@@ -21,14 +21,15 @@ ALL_ALPHA = {"0": _cp(0.4, 0.4, 0.0), "1": _cp(0.3, 0.3, 0.0), "0_1": _cp(0.25, 
 RESOLVED = {"0": _cp(0.4, 0.2, 0.2), "1": _cp(0.3, 0.15, 0.15), "0_1": _cp(0.25, 0.125, 0.125)}
 PARTLY = {"0": _cp(0.4, 0.4, 0.0), "1": _cp(0.3, 0.15, 0.15), "0_1": _cp(0.25, 0.125, 0.125)}
 # OH: 9 electrons; as a "mult 10" every electron would be alpha (only the arithmetic matters here)
-INP = "! UKS wB97M-V\n*xyz {charge} {mult}\nO 0.0 0.0 0.0\nH 0.0 0.0 0.97\n*\n"
+INP = "! {ref} wB97M-V\n*xyz {charge} {mult}\nO 0.0 0.0 0.0\nH 0.0 0.0 0.97\n*\n"
+SET_ASIDE = ".allalpha"
 
 
-def _folder(tmp_path, record, mult=1, charge=0, gbw=True, wfn=True, cpprop=True):
+def _folder(tmp_path, record, mult=1, charge=0, gbw=True, wfn=True, cpprop=True, ref="UKS"):
     job = tmp_path / "job"
     (job / "generator").mkdir(parents=True)
     (job / "generator" / "qtaim.json").write_text(json.dumps(record))
-    (job / "orca.inp").write_text(INP.format(charge=charge, mult=mult))
+    (job / "orca.inp").write_text(INP.format(ref=ref, charge=charge, mult=mult))
     if gbw:
         (job / "orca.gbw").write_bytes(b"gbw")
     if wfn:
@@ -107,13 +108,12 @@ class TestValidatorAndRestartGateAgree:
         (ALL_ALPHA, 10, False),  # 9 electrons, mult 10: every electron alpha
     ])
     def test_same_verdict(self, tmp_path, record, mult, rejected):
-        path = tmp_path / "qtaim.json"
-        path.write_text(json.dumps(record))
+        (tmp_path / "qtaim.json").write_text(json.dumps(record))
         n_e = 9
-        valid = validate_qtaim_dict(str(path), n_atoms=2, reject_all_alpha=True, n_electrons=n_e, mult=mult)
+        defect = qtaim_copy_has_all_alpha_defect(str(tmp_path), n_electrons=n_e, mult=mult)
         gate = _qtaim_output_complete(str(tmp_path), n_atoms=2, recheck_allalpha_qtaim=True,
                                       n_electrons=n_e, mult=mult)
-        assert valid is (not rejected) and gate is (not rejected)
+        assert defect is rejected and gate is (not rejected)
 
     def test_off_by_default(self, tmp_path):
         path = tmp_path / "qtaim.json"
@@ -124,22 +124,36 @@ class TestValidatorAndRestartGateAgree:
 
 class TestPrepareRerun:
 
-    def test_all_alpha_folder_loses_wfn_and_cpprop(self, tmp_path):
+    def test_all_alpha_folder_sets_the_wfn_aside_and_loses_cpprop(self, tmp_path):
         job = _folder(tmp_path, ALL_ALPHA)
         assert _prepare_allalpha_qtaim_rerun(str(job), wfx=True, preprocess_compressed=False, logger=LOG)
         for rel in ("orca.wfn", "generator/orca.wfn", "CPprop.txt", "generator/CPprop.txt"):
             assert not (job / rel).exists()
+        assert (job / ("orca.wfn" + SET_ASIDE)).read_text() == "wfn"
+        assert (job / "generator" / ("orca.wfn" + SET_ASIDE)).exists()
         assert (job / "orca.gbw").exists() and (job / "generator" / "qtaim.json").exists()
 
-    def test_resolved_folder_is_untouched(self, tmp_path):
+    def test_sound_unrestricted_folder_only_sets_the_wfn_aside(self, tmp_path):
+        # QTAIM may still rerun this pass for another reason and must not read the .wfn
         job = _folder(tmp_path, RESOLVED)
+        assert _prepare_allalpha_qtaim_rerun(str(job), wfx=True, preprocess_compressed=False, logger=LOG)
+        assert not (job / "orca.wfn").exists() and (job / ("orca.wfn" + SET_ASIDE)).exists()
+        assert (job / "CPprop.txt").exists()
+
+    def test_restricted_singlet_keeps_its_wfn(self, tmp_path):
+        job = _folder(tmp_path, RESOLVED, ref="RKS")
         assert _prepare_allalpha_qtaim_rerun(str(job), wfx=True, preprocess_compressed=False, logger=LOG)
         assert (job / "orca.wfn").exists() and (job / "CPprop.txt").exists()
 
-    def test_every_electron_alpha_is_untouched(self, tmp_path):
-        job = _folder(tmp_path, ALL_ALPHA, mult=10)
+    def test_sound_unrestricted_folder_without_a_source_keeps_its_wfn(self, tmp_path):
+        job = _folder(tmp_path, RESOLVED, gbw=False)
         assert _prepare_allalpha_qtaim_rerun(str(job), wfx=True, preprocess_compressed=False, logger=LOG)
         assert (job / "orca.wfn").exists()
+
+    def test_every_electron_alpha_keeps_its_outputs(self, tmp_path):
+        job = _folder(tmp_path, ALL_ALPHA, mult=10)
+        assert _prepare_allalpha_qtaim_rerun(str(job), wfx=True, preprocess_compressed=False, logger=LOG)
+        assert (job / "CPprop.txt").exists() and (job / ("orca.wfn" + SET_ASIDE)).exists()
 
     @pytest.mark.parametrize("kwargs, wfx", [(dict(gbw=False), True), (dict(), False)],
                              ids=["no_gbw_source", "no_wfx_flag"])
@@ -153,6 +167,7 @@ class TestPrepareRerun:
         (job / "orca.wfx").write_text("wfx")
         assert _prepare_allalpha_qtaim_rerun(str(job), wfx=True, preprocess_compressed=False, logger=LOG)
         assert (job / "orca.wfx").exists() and not (job / "orca.wfn").exists()
+        assert (job / ("orca.wfn" + SET_ASIDE)).exists()
 
     def test_gbw_analysis_stops_before_running_anything(self, tmp_path):
         job = _folder(tmp_path, ALL_ALPHA, gbw=False)
@@ -167,8 +182,10 @@ class TestPrepareRerun:
         gbw_analysis(str(job), multiwfn_cmd="/nonexistent/Multiwfn", orca_2mkl_cmd="/nonexistent/orca_2mkl",
                      restart=True, overwrite=False, logger=LOG, wfx=True, recheck_allalpha_qtaim=True,
                      move_results=True)
-        for rel in ("orca.wfn", "generator/orca.wfn", "CPprop.txt", "generator/CPprop.txt"):
-            assert not (job / rel).exists(), rel
+        # generator/ paths: clean_jobs never touches them, so only the preparation step explains these
+        assert not (job / "generator" / "orca.wfn").exists()
+        assert (job / "generator" / ("orca.wfn" + SET_ASIDE)).exists()
+        assert not (job / "generator" / "CPprop.txt").exists()
         # orca_2mkl failed: the gbw is the only source left and must survive for the next pass
         assert (job / "orca.gbw").exists()
         assert _prepare_allalpha_qtaim_rerun(str(job), wfx=True, preprocess_compressed=False, logger=LOG)
@@ -190,13 +207,19 @@ class TestCopies:
         assert not _qtaim_output_complete(str(job), n_atoms=2, recheck_allalpha_qtaim=True, n_electrons=9, mult=1)
         assert not validation.validation_checks(str(job), move_results=True, recheck_allalpha_qtaim=True)
         assert _prepare_allalpha_qtaim_rerun(str(job), wfx=True, preprocess_compressed=False, logger=LOG)
-        assert not (job / "orca.wfn").exists()
+        assert not (job / "orca.wfn").exists() and not (job / "CPprop.txt").exists()
 
     def test_both_copies_resolved_pass(self, tmp_path, monkeypatch):
         from qtaim_gen.source.utils import validation
         job = _folder(tmp_path, RESOLVED)
         (job / "qtaim.json").write_text(json.dumps(RESOLVED))
+        for name in ("timings", "fuzzy_full", "other", "charge", "bond"):
+            (job / "generator" / f"{name}.json").write_text("{}")
+        for check in ("validate_timing_dict", "validate_fuzzy_dict", "validate_other_dict",
+                      "validate_charge_dict", "validate_bond_dict"):
+            monkeypatch.setattr(validation, check, lambda *a, **k: True)
         assert _qtaim_output_complete(str(job), n_atoms=2, recheck_allalpha_qtaim=True, n_electrons=9, mult=1)
+        assert validation.validation_checks(str(job), move_results=True, recheck_allalpha_qtaim=True)
 
 
 class TestRunJobsGate:
@@ -210,7 +233,11 @@ class TestRunJobsGate:
         with caplog.at_level(logging.INFO, logger=LOG.name):
             run_jobs(str(job), separate=False, restart=True, debug=True, logger=LOG,
                      recheck_allalpha_qtaim=flag)
-        return any("Skipping qtaim" in r.getMessage() for r in caplog.records)
+        skipped = any("Skipping qtaim" in r.getMessage() for r in caplog.records)
+        # a step that ran rewrites its timing; a skipped one keeps 1.0
+        rewritten = json.loads((job / "timings.json").read_text()).get("qtaim") != 1.0
+        assert skipped is not rewritten
+        return skipped
 
     def test_all_alpha_is_skipped_without_the_flag(self, tmp_path, caplog):
         assert self._run(tmp_path, caplog, ALL_ALPHA, mult=1, flag=False)
@@ -283,8 +310,12 @@ class TestPlumbing:
         assert "--recheck_allalpha_qtaim" in out.stdout, out.stderr[-500:]
 
 
-def _banner(alpha, beta):
-    return f" Total/Alpha/Beta electrons:  {alpha + beta:.4f}  {alpha:.4f}  {beta:.4f}\n"
+def _banner(alpha, beta, finished=True):
+    text = f" Total/Alpha/Beta electrons:  {alpha + beta:.4f}  {alpha:.4f}  {beta:.4f}\n"
+    if finished:
+        text += (" Number of (3,-1) CPs:     1\n"
+                 " Done! The results have been outputted to CPprop.txt in current folder\n")
+    return text
 
 
 class TestBanner:
@@ -301,21 +332,42 @@ class TestBanner:
         (tmp_path / "qtaim.out").write_text(_banner(5, 4))
         assert qtaim_out_banner(str(tmp_path)) == (5.0, 4.0)
 
+    def test_root_archive_is_read_without_move_results(self, tmp_path):
+        import zipfile
+        from qtaim_gen.source.utils.validation import qtaim_out_banner
+        with zipfile.ZipFile(tmp_path / "out_files.zip", "w") as zf:
+            zf.writestr("qtaim.out", _banner(9, 0))
+        assert qtaim_out_banner(str(tmp_path)) == (9.0, 0.0)
+
+    def test_unfinished_run_does_not_supply_the_banner(self, tmp_path):
+        # a .wfx rerun killed mid-search printed beta > 0; the archived all-alpha run decides
+        import zipfile
+        from qtaim_gen.source.utils.validation import qtaim_out_banner
+        (tmp_path / "generator").mkdir()
+        (tmp_path / "generator" / "qtaim.json").write_text(json.dumps(ALL_ALPHA))
+        with zipfile.ZipFile(tmp_path / "generator" / "out_files.zip", "w") as zf:
+            zf.writestr("qtaim.out", _banner(9, 0))
+        (tmp_path / "qtaim.out").write_text(_banner(5, 4, finished=False))
+        assert qtaim_out_banner(str(tmp_path)) == (9.0, 0.0)
+        assert qtaim_copy_has_all_alpha_defect(str(tmp_path), n_electrons=9, mult=1)
+        assert not _qtaim_output_complete(str(tmp_path), recheck_allalpha_qtaim=True, n_electrons=9, mult=1)
+
     @pytest.mark.parametrize("record, banner, mult, rejected", [
         (ALL_ALPHA, (9, 0), 1, True),                       # all-alpha run
         (PARTLY, (9, 0), 1, True),
         ({"0": _cp(0.4, 0.2000001, 0.1999999)}, (9, 0), 1, True),  # resolved-looking, but not the fix's exact zeros
         (ALL_ALPHA, (9, 0), 10, False),                     # every electron alpha
-        (ALL_ALPHA, (5, 4), 2, False),                      # resolved run: stale record, never rejected by the gate
-        (PARTLY, (5, 4), 2, False),
+        (ALL_ALPHA, (9, 0), None, False),                   # multiplicity unknown: a rerun could not settle it
+        (ALL_ALPHA, (5, 4), 2, True),                       # resolved run, all-alpha record: not from that run
+        (RESOLVED, (5, 4), 2, False),                       # the rerun's own record
+        (PARTLY, (5, 4), 2, False),                         # stale CPs: a rerun list, never the gate
     ])
     def test_validator_and_gate_follow_the_banner(self, tmp_path, record, banner, mult, rejected):
         (tmp_path / "qtaim.json").write_text(json.dumps(record))
         (tmp_path / "qtaim.out").write_text(_banner(*banner))
-        valid = validate_qtaim_dict(str(tmp_path / "qtaim.json"), reject_all_alpha=True, folder=str(tmp_path),
-                                    n_electrons=9, mult=mult)
+        defect = qtaim_copy_has_all_alpha_defect(str(tmp_path), n_electrons=9, mult=mult)
         gate = _qtaim_output_complete(str(tmp_path), recheck_allalpha_qtaim=True, n_electrons=9, mult=mult)
-        assert valid is (not rejected) and gate is (not rejected)
+        assert defect is rejected and gate is (not rejected)
 
     def test_records_fixed_in_place_are_not_rerun(self, tmp_path, monkeypatch):
         # the archived qtaim.out of a fixed record still shows beta == 0
@@ -331,7 +383,9 @@ class TestBanner:
         assert validation.validation_checks(str(job), move_results=True, recheck_allalpha_qtaim=True)
         assert _qtaim_output_complete(str(job), recheck_allalpha_qtaim=True, n_electrons=9, mult=1)
         assert _prepare_allalpha_qtaim_rerun(str(job), wfx=True, preprocess_compressed=False, logger=LOG)
-        assert (job / "orca.wfn").exists() and (job / "generator" / "qtaim.out").exists()
+        # not a defect: the archived output stays; the unrestricted .wfn is only set aside
+        assert (job / "generator" / "qtaim.out").exists() and (job / "CPprop.txt").exists()
+        assert (job / ("orca.wfn" + SET_ASIDE)).exists()
 
     def test_rerun_preparation_removes_the_loose_qtaim_out(self, tmp_path):
         job = _folder(tmp_path, ALL_ALPHA)
@@ -339,3 +393,61 @@ class TestBanner:
         (job / "generator" / "qtaim.out").write_text(_banner(9, 0))
         assert _prepare_allalpha_qtaim_rerun(str(job), wfx=True, preprocess_compressed=False, logger=LOG)
         assert not (job / "qtaim.out").exists() and not (job / "generator" / "qtaim.out").exists()
+
+
+class TestReviewFixes:
+    """Pre-existing runner paths the set-aside .wfn made dangerous, and the cleanup tools."""
+
+    def test_clean_jobs_removes_the_set_aside_wfn(self, tmp_path):
+        from qtaim_gen.source.core.omol import clean_jobs
+        job = _folder(tmp_path, RESOLVED)
+        (job / ("orca.wfn" + SET_ASIDE)).write_text("wfn")
+        (job / "generator" / ("orca.wfn" + SET_ASIDE)).write_text("wfn")
+        clean_jobs(str(job), logger=LOG, move_results=True)
+        assert not (job / ("orca.wfn" + SET_ASIDE)).exists()
+        assert not (job / "generator" / ("orca.wfn" + SET_ASIDE)).exists()
+
+    def test_clean_omol_deletes_the_set_aside_wfn(self):
+        from qtaim_gen.source.scripts.helpers.clean_omol import should_delete
+        assert should_delete("orca.wfn" + SET_ASIDE)
+        assert not should_delete("orca.wfn") and not should_delete("orca.wfx")
+
+    def test_failed_extraction_keeps_the_compressed_gbw(self, tmp_path):
+        job = tmp_path / "job"
+        job.mkdir()
+        (job / "orca.inp").write_text(INP.format(ref="UKS", charge=0, mult=2))
+        (job / "orca.gbw.zstd0").write_bytes(b"not a zstd stream")
+        gbw_analysis(str(job), multiwfn_cmd="/nonexistent/Multiwfn", orca_2mkl_cmd="/nonexistent/orca_2mkl",
+                     logger=LOG, preprocess_compressed=True, move_results=True)
+        assert not (job / "orca.gbw").exists()
+        assert (job / "orca.gbw.zstd0").read_bytes() == b"not a zstd stream"
+
+    def test_patched_timings_do_not_pass_a_folder_that_fails_otherwise(self, tmp_path, monkeypatch):
+        from qtaim_gen.source.core import omol
+        calls = []
+
+        def failing(*a, **k):
+            calls.append(k)
+            return False
+        monkeypatch.setattr(omol, "validation_checks", failing)
+        monkeypatch.setattr(omol, "patch_timings_from_log", lambda *a, **k: True)
+        job = _folder(tmp_path, ALL_ALPHA)
+        ok = gbw_analysis(str(job), multiwfn_cmd="/nonexistent/Multiwfn", orca_2mkl_cmd="/nonexistent/orca_2mkl",
+                          logger=LOG, parse_only=True, patch_timings=True, move_results=True)
+        assert ok is False and len(calls) >= 2  # validated again after the patch
+
+    def test_sweep_predicts_with_the_flag(self, tmp_path, monkeypatch):
+        from qtaim_gen.source.scripts.helpers import sweep_truncated_steps as sweep
+        seen = []
+        monkeypatch.setattr(sweep, "validation_checks", lambda *a, **k: seen.append(("validation", k)) or False)
+
+        def step(folder, op, **k):
+            seen.append((op, k))
+            return True
+        monkeypatch.setattr(sweep, "_has_usable_step_output", step)
+        monkeypatch.setattr(sweep, "_compiled_data_present", lambda *a, **k: False)
+        job = _folder(tmp_path, ALL_ALPHA)
+        sweep.classify_folder(str(job), None, None, full_set=0, move_results=True, recheck_allalpha_qtaim=True)
+        assert seen and all(k.get("recheck_allalpha_qtaim") is True for _, k in seen)
+        qtaim_call = [k for op, k in seen if op == "qtaim"][0]
+        assert qtaim_call["n_electrons"] == 9 and qtaim_call["mult"] == 1
