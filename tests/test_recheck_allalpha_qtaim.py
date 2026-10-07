@@ -133,12 +133,12 @@ class TestPrepareRerun:
         assert (job / "generator" / ("orca.wfn" + SET_ASIDE)).exists()
         assert (job / "orca.gbw").exists() and (job / "generator" / "qtaim.json").exists()
 
-    def test_sound_unrestricted_folder_only_sets_the_wfn_aside(self, tmp_path):
-        # QTAIM may still rerun this pass for another reason and must not read the .wfn
+    def test_sound_unrestricted_folder_is_untouched(self, tmp_path):
+        # setting its .wfn aside would make extraction unpack a folder that then returns early as valid
         job = _folder(tmp_path, RESOLVED)
         assert _prepare_allalpha_qtaim_rerun(str(job), wfx=True, preprocess_compressed=False, logger=LOG)
-        assert not (job / "orca.wfn").exists() and (job / ("orca.wfn" + SET_ASIDE)).exists()
-        assert (job / "CPprop.txt").exists()
+        assert (job / "orca.wfn").exists() and (job / "CPprop.txt").exists()
+        assert not (job / ("orca.wfn" + SET_ASIDE)).exists()
 
     def test_restricted_singlet_keeps_its_wfn(self, tmp_path):
         job = _folder(tmp_path, RESOLVED, ref="RKS")
@@ -153,7 +153,7 @@ class TestPrepareRerun:
     def test_every_electron_alpha_keeps_its_outputs(self, tmp_path):
         job = _folder(tmp_path, ALL_ALPHA, mult=10)
         assert _prepare_allalpha_qtaim_rerun(str(job), wfx=True, preprocess_compressed=False, logger=LOG)
-        assert (job / "CPprop.txt").exists() and (job / ("orca.wfn" + SET_ASIDE)).exists()
+        assert (job / "CPprop.txt").exists() and (job / "orca.wfn").exists()
 
     @pytest.mark.parametrize("kwargs, wfx", [(dict(gbw=False), True), (dict(), False)],
                              ids=["no_gbw_source", "no_wfx_flag"])
@@ -244,6 +244,27 @@ class TestRunJobsGate:
 
     def test_all_alpha_reruns_under_the_flag(self, tmp_path, caplog):
         assert not self._run(tmp_path, caplog, ALL_ALPHA, mult=1, flag=True)
+
+    @pytest.mark.parametrize("ref, mult, wfx, refused", [
+        ("UKS", 1, False, True),    # UKS singlet, only the .wfn
+        ("RKS", 3, False, True),    # open shell is unrestricted whatever the keyword
+        ("RKS", 1, False, False),   # restricted .wfn is fine
+        ("UKS", 1, True, False),    # a .wfx is read first
+    ])
+    def test_qtaim_never_runs_from_an_unrestricted_wfn(self, tmp_path, caplog, ref, mult, wfx, refused):
+        # the record is sound but QTAIM reruns for another reason (here: no qtaim.json at all)
+        from qtaim_gen.source.core.omol import run_jobs
+        job = _folder(tmp_path, RESOLVED, mult=mult, ref=ref)
+        (job / "generator" / "qtaim.json").unlink()
+        if wfx:
+            (job / "orca.wfx").write_text("wfx")
+        (job / "timings.json").write_text(json.dumps({"qtaim": 1.0}))
+        with caplog.at_level(logging.INFO, logger=LOG.name):
+            run_jobs(str(job), separate=False, restart=True, debug=True, logger=LOG, recheck_allalpha_qtaim=True)
+        said = any("refusing to run qtaim" in r.getMessage() for r in caplog.records)
+        assert said is refused
+        if refused:
+            assert json.loads((job / "timings.json").read_text())["qtaim"] == -1
 
     def test_every_electron_alpha_is_still_skipped(self, tmp_path, caplog):
         # OH as "mult 10": all 9 electrons alpha, so the record is right (needs n_electrons and mult)
@@ -383,9 +404,9 @@ class TestBanner:
         assert validation.validation_checks(str(job), move_results=True, recheck_allalpha_qtaim=True)
         assert _qtaim_output_complete(str(job), recheck_allalpha_qtaim=True, n_electrons=9, mult=1)
         assert _prepare_allalpha_qtaim_rerun(str(job), wfx=True, preprocess_compressed=False, logger=LOG)
-        # not a defect: the archived output stays; the unrestricted .wfn is only set aside
+        # not a defect: nothing is touched
         assert (job / "generator" / "qtaim.out").exists() and (job / "CPprop.txt").exists()
-        assert (job / ("orca.wfn" + SET_ASIDE)).exists()
+        assert (job / "orca.wfn").exists()
 
     def test_rerun_preparation_removes_the_loose_qtaim_out(self, tmp_path):
         job = _folder(tmp_path, ALL_ALPHA)

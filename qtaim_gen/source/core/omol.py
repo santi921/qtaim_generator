@@ -710,6 +710,22 @@ def run_jobs(
 
         mfwn_file = os.path.join(folder, "props_{}.mfwn".format(order))
 
+        # Under --recheck_allalpha_qtaim QTAIM never reads an unrestricted .wfn: Multiwfn would read it
+        # as all-alpha and overwrite a good record. A rerun for another reason (CP counts) needs a .wfx.
+        if order == "qtaim" and recheck_allalpha_qtaim:
+            wf_path = _wavefunction_path(folder)
+            if wf_path is not None and wf_path.endswith(".wfn"):
+                from qtaim_gen.source.utils.fuzzy_recheck import unrestricted_input
+
+                if (mult_for_skip is not None and mult_for_skip > 1) or unrestricted_input(folder):
+                    logger.error(
+                        f"recheck_allalpha_qtaim: refusing to run qtaim from the unrestricted {wf_path}; "
+                        f"needs a .wfx (rerun with --wfx after removing the .wfn)")
+                    timings[order] = -1
+                    # recorded now: steps after this one may all be skipped, and they are what saves
+                    atomic_json_write(os.path.join(folder, "timings.json"), timings)
+                    continue
+
         # Precondition: non-convert multiwfn sub-jobs need a wavefunction file.
         # Surfacing it here beats a downstream KeyError in parse_multiwfn.
         if order != "convert" and not _wavefunction_present(folder):
@@ -1923,39 +1939,34 @@ ALLALPHA_WFN_SUFFIX = ".allalpha"
 def _prepare_allalpha_qtaim_rerun(
     folder: str, wfx: bool, preprocess_compressed: bool, logger: logging.Logger
 ) -> bool:
-    """Make sure no QTAIM step of this pass can read an unrestricted .wfn.
+    """Set a folder with an all-alpha qtaim.json up for a QTAIM rerun from a .wfx.
 
-    A defective (all-alpha) qtaim.json: every .wfn (folder and generator/) is set aside as
-    *.wfn.allalpha and the loose CPprop.txt and qtaim.out are removed, so the reparse cannot rebuild
-    the record, extraction rebuilds a .wfx from the gbw source, and the old banner cannot outrank the
-    rerun's qtaim.out. A sound record of an unrestricted system (mult > 1 or a UKS/UHF input): its
-    .wfn is set aside too when a .wfx or gbw source can replace it, since QTAIM may still rerun this
-    pass for another reason (CP counts, a reparse under clean=False) and would read it as all-alpha.
-    The set-aside file is removed by clean_jobs once validation passes, and by clean_omol.
-    False (do not run) when a defective record could only be reproduced: no --wfx, or no .wfx and
-    no gbw source. True otherwise.
+    Every .wfn (folder and generator/) is set aside as *.wfn.allalpha and the loose CPprop.txt and
+    qtaim.out are removed, so the reparse cannot rebuild the record, extraction rebuilds a .wfx from
+    the gbw source, and the old banner cannot outrank the rerun's qtaim.out. The set-aside file is
+    removed by clean_jobs once validation passes, and by clean_omol. A sound record is left alone
+    (run_jobs refuses to run QTAIM from an unrestricted .wfn under the flag).
+    False (do not run) when the record could only be reproduced: no --wfx, or no .wfx and no gbw
+    source. True otherwise.
     """
-    from qtaim_gen.source.utils.fuzzy_recheck import unrestricted_input
-
     dft_dict = get_charge_spin_n_atoms_from_folder(folder, logger=logger)
     mult = int(dft_dict["spin"]) if (dft_dict and dft_dict.get("spin") is not None) else None
     n_electrons = all_electron_count(dft_dict) if dft_dict else None
-    defect = qtaim_copy_has_all_alpha_defect(folder, n_electrons=n_electrons, mult=mult)
-    existing = _wavefunction_path(folder)
-    rebuildable = (existing is not None and existing.endswith(".wfx")) or _gbw_source_present(
-        folder, preprocess_compressed
-    )
-    if defect:
-        if not wfx:
-            logger.error("recheck_allalpha_qtaim: all-alpha qtaim.json in %s needs --wfx; not running", folder)
-            return False
-        if not rebuildable:
-            logger.error(
-                "recheck_allalpha_qtaim: all-alpha qtaim.json in %s and no .wfx or gbw source to rerun from; "
-                "not running", folder)
-            return False
-    elif not (wfx and rebuildable and ((mult is not None and mult > 1) or unrestricted_input(folder))):
+    if not qtaim_copy_has_all_alpha_defect(folder, n_electrons=n_electrons, mult=mult):
+        # a sound record is left alone: setting its .wfn aside made extraction unpack and
+        # decompress folders that then returned early as valid
         return True
+    if not wfx:
+        logger.error("recheck_allalpha_qtaim: all-alpha qtaim.json in %s needs --wfx; not running", folder)
+        return False
+    existing = _wavefunction_path(folder)
+    if not (existing is not None and existing.endswith(".wfx")) and not _gbw_source_present(
+        folder, preprocess_compressed
+    ):
+        logger.error(
+            "recheck_allalpha_qtaim: all-alpha qtaim.json in %s and no .wfx or gbw source to rerun from; "
+            "not running", folder)
+        return False
     for base in (folder, os.path.join(folder, "generator")):
         if not os.path.isdir(base):
             continue
@@ -1964,7 +1975,7 @@ def _prepare_allalpha_qtaim_rerun(
             if name.endswith(".wfn"):
                 os.replace(path, path + ALLALPHA_WFN_SUFFIX)
                 logger.info("recheck_allalpha_qtaim: set %s aside before QTAIM", path)
-            elif defect and name in ("CPprop.txt", "qtaim.out"):
+            elif name in ("CPprop.txt", "qtaim.out"):
                 # a loose qtaim.out would outrank the rerun's copy in out_files.zip
                 os.remove(path)
                 logger.info("recheck_allalpha_qtaim: removed %s before the QTAIM rerun", path)
