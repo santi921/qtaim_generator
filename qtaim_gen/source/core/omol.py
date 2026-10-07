@@ -11,7 +11,7 @@ from qtaim_gen.source.utils.validation import (
     get_charge_spin_n_atoms_from_folder,
     get_expected_timing_keys,
     qtaim_run_status,
-    qtaim_all_alpha_defect,
+    qtaim_copy_has_all_alpha_defect,
     all_electron_count,
     TIMINGS_PATCHED_KEY,
     TIMING_PLACEHOLDER,
@@ -146,9 +146,10 @@ def write_conversion(
         if os.path.exists(str(Path.home().joinpath(out_folder, read_file + ".molden.input"))):
             f.write("rm '{}.molden.input'\n".format(str(Path.home().joinpath(out_folder, read_file))))
 
-        # check if gbw file exists
+        # check if gbw file exists; keep it when orca_2mkl failed, it is the only source left
         if os.path.exists(str(Path.home().joinpath(out_folder, read_file + ".gbw"))):
-            f.write("rm '{}.gbw'\n".format(str(Path.home().joinpath(out_folder, read_file))))
+            base = str(Path.home().joinpath(out_folder, read_file))
+            f.write("[ -s '{0}.molden.input' ] && rm '{0}.gbw'\n".format(base))
 
     st = os.stat(out_file)
     os.chmod(out_file, st.st_mode | stat.S_IEXEC)
@@ -646,6 +647,8 @@ def run_jobs(
             "Could not determine n_atoms for skip-completeness check: %s", e
         )
     _fuzzy_routine_set = set(fuzzy_dict.keys()) if separate else set()
+    n_electrons_for_skip = all_electron_count(dft_dict) if (recheck_allalpha_qtaim and dft_dict) else None
+    mult_for_skip = int(dft_dict["spin"]) if (dft_dict and dft_dict.get("spin") is not None) else None
 
     for order in order_of_operations:
         # Per-sub-job restart: data presence is the primary skip signal; timing
@@ -669,8 +672,8 @@ def run_jobs(
                 charge=charge_for_skip,
                 fuzzy_routines=_fuzzy_routine_set,
                 recheck_allalpha_qtaim=recheck_allalpha_qtaim,
-                n_electrons=all_electron_count(dft_dict) if (recheck_allalpha_qtaim and dft_dict) else None,
-                mult=int(dft_dict["spin"]) if (dft_dict and dft_dict.get("spin") is not None) else None,
+                n_electrons=n_electrons_for_skip,
+                mult=mult_for_skip,
             )
             if step_done:
                 has_positive_timing = (
@@ -1916,16 +1919,7 @@ def _prepare_allalpha_qtaim_rerun(
     dft_dict = get_charge_spin_n_atoms_from_folder(folder, logger=logger)
     mult = int(dft_dict["spin"]) if (dft_dict and dft_dict.get("spin") is not None) else None
     n_electrons = all_electron_count(dft_dict) if dft_dict else None
-    defect = False
-    for base in (folder, os.path.join(folder, "generator")):
-        try:
-            with open(os.path.join(base, "qtaim.json"), "r") as f:
-                record = json.load(f)
-        except (OSError, json.JSONDecodeError):
-            continue
-        if isinstance(record, dict) and qtaim_all_alpha_defect(record, n_electrons=n_electrons, mult=mult):
-            defect = True
-    if not defect:
+    if not qtaim_copy_has_all_alpha_defect(folder, n_electrons=n_electrons, mult=mult):
         return True
     if not wfx:
         logger.error("recheck_allalpha_qtaim: all-alpha qtaim.json in %s needs --wfx; not running", folder)
@@ -1974,8 +1968,12 @@ def _qtaim_output_complete(
     reported; conversely, an empty BCP set is then acceptable when a complete
     run itself reported none (genuinely non-interacting fragments). With
     recheck_allalpha_qtaim it rejects an all-alpha or partly all-alpha record,
-    the same rule validate_qtaim_dict applies.
+    the same rule validation_checks applies: any defective copy (root or
+    generator/) rejects, so the gate, the validator and the pre-extraction
+    cleanup can never disagree about a folder.
     """
+    if recheck_allalpha_qtaim and qtaim_copy_has_all_alpha_defect(folder, n_electrons=n_electrons, mult=mult):
+        return False
     for base in (folder, os.path.join(folder, "generator")):
         path = os.path.join(base, "qtaim.json")
         if not os.path.isfile(path) or os.path.getsize(path) == 0:
@@ -1987,8 +1985,6 @@ def _qtaim_output_complete(
             continue
         if not data:
             continue
-        if recheck_allalpha_qtaim and qtaim_all_alpha_defect(data, n_electrons=n_electrons, mult=mult):
-            return False
 
         n_ncp = sum(1 for k in data if k != "_meta" and "_" not in k)
         n_bcp = sum(1 for k in data if k != "_meta" and "_" in k)

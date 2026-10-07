@@ -169,6 +169,58 @@ class TestPrepareRerun:
                      move_results=True)
         for rel in ("orca.wfn", "generator/orca.wfn", "CPprop.txt", "generator/CPprop.txt"):
             assert not (job / rel).exists(), rel
+        # orca_2mkl failed: the gbw is the only source left and must survive for the next pass
+        assert (job / "orca.gbw").exists()
+        assert _prepare_allalpha_qtaim_rerun(str(job), wfx=True, preprocess_compressed=False, logger=LOG)
+
+
+class TestCopies:
+    """A stale root copy (clean=False) next to generator/: every check reads both."""
+
+    @pytest.mark.parametrize("root,gen", [(RESOLVED, ALL_ALPHA), (ALL_ALPHA, RESOLVED)])
+    def test_any_defective_copy_rejects_everywhere(self, tmp_path, monkeypatch, root, gen):
+        from qtaim_gen.source.utils import validation
+        job = _folder(tmp_path, gen)
+        (job / "qtaim.json").write_text(json.dumps(root))
+        for name in ("timings", "fuzzy_full", "other", "charge", "bond"):
+            (job / "generator" / f"{name}.json").write_text("{}")
+        for check in ("validate_timing_dict", "validate_fuzzy_dict", "validate_other_dict",
+                      "validate_charge_dict", "validate_bond_dict"):
+            monkeypatch.setattr(validation, check, lambda *a, **k: True)
+        assert not _qtaim_output_complete(str(job), n_atoms=2, recheck_allalpha_qtaim=True, n_electrons=9, mult=1)
+        assert not validation.validation_checks(str(job), move_results=True, recheck_allalpha_qtaim=True)
+        assert _prepare_allalpha_qtaim_rerun(str(job), wfx=True, preprocess_compressed=False, logger=LOG)
+        assert not (job / "orca.wfn").exists()
+
+    def test_both_copies_resolved_pass(self, tmp_path, monkeypatch):
+        from qtaim_gen.source.utils import validation
+        job = _folder(tmp_path, RESOLVED)
+        (job / "qtaim.json").write_text(json.dumps(RESOLVED))
+        assert _qtaim_output_complete(str(job), n_atoms=2, recheck_allalpha_qtaim=True, n_electrons=9, mult=1)
+
+
+class TestRunJobsGate:
+    """run_jobs' per-step restart decision for qtaim, through the real call (n_electrons/mult forwarded)."""
+
+    def _run(self, tmp_path, caplog, record, mult, flag):
+        from qtaim_gen.source.core.omol import run_jobs
+        job = _folder(tmp_path, record, mult=mult)
+        (job / "qtaim.json").write_text(json.dumps(record))
+        (job / "timings.json").write_text(json.dumps({"qtaim": 1.0}))
+        with caplog.at_level(logging.INFO, logger=LOG.name):
+            run_jobs(str(job), separate=False, restart=True, debug=True, logger=LOG,
+                     recheck_allalpha_qtaim=flag)
+        return any("Skipping qtaim" in r.getMessage() for r in caplog.records)
+
+    def test_all_alpha_is_skipped_without_the_flag(self, tmp_path, caplog):
+        assert self._run(tmp_path, caplog, ALL_ALPHA, mult=1, flag=False)
+
+    def test_all_alpha_reruns_under_the_flag(self, tmp_path, caplog):
+        assert not self._run(tmp_path, caplog, ALL_ALPHA, mult=1, flag=True)
+
+    def test_every_electron_alpha_is_still_skipped(self, tmp_path, caplog):
+        # OH as "mult 10": all 9 electrons alpha, so the record is right (needs n_electrons and mult)
+        assert self._run(tmp_path, caplog, ALL_ALPHA, mult=10, flag=True)
 
 
 class TestPlumbing:
@@ -203,6 +255,22 @@ class TestPlumbing:
         (tmp_path / "a").mkdir()
         lst.write_text(f"{tmp_path / 'a'}\n")
         io.get_folders_from_file(str(lst), num_folders=10, pre_validate=True, recheck_allalpha_qtaim=True)
+        assert seen.get("recheck_allalpha_qtaim") is True
+
+    def test_process_folder_pre_skip_passes_the_flag(self, tmp_path, monkeypatch):
+        from qtaim_gen.source.core import workflow
+        seen = {}
+
+        def fake_validation(folder, **kwargs):
+            seen.update(kwargs)
+            return True
+        monkeypatch.setattr(workflow, "validation_checks", fake_validation)
+        monkeypatch.setattr(workflow, "gbw_analysis", lambda *a, **k: True)
+        job = tmp_path / "job"
+        job.mkdir()
+        for name in ("timings", "qtaim", "other", "fuzzy_full", "charge"):
+            (job / f"{name}.json").write_text("{}")
+        workflow.process_folder(str(job), move_results=False, recheck_allalpha_qtaim=True)
         assert seen.get("recheck_allalpha_qtaim") is True
 
     @pytest.mark.parametrize("module", ["full_runner", "full_runner_parsl", "full_runner_parsl_alcf",

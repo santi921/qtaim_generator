@@ -717,11 +717,17 @@ def _num(x) -> bool:
     return isinstance(x, (int, float)) and not isinstance(x, bool)
 
 
-def _atomic_number(element) -> int:
-    from rdkit import Chem
+_PERIODIC_TABLE = None
 
+
+def _atomic_number(element) -> int:
+    global _PERIODIC_TABLE
+    if _PERIODIC_TABLE is None:
+        from rdkit import Chem
+
+        _PERIODIC_TABLE = Chem.GetPeriodicTable()
     try:
-        return Chem.GetPeriodicTable().GetAtomicNumber(re.match(r"[A-Za-z]+", element or "").group(0))
+        return _PERIODIC_TABLE.GetAtomicNumber(re.match(r"[A-Za-z]+", element or "").group(0))
     except Exception:
         return 0
 
@@ -744,6 +750,9 @@ def qtaim_spin_class(record: dict) -> str:
     """
     cps = {k: v for k, v in record.items() if isinstance(v, dict) and _num(v.get("density_all"))
            and v["density_all"] > 1e-6}
+    # the common case, decided without element lookups: no CP is missing beta or has it at zero
+    if cps and all(_num(v.get("density_beta")) and not _beta_zero(v) for v in cps.values()):
+        return QTAIM_RESOLVED
     split = {k for k, v in cps.items() if "_" not in k and _num(v.get("density_beta")) and not _beta_zero(v)
              and _atomic_number(v.get("element")) >= _FIRST_ECP_Z}
     rest = [v for k, v in cps.items() if k not in split]
@@ -788,6 +797,25 @@ def qtaim_all_alpha_defect(record: dict, n_electrons: Optional[int] = None, mult
     if spin_class != QTAIM_ALL_ALPHA:
         return False
     return not (n_electrons is not None and mult is not None and n_electrons == mult - 1)
+
+
+def qtaim_copy_has_all_alpha_defect(folder: str, n_electrons: Optional[int] = None,
+                                     mult: Optional[int] = None) -> bool:
+    """True if either qtaim.json copy (folder root or generator/) is an all-alpha defect.
+
+    One rule for the validator, the restart gate and the pre-extraction cleanup: with
+    clean=False a stale root copy survives next to generator/, and checking only one copy
+    let the gate skip QTAIM while the validator failed the folder, every pass.
+    """
+    for base in (folder, os.path.join(folder, "generator")):
+        try:
+            with open(os.path.join(base, "qtaim.json"), "r") as f:
+                record = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            continue
+        if isinstance(record, dict) and qtaim_all_alpha_defect(record, n_electrons=n_electrons, mult=mult):
+            return True
+    return False
 
 
 def validate_qtaim_dict(
@@ -1246,6 +1274,13 @@ def validation_checks(
     ):
         if logger:
             logger.error(f"QTAIM json validation failed in folder: {folder}")
+        tf_cond = False
+    elif recheck_allalpha_qtaim and qtaim_copy_has_all_alpha_defect(
+        folder, n_electrons=all_electron_count(dft_dict), mult=spin
+    ):
+        # the copy validate_qtaim_dict did not read (a stale root copy under clean=False)
+        if logger:
+            logger.error(f"All-alpha qtaim.json copy left in folder: {folder}")
         tf_cond = False
 
     if not validate_bond_dict(

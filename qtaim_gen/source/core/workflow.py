@@ -288,6 +288,7 @@ def process_folder(
                     move_results=move_results,
                     logger=logger,
                     recheck_fuzzy=recheck_fuzzy,
+                    recheck_allalpha_qtaim=recheck_allalpha_qtaim,
                 )
 
                 if not tf_validation:
