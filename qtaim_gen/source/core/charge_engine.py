@@ -419,59 +419,122 @@ def _voronoi_mask(pts, atcoords, center):
     return mask
 
 
-@njit(parallel=True, cache=True)
-def _mbis_cycle(grel, atcoords, tmpden, cut2, mshell, pop, sig):
-    """One MBIS iteration (MBIS, imode 0): new shell populations and the
-    integral part of the new widths (Eqs. 18-19 of the MBIS paper). tmpden[c, i]
-    is rho * quadrature weight * Becke weight of centre c at its point i; atoms
-    beyond atmrhocut are ignored (ignorefar=1), shell densities below 1e-10 are
-    zeroed and points with tmpden <= 1e-14 skipped, as Multiwfn does."""
-    nat = atcoords.shape[0]
+MBIS_DENCUT = 1e-10  # MBIS dencut: shell densities below this are zeroed
+
+
+@njit(nogil=True, cache=True)
+def _mbis_gather(grel, atcoords, tmpden, cut2, mshell, sig, dmax, dmax_atom2, cand_ptr, cand, p0, p1, cap):
+    """MBIS terms (atom, shell, distance, -d/sigma) of the flat points p0..p1
+    (centre * len(grel) + point) that can reach MBIS_DENCUT; ptr[q] is where
+    point q's terms start. Skipped: points with tmpden <= 1e-14, atoms beyond
+    atmrhocut (ignorefar=1) or beyond every shell's dencut radius, and shells
+    beyond their own (dmax, padded so a skipped term is certainly below it)."""
     m = grel.shape[0]
-    npts = nat * m
-    nblk = min(npts, 256)
-    chunk = (npts + nblk - 1) // nblk
-    ppop = np.zeros((nblk, nat, 6))
-    psig = np.zeros((nblk, nat, 6))
-    for blk in prange(nblk):
-        rho0sh = np.zeros((nat, 6))
-        dist = np.empty(nat)
-        for ip in range(blk * chunk, min(npts, (blk + 1) * chunk)):
-            c = ip // m
-            i = ip - c * m
-            td = tmpden[c, i]
-            if not td > 1e-14:
-                continue
+    n = p1 - p0
+    tj = np.empty(cap, dtype=np.int64)
+    tk = np.empty(cap, dtype=np.int64)
+    td = np.empty(cap)
+    targ = np.empty(cap)
+    ptr = np.zeros(n + 1, dtype=np.int64)
+    nt = 0
+    for q in range(n):
+        ip = p0 + q
+        c = ip // m
+        i = ip - c * m
+        if tmpden[c, i] > 1e-14:
             x = grel[i, 0] + atcoords[c, 0]
             y = grel[i, 1] + atcoords[c, 1]
             z = grel[i, 2] + atcoords[c, 2]
-            rho0 = 0.0
-            for j in range(nat):
+            for r in range(cand_ptr[c], cand_ptr[c + 1]):
+                j = cand[r]
                 dx = x - atcoords[j, 0]
                 dy = y - atcoords[j, 1]
                 dz = z - atcoords[j, 2]
                 d2 = dx * dx + dy * dy + dz * dz
-                if d2 > cut2[j]:
-                    dist[j] = -1.0
+                if d2 > cut2[j] or d2 > dmax_atom2[j]:
                     continue
                 d = np.sqrt(d2)
-                dist[j] = d
                 for k in range(mshell[j]):
-                    sv = sig[j, k]
-                    t = pop[j, k] / sv**3 / 8 / np.pi * np.exp(-d / sv)
-                    if t < 1e-10:
-                        t = 0.0
-                    rho0sh[j, k] = t
-                    rho0 += t
-            if rho0 > 0.0:
-                for j in range(nat):
-                    if dist[j] < 0.0:
+                    if d > dmax[j, k]:
                         continue
-                    for k in range(mshell[j]):
-                        f = td * rho0sh[j, k] / rho0
-                        ppop[blk, j, k] += f
-                        psig[blk, j, k] += f * dist[j]
-    return ppop.sum(axis=0), psig.sum(axis=0)
+                    tj[nt] = j
+                    tk[nt] = k
+                    td[nt] = d
+                    targ[nt] = -d / sig[j, k]
+                    nt += 1
+        ptr[q + 1] = nt
+    return tj[:nt], tk[:nt], td[:nt], targ[:nt], ptr
+
+
+@njit(nogil=True, cache=True)
+def _mbis_accumulate(tmpden, m, p0, amp, tj, tk, td, ex, ptr, nat):
+    """New shell populations and the integral part of the new widths (Eqs.
+    18-19 of the MBIS paper) from the gathered terms; ex holds exp(-d/sigma)."""
+    ppop = np.zeros((nat, 6))
+    psig = np.zeros((nat, 6))
+    for q in range(ptr.shape[0] - 1):
+        a, b = ptr[q], ptr[q + 1]
+        if a == b:
+            continue
+        rho0 = 0.0
+        for s in range(a, b):
+            t = amp[tj[s], tk[s]] * ex[s]
+            if t < MBIS_DENCUT:
+                t = 0.0
+            ex[s] = t
+            rho0 += t
+        if rho0 > 0.0:
+            ip = p0 + q
+            c = ip // m
+            w = tmpden[c, ip - c * m]
+            for s in range(a, b):
+                if ex[s] != 0.0:
+                    f = w * ex[s] / rho0
+                    ppop[tj[s], tk[s]] += f
+                    psig[tj[s], tk[s]] += f * td[s]
+    return ppop, psig
+
+
+def _mbis_cycle(grel, coords, tmpden, cut2, cand_ptr, cand, mshell, pop, sig, block=4096):
+    """One MBIS iteration (MBIS, imode 0). Points are processed in blocks on
+    numba.get_num_threads() worker threads: gather the terms that can matter,
+    one vectorized numpy exp, accumulate."""
+    nat = len(coords)
+    m = grel.shape[0]
+    npts = nat * m
+    amp = np.zeros_like(pop)
+    dmax = np.full(pop.shape, -1.0)
+    for j in range(nat):
+        for k in range(mshell[j]):
+            sv = sig[j, k]
+            if not sv > 0:
+                # a shell whose population went to exactly 0 keeps sigma 0, where
+                # Multiwfn would form 0/0; it contributes nothing here
+                continue
+            amp[j, k] = pop[j, k] / sv**3 / 8 / np.pi
+            if amp[j, k] > MBIS_DENCUT:
+                dmax[j, k] = sv * np.log(amp[j, k] / MBIS_DENCUT) * (1 + 1e-9) + 1e-12
+    dmax_atom = dmax.max(axis=1)
+    dmax_atom2 = np.where(dmax_atom < 0, -1.0, dmax_atom**2)
+    ncand = np.diff(cand_ptr)
+
+    def one_block(p0):
+        p1 = min(npts, p0 + block)
+        cap = (p1 - p0) * 6 * int(ncand[p0 // m : (p1 - 1) // m + 1].max())
+        tj, tk, td, targ, ptr = _mbis_gather(
+            grel, coords, tmpden, cut2, mshell, sig, dmax, dmax_atom2, cand_ptr, cand, p0, p1, cap
+        )
+        return _mbis_accumulate(tmpden, m, p0, amp, tj, tk, td, np.exp(targ), ptr, nat)
+
+    starts = range(0, npts, block)
+    nthreads = numba.get_num_threads()
+    if nthreads == 1 or len(starts) == 1:
+        parts = [one_block(p0) for p0 in starts]
+    else:
+        with ThreadPoolExecutor(nthreads) as pool:
+            parts = list(pool.map(one_block, starts))
+    return sum(p[0] for p in parts), sum(p[1] for p in parts)
+
 
 
 # ---------------------------------------------------------------- partitions
@@ -554,9 +617,15 @@ def mbis_fit(grel, coords, tmpden, atnums, qbase, crit=1e-4, maxcyc=500):
 
     mshell, pop, sig = mbis_initial_shells(atnums)
     cut2 = np.array([R.ATMRHOCUT[int(z)] ** 2 for z in atnums])
+    # per grid centre, the atoms some of its points can be within atmrhocut of
+    reach = np.sqrt((grel**2).sum(axis=1)).max() + np.sqrt(cut2)
+    dist = np.linalg.norm(coords[:, None, :] - coords[None, :, :], axis=2)
+    cand_lists = [np.flatnonzero(dist[c] <= reach * (1 + 1e-9)) for c in range(len(coords))]
+    cand_ptr = np.concatenate([[0], np.cumsum([len(x) for x in cand_lists])]).astype(np.int64)
+    cand = np.concatenate(cand_lists).astype(np.int64)
     last = np.zeros(len(atnums))
     for icyc in range(1, maxcyc + 1):
-        popnew, signew = _mbis_cycle(grel, coords, tmpden, cut2, mshell, pop, sig)
+        popnew, signew = _mbis_cycle(grel, coords, tmpden, cut2, cand_ptr, cand, mshell, pop, sig)
         pos = popnew > 0
         signew[pos] /= 3 * popnew[pos]
         charge = qbase - popnew.sum(axis=1)
