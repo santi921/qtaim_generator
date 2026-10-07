@@ -27,10 +27,12 @@ import re
 import sys
 import tempfile
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 import numba
 import numpy as np
 from numba import njit, prange
+from threadpoolctl import threadpool_limits
 
 from qtaim_gen.source.data import multiwfn_tables as T
 
@@ -156,14 +158,15 @@ def multiwfn_atom_grid(nrad=75, nang=434, radcut=10.0):
 # ---------------------------------------------------------------- kernels
 
 
-@njit(parallel=True, cache=True)
+@njit(nogil=True, cache=True)
 def _primitive_block(pts, atcoords, groups, g_center, g_alpha, g_start, g_end, lmn, ncols):
     """Values of the primitives of `groups` (one column each, in group order) at
     every point (orbderv's GTF part), zero where Multiwfn's exp cutoff drops
-    them. Callers pass only the groups whose cutoff sphere reaches the block."""
+    them. Callers pass only the groups whose cutoff sphere reaches the block.
+    Serial and GIL-free: orbital_values runs one block per worker thread."""
     n = pts.shape[0]
     out = np.zeros((n, ncols))
-    for ip in prange(n):
+    for ip in range(n):
         x, y, z = pts[ip, 0], pts[ip, 1], pts[ip, 2]
         col = 0
         last = -1
@@ -229,7 +232,8 @@ def orbital_values(pts, coords, basis, block=512):
     """Occupied MO values at every point. Points are taken in spatially compact
     blocks; per block only primitive groups whose exp-cutoff sphere reaches the
     block's bounding box are evaluated, and the MOs follow from one dense
-    matrix product with their coefficients (BLAS)."""
+    matrix product with their coefficients. Blocks run on numba.get_num_threads()
+    worker threads, each with single-threaded BLAS (see limit_blas_threads)."""
     pts = np.asarray(pts, dtype=float)
     ct = basis["ct"]
     out = np.empty((len(pts), ct.shape[1]))
@@ -239,7 +243,8 @@ def orbital_values(pts, coords, basis, block=512):
     sorted_pts = np.ascontiguousarray(pts[order])
     gs, ge, ga, gc = basis["g_start"], basis["g_end"], basis["g_alpha"], basis["g_center"]
     glen = ge - gs
-    for s0 in range(0, len(pts), block):
+
+    def one_block(s0):
         blk = sorted_pts[s0 : s0 + block]
         lo, hi = blk.min(axis=0), blk.max(axis=0)
         d2 = (np.maximum(0.0, np.maximum(lo - coords, coords - hi)) ** 2).sum(axis=1)
@@ -248,20 +253,27 @@ def orbital_values(pts, coords, basis, block=512):
         cols = np.arange(n.sum()) + np.repeat(gs[groups] - (np.cumsum(n) - n), n)
         prim = _primitive_block(blk, coords, groups, gc, ga, gs, ge, basis["lmn"], len(cols))
         out[order[s0 : s0 + block]] = prim @ ct[cols]
+
+    starts = range(0, len(pts), block)
+    nthreads = numba.get_num_threads()
+    if nthreads == 1 or len(starts) == 1:
+        for s0 in starts:
+            one_block(s0)
+    else:
+        with ThreadPoolExecutor(nthreads) as pool:
+            list(pool.map(one_block, starts))
     return out
 
 
 def limit_blas_threads(fn):
-    """Run fn with BLAS (numpy matmul) threads capped at numba's thread count,
-    so the two thread pools do not oversubscribe the cores."""
+    """Run fn with single-threaded BLAS. orbital_values parallelizes over blocks
+    itself; a multithreaded BLAS inside those workers, or next to numba's
+    spin-waiting OpenMP threads, oversubscribes the cores (7x slower on 4
+    pinned cores)."""
 
     @functools.wraps(fn)
     def wrapper(*args, **kwargs):
-        try:
-            from threadpoolctl import threadpool_limits
-        except ImportError:
-            return fn(*args, **kwargs)
-        with threadpool_limits(numba.get_num_threads()):
+        with threadpool_limits(1):
             return fn(*args, **kwargs)
 
     return wrapper
