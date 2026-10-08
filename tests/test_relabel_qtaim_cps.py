@@ -223,3 +223,85 @@ class TestMain:
         jobs, agg, _ = self._main(tmp_path, monkeypatch, "--workers", "1", "--dry_run")
         assert agg["would_relabel"] == 2 and agg["relabeled"] == 0
         assert json.loads(open(os.path.join(jobs[0], "generator", "qtaim.json")).read()) == SWAPPED
+
+
+class TestDropStaleBondKeys:
+    """--drop_stale_bond_keys: the older run's CP under a wrong key goes when its own key holds a CP."""
+
+    def _run(self, job, dry_run=False):
+        return rq.process_folder(str(job), None, None, dry_run=dry_run, drop_bonds=True)
+
+    def test_self_pair_and_wrong_pair_with_a_partner(self):
+        older = dict(RIGHT["0_3"], density_all=0.39)  # a different run's value
+        rec, n = rq.drop_stale_bond_keys(dict(RIGHT, **{"1_1": RIGHT["1_2"], "1_3": older}))
+        assert n == 2 and rec == RIGHT
+
+    def test_partner_value_is_kept_not_the_stale_one(self):
+        rec, _ = rq.drop_stale_bond_keys(dict(RIGHT, **{"2_3": dict(RIGHT["0_3"], density_all=9.9)}))
+        assert rec["0_3"]["density_all"] == 0.40
+
+    @pytest.mark.parametrize("extra", [
+        {"1_3": _bcp(1, 3, 0.1)},                                       # own key 1_3: not stale
+        {"2_2": {"density_all": 0.1}},                                  # no connected_bond_paths
+        {"2_3": _bcp(1, 3, 0.1)},                                       # own key 1_3 is absent: an orphan
+        {"2_2": {"connected_bond_paths": [3, 3]}, "1_3": {"connected_bond_paths": [3, 3]}},  # p == q: junk
+    ], ids=["not_stale", "no_paths", "orphan", "same_atom_paths"])
+    def test_kept_without_a_partner(self, extra):
+        rec, n = rq.drop_stale_bond_keys(dict(RIGHT, **extra))
+        assert n == 0 and rec == dict(RIGHT, **extra)
+
+    def test_two_stale_keys_pointing_at_each_other_are_both_kept(self):
+        crossed = dict(RIGHT, **{"0_1": RIGHT["0_2"], "0_2": RIGHT["0_1"]})
+        assert rq.drop_stale_bond_keys(crossed) == (crossed, 0)
+
+    def test_after_the_relabel(self, tmp_path):
+        # stored 1_1 becomes 2_2 under the swap; its own key 1_2 is present after the relabel
+        job = _job(tmp_path, record=dict(SWAPPED, **{"1_1": _bcp(1, 2, 0.2)}))
+        r = self._run(job)
+        assert r["status"] == rq.STATUS_RELABELED and r["dropped_bond_keys"] == 1 and r["stale_bond_keys"] == 0
+        assert _stored(job) == RIGHT
+
+    def test_partner_that_is_only_right_after_the_relabel(self, tmp_path):
+        # stored 0_1 holds atom 0-2's bond until the relabel, so a drop before it would keep 3_3
+        job = _job(tmp_path, record=dict(SWAPPED, **{"3_3": RIGHT["0_1"]}))
+        r = self._run(job)
+        assert r["dropped_bond_keys"] == 1 and _stored(job) == RIGHT
+
+    def test_clean_record_written_and_second_pass_has_nothing(self, tmp_path):
+        job = _job(tmp_path, record=dict(RIGHT, **{"1_3": RIGHT["0_3"]}), root_copy=dict(RIGHT, **{"3_3": RIGHT["0_3"]}))
+        r = self._run(job)
+        assert r["status"] == rq.STATUS_CLEAN and r["dropped_bond_keys"] == 2 and r["stale_bond_keys"] == 0
+        assert _stored(job) == RIGHT and _stored(job, "qtaim.json") == RIGHT
+        r = self._run(job)
+        assert r["dropped_bond_keys"] == 0 and r["stale_bond_keys"] == 0
+
+    def test_dry_run_counts_and_writes_nothing(self, tmp_path):
+        stale = dict(RIGHT, **{"1_3": RIGHT["0_3"]})
+        job = _job(tmp_path, record=stale)
+        r = self._run(job, dry_run=True)
+        assert r["status"] == rq.STATUS_CLEAN and r["dropped_bond_keys"] == 1 and r["stale_bond_keys"] == 0
+        assert _stored(job) == stale and not (job / ".processing.lock").exists()
+
+    def test_orphan_folder_stays_listed(self, tmp_path):
+        job = _job(tmp_path, record=dict(RIGHT, **{"2_3": _bcp(1, 3, 0.1)}))
+        r = self._run(job)
+        assert r["dropped_bond_keys"] == 0 and r["stale_bond_keys"] == 1
+
+    def test_not_clean_folder_is_untouched(self, tmp_path):
+        dup = dict(RIGHT, **{"1": RIGHT["2"], "1_1": RIGHT["1_2"]})
+        job = _job(tmp_path, record=dup)
+        assert self._run(job)["status"] == rq.STATUS_NOT_CLEAN and _stored(job) == dup
+
+    def test_off_by_default(self, tmp_path):
+        stale = dict(RIGHT, **{"1_3": RIGHT["0_3"]})
+        job = _job(tmp_path, record=stale)
+        r = _run(job)
+        assert r["dropped_bond_keys"] == 0 and r["stale_bond_keys"] == 1 and _stored(job) == stale
+
+    def test_main_counts_and_remaining(self, tmp_path, monkeypatch):
+        jobs = TestMain()._main(tmp_path, monkeypatch, "--workers", "1", "--drop_stale_bond_keys")
+        jobs, agg, remaining = jobs
+        # c: relabeled, its 1_1 (2_2 after the swap) dropped; d: not clean, untouched
+        assert (agg["relabeled"], agg["with_stale_bond_keys"], agg["with_dropped_bond_keys"],
+                agg["dropped_bond_keys"]) == (2, 0, 1, 1)
+        assert remaining == [jobs[3]]
