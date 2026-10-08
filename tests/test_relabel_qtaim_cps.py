@@ -245,7 +245,9 @@ class TestDropStaleBondKeys:
         {"2_2": {"density_all": 0.1}},                                  # no connected_bond_paths
         {"2_3": _bcp(1, 3, 0.1)},                                       # own key 1_3 is absent: an orphan
         {"2_2": {"connected_bond_paths": [3, 3]}, "1_3": {"connected_bond_paths": [3, 3]}},  # p == q: junk
-    ], ids=["not_stale", "no_paths", "orphan", "same_atom_paths"])
+        {"0_1_2": RIGHT["0_1"]},                                        # not an atom-pair key
+        {"_meta": {"connected_bond_paths": [1, 2]}},
+    ], ids=["not_stale", "no_paths", "orphan", "same_atom_paths", "three_parts", "meta"])
     def test_kept_without_a_partner(self, extra):
         rec, n = rq.drop_stale_bond_keys(dict(RIGHT, **extra))
         assert n == 0 and rec == dict(RIGHT, **extra)
@@ -270,7 +272,8 @@ class TestDropStaleBondKeys:
     def test_clean_record_written_and_second_pass_has_nothing(self, tmp_path):
         job = _job(tmp_path, record=dict(RIGHT, **{"1_3": RIGHT["0_3"]}), root_copy=dict(RIGHT, **{"3_3": RIGHT["0_3"]}))
         r = self._run(job)
-        assert r["status"] == rq.STATUS_CLEAN and r["dropped_bond_keys"] == 2 and r["stale_bond_keys"] == 0
+        # one stale key per copy: the larger count of the two, as stale_bond_keys counts
+        assert r["status"] == rq.STATUS_CLEAN and r["dropped_bond_keys"] == 1 and r["stale_bond_keys"] == 0
         assert _stored(job) == RIGHT and _stored(job, "qtaim.json") == RIGHT
         r = self._run(job)
         assert r["dropped_bond_keys"] == 0 and r["stale_bond_keys"] == 0
@@ -290,7 +293,62 @@ class TestDropStaleBondKeys:
     def test_not_clean_folder_is_untouched(self, tmp_path):
         dup = dict(RIGHT, **{"1": RIGHT["2"], "1_1": RIGHT["1_2"]})
         job = _job(tmp_path, record=dup)
-        assert self._run(job)["status"] == rq.STATUS_NOT_CLEAN and _stored(job) == dup
+        r = self._run(job)
+        assert r["status"] == rq.STATUS_NOT_CLEAN and r["dropped_bond_keys"] == 0 and _stored(job) == dup
+
+    def test_dry_run_with_a_relabel_and_a_drop(self, tmp_path):
+        rec = dict(SWAPPED, **{"1_1": _bcp(1, 2, 0.2)})
+        job = _job(tmp_path, record=rec)
+        r = self._run(job, dry_run=True)
+        assert r["status"] == rq.STATUS_WOULD_RELABEL and r["dropped_bond_keys"] == 1 and r["stale_bond_keys"] == 0
+        assert _stored(job) == rec
+
+    def test_copies_that_differ(self, tmp_path):
+        job = _job(tmp_path, record=dict(RIGHT, **{"1_3": RIGHT["0_3"]}),
+                   root_copy=dict(RIGHT, **{"1_3": RIGHT["0_3"], "3_3": RIGHT["0_3"]}))
+        r = self._run(job)
+        assert r["dropped_bond_keys"] == 2 and r["stale_bond_keys"] == 0
+        assert _stored(job) == RIGHT and _stored(job, "qtaim.json") == RIGHT
+
+    def test_rewritten_files_keep_their_mtime(self, tmp_path):
+        # move_results_to_folder keeps a root qtaim.json only when CPprop.txt is newer than generator/
+        job = _job(tmp_path, record=dict(SWAPPED, **{"1_3": RIGHT["0_3"]}))
+        gen = job / "generator" / "qtaim.json"
+        old = time.time() - 86400
+        os.utime(gen, (old, old))
+        cpprop = job / "CPprop.txt"
+        cpprop.write_text("x")
+        os.utime(cpprop, (old + 60, old + 60))
+        assert self._run(job)["status"] == rq.STATUS_RELABELED and _stored(job) == RIGHT
+        assert os.path.getmtime(gen) == pytest.approx(old) and os.path.getmtime(cpprop) > os.path.getmtime(gen)
+
+    @pytest.mark.parametrize("reported, storable, short", [
+        (7, None, True),    # 4 bond CPs left of 7 reported: a shortfall the duplicates were hiding
+        (6, None, False),   # within the tolerance of 2
+        (7, 5, False),      # Multiwfn's count includes unstorable CPs
+        (None, None, False),  # no qtaim.out count: nothing to compare
+    ])
+    def test_bcp_short_after_the_drop(self, tmp_path, monkeypatch, reported, storable, short):
+        from qtaim_gen.source.utils import validation
+        monkeypatch.setattr(validation, "qtaim_run_status", lambda f: {"reported_bcp": reported})
+        monkeypatch.setattr(validation, "storable_bcp_count", lambda f: storable)
+        pad = {"1_1": RIGHT["1_2"], "3_3": RIGHT["0_3"], "2_2": RIGHT["0_2"]}
+        job = _job(tmp_path, record=dict(RIGHT, **pad))
+        r = self._run(job)
+        assert r["dropped_bond_keys"] == 3 and r["bcp_short"] is short and _stored(job) == RIGHT
+
+    def test_bcp_not_checked_without_a_drop(self, tmp_path, monkeypatch):
+        from qtaim_gen.source.utils import validation
+        monkeypatch.setattr(validation, "qtaim_run_status", lambda f: {"reported_bcp": 99})
+        assert self._run(_job(tmp_path, record=RIGHT))["bcp_short"] is False
+
+    def test_bcp_short_is_listed(self, tmp_path, monkeypatch):
+        from qtaim_gen.source.utils import validation
+        monkeypatch.setattr(validation, "qtaim_run_status", lambda f: {"reported_bcp": 9})
+        monkeypatch.setattr(validation, "storable_bcp_count", lambda f: None)
+        jobs, agg, remaining = TestMain()._main(tmp_path, monkeypatch, "--workers", "1", "--drop_stale_bond_keys")
+        # c drops one key and then holds 4 of 9 reported bond CPs
+        assert agg["bcp_short"] == 1 and sorted(remaining) == sorted([jobs[2], jobs[3]])
 
     def test_off_by_default(self, tmp_path):
         stale = dict(RIGHT, **{"1_3": RIGHT["0_3"]})
@@ -299,8 +357,7 @@ class TestDropStaleBondKeys:
         assert r["dropped_bond_keys"] == 0 and r["stale_bond_keys"] == 1 and _stored(job) == stale
 
     def test_main_counts_and_remaining(self, tmp_path, monkeypatch):
-        jobs = TestMain()._main(tmp_path, monkeypatch, "--workers", "1", "--drop_stale_bond_keys")
-        jobs, agg, remaining = jobs
+        jobs, agg, remaining = TestMain()._main(tmp_path, monkeypatch, "--workers", "1", "--drop_stale_bond_keys")
         # c: relabeled, its 1_1 (2_2 after the swap) dropped; d: not clean, untouched
         assert (agg["relabeled"], agg["with_stale_bond_keys"], agg["with_dropped_bond_keys"],
                 agg["dropped_bond_keys"]) == (2, 0, 1, 1)
