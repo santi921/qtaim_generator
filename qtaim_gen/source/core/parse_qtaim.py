@@ -1,6 +1,18 @@
 import json
 import os
+import re
+
 import numpy as np
+
+# Fortran Ew.d drops the exponent letter when |exponent| > 99: 0.1999917076-166
+_BARE_EXPONENT = re.compile(r"(?<=\d)([-+]\d{3})$")
+
+
+def fortran_float(token: str) -> float:
+    token = token.replace("D", "E")
+    if "E" not in token:
+        token = _BARE_EXPONENT.sub(r"E\1", token)
+    return float(token)
 
 
 def parse_cp(lines, verbose=True):

@@ -11,6 +11,8 @@ from qtaim_gen.source.utils.validation import (
     get_charge_spin_n_atoms_from_folder,
     get_expected_timing_keys,
     qtaim_run_status,
+    cpprop_integrity,
+    qtaim_cpprop_problems,
     qtaim_copy_has_all_alpha_defect,
     qtaim_copy_has_mislabeled_cps,
     all_electron_count,
@@ -921,6 +923,15 @@ def parse_multiwfn(
                     f"CPprop.txt export never completed, so CPprop.txt is partial"
                 )
                 continue
+            # damage qtaim.out cannot show (truncated or spliced after the run)
+            with open(cp_prop_path, "rb") as f:
+                _cpprop_problems = cpprop_integrity(f.read(), reported_bcp=_qstat["reported_bcp"])
+            if _cpprop_problems:
+                logger.error(
+                    f"Skipping qtaim parse in {folder}: damaged CPprop.txt "
+                    f"({'; '.join(_cpprop_problems)})"
+                )
+                continue
 
             inp_loc = None
             inp_orca = None
@@ -1140,7 +1151,16 @@ def clean_jobs(
     with zipfile.ZipFile(zip_file_out, "w") as zipf:
         for file in files_to_zip:
             try:
-                zipf.write(os.path.join(folder, file), arcname=file)
+                arcname = file
+                if file == "CPprop.txt":
+                    with open(os.path.join(folder, file), "rb") as f:
+                        problems = cpprop_integrity(f.read(), reported_bcp=qtaim_run_status(folder)["reported_bcp"])
+                    if problems:
+                        # kept as evidence, under a name that cannot replace a
+                        # sound CPprop.txt already in generator/out_files.zip
+                        arcname = "CPprop.corrupt.txt"
+                        logger.error(f"Archiving damaged CPprop.txt in {folder} as {arcname}: {'; '.join(problems)}")
+                zipf.write(os.path.join(folder, file), arcname=arcname)
                 successfully_zipped.append(file)
                 logger.info(f"Zipped {file}")
             except Exception as e:
@@ -2080,6 +2100,10 @@ def _qtaim_output_complete(
         if check_bcp_count:
             if status is None:
                 status = qtaim_run_status(folder)
+            # same rule as validate_qtaim_dict: a damaged CPprop.txt, even only
+            # the archived copy, reruns QTAIM
+            if qtaim_cpprop_problems(folder):
+                return False
             if status["have_qtaim_out"]:
                 # search_done too, not just export_done: a qtaim.out with the
                 # export marker but no parseable CP count line fails the
@@ -2127,6 +2151,13 @@ def _qtaim_raw_output_complete(folder: str, n_atoms: Optional[int] = None) -> bo
     # exists here, so the status describes the same run as CPprop.txt.
     status = qtaim_run_status(folder)
     if not (status["search_done"] and status["export_done"]):
+        return False
+    # parse_multiwfn refuses a damaged CPprop.txt, so it is not usable output
+    try:
+        with open(cpprop, "rb") as f:
+            if cpprop_integrity(f.read(), reported_bcp=status["reported_bcp"]):
+                return False
+    except OSError:
         return False
     if n_atoms is None:
         return True

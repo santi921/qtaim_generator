@@ -7,7 +7,7 @@ import shutil
 import tempfile
 import zipfile
 from typing import Optional
-from qtaim_gen.source.core.parse_qtaim import dft_inp_to_dict
+from qtaim_gen.source.core.parse_qtaim import dft_inp_to_dict, fortran_float
 from qtaim_gen.source.core.parse_orca import ORCA_PARSER_VERSION
 import numpy as np
 from datetime import datetime
@@ -606,6 +606,121 @@ def qtaim_run_status(folder: str) -> dict:
     }
 
 
+CPPROP_HEADER = re.compile(r"----------------\s+CP\s+(\d+),\s+Type\s+\(3,([-+]\d)\)")
+CPPROP_REQUIRED = ("Position (Bohr):", "Density of all electrons:", "Norm of gradient is:",
+                   "Eigenvalues of Hessian:", "Determinant of Hessian:")
+CPPROP_POSITIVE_EIGENVALUES = {"-3": 0, "-1": 1, "+1": 2, "+3": 3}
+
+
+def cpprop_integrity(data, reported_bcp: Optional[int] = None) -> list:
+    """Reasons a Multiwfn CPprop.txt cannot be trusted; [] when it is intact.
+
+    qtaim_run_status reads only qtaim.out, so it passes a CPprop.txt damaged
+    after (or outside) the Multiwfn run. Two such files were found in archived
+    out_files.zip on LRC (2026-10-09, 2 of 1500 sampled), both with complete
+    qtaim.out: one cut off inside its last CP block, one with 769,644 NUL bytes
+    where two writes spliced (CPs 48-277 missing, CP 47 carrying a bond CP's
+    Hessian). Checks: NUL bytes, CP numbering 1..max with no gaps or repeats,
+    every block holding the sections through the Hessian, Hessian signs matching
+    the CP type, and the (3,-1) count against qtaim.out's reported count.
+
+    Only damage a rerun can repair is flagged: Multiwfn classifies a CP by its
+    own Hessian signs, so a mismatch means the block was spliced. Eigenvalues
+    that are non-finite or unparsable (overflow stars) would recur on a rerun
+    and are not flagged; failing them would requeue the job forever.
+
+    data: the file's bytes or text."""
+    problems = []
+    if isinstance(data, bytes):
+        n_nul = data.count(b"\x00")
+        if n_nul:
+            problems.append(f"{n_nul} NUL bytes")
+        data = data.decode("latin1")
+    lines = data.splitlines()
+    heads = [(i, int(m.group(1)), m.group(2)) for i, ln in enumerate(lines) if (m := CPPROP_HEADER.search(ln))]
+    if not heads:
+        return problems + ["no CP blocks"]
+    idx = [h[1] for h in heads]
+    repeated = sorted({k for k in idx if idx.count(k) > 1})
+    missing = sorted(set(range(1, max(idx) + 1)) - set(idx))
+    if repeated:
+        problems.append(f"repeated CP numbers {repeated[:5]}")
+    if missing:
+        problems.append(f"{len(missing)} CP numbers missing, first {missing[:5]}")
+    incomplete, wrong_signs = [], []
+    for n, (start, number, cp_type) in enumerate(heads):
+        block = lines[start + 1:heads[n + 1][0] if n + 1 < len(heads) else len(lines)]
+        if not all(any(key in ln for ln in block) for key in CPPROP_REQUIRED):
+            incomplete.append(number)
+            continue
+        eig = next(ln for ln in block if "Eigenvalues of Hessian:" in ln).split(":", 1)[1].split()
+        try:
+            values = [fortran_float(x) for x in eig[:3]]
+        except ValueError:
+            continue
+        if len(values) == 3 and all(math.isfinite(v) for v in values):
+            if sum(v > 0 for v in values) != CPPROP_POSITIVE_EIGENVALUES[cp_type]:
+                wrong_signs.append(number)
+    if incomplete:
+        problems.append(f"incomplete CP blocks {incomplete[:5]}")
+    if wrong_signs:
+        problems.append(f"Hessian signs contradict CP type at CPs {wrong_signs[:5]}")
+    n_bcp = sum(h[2] == "-1" for h in heads)
+    if reported_bcp is not None and n_bcp != reported_bcp:
+        problems.append(f"{n_bcp} (3,-1) blocks but qtaim.out reports {reported_bcp}")
+    return problems
+
+
+def _cpprop_copy(folder: str):
+    """(CPprop.txt bytes, qtaim.out reported (3,-1) count or None, location) for
+    the first CPprop.txt found in root, generator/, generator/out_files.zip, then
+    out_files.zip, with the count from the qtaim.out in that same location (the
+    same step wrote both). None when there is no CPprop.txt."""
+    def reported(text):
+        found = QTAIM_COUNT_PATTERN.findall(text)
+        return int(found[-1]) if found else None
+
+    for base in (folder, os.path.join(folder, "generator")):
+        path = os.path.join(base, "CPprop.txt")
+        if os.path.isfile(path) and os.path.getsize(path) > 0:
+            try:
+                with open(path, "rb") as f:
+                    data = f.read()
+                out = os.path.join(base, "qtaim.out")
+                count = None
+                if os.path.isfile(out):
+                    with open(out, "r", errors="replace") as f:
+                        count = reported(f.read())
+                return data, count, path
+            except OSError:
+                continue
+    for zip_path in (os.path.join(folder, "generator", "out_files.zip"), os.path.join(folder, "out_files.zip")):
+        if not os.path.isfile(zip_path):
+            continue
+        try:
+            with zipfile.ZipFile(zip_path, "r") as zf:
+                names = zf.namelist()
+                if "CPprop.txt" not in names:
+                    continue
+                count = None
+                if "qtaim.out" in names:
+                    count = reported(zf.read("qtaim.out").decode("utf-8", errors="replace"))
+                return zf.read("CPprop.txt"), count, zip_path + ":CPprop.txt"
+        except (zipfile.BadZipFile, OSError, KeyError):
+            continue
+    return None
+
+
+def qtaim_cpprop_problems(folder: str) -> list:
+    """cpprop_integrity of the folder's CPprop.txt (see _cpprop_copy for which
+    copy), each reason prefixed with its location; [] if intact or absent."""
+    copy = _cpprop_copy(folder)
+    if copy is None:
+        return []
+    data, count, where = copy
+    return [f"{where}: {p}" for p in cpprop_integrity(data, reported_bcp=count)]
+
+
 # How many bond CPs may be missing before a record counts as defective.
 # Measured on 19 residual jobs from a repair test: 17 were missing exactly one
 # CP and 2 were missing two, and the count did not scale with system size (one
@@ -684,6 +799,9 @@ def storable_bcp_count(folder: str) -> Optional[int]:
         return None
 
     try:
+        with open(text_path, "rb") as f:
+            if cpprop_integrity(f.read()):
+                return None
         _atoms, bonds = only_atom_cps(get_qtaim_descs(text_path))
         pairs = {
             tuple(sorted(v["connected_bond_paths"]))
@@ -1035,6 +1153,17 @@ def validate_qtaim_dict(
                 f"QTAIM CPprop.txt export never completed, so the parsed record "
                 f"is partial: {folder}"
             )
+            if verbose:
+                print(msg)
+            if logger:
+                logger.error(msg)
+            return False
+        # A damaged CPprop.txt (including the archived copy alone) fails even
+        # when qtaim.json is sound: the archive is the only per-CP record, and
+        # the rerun replaces it. _qtaim_output_complete applies the same rule.
+        cpprop_problems = qtaim_cpprop_problems(folder)
+        if cpprop_problems:
+            msg = f"Damaged CPprop.txt, QTAIM must rerun: {'; '.join(cpprop_problems)}"
             if verbose:
                 print(msg)
             if logger:

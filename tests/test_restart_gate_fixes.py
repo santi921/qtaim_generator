@@ -311,3 +311,55 @@ def test_multiwfn_wrapper_sets_pipefail(tmp_path):
     assert lines[0] == "#!/bin/bash"
     assert lines[1] == "set -o pipefail"
     assert "| tee" in lines[-1]
+
+
+def _damaged_cpprop_text():
+    """CPprop_w_bond_paths.txt cut inside its last block, as found on LRC (2026-10-09)."""
+    lines = CPPROP_FIXTURE.read_text().splitlines()
+    last = max(i for i, ln in enumerate(lines) if "----------------   CP" in ln)
+    cut = next(i for i in range(last, len(lines)) if "ESP from nuclear charges" in lines[i])
+    return "\n".join(lines[: cut + 1]) + "\n"
+
+
+class TestDamagedCpprop:
+    """A CPprop.txt damaged after the run carries a complete qtaim.out, so the
+    export marker cannot catch it; cpprop_integrity must, at every gate."""
+
+    def _folder(self, tmp_path):
+        (tmp_path / "CPprop.txt").write_text(_damaged_cpprop_text())
+        shutil.copy(INP_FIXTURE, tmp_path / "input.in")
+        (tmp_path / "qtaim.out").write_text(BANNER + COUNT_LINE + EXPORT_LINE + BANNER)
+        return str(tmp_path)
+
+    def test_not_parsed(self, tmp_path):
+        folder = self._folder(tmp_path)
+        parse_multiwfn(folder, separate=False, logger=logging.getLogger("t"))
+        assert not os.path.exists(os.path.join(folder, "qtaim.json"))
+
+    def test_raw_output_is_not_usable(self, tmp_path):
+        assert not _qtaim_output_complete(self._folder(tmp_path), n_atoms=_n_atoms_in_fixture())
+
+    def test_archived_under_a_name_that_cannot_replace_a_sound_copy(self, tmp_path):
+        from qtaim_gen.source.core.omol import clean_jobs
+
+        folder = self._folder(tmp_path)
+        gen = tmp_path / "generator"
+        gen.mkdir()
+        sound = CPPROP_FIXTURE.read_bytes()
+        with zipfile.ZipFile(gen / "out_files.zip", "w") as z:
+            z.writestr("CPprop.txt", sound)
+            z.writestr("qtaim.out", BANNER + COUNT_LINE + EXPORT_LINE + BANNER)
+        clean_jobs(folder, logger=logging.getLogger("t"), move_results=True)
+        with zipfile.ZipFile(gen / "out_files.zip") as z:
+            assert z.read("CPprop.txt") == sound
+            assert z.read("CPprop.corrupt.txt").decode() == _damaged_cpprop_text()
+
+    def test_sound_cpprop_is_archived_as_is(self, tmp_path):
+        from qtaim_gen.source.core.omol import clean_jobs
+
+        shutil.copy(CPPROP_FIXTURE, tmp_path / "CPprop.txt")
+        (tmp_path / "qtaim.out").write_text(BANNER + COUNT_LINE + EXPORT_LINE + BANNER)
+        clean_jobs(str(tmp_path), logger=logging.getLogger("t"), move_results=True)
+        with zipfile.ZipFile(tmp_path / "generator" / "out_files.zip") as z:
+            assert "CPprop.corrupt.txt" not in z.namelist()
+            assert z.read("CPprop.txt") == CPPROP_FIXTURE.read_bytes()
