@@ -61,12 +61,13 @@ def horton_eval(wfx_path, points_path, out_path):
         c, o = mol.mo.coeffs, mol.mo.occs
         spins = {"a": (c, o / 2), "b": (c, o / 2)}
     kw = {"screen_basis": False}
+    # gbasis's Hessian holds ~8 float64 arrays of shape (3, 3, nbasis, npoints); chunk to ~4 GB
+    step = max(1, int(7e6 // len(mol.mo.coeffs)))
     for s, (c, o) in spins.items():
         dm = (c * o) @ c.T
-        res[f"rho_{s}"] = evaluate_density(dm, basis, pts, **kw)
-        res[f"grad_{s}"] = evaluate_density_gradient(dm, basis, pts, **kw)
-        res[f"hess_{s}"] = evaluate_density_hessian(dm, basis, pts, **kw)
-        res[f"G_{s}"] = evaluate_posdef_kinetic_energy_density(dm, basis, pts, **kw)
+        for key, fn in (("rho", evaluate_density), ("grad", evaluate_density_gradient),
+                        ("hess", evaluate_density_hessian), ("G", evaluate_posdef_kinetic_energy_density)):
+            res[f"{key}_{s}"] = np.concatenate([fn(dm, basis, pts[i:i + step], **kw) for i in range(0, len(pts), step)])
     np.savez(out_path, **res)
 
 
