@@ -6,7 +6,7 @@ import shutil
 import tempfile
 import zipfile
 from typing import Optional
-from qtaim_gen.source.core.parse_qtaim import dft_inp_to_dict
+from qtaim_gen.source.core.parse_qtaim import dft_inp_to_dict, fortran_float
 from qtaim_gen.source.core.parse_orca import ORCA_PARSER_VERSION
 from qtaim_gen.source.data.multiwfn import ENGINE_ROUTINES
 import numpy as np
@@ -629,6 +629,67 @@ def qtaim_run_status(folder: str) -> dict:
         "export_done": QTAIM_EXPORT_MARKER in text,
         "reported_bcp": int(found[-1]) if found else None,
     }
+
+
+CPPROP_HEADER = re.compile(r"----------------\s+CP\s+(\d+),\s+Type\s+\(3,([-+]\d)\)")
+CPPROP_REQUIRED = ("Position (Bohr):", "Density of all electrons:", "Norm of gradient is:",
+                   "Eigenvalues of Hessian:", "Determinant of Hessian:")
+CPPROP_POSITIVE_EIGENVALUES = {"-3": 0, "-1": 1, "+1": 2, "+3": 3}
+
+
+def cpprop_integrity(data, reported_bcp: Optional[int] = None) -> list:
+    """Reasons a Multiwfn CPprop.txt cannot be trusted; [] when it is intact.
+
+    qtaim_run_status reads only qtaim.out, so it passes a CPprop.txt damaged
+    after (or outside) the Multiwfn run. Two such files were found in archived
+    out_files.zip on LRC (2026-10-09, 2 of 1500 sampled): one cut off inside its
+    last CP block, one with 769,644 NUL bytes where a second write spliced two
+    files (CPs 48-277 missing, CP 47 carrying a bond CP's Hessian). Checks:
+    NUL bytes, CP numbering 1..max with no gaps or repeats, every block holding
+    the sections through the Hessian, Hessian signs matching the CP type, and
+    the (3,-1) count against qtaim.out's reported count when given.
+
+    data: the file's bytes or text."""
+    problems = []
+    if isinstance(data, bytes):
+        n_nul = data.count(b"\x00")
+        if n_nul:
+            problems.append(f"{n_nul} NUL bytes")
+        data = data.decode("latin1")
+    lines = data.splitlines()
+    heads = [(i, int(m.group(1)), m.group(2)) for i, ln in enumerate(lines) if (m := CPPROP_HEADER.search(ln))]
+    if not heads:
+        return problems + ["no CP blocks"]
+    idx = [h[1] for h in heads]
+    repeated = sorted({k for k in idx if idx.count(k) > 1})
+    missing = sorted(set(range(1, max(idx) + 1)) - set(idx))
+    if repeated:
+        problems.append(f"repeated CP numbers {repeated[:5]}")
+    if missing:
+        problems.append(f"{len(missing)} CP numbers missing, first {missing[:5]}")
+    incomplete, wrong_signs = [], []
+    for n, (start, number, cp_type) in enumerate(heads):
+        block = lines[start + 1:heads[n + 1][0] if n + 1 < len(heads) else len(lines)]
+        text = "\n".join(block)
+        if not all(key in text for key in CPPROP_REQUIRED):
+            incomplete.append(number)
+            continue
+        eig = next(ln for ln in block if "Eigenvalues of Hessian:" in ln).split(":", 1)[1].split()
+        try:
+            n_pos = sum(fortran_float(x) > 0 for x in eig[:3])
+        except ValueError:
+            incomplete.append(number)
+            continue
+        if len(eig) < 3 or n_pos != CPPROP_POSITIVE_EIGENVALUES[cp_type]:
+            wrong_signs.append(number)
+    if incomplete:
+        problems.append(f"incomplete CP blocks {incomplete[:5]}")
+    if wrong_signs:
+        problems.append(f"Hessian signs contradict CP type at CPs {wrong_signs[:5]}")
+    n_bcp = sum(h[2] == "-1" for h in heads)
+    if reported_bcp is not None and n_bcp != reported_bcp:
+        problems.append(f"{n_bcp} (3,-1) blocks but qtaim.out reports {reported_bcp}")
+    return problems
 
 
 # How many bond CPs may be missing before a record counts as defective.

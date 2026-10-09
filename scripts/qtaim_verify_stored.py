@@ -43,6 +43,7 @@ from qtaim_compare_props import compare_cps  # noqa: E402
 from qtaim_gen.source.core.charge_engine import prepare_basis, read_wfx  # noqa: E402
 from qtaim_gen.source.core.omol import create_jobs, write_settings_file  # noqa: E402
 from qtaim_gen.source.core.parse_qtaim import load_cpprop_full, poincare_hopf  # noqa: E402
+from qtaim_gen.source.utils.validation import QTAIM_COUNT_PATTERN, cpprop_integrity  # noqa: E402
 
 
 # as the production Slurm scripts: Multiwfn crashes in the molden -> wfx step otherwise
@@ -70,14 +71,19 @@ def stored_reference(results_folder, workdir):
         if "CPprop.txt" not in names:
             return None, info
         info["cpprop_time"] = "%04d-%02d-%02d %02d:%02d:%02d" % z.getinfo(names["CPprop.txt"]).date_time
+        reported = None
         if "qtaim.out" in names:
             info["qtaim_out_time"] = "%04d-%02d-%02d %02d:%02d:%02d" % z.getinfo(names["qtaim.out"]).date_time
-            head = z.read(names["qtaim.out"])[:4000].decode("latin1")
-            m = re.search(r"Version\s+(\S+),\s+update date:\s+(\S+)", head)
+            text = z.read(names["qtaim.out"]).decode("latin1")
+            m = re.search(r"Version\s+(\S+),\s+update date:\s+(\S+)", text[:4000])
             info["multiwfn_build"] = f"{m.group(1)} {m.group(2)}" if m else None
+            found = QTAIM_COUNT_PATTERN.findall(text)
+            reported = int(found[-1]) if found else None
+        data = z.read(names["CPprop.txt"])
+        info["cpprop_problems"] = cpprop_integrity(data, reported_bcp=reported)
         path = os.path.join(workdir, "CPprop_stored.txt")
         with open(path, "wb") as f:
-            f.write(z.read(names["CPprop.txt"]))
+            f.write(data)
     return path, info
 
 
@@ -170,6 +176,9 @@ def verify(job, args):
         if cpprop is None:
             rec["status"] = "no_stored_cpprop"
             return rec
+        if info["cpprop_problems"]:
+            rec["status"] = "corrupt_reference"
+            return rec
         t0 = time.perf_counter()
         wfx_path = regenerate_wfx(job, workdir, args)
         rec["convert_s"] = round(time.perf_counter() - t0, 2)
@@ -191,6 +200,10 @@ def verify(job, args):
         return rec
     except subprocess.CalledProcessError as e:
         rec["status"] = f"error: {e.cmd} exited {e.returncode}"
+        return rec
+    except Exception as e:
+        # one bad job must not end the slice
+        rec["status"] = f"error: {type(e).__name__}: {e}"
         return rec
     finally:
         shutil.rmtree(workdir, ignore_errors=True)

@@ -14,6 +14,7 @@ import pytest
 
 from qtaim_gen.source.utils.validation import (
     count_reported_bcps,
+    cpprop_integrity,
     qtaim_run_status,
     validate_qtaim_dict,
 )
@@ -937,3 +938,63 @@ class TestRequireProvenance:
             str(p), n_atoms=12, folder=str(tmp_path),
             check_bcp_count=True, bcp_tolerance=2, require_provenance=True,
         )
+
+
+CPPROP_FIXTURE = os.path.join(os.path.dirname(__file__), "test_files", "CPprop.txt")
+
+
+class TestCpPropIntegrity:
+    """Damage seen in archived out_files.zip on LRC (2026-10-09) that
+    qtaim_run_status cannot see, because qtaim.out still reports a finished run."""
+
+    @staticmethod
+    def _lines():
+        with open(CPPROP_FIXTURE) as f:
+            return f.read().splitlines()
+
+    @staticmethod
+    def _heads(lines):
+        return [i for i, ln in enumerate(lines) if "----------------   CP" in ln]
+
+    def test_intact_file_passes(self):
+        lines = self._lines()
+        n_bcp = sum("Type (3,-1)" in ln for ln in lines)
+        assert cpprop_integrity(open(CPPROP_FIXTURE, "rb").read(), reported_bcp=n_bcp) == []
+
+    def test_cut_inside_last_block(self):
+        lines = self._lines()
+        last = self._heads(lines)[-1]
+        cut = next(i for i in range(last, len(lines)) if "ESP from nuclear charges" in lines[i])
+        assert cpprop_integrity("\n".join(lines[: cut + 1])) == ["incomplete CP blocks [47]"]
+
+    def test_nul_splice(self):
+        # head of one write, a NUL hole, the tail of another: CP 47's first half
+        # followed by a later block's Hessian section, then later CPs only
+        lines = self._lines()
+        heads = self._heads(lines)
+        cut = next(i for i in range(heads[10], heads[11]) if "Total ESP" in lines[i])
+        tail_from = next(i for i in range(heads[30], heads[31]) if "Total ESP" in lines[i])
+        data = ("\n".join(lines[:cut]) + "\n").encode() + b"\x00" * 64 + ("\n".join(lines[tail_from:])).encode()
+        problems = cpprop_integrity(data, reported_bcp=sum("Type (3,-1)" in ln for ln in lines))
+        assert problems[0] == "64 NUL bytes"
+        assert any("CP numbers missing" in p for p in problems)
+        assert any(p.startswith("Hessian signs contradict CP type") or "(3,-1) blocks" in p for p in problems)
+
+    def test_bcp_hessian_under_ncp_header(self):
+        lines = self._lines()
+        ncp = next(i for i, ln in enumerate(lines) if "Type (3,-3)" in ln)
+        bcp = next(i for i, ln in enumerate(lines) if "Type (3,-1)" in ln)
+        e_ncp = next(i for i in range(ncp, len(lines)) if "Eigenvalues of Hessian:" in lines[i])
+        e_bcp = next(i for i in range(bcp, len(lines)) if "Eigenvalues of Hessian:" in lines[i])
+        lines[e_ncp] = lines[e_bcp]
+        number = int(lines[ncp].split()[2].rstrip(","))
+        assert cpprop_integrity("\n".join(lines)) == [f"Hessian signs contradict CP type at CPs [{number}]"]
+
+    def test_bcp_count_disagrees_with_qtaim_out(self):
+        lines = self._lines()
+        n_bcp = sum("Type (3,-1)" in ln for ln in lines)
+        assert cpprop_integrity("\n".join(lines), reported_bcp=n_bcp + 1) == [
+            f"{n_bcp} (3,-1) blocks but qtaim.out reports {n_bcp + 1}"]
+
+    def test_empty(self):
+        assert cpprop_integrity(b"") == ["no CP blocks"]
