@@ -1,5 +1,7 @@
 import json
 import os
+import re
+
 import numpy as np
 
 
@@ -205,6 +207,16 @@ def get_qtaim_descs(file="./CPprop_1157_1118_1158.txt", verbose=False):
 
 CP_TYPE_LABEL = {"(3,-3)": "NCP", "(3,-1)": "BCP", "(3,+1)": "RCP", "(3,+3)": "CCP"}
 
+# Fortran Ew.d drops the exponent letter when |exponent| > 99: 0.1999917076-166
+_BARE_EXPONENT = re.compile(r"(?<=\d)([-+]\d{3})$")
+
+
+def fortran_float(token: str) -> float:
+    token = token.replace("D", "E")
+    if "E" not in token:
+        token = _BARE_EXPONENT.sub(r"E\1", token)
+    return float(token)
+
 
 def load_cpprop_full(path: str) -> list:
     """Every CP in a Multiwfn CPprop.txt, ring and cage CPs included (parse_cp
@@ -215,7 +227,7 @@ def load_cpprop_full(path: str) -> list:
     eigenvectors (columns) as lists."""
 
     def floats(text):
-        return [float(x) for x in text.replace("D", "E").split()]
+        return [fortran_float(x) for x in text.split()]
 
     with open(path) as f:
         lines = [ln.rstrip("\n") for ln in f]
@@ -257,7 +269,7 @@ def load_cpprop_full(path: str) -> list:
                 i += 3
             elif t.startswith("Eigenvalues of Hessian:"):
                 cp["eigenvalues"] = floats(t.split(":", 1)[1])
-            elif t.startswith("Eigenvectors(columns) of Hessian:"):
+            elif t.startswith(("Eigenvectors(columns) of Hessian:", "Eigenvectors (columns) of Hessian:")):
                 cp["eigenvectors"] = [floats(lines[i + k]) for k in (1, 2, 3)]
                 i += 3
             elif ":" in t and not t.startswith("Position (Angstrom)"):
@@ -267,7 +279,7 @@ def load_cpprop_full(path: str) -> list:
                 vals = val.split()
                 try:
                     # first number after the colon (Total ESP also prints eV and kcal/mol)
-                    cp["props"][" ".join(name.split())] = float(vals[0].replace("D", "E"))
+                    cp["props"][" ".join(name.split())] = fortran_float(vals[0])
                 except (ValueError, IndexError):
                     pass
             i += 1

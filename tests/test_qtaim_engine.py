@@ -29,6 +29,22 @@ def test_loader_keeps_every_cp_type():
     assert all(c["connected"] is not None for c in cps if c["label"] == "BCP")
 
 
+def test_loader_reads_three_digit_exponents_and_both_eigenvector_labels(tmp_path):
+    # Multiwfn prints 1.999917076e-167 as 0.1999917076-166 (no E); current
+    # builds write "Eigenvectors (columns)", older ones "Eigenvectors(columns)"
+    with open(CPPROP) as f:
+        lines = f.read().splitlines()
+    i = next(k for k, ln in enumerate(lines) if "Components of gradient in x/y/z are:" in ln)
+    vals = lines[i + 1].split()
+    lines[i + 1] = "  " + "  ".join(["0.1999917076-166", "-0.3132422160+150", vals[2]])
+    path = tmp_path / "CPprop.txt"
+    path.write_text("\n".join(lines) + "\n")
+    cps = load_cpprop_full(str(path))
+    assert cps[0]["gradient"][:2] == [pytest.approx(0.1999917076e-166), pytest.approx(-0.3132422160e150)]
+    assert all(len(c["eigenvectors"]) == 3 for c in cps)
+    assert len(cps) == len(load_cpprop_full(CPPROP))
+
+
 @pytest.mark.skipif(not HAS_NUMBA, reason="numba not installed")
 def test_point_properties_match_multiwfn_at_its_cps():
     from qtaim_gen.source.core.charge_engine import prepare_basis, read_wfx
