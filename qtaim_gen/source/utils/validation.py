@@ -671,15 +671,16 @@ def cpprop_integrity(data, reported_bcp: Optional[int] = None) -> list:
     return problems
 
 
-def _cpprop_copy(folder: str):
-    """(CPprop.txt bytes, qtaim.out reported (3,-1) count or None, location) for
-    the first CPprop.txt found in root, generator/, generator/out_files.zip, then
-    out_files.zip, with the count from the qtaim.out in that same location (the
-    same step wrote both). None when there is no CPprop.txt."""
-    def reported(text):
-        found = QTAIM_COUNT_PATTERN.findall(text)
-        return int(found[-1]) if found else None
+def _reported_bcp(qtaim_out_text: Optional[str]) -> Optional[int]:
+    found = QTAIM_COUNT_PATTERN.findall(qtaim_out_text or "")
+    return int(found[-1]) if found else None
 
+
+def _cpprop_copy(folder: str):
+    """(CPprop.txt bytes, qtaim.out text or None, location) for the first
+    CPprop.txt found in root, generator/, generator/out_files.zip, then
+    out_files.zip, with the qtaim.out from that same location (the same step
+    wrote both). None when there is no CPprop.txt."""
     for base in (folder, os.path.join(folder, "generator")):
         path = os.path.join(base, "CPprop.txt")
         if os.path.isfile(path) and os.path.getsize(path) > 0:
@@ -687,11 +688,11 @@ def _cpprop_copy(folder: str):
                 with open(path, "rb") as f:
                     data = f.read()
                 out = os.path.join(base, "qtaim.out")
-                count = None
+                text = None
                 if os.path.isfile(out):
                     with open(out, "r", errors="replace") as f:
-                        count = reported(f.read())
-                return data, count, path
+                        text = f.read()
+                return data, text, path
             except OSError:
                 continue
     for zip_path in (os.path.join(folder, "generator", "out_files.zip"), os.path.join(folder, "out_files.zip")):
@@ -702,10 +703,8 @@ def _cpprop_copy(folder: str):
                 names = zf.namelist()
                 if "CPprop.txt" not in names:
                     continue
-                count = None
-                if "qtaim.out" in names:
-                    count = reported(zf.read("qtaim.out").decode("utf-8", errors="replace"))
-                return zf.read("CPprop.txt"), count, zip_path + ":CPprop.txt"
+                text = zf.read("qtaim.out").decode("utf-8", errors="replace") if "qtaim.out" in names else None
+                return zf.read("CPprop.txt"), text, zip_path + ":CPprop.txt"
         except (zipfile.BadZipFile, OSError, KeyError):
             continue
     return None
@@ -717,8 +716,74 @@ def qtaim_cpprop_problems(folder: str) -> list:
     copy = _cpprop_copy(folder)
     if copy is None:
         return []
-    data, count, where = copy
-    return [f"{where}: {p}" for p in cpprop_integrity(data, reported_bcp=count)]
+    data, text, where = copy
+    return [f"{where}: {p}" for p in cpprop_integrity(data, reported_bcp=_reported_bcp(text))]
+
+
+# qtaim.json key holding record-level provenance (not a critical point); every
+# reader that tells nuclear from bond CPs by "_" in the key must skip it
+QTAIM_META_KEY = "_meta"
+# printed only when Multiwfn runs the sphere search (topology option 6), which
+# qtaim_data(exhaustive=True) adds
+QTAIM_SPHERE_SEARCH_MARKER = "Distribute starting points in sphere(s)"
+QTAIM_SEARCH_STANDARD, QTAIM_SEARCH_EXHAUSTIVE = "standard", "exhaustive"
+
+
+def cpprop_cp_counts(data) -> dict:
+    """{"NCP", "BCP", "RCP", "CCP": count} from a CPprop.txt's block headers."""
+    if isinstance(data, bytes):
+        data = data.decode("latin1")
+    labels = {"-3": "NCP", "-1": "BCP", "+1": "RCP", "+3": "CCP"}
+    counts = dict.fromkeys(labels.values(), 0)
+    for m in CPPROP_HEADER.finditer(data):
+        counts[labels[m.group(2)]] += 1
+    return counts
+
+
+def qtaim_topology_meta(cpprop_data, qtaim_out_text: Optional[str]) -> dict:
+    """The _meta block parse_multiwfn stores in qtaim.json: CP counts by type,
+    the Poincare-Hopf sum n - b + r - c (1 for a complete topology of an
+    isolated molecule) and which Multiwfn search produced them (None when no
+    qtaim.out says)."""
+    counts = cpprop_cp_counts(cpprop_data)
+    if qtaim_out_text is None:
+        search = None
+    elif QTAIM_SPHERE_SEARCH_MARKER in qtaim_out_text:
+        search = QTAIM_SEARCH_EXHAUSTIVE
+    else:
+        search = QTAIM_SEARCH_STANDARD
+    return {
+        "poincare_hopf": counts["NCP"] - counts["BCP"] + counts["RCP"] - counts["CCP"],
+        "cp_counts": counts,
+        "qtaim_search": search,
+    }
+
+
+def qtaim_poincare_hopf(record: Optional[dict], folder: Optional[str] = None) -> Optional[dict]:
+    """Topology of a QTAIM record: its _meta when present, else computed from
+    the folder's CPprop.txt and the qtaim.out beside it (records parsed before
+    _meta existed). None when neither is available, which is never a failure."""
+    meta = record.get(QTAIM_META_KEY) if isinstance(record, dict) else None
+    if isinstance(meta, dict) and isinstance(meta.get("poincare_hopf"), int):
+        return meta
+    if folder is None:
+        return None
+    copy = _cpprop_copy(folder)
+    if copy is None or cpprop_integrity(copy[0]):
+        return None
+    return qtaim_topology_meta(copy[0], copy[1])
+
+
+def poincare_hopf_needs_exhaustive(topology: Optional[dict]) -> bool:
+    """True when --enforce_poincare_hopf should rerun QTAIM with the exhaustive
+    search: n - b + r - c != 1 from a search that was not already exhaustive.
+    An exhaustive result is accepted whatever its sum (a rerun reproduces it),
+    so the escalation happens at most once and cannot loop."""
+    return (
+        topology is not None
+        and topology["poincare_hopf"] != 1
+        and topology.get("qtaim_search") != QTAIM_SEARCH_EXHAUSTIVE
+    )
 
 
 # How many bond CPs may be missing before a record counts as defective.
@@ -1055,9 +1120,13 @@ def validate_qtaim_dict(
     check_bcp_count: bool = False,
     bcp_tolerance: int = DEFAULT_BCP_TOLERANCE,
     require_provenance: bool = False,
+    enforce_poincare_hopf: bool = False,
 ):
     """
-    Basic check that the qtaim json file has the expected structure
+    Basic check that the qtaim json file has the expected structure.
+    With enforce_poincare_hopf, a record whose n - b + r - c != 1 fails unless an
+    exhaustive search produced it (see poincare_hopf_needs_exhaustive); a record
+    without that information (no _meta, no CPprop.txt) passes.
     Check that it has the keys 'atoms', 'bonds', 'charges', and 'fuzzy'.
     If n_atoms is provided, check that the number of non-bonded critical points matches n_atoms.
     If harsh_check is True, also check that the number of nuclear critical points matches n_atoms.
@@ -1071,10 +1140,8 @@ def validate_qtaim_dict(
             print("QTAIM json file is empty.")
         return False
 
-    # dict_ncps = {qtaim_dict[key] for key in qtaim_dict if "_" not in key}
-    dict_ncps = [qtaim_dict[key] for key in list(qtaim_dict.keys()) if "_" not in key]
-    # dict_bcps = {qtaim_dict[key] for key in qtaim_dict if "_" in key}
-    dict_bcps = [qtaim_dict[key] for key in list(qtaim_dict.keys()) if "_" in key]
+    dict_ncps = [v for k, v in qtaim_dict.items() if k != QTAIM_META_KEY and "_" not in k]
+    dict_bcps = [v for k, v in qtaim_dict.items() if k != QTAIM_META_KEY and "_" in k]
 
     if n_atoms is not None:
         if len(dict_ncps) != n_atoms:
@@ -1223,6 +1290,26 @@ def validate_qtaim_dict(
                 if logger:
                     logger.warning(msg)
 
+    if enforce_poincare_hopf:
+        topology = qtaim_poincare_hopf(qtaim_dict, folder)
+        if topology is not None and topology["poincare_hopf"] != 1:
+            counts = topology.get("cp_counts")
+            if poincare_hopf_needs_exhaustive(topology):
+                msg = (f"Poincare-Hopf sum {topology['poincare_hopf']} != 1 {counts} from a "
+                       f"{topology.get('qtaim_search') or 'unknown'} search; QTAIM reruns with the "
+                       f"exhaustive search ({qtaim_json_loc})")
+                if verbose:
+                    print(msg)
+                if logger:
+                    logger.error(msg)
+                return False
+            msg = (f"Poincare-Hopf sum {topology['poincare_hopf']} != 1 {counts} after the "
+                   f"exhaustive search; accepted, a rerun reproduces it ({qtaim_json_loc})")
+            if verbose:
+                print(msg)
+            if logger:
+                logger.warning(msg)
+
     if verbose:
         print(f"Number of nuclear critical points: {len(dict_ncps)}")
         print(f"Number of bond critical points: {len(dict_bcps)}")
@@ -1364,6 +1451,7 @@ def validation_checks(
     orca_min_parser_version: Optional[int] = ORCA_PARSER_VERSION,
     recheck_allalpha_qtaim: bool = False,
     recheck_cp_labels: bool = False,
+    enforce_poincare_hopf: bool = False,
 ):
     """
     Run all validation checks on the json files in the given folder.
@@ -1390,6 +1478,9 @@ def validation_checks(
             Dry run: nothing is written.
         recheck_cp_labels (bool): fail a qtaim.json (either copy) whose nuclear CP sits on
             another atom (misplaced_nuclear_cps), so the runner reruns QTAIM.
+        enforce_poincare_hopf (bool): fail a qtaim.json whose n - b + r - c != 1 from a
+            standard search, so the runner reruns QTAIM with the exhaustive search
+            (accepted afterwards whatever the sum; see poincare_hopf_needs_exhaustive).
         recheck_allalpha_qtaim (bool): fail an all-alpha or partly all-alpha qtaim.json
             (an unrestricted .wfn read as all-alpha), unless every electron is alpha.
         orca_min_parser_version (Optional[int]): with check_orca, also fail when
@@ -1496,6 +1587,7 @@ def validation_checks(
         check_bcp_count=check_bcp_count,
         bcp_tolerance=bcp_tolerance,
         require_provenance=require_qtaim_provenance,
+        enforce_poincare_hopf=enforce_poincare_hopf,
     ):
         if logger:
             logger.error(f"QTAIM json validation failed in folder: {folder}")

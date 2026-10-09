@@ -130,7 +130,9 @@ def _close(a, b) -> bool:
 def _plan(folder: str, inputs: Optional[str]) -> Tuple[str, Optional[dict], str]:
     """(status, re-parsed record to write or None, stored path)."""
     from qtaim_gen.source.core.parse_multiwfn import parse_qtaim
-    from qtaim_gen.source.utils.validation import qtaim_run_status
+    from qtaim_gen.source.utils.validation import (
+        QTAIM_META_KEY, qtaim_run_status, qtaim_topology_meta, read_qtaim_out,
+    )
 
     stored_path = _stored_path(folder)
     if stored_path is None:
@@ -149,6 +151,8 @@ def _plan(folder: str, inputs: Optional[str]) -> Tuple[str, Optional[dict], str]
         try:
             parsed = json.loads(json.dumps(parse_qtaim(cprop_file=cpprop, inp_loc=inp,
                                                        orca_tf=inp.endswith(".inp"))))
+            with open(cpprop, "rb") as f:
+                meta = qtaim_topology_meta(f.read(), read_qtaim_out(folder))
         except Exception:
             return STATUS_PARSE_FAILED, None, stored_path
     if not parsed:
@@ -161,8 +165,9 @@ def _plan(folder: str, inputs: Optional[str]) -> Tuple[str, Optional[dict], str]
         stored = json.load(f)
     if not all(_close(parsed[k], stored[k]) for k in parsed.keys() & stored.keys()):
         return STATUS_DIFFERENT_RUN, None, stored_path
-    if parsed.keys() == stored.keys():
+    if parsed.keys() == stored.keys() - {QTAIM_META_KEY}:
         return STATUS_SAME, None, stored_path
+    parsed[QTAIM_META_KEY] = meta
     return STATUS_REPLACED, parsed, stored_path
 
 
@@ -184,9 +189,9 @@ def process_folder(entry: str, root_inputs: Optional[str], root_results: Optiona
         status, parsed, stored_path = _plan(folder, inputs)
         if parsed is not None:
             with open(stored_path) as f:
-                stored_keys = set(json.load(f))
+                stored_keys = set(json.load(f)) - {"_meta"}
             result["only_stored"] = sorted(stored_keys - parsed.keys())
-            result["only_reparsed"] = sorted(parsed.keys() - stored_keys)
+            result["only_reparsed"] = sorted(parsed.keys() - stored_keys - {"_meta"})
             if dry_run:
                 status = STATUS_WOULD_REPLACE
             else:

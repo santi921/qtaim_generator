@@ -62,7 +62,10 @@ class TestProcessFolder:
         r = rq.process_folder(str(job), None, None, dry_run=False)
         assert r["status"] == rq.STATUS_REPLACED
         assert r["only_stored"] == ["0_1", "2_2"] and r["only_reparsed"] == []
-        assert _stored(job) == REPARSED
+        stored = _stored(job)
+        # the rewrite regenerates the provenance block parse_multiwfn writes
+        assert set(stored.pop("_meta")) == {"poincare_hopf", "cp_counts", "qtaim_search"}
+        assert stored == REPARSED
         assert reparse[0][2] is True
         assert not (job / ".processing.lock").exists()
 

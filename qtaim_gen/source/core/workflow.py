@@ -223,6 +223,7 @@ def process_folder(
     require_qtaim_provenance: bool = False,
     recheck_allalpha_qtaim: bool = False,
     recheck_cp_labels: bool = False,
+    enforce_poincare_hopf: bool = False,
     exhaustive_qtaim: bool = False,
     patch_timings: bool = False,
     horton_python: str = "",
@@ -291,6 +292,7 @@ def process_folder(
                     recheck_fuzzy=recheck_fuzzy,
                     recheck_allalpha_qtaim=recheck_allalpha_qtaim,
                     recheck_cp_labels=recheck_cp_labels,
+                    enforce_poincare_hopf=enforce_poincare_hopf,
                 )
 
                 if not tf_validation:
@@ -335,6 +337,7 @@ def process_folder(
             require_qtaim_provenance=require_qtaim_provenance,
             recheck_allalpha_qtaim=recheck_allalpha_qtaim,
             recheck_cp_labels=recheck_cp_labels,
+            enforce_poincare_hopf=enforce_poincare_hopf,
             exhaustive_qtaim=exhaustive_qtaim,
             subprocess_env=subprocess_env,
             patch_timings=patch_timings,
@@ -422,6 +425,7 @@ def process_folder_alcf(
     require_qtaim_provenance: bool = False,
     recheck_allalpha_qtaim: bool = False,
     recheck_cp_labels: bool = False,
+    enforce_poincare_hopf: bool = False,
     exhaustive_qtaim: bool = False,
     patch_timings: bool = False,
     horton_python: str = "",
@@ -544,6 +548,7 @@ def process_folder_alcf(
                 require_qtaim_provenance=require_qtaim_provenance,
                 recheck_allalpha_qtaim=recheck_allalpha_qtaim,
                 recheck_cp_labels=recheck_cp_labels,
+                enforce_poincare_hopf=enforce_poincare_hopf,
                 recheck_fuzzy=recheck_fuzzy,
             )
 
@@ -622,6 +627,7 @@ def process_folder_alcf(
             require_qtaim_provenance=require_qtaim_provenance,
             recheck_allalpha_qtaim=recheck_allalpha_qtaim,
             recheck_cp_labels=recheck_cp_labels,
+            enforce_poincare_hopf=enforce_poincare_hopf,
             exhaustive_qtaim=exhaustive_qtaim,
             subprocess_env=subprocess_env,
             patch_timings=patch_timings,
