@@ -30,6 +30,7 @@ import resource
 import shutil
 import subprocess
 import sys
+import tarfile
 import tempfile
 import time
 import zipfile
@@ -80,6 +81,23 @@ def stored_reference(results_folder, workdir):
     return path, info
 
 
+def _extract_inp(archive, workdir):
+    """Stream orca.inp out of orca.tar.zst (unzstd -c into tarfile), stopping once
+    found. Avoids tar --zstd, which older GNU tar (some HPC nodes) lacks."""
+    proc = subprocess.Popen(["unzstd", "-c", "-q", archive], stdout=subprocess.PIPE)
+    try:
+        with tarfile.open(fileobj=proc.stdout, mode="r|") as tf:
+            for member in tf:
+                if member.isfile() and os.path.basename(member.name) == "orca.inp":
+                    with open(os.path.join(workdir, "orca.inp"), "wb") as f:
+                        f.write(tf.extractfile(member).read())
+                    break
+    finally:
+        proc.stdout.close()
+        proc.kill()
+        proc.wait()
+
+
 def regenerate_wfx(input_folder, workdir, args):
     """Production convert step in workdir; returns the orca.wfx path or None."""
     for name in ("orca.gbw.zstd0", "orca.gbw"):
@@ -96,8 +114,7 @@ def regenerate_wfx(input_folder, workdir, args):
     if os.path.isfile(os.path.join(input_folder, "orca.inp")):
         shutil.copy(os.path.join(input_folder, "orca.inp"), workdir)
     elif os.path.isfile(os.path.join(input_folder, "orca.tar.zst")):
-        subprocess.run(["tar", "--zstd", "-xf", os.path.join(input_folder, "orca.tar.zst"),
-                        "--wildcards", "*.inp", "--transform", "s#.*/##"], cwd=workdir, check=True)
+        _extract_inp(os.path.join(input_folder, "orca.tar.zst"), workdir)
     write_settings_file(workdir, n_threads=args.n_threads)
     create_jobs(folder=workdir, multiwfn_cmd=args.multiwfn_cmd, orca_2mkl_cmd=args.orca_2mkl_cmd,
                 separate=True, full_set=0, wfx=True)
