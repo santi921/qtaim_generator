@@ -3,7 +3,8 @@ CPprop.txt, printed to 12 decimals in Bohr), compare every property the engine
 evaluates (qtaim_engine.point_properties) with Multiwfn's printed value.
 
 Reports per property the largest relative difference |e - m| / |m| (absolute
-for ellipticity and eta, printed with 6 decimals), split by CP type.
+for ellipticity and eta, printed with 6 decimals; the gradient against the
+position-rounding bound), split by CP type.
 
     python scripts/qtaim_compare_props.py --pairs pairs.txt
 where each line of pairs.txt is "path/to/CPprop.txt path/to/orca.wfx".
@@ -37,10 +38,12 @@ SCALARS = {
 ABSOLUTE = {"ellipticity", "eta", "spin"}
 
 
-def compare(cpprop, wfx_path):
-    cps = load_cpprop_full(cpprop)
-    wfx = read_wfx(wfx_path)
-    basis = prepare_basis(wfx)
+def compare_cps(cps, wfx, basis):
+    """Per CP type: (count, {property: max difference}) between Multiwfn's
+    printed values for cps (load_cpprop_full) and the engine at the printed
+    positions. gradient_bound is max |g_engine - g_mwfn| over the rounding
+    bound ||H||_2 * 8.7e-13 + 5e-11 |g| + 1e-20 (positions printed to 1e-12
+    Bohr per coordinate, values to E18.10); <= 1 means consistent."""
     pts = np.array([c["pos_bohr"] for c in cps])
     eng = point_properties(pts, wfx, basis)
     out = {}
@@ -60,9 +63,16 @@ def compare(cpprop, wfx_path):
         ev_ref = np.array([cps[i]["eigenvalues"] for i in idx])
         res["eigenvalues"] = float(np.max(np.abs(eng["eigenvalues"][idx] - np.sort(ev_ref, axis=1)) / np.maximum(np.abs(ev_ref), 1e-300)))
         g_ref = np.array([cps[i]["gradient"] for i in idx])
-        res["gradient_abs"] = float(np.max(np.abs(eng["gradient"][idx] - g_ref)))
+        dg = np.linalg.norm(eng["gradient"][idx] - g_ref, axis=1)
+        bound = np.abs(eng["eigenvalues"][idx]).max(axis=1) * 8.7e-13 + 5e-11 * np.linalg.norm(g_ref, axis=1) + 1e-20
+        res["gradient_bound"] = float(np.max(dg / bound))
         out[lab] = (len(idx), res)
     return out
+
+
+def compare(cpprop, wfx_path):
+    wfx = read_wfx(wfx_path)
+    return compare_cps(load_cpprop_full(cpprop), wfx, prepare_basis(wfx))
 
 
 def main():
@@ -80,7 +90,7 @@ def main():
             print(f"{name[:34]} | {lab} x{n} | " + " ".join(f"{k} {v:.1e}" for k, v in r.items()))
             for k, v in r.items():
                 worst[(lab, k)] = max(worst.get((lab, k), 0.0), v)
-    print("\nworst over all jobs (relative; absolute for ellipticity, eta, spin, gradient_abs):")
+    print("\nworst over all jobs (relative; absolute for ellipticity, eta, spin; gradient_bound <= 1 is consistent):")
     for lab in ("NCP", "BCP", "RCP", "CCP"):
         row = {k: v for (l2, k), v in worst.items() if l2 == lab}
         if row:
