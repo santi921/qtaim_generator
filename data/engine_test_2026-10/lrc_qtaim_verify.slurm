@@ -11,10 +11,11 @@
 
 # Tier 2 QTAIM verification (docs/engine_roadmap/qtaim_verification_campaign.md):
 # the engine against the CPprop.txt stored in each job's generator/out_files.zip.
-# Reads the job folders only; writes $OUT. One array task per vertical:
-#   sbatch -J qverify --export=ALL,VERTICALS="5A_elytes rgd_uks tm_react" --array=0-2 lrc_qtaim_verify.slurm
-# CONTROL=1 runs the first $NCONTROL jobs of each sample with --control (fresh
-# Multiwfn QTAIM on the regenerated wfx) into a separate file.
+# Reads the job folders only. Each array task takes a disjoint slice of N lines
+# of LIST and writes $WORK/<job name>_<task>.jsonl. CONTROL=1 adds --control
+# (fresh Multiwfn QTAIM on the regenerated wfx; slow on large jobs, use N=1).
+#   sbatch -J qverify  --export=ALL,LIST=$WORK/sample_all.txt,N=25 --array=0-59 lrc_qtaim_verify.slurm
+#   sbatch -J qcontrol --export=ALL,LIST=$WORK/control_all.txt,N=1,CONTROL=1 --array=0-14 lrc_qtaim_verify.slurm
 
 source ~/.bashrc
 module load gcc
@@ -29,14 +30,18 @@ RES=/global/scratch/users/santiagovargas/OMol4M
 WORK=/global/scratch/users/santiagovargas/engine_test/qverify
 ORCA_2MKL=/global/scratch/users/santiagovargas/orca_6_0_1_linux_x86-64_shared_openmpi416/orca_2mkl
 MULTIWFN=/global/scratch/users/santiagovargas/Multiwfn/Multiwfn_3.8_dev_bin_Linux/Multiwfn
-V=$(echo $VERTICALS | cut -d' ' -f$(( SLURM_ARRAY_TASK_ID + 1 )))
-SAMPLE=$WORK/sample_${V}.txt
-TMP=${TMPDIR:-/tmp}
-
-COMMON="--root_omol_inputs $SRC/ --root_omol_results $RES/ --orca_2mkl_cmd $ORCA_2MKL --multiwfn_cmd $MULTIWFN --n_threads $SLURM_CPUS_PER_TASK --tmp_dir $TMP"
-if [ "${CONTROL:-0}" = 1 ]; then
-  head -${NCONTROL:-5} $SAMPLE > $WORK/control_${V}.txt
-  python $Q/scripts/qtaim_verify_stored.py --job_file $WORK/control_${V}.txt --out $WORK/control_${V}.jsonl --control $COMMON
-else
-  python $Q/scripts/qtaim_verify_stored.py --job_file $SAMPLE --out $WORK/verify_${V}.jsonl $COMMON
+N=${N:-25}
+ID=${SLURM_ARRAY_TASK_ID}
+mkdir -p $WORK/slices
+SLICE=$WORK/slices/${SLURM_JOB_NAME}_${ID}.txt
+sed -n "$(( ID * N + 1 )),$(( (ID + 1) * N ))p" $LIST > $SLICE
+if [ ! -s $SLICE ]; then
+  echo "task $ID: empty slice, nothing to do"
+  exit 0
 fi
+
+EXTRA=""
+[ "${CONTROL:-0}" = 1 ] && EXTRA="--control"
+python $Q/scripts/qtaim_verify_stored.py --job_file $SLICE --out $WORK/${SLURM_JOB_NAME}_${ID}.jsonl \
+    --root_omol_inputs $SRC/ --root_omol_results $RES/ --orca_2mkl_cmd $ORCA_2MKL --multiwfn_cmd $MULTIWFN \
+    --n_threads $SLURM_CPUS_PER_TASK --tmp_dir ${TMPDIR:-/tmp} $EXTRA
