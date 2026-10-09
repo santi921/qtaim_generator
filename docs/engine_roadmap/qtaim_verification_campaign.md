@@ -54,6 +54,28 @@ Multiwfn's print format.
   Multiwfn that prints E25.16 in CPprop.txt, making Multiwfn itself a full-precision
   reference. Its build requirements are unverified.
 
+## Results so far (2026-10-09)
+
+- Tier 1, 93 of 100 local wavefunctions (2-274 atoms, 25 with EDF, about 140,000
+  points) [V]:
+  - Median agreement with HORTON: rho 7.5e-14, gradient 3.4e-13, Hessian 1.7e-12,
+    Laplacian 2.8e-12, G 4.0e-13 relative.
+  - EDF gradient and Hessian match central differences to 2.7e-7, the step-size limit.
+  - One outlier: a 17-atom Hf ECP job, 3.2e-7 relative in rho at 0.07-0.16 Bohr from
+    the Hf nucleus.
+    - There the valence-only density is about 1e-6 and comes from cancelling
+      tight-primitive terms.
+    - An 80-bit extended-precision evaluation matches the engine to 7.5e-14 to 1e-12
+      and HORTON to only 1.2e-7 to 3.2e-7, so HORTON loses precision there, not the
+      engine.
+  - The patched high-precision Multiwfn is not needed.
+- P0 cost ladder, local Multiwfn, 4 threads, 12-274 atoms [V]:
+  - The ESP is 60-78% of the QTAIM step at every size.
+  - The CP search grows from 0.2 s to 620 s and is 19-31% of the step above 100 atoms.
+  - All 8 runs satisfy Poincare-Hopf with no unpaired BCPs.
+  - Conclusion: the ESP kernel (P2) is the largest saving; the search (P3) is second
+    and needs the O(N) seeding for large jobs.
+
 ## Tier 2: stored regeneration-campaign references at scale
 
 Goal: the P1 properties (and later the CP sets) against production Multiwfn on the real
@@ -74,7 +96,8 @@ data distribution, reusing the QTAIM regeneration campaign instead of rerunning 
 - Control subset: about 5 jobs per vertical also get a fresh Multiwfn QTAIM run on the
   regenerated wfx. This confirms that a wfx regenerated now reproduces the stored values,
   so the comparison measures the engine, not drift in the conversion.
-- Sample: at most 100 jobs per vertical (user, 2026-10-08), stratified with a fixed seed.
+- Sample: at most 100 jobs per vertical (user, 2026-10-08), stratified with a fixed seed;
+  500 per vertical on LRC, which has idle compute (user, 2026-10-09).
   - Bins: atoms (1-20, 20-50, 50-100, 100-200, 200+), multiplicity (1, 2, 3+), ECP/EDF
     present, element class (main group, 3d, 4d/5d, lanthanide/actinide).
   - Rare bins are filled first.
