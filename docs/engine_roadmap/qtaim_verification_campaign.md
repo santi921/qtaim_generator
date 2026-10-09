@@ -54,60 +54,69 @@ Multiwfn's print format.
   Multiwfn that prints E25.16 in CPprop.txt, making Multiwfn itself a full-precision
   reference. Its build requirements are unverified.
 
-## Tier 2: in-folder comparison at scale (LRC)
+## Tier 2: stored regeneration-campaign references at scale
 
-Goal: the P1 properties (and later the CP sets) against fresh production Multiwfn, on the
-real data distribution, without keeping wfx files.
+Goal: the P1 properties (and later the CP sets) against production Multiwfn on the real
+data distribution, reusing the QTAIM regeneration campaign instead of rerunning Multiwfn.
 
-- Mechanism: a new runner flag, `--qtaim_verify`.
-  1. In each job folder, after convert has produced orca.wfx, run production Multiwfn
-     QTAIM as usual.
-  2. Load its CPprop.txt with load_cpprop_full.
-  3. Evaluate qtaim_engine.point_properties at Multiwfn's CP positions.
-  4. Write generator/qtaim_verify.json: per property and CP type, the max relative
-     difference and the worst CP; CP counts, Poincare-Hopf, unpaired BCPs, NCPs without
-     a nucleus; Multiwfn and engine timings.
-  - The wfx is cleaned as usual, so only the small JSON stays.
-- Sample (stratified, fixed seed), starting with the LRC verticals: tm_react, rgd_uks,
-  5A_elytes.
-  - Bins: atoms (1-20, 20-50, 50-100, 100-200, 200+), multiplicity (1, 2, 3+),
-    ECP/EDF present, element class (main group, 3d, 4d/5d, lanthanide/actinide).
-  - [E] 2,000 jobs per vertical, plus every job in the rare bins (200+ atoms, actinides,
-    multiplicity 6+).
-  - Same Slurm layout as data/engine_test_2026-10 (new MODE=qverify).
-- Then ALCF and LLNL verticals with the same flag. Their sizes are a user decision.
+- References: the CPprop.txt files the regeneration campaign is saving. They are fresh,
+  .wfx-based (with EDF) and come from one Multiwfn build.
+  - Older stored qtaim.json is not a valid reference. On tm_react, 57% of stored records
+    differ from a fresh run: .wfn-era alpha/beta loss, ECP without EDF, mixed builds [V].
+- Mechanism: a verification script, `scripts/qtaim_verify_stored.py`, run per job folder.
+  1. Regenerate orca.wfx from the gbw in a temporary directory with the production convert
+     step (orca_2mkl, then Multiwfn molden -> wfx). Median 0.56 s locally [V].
+  2. Load the stored CPprop.txt with load_cpprop_full.
+  3. Evaluate qtaim_engine.point_properties at the stored CP positions.
+  4. Write qtaim_verify.json: per property and CP type, the max relative difference and
+     the worst CP; CP counts, Poincare-Hopf, unpaired BCPs, NCPs without a nucleus.
+  5. Delete the temporary wfx. Nothing else in the folder changes.
+- Control subset: about 5 jobs per vertical also get a fresh Multiwfn QTAIM run on the
+  regenerated wfx. This confirms that a wfx regenerated now reproduces the stored values,
+  so the comparison measures the engine, not drift in the conversion.
+- Sample: at most 100 jobs per vertical (user, 2026-10-08), stratified with a fixed seed.
+  - Bins: atoms (1-20, 20-50, 50-100, 100-200, 200+), multiplicity (1, 2, 3+), ECP/EDF
+    present, element class (main group, 3d, 4d/5d, lanthanide/actinide).
+  - Rare bins are filled first.
+  - Run on each cluster where the regeneration outputs live: LRC, ALCF and LLNL, as their
+    campaigns finish.
+- Kept wavefunctions for repeatable offline checks: 10 per vertical locally, 100 per
+  vertical on LRC.
 - Report: scripts/qtaim_verify_report.py aggregates every qtaim_verify.json.
   - Pass rates per stratum.
   - The worst cases per property.
-  - A triage list split into: print-limited (as above), EDF or ECP, near-degenerate
-    Hessian (ellipticity or eta), and genuine.
+  - A triage list split into: print-limited, EDF or ECP, near-degenerate Hessian
+    (ellipticity or eta), conversion drift (from the control subset), and genuine.
 - Acceptance: criterion A on 100% of jobs. Gradients are judged against the position
   rounding bound |delta g| <= ||H|| x 1e-12, not a fixed threshold.
-- Cost [E]:
-  - Production QTAIM has a median of 16 s and a long tail. Over 2,797 local runs the max
-    was 36,852 s, and ESP is 60-78% of the step at 12-39 atoms [V].
-  - With a 5 h per-job timeout, 6,000 jobs at 4 cores need about 300-600 core-hours,
-    most of it in the 200+ atom bin.
-  - The engine side adds seconds per job.
+- Cost [E]: per job, a conversion plus engine point properties, seconds. The control
+  subset adds production QTAIM runs, a few core-hours.
 
-## Tier 3: levels of theory
+## Tier 3: levels of theory (OpenActinides first)
 
 Goal: parity beyond the single OMol25 production level (README.md requirement).
 
-- Molecule set, 8-10 molecules: an organic, an anion, a radical, a 3d complex
-  (high-spin and low-spin), a 4d/5d complex with an ECP, a lanthanide with an ECP, a
-  noble-gas compound, and a hydrogen-bonded dimer.
-- Matrix in ORCA:
-  - functionals: GGA, hybrid, range-separated hybrid, HF;
-  - basis sets: def2-SVP, def2-TZVP, def2-TZVPD, def2-QZVPP (g/h functions);
-  - all-electron vs ECP;
-  - RKS / UKS / ROKS;
-  - ORCA 5 and ORCA 6.
-  - [E] About 150 single points, minutes each locally.
-- Every point runs local Multiwfn (production QTAIM and charges), the engines and HORTON;
-  PySCF where its readers allow.
-- Results go in a parity table per setting. Settings that are out of scope (relativistic
-  all-electron, correlated relaxed densities) are listed as such.
+- First set: the OpenActinides benchmark. Its DFT is already done, as a sweep over
+  functionals, basis sets, relativistic treatments and dispersion corrections. Run
+  Multiwfn (production QTAIM, charges, fuzzy, ALIE) on a chunk of it, then the engines and
+  HORTON, and compare.
+  - This covers heavy elements, scalar-relativistic effects and large or high-angular
+    basis sets. These are the places where kernels and EDF handling are most likely to
+    break.
+  - Expected limits [I]:
+    - Multiwfn refuses MBIS above Z=86 (the engine copies that), so there are no MBIS
+      references for actinides.
+    - ECP actinide runs need EDF core densities. A local uranium ECP complex without
+      EDF lost a nuclear CP and had all bonds unpaired [V]. Whether Multiwfn's built-in
+      library covers every actinide/ECP combination in the sweep is unverified.
+    - Dispersion corrections added after the SCF (D3/D4) leave the density unchanged, so
+      those runs can be deduplicated. Non-local dispersion inside the SCF (VV10) changes
+      it and stays.
+    - The engine supports up to h functions (Multiwfn primitive type 56). Basis sets
+      with i functions would need an extension.
+- Not covered by OpenActinides: organics, main group, 3d/4d metals, lanthanides. A small
+  supplementary ORCA set, or samples from the existing verticals, fills those later.
+- Results go in a parity table per setting.
 
 ## Later criteria (after P3)
 
@@ -127,16 +136,25 @@ which the in-folder mode provides.
 ## Implementation pieces
 
 1. scripts/qtaim_horton_check.py (horton env; tier 1).
-2. `--qtaim_verify` in gbw_analysis and the runners, and qtaim_verify.json (tier 2).
-3. MODE=qverify plus a stratified sampler in data/engine_test_2026-10 (tier 2).
-4. ORCA inputs for the level-of-theory matrix (tier 3).
+2. scripts/qtaim_verify_stored.py: regenerate the wfx from the gbw, compare against the
+   stored CPprop.txt, write qtaim_verify.json (tier 2).
+3. A stratified sampler and Slurm array per cluster (tier 2), following
+   data/engine_test_2026-10.
+4. A driver for the OpenActinides chunk: Multiwfn, engines and HORTON per setting
+   (tier 3).
 5. scripts/qtaim_verify_report.py.
 
-## Open decisions
+## Decisions (2026-10-08)
 
-- Sample size per vertical, and when to include the ALCF and LLNL verticals.
-- Whether to build the patched high-precision Multiwfn now, or only if tier 1 needs it.
-- The exact tier 3 matrix (functionals, basis sets), and whether correlated or
-  relativistic densities are ever in scope.
-- Whether a small set of wfx files (for example 200 per vertical) should be kept for
-  repeatable offline checks.
+- Sample: at most 100 jobs per vertical.
+- Patched high-precision Multiwfn: only if tier 1 shows discrepancies we cannot explain.
+- Kept wavefunctions: 10 per vertical locally, 100 per vertical on LRC.
+- Tier 2 uses the regeneration campaign's stored CPprop.txt, not fresh Multiwfn runs (a
+  small fresh control subset only).
+- Tier 3 starts with OpenActinides.
+
+## Open questions
+
+- Where the regeneration campaign's CPprop.txt files are stored per cluster (job folder
+  or out_files.zip), and which Multiwfn build produced them.
+- Which chunk of OpenActinides to run first, and where its wavefunctions live.
