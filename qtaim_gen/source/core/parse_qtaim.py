@@ -203,6 +203,85 @@ def get_qtaim_descs(file="./CPprop_1157_1118_1158.txt", verbose=False):
     return ret_dict
 
 
+CP_TYPE_LABEL = {"(3,-3)": "NCP", "(3,-1)": "BCP", "(3,+1)": "RCP", "(3,+3)": "CCP"}
+
+
+def load_cpprop_full(path: str) -> list:
+    """Every CP in a Multiwfn CPprop.txt, ring and cage CPs included (parse_cp
+    keeps only nuclear and bond CPs). Each entry: index, type ("(3,-1)"), label
+    (NCP/BCP/RCP/CCP), nucleus (1-based atom index or None), connected (pair
+    of 1-based atom indices or None), pos_bohr, every scalar "name: value" line
+    under props, and gradient, laplacian_xyz, hessian, eigenvalues,
+    eigenvectors (columns) as lists."""
+
+    def floats(text):
+        return [float(x) for x in text.replace("D", "E").split()]
+
+    with open(path) as f:
+        lines = [ln.rstrip("\n") for ln in f]
+    cps = []
+    i = 0
+    while i < len(lines):
+        ln = lines[i]
+        if "----------------   CP" not in ln:
+            i += 1
+            continue
+        head = ln.split()
+        cp = {
+            "index": int(head[2].rstrip(",")),
+            "type": head[4],
+            "label": CP_TYPE_LABEL.get(head[4]),
+            "nucleus": None,
+            "connected": None,
+            "props": {},
+        }
+        i += 1
+        while i < len(lines) and "----------------   CP" not in lines[i]:
+            t = lines[i].strip()
+            if t.startswith("Corresponding nucleus:"):
+                v = t.split(":", 1)[1].strip()
+                cp["nucleus"] = None if v.startswith("Unknown") else int(v.split("(")[0])
+            elif t.startswith("Connected atoms:"):
+                parts = t.split(":", 1)[1].split("--")
+                cp["connected"] = [int(x.split("(")[0]) for x in parts]
+            elif t.startswith("Position (Bohr):"):
+                cp["pos_bohr"] = floats(t.split(":", 1)[1])
+            elif t.startswith("Components of gradient in x/y/z are:"):
+                cp["gradient"] = floats(lines[i + 1])
+                i += 1
+            elif t.startswith("Components of Laplacian in x/y/z are:"):
+                cp["laplacian_xyz"] = floats(lines[i + 1])
+                i += 1
+            elif t.startswith("Hessian matrix:"):
+                cp["hessian"] = [floats(lines[i + k]) for k in (1, 2, 3)]
+                i += 3
+            elif t.startswith("Eigenvalues of Hessian:"):
+                cp["eigenvalues"] = floats(t.split(":", 1)[1])
+            elif t.startswith("Eigenvectors(columns) of Hessian:"):
+                cp["eigenvectors"] = [floats(lines[i + k]) for k in (1, 2, 3)]
+                i += 3
+            elif ":" in t and not t.startswith("Position (Angstrom)"):
+                # "Corr. hole ..., ref.: x y z : value" carries the value after the last colon
+                name = t.split(":", 1)[0]
+                val = t.rsplit(":", 1)[1] if "ref.:" in t else t.split(":", 1)[1]
+                vals = val.split()
+                try:
+                    # first number after the colon (Total ESP also prints eV and kcal/mol)
+                    cp["props"][" ".join(name.split())] = float(vals[0].replace("D", "E"))
+                except (ValueError, IndexError):
+                    pass
+            i += 1
+        cps.append(cp)
+    return cps
+
+
+def poincare_hopf(cps: list) -> int:
+    """n - b + r - c for a CP list from load_cpprop_full; 1 for a complete
+    topology of an isolated molecule."""
+    count = {lab: sum(1 for c in cps if c["label"] == lab) for lab in ("NCP", "BCP", "RCP", "CCP")}
+    return count["NCP"] - count["BCP"] + count["RCP"] - count["CCP"]
+
+
 def get_spin_charge_from_orca_inp(dft_inp_file: str) -> tuple:
     """
     helper to just get spin and charge from orca file
