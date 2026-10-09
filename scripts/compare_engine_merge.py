@@ -111,10 +111,11 @@ def _leaves(d, prefix=""):
         yield prefix, d
 
 
-def qtaim_same(o, n, rtol=1e-10, atol=1e-12):
+def qtaim_same(o, n, rtol=1e-10, atol=1e-9):
     """Same CP set and every field equal, numbers within rtol/atol: two Multiwfn
-    runs of one job differ at ~1e-15 (summation order). cp_num is ignored, as
-    Multiwfn's CP index follows search order."""
+    runs of one job differ at ~1e-15 (summation order), and a printed value can
+    flip its last digit (esp_total by 1e-10). cp_num is ignored, as Multiwfn's
+    CP index follows search order."""
     if not isinstance(o, dict) or not isinstance(n, dict):
         return o == n
     if set(o) != set(n):
