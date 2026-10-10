@@ -18,6 +18,7 @@ from qtaim_gen.source.utils.validation import (
     qtaim_poincare_hopf,
     poincare_hopf_needs_exhaustive,
     QTAIM_META_KEY,
+    QTAIM_SEARCH_EXHAUSTIVE,
     qtaim_copy_has_all_alpha_defect,
     qtaim_copy_has_mislabeled_cps,
     all_electron_count,
@@ -931,8 +932,12 @@ def parse_multiwfn(
                 )
                 continue
             # damage qtaim.out cannot show (truncated or spliced after the run)
-            with open(cp_prop_path, "rb") as f:
-                _cpprop_data = f.read()
+            try:
+                with open(cp_prop_path, "rb") as f:
+                    _cpprop_data = f.read()
+            except OSError as e:
+                logger.error(f"Skipping qtaim parse in {folder}: cannot read CPprop.txt ({e})")
+                continue
             _cpprop_problems = cpprop_integrity(_cpprop_data, reported_bcp=_qstat["reported_bcp"])
             if _cpprop_problems:
                 logger.error(
@@ -1163,18 +1168,27 @@ def clean_jobs(
         if (f.endswith(".out") and f != "orca.out") or f.endswith("CPprop.txt")
     ]
     successfully_zipped = []
+    cpprop_problems = []
+    if "CPprop.txt" in files_to_zip:
+        try:
+            with open(os.path.join(folder, "CPprop.txt"), "rb") as f:
+                cpprop_problems = cpprop_integrity(f.read(), reported_bcp=qtaim_run_status(folder)["reported_bcp"])
+        except OSError as e:
+            cpprop_problems = [f"unreadable: {e}"]
+    if cpprop_problems:
+        logger.error(f"Archiving damaged CPprop.txt in {folder} as CPprop.corrupt.txt "
+                     f"(with its qtaim.out as qtaim.corrupt.out): {'; '.join(cpprop_problems)}")
     with zipfile.ZipFile(zip_file_out, "w") as zipf:
         for file in files_to_zip:
             try:
                 arcname = file
-                if file == "CPprop.txt":
-                    with open(os.path.join(folder, file), "rb") as f:
-                        problems = cpprop_integrity(f.read(), reported_bcp=qtaim_run_status(folder)["reported_bcp"])
-                    if problems:
-                        # kept as evidence, under a name that cannot replace a
-                        # sound CPprop.txt already in generator/out_files.zip
-                        arcname = "CPprop.corrupt.txt"
-                        logger.error(f"Archiving damaged CPprop.txt in {folder} as {arcname}: {'; '.join(problems)}")
+                # kept as evidence under names that cannot replace the sound
+                # CPprop.txt and its own qtaim.out in generator/out_files.zip,
+                # which would leave the archive pairing two different runs
+                if cpprop_problems and file == "CPprop.txt":
+                    arcname = "CPprop.corrupt.txt"
+                elif cpprop_problems and file == "qtaim.out":
+                    arcname = "qtaim.corrupt.out"
                 zipf.write(os.path.join(folder, file), arcname=arcname)
                 successfully_zipped.append(file)
                 logger.info(f"Zipped {file}")
@@ -1406,15 +1420,18 @@ def move_results_to_folder(
                 try:
                     if file == "qtaim.json":
                         # A root qtaim.json is only this run's result when the CPprop.txt it
-                        # was parsed from is newer than the generator/ record. Otherwise it is
-                        # a leftover (clean=False keeps the root copy and CPprop.txt, and every
-                        # pass re-parses them) and must not undo a later rerun or patch.
+                        # was parsed from is newer than the generator/ record and intact.
+                        # Otherwise it is a leftover (clean=False keeps the root copy and
+                        # CPprop.txt, and every pass re-parses them; parse_multiwfn refuses a
+                        # damaged CPprop.txt and leaves the old root copy in place) and must
+                        # not undo a later rerun or patch.
                         cpprop = os.path.join(folder, "CPprop.txt")
                         if not (os.path.isfile(cpprop)
-                                and os.path.getmtime(cpprop) > os.path.getmtime(existing_path)):
+                                and os.path.getmtime(cpprop) > os.path.getmtime(existing_path)
+                                and not qtaim_cpprop_problems(folder, root_only=True)):
                             logger.warning(
-                                "Kept generator/qtaim.json in %s: root qtaim.json is not from a "
-                                "CPprop.txt newer than it", folder,
+                                "Kept generator/qtaim.json in %s: root qtaim.json is not from an "
+                                "intact CPprop.txt newer than it", folder,
                             )
                             if clean:
                                 os.remove(new_path)
@@ -2116,13 +2133,13 @@ def _qtaim_output_complete(
                 # no qtaim.out means completeness is unverifiable; must match
                 # the validator or the step is skipped and then fails validation
                 return False
+        # same rule as validate_qtaim_dict: a damaged root CPprop.txt always reruns
+        # QTAIM, any damaged copy (the archived one included) under check_bcp_count
+        if qtaim_cpprop_problems(folder, root_only=not check_bcp_count):
+            return False
         if check_bcp_count:
             if status is None:
                 status = qtaim_run_status(folder)
-            # same rule as validate_qtaim_dict: a damaged CPprop.txt, even only
-            # the archived copy, reruns QTAIM
-            if qtaim_cpprop_problems(folder):
-                return False
             if status["have_qtaim_out"]:
                 # search_done too, not just export_done: a qtaim.out with the
                 # export marker but no parseable CP count line fails the
@@ -2249,19 +2266,29 @@ def _step_out_parses(
 
 
 def _poincare_hopf_needs_escalation(folder: str, logger: logging.Logger) -> bool:
-    """Whether the folder's QTAIM record fails Poincare-Hopf from a standard search
-    (poincare_hopf_needs_exhaustive): the first qtaim.json copy, root then
-    generator/, else the raw CPprop.txt. Read before create_jobs writes the QTAIM
-    script, while the old record is still on disk."""
+    """Whether a QTAIM rerun in this folder must use the exhaustive search: its record
+    fails Poincare-Hopf from a standard search (poincare_hopf_needs_exhaustive), or
+    already came from the exhaustive search (kept, so a rerun for another reason does
+    not fall back to standard and escalate again). Reads the copy the restart gate
+    reads (_qtaim_output_complete: root then generator/, skipping empty files), else
+    the raw CPprop.txt, so it must run while the old record is still on disk."""
     record = None
     for base in (folder, os.path.join(folder, "generator")):
+        path = os.path.join(base, "qtaim.json")
+        if not os.path.isfile(path) or os.path.getsize(path) == 0:
+            continue
         try:
-            with open(os.path.join(base, "qtaim.json"), "r") as f:
-                record = json.load(f)
-            break
+            with open(path, "r") as f:
+                data = json.load(f)
         except (OSError, json.JSONDecodeError):
             continue
-    topology = qtaim_poincare_hopf(record if isinstance(record, dict) else None, folder)
+        if isinstance(data, dict) and data:
+            record = data
+            break
+    topology = qtaim_poincare_hopf(record, folder)
+    if topology is not None and topology.get("qtaim_search") == QTAIM_SEARCH_EXHAUSTIVE:
+        logger.info("QTAIM record in %s came from the exhaustive search; any rerun keeps it", folder)
+        return True
     if not poincare_hopf_needs_exhaustive(topology):
         return False
     logger.warning(
@@ -2730,6 +2757,11 @@ def gbw_analysis(
             restart = False
         else:
             logger.info("Timings file found at %s - restarting.", timings_path)
+
+    if enforce_poincare_hopf and parse_only:
+        # nothing can rerun QTAIM, so a violation would fail validation on every pass
+        logger.warning("--enforce_poincare_hopf has no effect with parse_only; ignored")
+        enforce_poincare_hopf = False
 
     if (recheck_fuzzy or recheck_allalpha_qtaim or recheck_cp_labels or enforce_poincare_hopf) \
             and not restart and not overwrite:

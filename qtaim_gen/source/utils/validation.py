@@ -3,9 +3,11 @@ import math
 import os
 import json
 import re
+import collections
 import shutil
 import tempfile
 import zipfile
+import zlib
 from typing import Optional
 from qtaim_gen.source.core.parse_qtaim import dft_inp_to_dict, fortran_float
 from qtaim_gen.source.core.parse_orca import ORCA_PARSER_VERSION
@@ -606,7 +608,7 @@ def qtaim_run_status(folder: str) -> dict:
     }
 
 
-CPPROP_HEADER = re.compile(r"----------------\s+CP\s+(\d+),\s+Type\s+\(3,([-+]\d)\)")
+CPPROP_HEADER = re.compile(r"----------------\s+CP\s+(\d+),\s+Type\s+\(3,([-+][13])\)")
 CPPROP_REQUIRED = ("Position (Bohr):", "Density of all electrons:", "Norm of gradient is:",
                    "Eigenvalues of Hessian:", "Determinant of Hessian:")
 CPPROP_POSITIVE_EIGENVALUES = {"-3": 0, "-1": 1, "+1": 2, "+3": 3}
@@ -641,7 +643,7 @@ def cpprop_integrity(data, reported_bcp: Optional[int] = None) -> list:
     if not heads:
         return problems + ["no CP blocks"]
     idx = [h[1] for h in heads]
-    repeated = sorted({k for k in idx if idx.count(k) > 1})
+    repeated = sorted(k for k, c in collections.Counter(idx).items() if c > 1)
     missing = sorted(set(range(1, max(idx) + 1)) - set(idx))
     if repeated:
         problems.append(f"repeated CP numbers {repeated[:5]}")
@@ -676,25 +678,32 @@ def _reported_bcp(qtaim_out_text: Optional[str]) -> Optional[int]:
     return int(found[-1]) if found else None
 
 
-def _cpprop_copy(folder: str):
+def _cpprop_copy(folder: str, root_only: bool = False):
     """(CPprop.txt bytes, qtaim.out text or None, location) for the first
-    CPprop.txt found in root, generator/, generator/out_files.zip, then
-    out_files.zip, with the qtaim.out from that same location (the same step
-    wrote both). None when there is no CPprop.txt."""
-    for base in (folder, os.path.join(folder, "generator")):
+    CPprop.txt found in root, generator/out_files.zip, out_files.zip, then a legacy
+    loose generator/CPprop.txt, with the qtaim.out from that same location (the same
+    step wrote both). The legacy copy comes last: nothing writes it any more, and
+    read before the archive a damaged one would outlive every rerun. root_only: the
+    loose root copy only, the current run's output. None when there is no CPprop.txt."""
+    def loose(base):
         path = os.path.join(base, "CPprop.txt")
-        if os.path.isfile(path) and os.path.getsize(path) > 0:
-            try:
-                with open(path, "rb") as f:
-                    data = f.read()
-                out = os.path.join(base, "qtaim.out")
-                text = None
-                if os.path.isfile(out):
-                    with open(out, "r", errors="replace") as f:
-                        text = f.read()
-                return data, text, path
-            except OSError:
-                continue
+        if not (os.path.isfile(path) and os.path.getsize(path) > 0):
+            return None
+        try:
+            with open(path, "rb") as f:
+                data = f.read()
+            out = os.path.join(base, "qtaim.out")
+            text = None
+            if os.path.isfile(out):
+                with open(out, "r", errors="replace") as f:
+                    text = f.read()
+            return data, text, path
+        except OSError:
+            return None
+
+    copy = loose(folder)
+    if copy is not None or root_only:
+        return copy
     for zip_path in (os.path.join(folder, "generator", "out_files.zip"), os.path.join(folder, "out_files.zip")):
         if not os.path.isfile(zip_path):
             continue
@@ -705,15 +714,16 @@ def _cpprop_copy(folder: str):
                     continue
                 text = zf.read("qtaim.out").decode("utf-8", errors="replace") if "qtaim.out" in names else None
                 return zf.read("CPprop.txt"), text, zip_path + ":CPprop.txt"
-        except (zipfile.BadZipFile, OSError, KeyError):
+        except (zipfile.BadZipFile, OSError, KeyError, zlib.error, EOFError):
+            # a damaged member is as good as absent here; cpprop_integrity judges content
             continue
-    return None
+    return loose(os.path.join(folder, "generator"))
 
 
-def qtaim_cpprop_problems(folder: str) -> list:
+def qtaim_cpprop_problems(folder: str, root_only: bool = False) -> list:
     """cpprop_integrity of the folder's CPprop.txt (see _cpprop_copy for which
     copy), each reason prefixed with its location; [] if intact or absent."""
-    copy = _cpprop_copy(folder)
+    copy = _cpprop_copy(folder, root_only=root_only)
     if copy is None:
         return []
     data, text, where = copy
@@ -1204,6 +1214,21 @@ def validate_qtaim_dict(
                 logger.error(msg)
             return False
 
+    if folder is not None:
+        # A damaged CPprop.txt fails even when qtaim.json is sound: the loose root
+        # copy always (parse_multiwfn refused this run's output), any copy including
+        # the archived one under check_bcp_count (the archive is the only per-CP
+        # record, and the rerun replaces it). _qtaim_output_complete applies the
+        # same rule, so the gate and the validator agree.
+        cpprop_problems = qtaim_cpprop_problems(folder, root_only=not check_bcp_count)
+        if cpprop_problems:
+            msg = f"Damaged CPprop.txt, QTAIM must rerun: {'; '.join(cpprop_problems)}"
+            if verbose:
+                print(msg)
+            if logger:
+                logger.error(msg)
+            return False
+
     if check_bcp_count and folder is not None:
         # An incomplete run is a defect even when the counts happen to agree:
         # if the search or the export never finished, the record cannot be
@@ -1225,18 +1250,6 @@ def validate_qtaim_dict(
             if logger:
                 logger.error(msg)
             return False
-        # A damaged CPprop.txt (including the archived copy alone) fails even
-        # when qtaim.json is sound: the archive is the only per-CP record, and
-        # the rerun replaces it. _qtaim_output_complete applies the same rule.
-        cpprop_problems = qtaim_cpprop_problems(folder)
-        if cpprop_problems:
-            msg = f"Damaged CPprop.txt, QTAIM must rerun: {'; '.join(cpprop_problems)}"
-            if verbose:
-                print(msg)
-            if logger:
-                logger.error(msg)
-            return False
-
         reported = status["reported_bcp"]
         raw_deficit = reported - len(dict_bcps) if reported is not None else 0
         # 0 < raw_deficit <= tolerance is deliberately silent. Those records are

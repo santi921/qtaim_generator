@@ -349,10 +349,14 @@ class TestDamagedCpprop:
         with zipfile.ZipFile(gen / "out_files.zip", "w") as z:
             z.writestr("CPprop.txt", sound)
             z.writestr("qtaim.out", BANNER + COUNT_LINE + EXPORT_LINE + BANNER)
+        archived_out = BANNER + COUNT_LINE + EXPORT_LINE + BANNER
         clean_jobs(folder, logger=logging.getLogger("t"), move_results=True)
         with zipfile.ZipFile(gen / "out_files.zip") as z:
             assert z.read("CPprop.txt") == sound
             assert z.read("CPprop.corrupt.txt").decode() == _damaged_cpprop_text()
+            # the sound pair stays from one run: the damaged run's qtaim.out does not replace it
+            assert z.read("qtaim.out").decode() == archived_out
+            assert "qtaim.corrupt.out" in z.namelist()
 
     def test_sound_cpprop_is_archived_as_is(self, tmp_path):
         from qtaim_gen.source.core.omol import clean_jobs
@@ -363,3 +367,44 @@ class TestDamagedCpprop:
         with zipfile.ZipFile(tmp_path / "generator" / "out_files.zip") as z:
             assert "CPprop.corrupt.txt" not in z.namelist()
             assert z.read("CPprop.txt") == CPPROP_FIXTURE.read_bytes()
+
+    def test_damaged_root_copy_fails_without_check_bcp_count(self, tmp_path):
+        from qtaim_gen.source.utils.validation import validate_qtaim_dict
+
+        folder = self._folder(tmp_path)
+        gen = tmp_path / "generator"
+        gen.mkdir()
+        rec = {str(i): {"density_all": 1.0} for i in range(_n_atoms_in_fixture())}
+        rec.update({f"{i}_{i + 1}": {"density_all": 0.1} for i in range(13)})
+        (gen / "qtaim.json").write_text(json.dumps(rec))
+        n = _n_atoms_in_fixture()
+        assert not validate_qtaim_dict(str(gen / "qtaim.json"), n_atoms=n, folder=folder)
+        assert not _qtaim_output_complete(folder, n_atoms=n)
+
+    def test_stale_root_record_is_not_promoted_over_a_damaged_cpprop(self, tmp_path):
+        # parse_multiwfn refuses the damaged CPprop.txt and leaves the old root
+        # qtaim.json; that leftover must not replace the generator/ record
+        import time
+        from qtaim_gen.source.core.omol import move_results_to_folder
+
+        gen = tmp_path / "generator"
+        gen.mkdir()
+        (tmp_path / "qtaim.json").write_text(json.dumps({"0": {"density_all": 9.9}}))
+        (gen / "qtaim.json").write_text(json.dumps({"0": {"density_all": 1.0}}))
+        time.sleep(0.02)
+        self._folder(tmp_path)  # damaged CPprop.txt, newer than both records
+        move_results_to_folder(str(tmp_path), logger=logging.getLogger("t"), clean=False)
+        assert json.loads((gen / "qtaim.json").read_text()) == {"0": {"density_all": 1.0}}
+
+    def test_archive_outranks_a_legacy_loose_generator_copy(self, tmp_path):
+        # nothing writes generator/CPprop.txt any more; read first, a damaged one
+        # would outlive every rerun that refreshes the archive
+        from qtaim_gen.source.utils.validation import qtaim_cpprop_problems
+
+        gen = tmp_path / "generator"
+        gen.mkdir()
+        (gen / "CPprop.txt").write_text(_damaged_cpprop_text())
+        with zipfile.ZipFile(gen / "out_files.zip", "w") as z:
+            z.writestr("CPprop.txt", CPPROP_FIXTURE.read_bytes())
+            z.writestr("qtaim.out", COUNT_LINE + EXPORT_LINE)
+        assert qtaim_cpprop_problems(str(tmp_path)) == []

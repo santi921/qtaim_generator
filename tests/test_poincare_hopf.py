@@ -107,7 +107,8 @@ class TestValidatorAndGate:
         folder, p = _job(tmp_path, _record(0, "exhaustive"))
         assert validate_qtaim_dict(str(p), n_atoms=13, folder=str(folder), enforce_poincare_hopf=True)
         assert _qtaim_output_complete(str(folder), n_atoms=13, enforce_poincare_hopf=True)
-        assert not _poincare_hopf_needs_escalation(str(folder), LOG)
+        # accepted, and any later rerun keeps the exhaustive search
+        assert _poincare_hopf_needs_escalation(str(folder), LOG)
 
     def test_satisfied_record_passes(self, tmp_path):
         folder, p = _job(tmp_path, _record(1, "standard"))
@@ -132,3 +133,71 @@ class TestLmdbBoundary:
         _, bond_keys, _, bond_feats, _ = parse_qtaim_data(rec, {}, {})
         assert bond_keys == ["density_all"]
         assert bond_feats[(0, 1)] == {"density_all": 0.2}
+
+
+class TestEscalationPlumbing:
+    """The escalation only works if it reaches create_jobs(exhaustive_qtaim=True)."""
+
+    def _gbw(self, monkeypatch, tmp_path, record, **kwargs):
+        from qtaim_gen.source.core import omol
+        seen = {}
+        monkeypatch.setattr(omol, "create_jobs", lambda *a, **k: seen.update(create=k))
+        monkeypatch.setattr(omol, "run_jobs", lambda *a, **k: seen.update(run=k))
+        monkeypatch.setattr(omol, "parse_multiwfn", lambda *a, **k: None)
+        monkeypatch.setattr(omol, "validation_checks", lambda *a, **k: seen.update(validate=k) or False)
+        folder, _ = _job(tmp_path, record)
+        (folder / "orca.wfn").write_text("wfn")
+        omol.gbw_analysis(str(folder), multiwfn_cmd="x", orca_2mkl_cmd="y", restart=False, overwrite=False,
+                          logger=LOG, move_results=True, **kwargs)
+        return seen
+
+    def test_violation_writes_the_exhaustive_script(self, monkeypatch, tmp_path):
+        seen = self._gbw(monkeypatch, tmp_path, _record(0, "standard"), enforce_poincare_hopf=True)
+        assert seen["create"]["exhaustive_qtaim"] is True
+        assert seen["run"]["restart"] is True and seen["run"]["enforce_poincare_hopf"] is True
+
+    def test_satisfied_record_keeps_the_standard_script(self, monkeypatch, tmp_path):
+        seen = self._gbw(monkeypatch, tmp_path, _record(1, "standard"), enforce_poincare_hopf=True)
+        assert seen["create"]["exhaustive_qtaim"] is False
+
+    def test_exhaustive_record_stays_exhaustive(self, monkeypatch, tmp_path):
+        # a rerun for another reason must not fall back to standard and escalate again
+        seen = self._gbw(monkeypatch, tmp_path, _record(1, "exhaustive"), enforce_poincare_hopf=True)
+        assert seen["create"]["exhaustive_qtaim"] is True
+
+    def test_flag_off_never_escalates(self, monkeypatch, tmp_path):
+        seen = self._gbw(monkeypatch, tmp_path, _record(0, "standard"))
+        assert seen["create"]["exhaustive_qtaim"] is False
+
+    def test_parse_only_ignores_the_flag(self, monkeypatch, tmp_path):
+        # nothing can rerun QTAIM under parse_only, so enforcing would fail every pass
+        seen = self._gbw(monkeypatch, tmp_path, _record(0, "standard"), enforce_poincare_hopf=True,
+                         parse_only=True)
+        assert seen["validate"]["enforce_poincare_hopf"] is False
+
+    def test_clean_first_decides_before_the_record_moves(self, monkeypatch, tmp_path):
+        # _clean_first moves generator/ aside; deciding afterwards found nothing and
+        # reran the standard search forever
+        from qtaim_gen.source.core import workflow
+        seen = {}
+        monkeypatch.setattr(workflow, "gbw_analysis", lambda *a, **k: seen.update(k) or False)
+        folder, _ = _job(tmp_path, _record(0, "standard"))
+        workflow.process_folder(str(folder), clean_first=True, enforce_poincare_hopf=True, move_results=True)
+        assert seen["exhaustive_qtaim"] is True and seen["enforce_poincare_hopf"] is True
+
+    def test_prevalidation_passes_the_flag(self, monkeypatch, tmp_path):
+        from qtaim_gen.source.utils import io
+        seen = {}
+        monkeypatch.setattr(io, "validation_checks", lambda folder, **k: seen.update(k) or True)
+        (tmp_path / "a").mkdir()
+        lst = tmp_path / "jobs.txt"
+        lst.write_text(f"{tmp_path / 'a'}\n")
+        io.get_folders_from_file(str(lst), num_folders=10, pre_validate=True, enforce_poincare_hopf=True)
+        assert seen.get("enforce_poincare_hopf") is True
+
+    def test_runners_accept_the_flag(self):
+        import importlib
+        for mod in ("full_runner", "full_runner_parsl", "full_runner_parsl_alcf", "helpers.refine_list_of_jobs",
+                    "helpers.sweep_truncated_steps"):
+            src = Path(importlib.import_module(f"qtaim_gen.source.scripts.{mod}").__file__).read_text()
+            assert '"--enforce_poincare_hopf"' in src, mod

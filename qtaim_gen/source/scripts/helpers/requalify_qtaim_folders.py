@@ -18,7 +18,9 @@ Per folder, under the runners' .processing.lock (no lock with --dry_run):
 
 Statuses: same (nothing to do), replaced, would_replace (--dry_run), missing (no folder),
 no_qtaim_json, no_provenance (no qtaim.out, or the run did not finish), no_cpprop (pre-archiving
-run), no_inp, parse_failed, ncp_mismatch, count_mismatch, different_run, locked, failed.
+run), damaged_cpprop (validation.cpprop_integrity: truncated, spliced or a count different from
+qtaim.out's; a truncated file still parses, minus its tail), no_inp, parse_failed, ncp_mismatch,
+count_mismatch, different_run, locked, failed.
 --list_remaining writes the entries (as given) that need a real QTAIM rerun or a look:
 everything except same, replaced and would_replace.
 
@@ -51,6 +53,7 @@ STATUS_MISSING = "missing"
 STATUS_NO_QTAIM_JSON = "no_qtaim_json"
 STATUS_NO_PROVENANCE = "no_provenance"
 STATUS_NO_CPPROP = "no_cpprop"
+STATUS_DAMAGED_CPPROP = "damaged_cpprop"
 STATUS_NO_INP = "no_inp"
 STATUS_PARSE_FAILED = "parse_failed"
 STATUS_NCP_MISMATCH = "ncp_mismatch"
@@ -59,7 +62,7 @@ STATUS_DIFFERENT_RUN = "different_run"
 STATUS_LOCKED = "locked"
 STATUS_FAILED = "failed"
 STATUSES = (STATUS_SAME, STATUS_REPLACED, STATUS_WOULD_REPLACE, STATUS_MISSING, STATUS_NO_QTAIM_JSON,
-            STATUS_NO_PROVENANCE, STATUS_NO_CPPROP, STATUS_NO_INP, STATUS_PARSE_FAILED,
+            STATUS_NO_PROVENANCE, STATUS_NO_CPPROP, STATUS_DAMAGED_CPPROP, STATUS_NO_INP, STATUS_PARSE_FAILED,
             STATUS_NCP_MISMATCH, STATUS_COUNT_MISMATCH, STATUS_DIFFERENT_RUN, STATUS_LOCKED,
             STATUS_FAILED)
 DONE = (STATUS_SAME, STATUS_REPLACED, STATUS_WOULD_REPLACE)
@@ -131,7 +134,7 @@ def _plan(folder: str, inputs: Optional[str]) -> Tuple[str, Optional[dict], str]
     """(status, re-parsed record to write or None, stored path)."""
     from qtaim_gen.source.core.parse_multiwfn import parse_qtaim
     from qtaim_gen.source.utils.validation import (
-        QTAIM_META_KEY, qtaim_run_status, qtaim_topology_meta, read_qtaim_out,
+        QTAIM_META_KEY, cpprop_integrity, qtaim_run_status, qtaim_topology_meta, read_qtaim_out,
     )
 
     stored_path = _stored_path(folder)
@@ -145,14 +148,17 @@ def _plan(folder: str, inputs: Optional[str]) -> Tuple[str, Optional[dict], str]
         cpprop = _cpprop(folder, tmp)
         if cpprop is None:
             return STATUS_NO_CPPROP, None, stored_path
+        with open(cpprop, "rb") as f:
+            data = f.read()
+        if cpprop_integrity(data, reported_bcp=run["reported_bcp"]):
+            return STATUS_DAMAGED_CPPROP, None, stored_path
         if geom is None:
             return STATUS_NO_INP, None, stored_path
         inp, n_atoms = geom
         try:
             parsed = json.loads(json.dumps(parse_qtaim(cprop_file=cpprop, inp_loc=inp,
                                                        orca_tf=inp.endswith(".inp"))))
-            with open(cpprop, "rb") as f:
-                meta = qtaim_topology_meta(f.read(), read_qtaim_out(folder))
+            meta = qtaim_topology_meta(data, read_qtaim_out(folder))
         except Exception:
             return STATUS_PARSE_FAILED, None, stored_path
     if not parsed:

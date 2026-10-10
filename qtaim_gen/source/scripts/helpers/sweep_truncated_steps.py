@@ -139,6 +139,7 @@ def classify_folder(
     wfx: bool = True,
     recheck_allalpha_qtaim: bool = False,
     recheck_cp_labels: bool = False,
+    enforce_poincare_hopf: bool = False,
 ) -> dict:
     folder = resolve_results_folder(folder_inputs, root_omol_inputs, root_omol_results)
     rec = {"folder": folder_inputs, "results_folder": folder}
@@ -216,6 +217,7 @@ def classify_folder(
                 logger=None,
                 recheck_allalpha_qtaim=recheck_allalpha_qtaim,
                 recheck_cp_labels=recheck_cp_labels,
+                enforce_poincare_hopf=enforce_poincare_hopf,
             )
         )
     except Exception:
@@ -255,6 +257,7 @@ def classify_folder(
             recheck_allalpha_qtaim=recheck_allalpha_qtaim, n_electrons=n_electrons,
             mult=int(mult) if mult is not None else None,
             recheck_cp_labels=recheck_cp_labels, atoms=atoms,
+            enforce_poincare_hopf=enforce_poincare_hopf,
         )
         if will_skip:
             continue
@@ -319,6 +322,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--recheck_cp_labels", action="store_true",
                         help="predict the skips the runner makes under --recheck_cp_labels "
                              "(a nuclear CP filed under the wrong atom reruns QTAIM)")
+    parser.add_argument("--enforce_poincare_hopf", action="store_true",
+                        help="predict the skips the runner makes under --enforce_poincare_hopf "
+                             "(n - b + r - c != 1 from a standard search reruns QTAIM)")
     parser.add_argument("--requeue_file", type=str, default=None,
                         help="if set, write non-complete folder paths here")
     args = parser.parse_args(argv)
@@ -351,6 +357,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                 not args.wfn,
                 args.recheck_allalpha_qtaim,
                 args.recheck_cp_labels,
+                args.enforce_poincare_hopf,
             ): folder
             for folder in folders
         }
