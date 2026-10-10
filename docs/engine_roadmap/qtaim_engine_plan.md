@@ -107,7 +107,7 @@ It has no derivatives. Every part of QTAIM needs primitive first and second deri
 
 | Problem | Evidence | Requirement |
 |---|---|---|
-| BCPs lost: no attributable pair, two BCPs for one pair, unmatched attractor | 18 / 2 / 1 of 28 residual cases; tolerance of 2 (validation.py:642-724; regen plan section 3) | Every BCP gets a pair from a robust path tracer. Same-pair duplicates are kept |
+| BCPs lost: no attributable pair, two BCPs for one pair, unmatched attractor | 18 / 2 / 1 of 28 residual cases; tolerance of 2 (validation.storable_bcp_count and DEFAULT_BCP_TOLERANCE; regen plan section 3) | Every BCP gets a pair from a robust path tracer. Same-pair duplicates are kept |
 | Search misses real BCPs | HCNKrF+; 6 S-O/S-F bonds lost in a shipped K+ record (doc 07:494-495) | Completeness checks + adaptive reseeding |
 | ECP atom without core density: missing or phantom NCP, det_hessian up to 1e21 | NOTE_2026-10-05_fuzzy_bond_singlets.md:80-84. Local UCl6: 6 NCPs for 7 atoms, all 6 BCPs unpaired, PH = 0 [V] | Require EDF, or inject it from ported tables (D5) |
 | Open-shell .wfn read as all-alpha | tracker #28; 557,098 records fixed (data/rerun_lists_2026-09-29/STATUS.md:404-407) | wfx only; spin from MO types |
@@ -149,7 +149,7 @@ It has no derivatives. Every part of QTAIM needs primitive first and second deri
 ## 4. Design (core/qtaim_engine.py, CLI `qtaim-engine`)
 
 **Kernels**
-- `orbital_derivs`: 10 columns per primitive (value, gradient, Hessian) in the existing block/screen/GEMM path. It yields MO value, gradient and Hessian, which give rho, its gradient and Hessian, tau, and the MO Laplacian. EDF gets analytic s-Gaussian derivatives.
+- `orbital_derivatives`: 10 columns per primitive (value, gradient, Hessian) in the existing block/screen/GEMM path. It yields MO value, gradient and Hessian, which give rho, its gradient and Hessian, tau, and the MO Laplacian. EDF gets analytic s-Gaussian derivatives.
 - ESP:
   - McMurchie-Davidson nuclear-attraction integrals over shell pairs;
   - a tabulated Boys function up to n = 10 (h functions are the limit, charge_engine.py:110-111);

@@ -959,7 +959,8 @@ class TestCpPropIntegrity:
     def test_intact_file_passes(self):
         lines = self._lines()
         n_bcp = sum("Type (3,-1)" in ln for ln in lines)
-        assert cpprop_integrity(open(CPPROP_FIXTURE, "rb").read(), reported_bcp=n_bcp) == []
+        with open(CPPROP_FIXTURE, "rb") as f:
+            assert cpprop_integrity(f.read(), reported_bcp=n_bcp) == []
 
     def test_cut_inside_last_block(self):
         lines = self._lines()
@@ -976,9 +977,12 @@ class TestCpPropIntegrity:
         tail_from = next(i for i in range(heads[30], heads[31]) if "Total ESP" in lines[i])
         data = ("\n".join(lines[:cut]) + "\n").encode() + b"\x00" * 64 + ("\n".join(lines[tail_from:])).encode()
         problems = cpprop_integrity(data, reported_bcp=sum("Type (3,-1)" in ln for ln in lines))
-        assert problems[0] == "64 NUL bytes"
-        assert any("CP numbers missing" in p for p in problems)
-        assert any(p.startswith("Hessian signs contradict CP type") or "(3,-1) blocks" in p for p in problems)
+        assert problems == [
+            "64 NUL bytes",
+            "20 CP numbers missing, first [12, 13, 14, 15, 16]",
+            "Hessian signs contradict CP type at CPs [11]",  # CP 11's head with CP 31's Hessian
+            "14 (3,-1) blocks but qtaim.out reports 23",
+        ]
 
     def test_bcp_hessian_under_ncp_header(self):
         lines = self._lines()

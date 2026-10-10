@@ -1,6 +1,6 @@
 # QTAIM engine verification campaign (plan)
 
-Status: proposed 2026-10-08, for approval. Companion to qtaim_engine_plan.md (criteria A-F)
+Status: tiers 1 and 2 running since 2026-10-08 (results below). Companion to qtaim_engine_plan.md (criteria A-F)
 and README.md (parity across levels of theory).
 
 Tags: [V] verified, [I] inference, [E] estimate.
@@ -38,11 +38,16 @@ Multiwfn's print format.
   derivatives agree to 1e-7 relative, the step-size limit, through g functions. [V]
 - Points per job:
   - Multiwfn's CP positions;
-  - 2,000 points drawn around each atom at radii 0.01-6 Bohr, log-spaced so they reach
-    the nuclear cusps;
-  - a molecular box sample.
-- Quantities: rho, alpha/beta/spin, gradient, Hessian, G, K, the Laplacian, ELF and LOL
-  (both formed from the compared ingredients), and ALIE.
+  - 40 points around each atom at radii 0.01-6 Bohr, log-spaced so they reach the nuclear
+    cusps, in random directions;
+  - 500 points uniform in the molecular box (plus 3 Bohr).
+- Quantities compared (`scripts/qtaim_horton_check.py`): rho, alpha and beta densities,
+  gradient, Hessian, Laplacian, G, and K through the identity K = G - lap/4. ELF, LOL, ALIE,
+  spin and G_xyz are not compared here; they rest on the tier 2 comparison with Multiwfn's
+  printed values only (code review, 2026-10-09).
+- Known limitation: for ROKS wavefunctions the alpha/beta split on the HORTON side is
+  wrong (iodata loads them as restricted, occupations 2/1, and the script halves them);
+  total rho is unaffected.
 - Jobs: every local wavefunction with a wfx.
   - The 87 wfx_pull files (25 with EDF; transition metals, lanthanides, multiplicities up
     to 11).
@@ -69,6 +74,21 @@ Multiwfn's print format.
       and HORTON to only 1.2e-7 to 3.2e-7, so HORTON loses precision there, not the
       engine.
   - The patched high-precision Multiwfn is not needed.
+- Tier 1, the remaining 7 wavefunctions (147-342 atoms, 6,380-14,180 points each, run
+  with chunked HORTON evaluation) [V]: worst point over each job, relative, rho
+  1.2e-13 to 1.8e-12, gradient 7.1e-13 to 3.8e-12, Hessian 4.5e-12 to 1.4e-11, Laplacian
+  5.1e-12 to 6.3e-11. These maxima exceed the 1e-12 acceptance figure for rho on 2 jobs
+  and for the Laplacian on all 7; the pattern (growing with size, largest where the
+  Laplacian's terms cancel) points to summation roundoff over thousands of primitives
+  rather than a kernel error [I], which an extended-precision check on one job would settle.
+- Tier 2 on LRC, 1500 sampled jobs (5A_elytes, rgd_uks, tm_react; 2026-10-09) [V]:
+  1432 compared, no engine disagreement beyond print precision; 2 stored CPprop.txt
+  files corrupt (one NUL-spliced, one truncated; their qtaim.json are intact); 3 BCP
+  Laplacians at 3.2e-8 to 1.5e-7 relative, unconfirmed as position rounding [I]; 68 jobs
+  lost to a parser bug (Fortran three-digit exponents), since fixed. The summary was
+  NaN-blind until the 2026-10-09 review fix; the NaN recount is pending.
+  Control (15 jobs, fresh Multiwfn on the regenerated wfx): identical CP sets, position
+  differences 0.
 - P0 cost ladder, local Multiwfn, 4 threads, 12-274 atoms [V]:
   - The ESP is 60-78% of the QTAIM step at every size.
   - The CP search grows from 0.2 s to 620 s and is 19-31% of the step above 100 atoms.
@@ -85,33 +105,42 @@ data distribution, reusing the QTAIM regeneration campaign instead of rerunning 
   .wfx-based (with EDF) and come from one Multiwfn build.
   - Older stored qtaim.json is not a valid reference. On tm_react, 57% of stored records
     differ from a fresh run: .wfn-era alpha/beta loss, ECP without EDF, mixed builds [V].
-- Mechanism: a verification script, `scripts/qtaim_verify_stored.py`, run per job folder.
+- Mechanism: a verification script, `scripts/qtaim_verify_stored.py`, over a list of job
+  folders. It only reads them; all work happens in a temporary directory.
   1. Regenerate orca.wfx from the gbw in a temporary directory with the production convert
      step (orca_2mkl, then Multiwfn molden -> wfx). Median 0.56 s locally [V].
   2. Load the stored CPprop.txt with load_cpprop_full.
   3. Evaluate qtaim_engine.point_properties at the stored CP positions.
-  4. Write qtaim_verify.json: per property and CP type, the max relative difference and
-     the worst CP; CP counts, Poincare-Hopf, unpaired BCPs, NCPs without a nucleus.
-  5. Delete the temporary wfx. Nothing else in the folder changes.
+  4. Append one JSON record per job to `--out`: per property and CP type, the max
+     difference (a NaN or a property missing from CPprop.txt reports inf); CP counts,
+     Poincare-Hopf, unpaired BCPs, NCPs without a nucleus. A stored CPprop.txt that fails
+     `validation.cpprop_integrity` is recorded as `corrupt_reference` and not compared.
+  5. Delete the temporary directory. Jobs already in `--out` are skipped, so a requeued
+     task resumes; each subprocess has a timeout.
 - Control subset: about 5 jobs per vertical also get a fresh Multiwfn QTAIM run on the
   regenerated wfx. This confirms that a wfx regenerated now reproduces the stored values,
   so the comparison measures the engine, not drift in the conversion.
 - Sample: at most 100 jobs per vertical (user, 2026-10-08), stratified with a fixed seed;
   500 per vertical on LRC, which has idle compute (user, 2026-10-09).
-  - Bins: atoms (1-20, 20-50, 50-100, 100-200, 200+), multiplicity (1, 2, 3+), ECP/EDF
-    present, element class (main group, 3d, 4d/5d, lanthanide/actinide).
-  - Rare bins are filled first.
+  - Bins (`scripts/qtaim_verify_sample.py`): nuclear-CP count from the stored CPprop.txt
+    (1-20, 21-50, 51-100, 101-200, 200+) and multiplicity (1, 2, 3+), drawn round-robin
+    across bins so small bins are not crowded out.
+  - Not binned yet: ECP/EDF presence and element class (main group, 3d, 4d/5d,
+    lanthanide/actinide). Until they are, tier 2 does not guarantee EDF or heavy-element
+    coverage (code review, 2026-10-09).
   - Run on each cluster where the regeneration outputs live: LRC, ALCF and LLNL, as their
     campaigns finish.
 - Kept wavefunctions for repeatable offline checks: 10 per vertical locally, 100 per
   vertical on LRC.
-- Report: scripts/qtaim_verify_report.py aggregates every qtaim_verify.json.
+- Report (planned, not written yet): scripts/qtaim_verify_report.py aggregates the JSONL
+  records.
   - Pass rates per stratum.
   - The worst cases per property.
   - A triage list split into: print-limited, EDF or ECP, near-degenerate Hessian
     (ellipticity or eta), conversion drift (from the control subset), and genuine.
 - Acceptance: criterion A on 100% of jobs. Gradients are judged against the position
-  rounding bound |delta g| <= ||H|| x 1e-12, not a fixed threshold.
+  rounding bound |delta g| <= ||H||_2 x 8.7e-13 + 5e-11 |g| + 1e-20 (positions printed to
+  1e-12 Bohr per coordinate, values to E18.10), not a fixed threshold.
 - Cost [E]: per job, a conversion plus engine point properties, seconds. The control
   subset adds production QTAIM runs, a few core-hours.
 

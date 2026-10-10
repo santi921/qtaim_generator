@@ -12,8 +12,9 @@
 # Tier 2 QTAIM verification (docs/engine_roadmap/qtaim_verification_campaign.md):
 # the engine against the CPprop.txt stored in each job's generator/out_files.zip.
 # Reads the job folders only. Each array task takes a disjoint slice of N lines
-# of LIST and writes $WORK/<job name>_<task>.jsonl. CONTROL=1 adds --control
-# (fresh Multiwfn QTAIM on the regenerated wfx; slow on large jobs, use N=1).
+# of LIST and writes $WORK/<job name>_<task>.jsonl; a requeued task skips the jobs
+# already in its file. CONTROL=1 adds --control (fresh Multiwfn QTAIM on the
+# regenerated wfx; slow on large jobs, use N=1).
 #   sbatch -J qverify  --export=ALL,LIST=$WORK/sample_all.txt,N=25 --array=0-59 lrc_qtaim_verify.slurm
 #   sbatch -J qcontrol --export=ALL,LIST=$WORK/control_all.txt,N=1,CONTROL=1 --array=0-14 lrc_qtaim_verify.slurm
 
@@ -31,6 +32,7 @@ WORK=/global/scratch/users/santiagovargas/engine_test/qverify
 ORCA_2MKL=/global/scratch/users/santiagovargas/orca_6_0_1_linux_x86-64_shared_openmpi416/orca_2mkl
 MULTIWFN=/global/scratch/users/santiagovargas/Multiwfn/Multiwfn_3.8_dev_bin_Linux/Multiwfn
 N=${N:-25}
+: "${LIST:?LIST is required (export LIST=...)}"
 ID=${SLURM_ARRAY_TASK_ID}
 mkdir -p $WORK/slices
 SLICE=$WORK/slices/${SLURM_JOB_NAME}_${ID}.txt

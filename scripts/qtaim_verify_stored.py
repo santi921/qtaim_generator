@@ -15,7 +15,10 @@ Per job:
      CP-set reproducibility);
   5. append one JSON record to --out and delete the temporary directory.
 
-Nothing in the job folders is modified.
+Nothing in the job folders is modified. Jobs already recorded in --out are
+skipped, so a requeued Slurm task resumes its slice. Each Multiwfn or orca_2mkl
+call is limited to --timeout seconds; on SIGTERM (preemption, walltime) the
+running job is abandoned unrecorded and its temporary directory removed.
 
     python scripts/qtaim_verify_stored.py --job_file jobs.txt \
         --root_omol_inputs SRC/ --root_omol_results RES/ --out verify.jsonl \
@@ -28,9 +31,9 @@ import os
 import re
 import resource
 import shutil
+import signal
 import subprocess
 import sys
-import tarfile
 import tempfile
 import time
 import zipfile
@@ -50,13 +53,19 @@ from qtaim_gen.source.utils.validation import QTAIM_COUNT_PATTERN, cpprop_integr
 MULTIWFN_ENV = dict(os.environ, OMP_STACKSIZE="4G", KMP_STACKSIZE="200M")
 
 
-def _unlimited_stack():
-    resource.setrlimit(resource.RLIMIT_STACK, (resource.RLIM_INFINITY, resource.RLIM_INFINITY))
-
-
-def _run(script, workdir):
-    subprocess.run(["bash", script], cwd=workdir, check=True, capture_output=True,
-                   env=MULTIWFN_ENV, preexec_fn=_unlimited_stack)
+def _run(script, workdir, timeout):
+    # the scripts tee Multiwfn's output into <step>.out; only stderr is kept for the record
+    proc = subprocess.Popen(["bash", script], cwd=workdir, stdout=subprocess.DEVNULL,
+                            stderr=subprocess.PIPE, env=MULTIWFN_ENV, start_new_session=True)
+    try:
+        _, err = proc.communicate(timeout=timeout)
+    except BaseException:
+        # timeout or SIGTERM: kill the whole group, since Multiwfn and tee outlive bash
+        os.killpg(proc.pid, signal.SIGKILL)
+        proc.wait()
+        raise
+    if proc.returncode:
+        raise subprocess.CalledProcessError(proc.returncode, ["bash", script], stderr=err)
 
 
 def stored_reference(results_folder, workdir):
@@ -87,45 +96,22 @@ def stored_reference(results_folder, workdir):
     return path, info
 
 
-def _extract_inp(archive, workdir):
-    """Stream orca.inp out of orca.tar.zst (unzstd -c into tarfile), stopping once
-    found. Avoids tar --zstd, which older GNU tar (some HPC nodes) lacks."""
-    proc = subprocess.Popen(["unzstd", "-c", "-q", archive], stdout=subprocess.PIPE)
-    try:
-        with tarfile.open(fileobj=proc.stdout, mode="r|") as tf:
-            for member in tf:
-                if member.isfile() and os.path.basename(member.name) == "orca.inp":
-                    with open(os.path.join(workdir, "orca.inp"), "wb") as f:
-                        f.write(tf.extractfile(member).read())
-                    break
-    finally:
-        proc.stdout.close()
-        proc.kill()
-        proc.wait()
-
-
 def regenerate_wfx(input_folder, workdir, args):
     """Production convert step in workdir; returns the orca.wfx path or None."""
-    for name in ("orca.gbw.zstd0", "orca.gbw"):
-        src = os.path.join(input_folder, name)
-        if os.path.isfile(src):
-            shutil.copy(src, workdir)
-            break
+    gbw = os.path.join(workdir, "orca.gbw")
+    if os.path.isfile(os.path.join(input_folder, "orca.gbw.zstd0")):
+        subprocess.run(["unzstd", "-q", "-f", "-o", gbw, os.path.join(input_folder, "orca.gbw.zstd0")],
+                       check=True, timeout=args.timeout)
+    elif os.path.isfile(os.path.join(input_folder, "orca.gbw")):
+        shutil.copy(os.path.join(input_folder, "orca.gbw"), gbw)
     else:
         return None
-    if os.path.isfile(os.path.join(workdir, "orca.gbw.zstd0")):
-        subprocess.run(["unzstd", "-q", "-f", "-o", "orca.gbw", "orca.gbw.zstd0"], cwd=workdir, check=True)
-        os.remove(os.path.join(workdir, "orca.gbw.zstd0"))
-    # create_jobs reads the ORCA input (check_spin); raw folders keep it inside orca.tar.zst
-    if os.path.isfile(os.path.join(input_folder, "orca.inp")):
-        shutil.copy(os.path.join(input_folder, "orca.inp"), workdir)
-    elif os.path.isfile(os.path.join(input_folder, "orca.tar.zst")):
-        _extract_inp(os.path.join(input_folder, "orca.tar.zst"), workdir)
     write_settings_file(workdir, n_threads=args.n_threads)
+    # debug=True writes the convert and QTAIM steps only (no step that reads orca.inp)
     create_jobs(folder=workdir, multiwfn_cmd=args.multiwfn_cmd, orca_2mkl_cmd=args.orca_2mkl_cmd,
-                separate=True, full_set=0, wfx=True)
-    _run("convert.in", workdir)
-    _run("props_convert.mfwn", workdir)
+                separate=True, full_set=0, wfx=True, debug=True)
+    _run("convert.in", workdir, args.timeout)
+    _run("props_convert.mfwn", workdir, args.timeout)
     wfx = os.path.join(workdir, "orca.wfx")
     return wfx if os.path.isfile(wfx) else None
 
@@ -140,9 +126,9 @@ def summarize(cps):
     }
 
 
-def control_run(workdir, stored_cps):
+def control_run(workdir, stored_cps, timeout):
     """Fresh production QTAIM on the regenerated wfx, compared with the stored CPs."""
-    _run("props_qtaim.mfwn", workdir)
+    _run("props_qtaim.mfwn", workdir, timeout)
     fresh = load_cpprop_full(os.path.join(workdir, "CPprop.txt"))
     out = {"fresh": summarize(fresh)}
     if len(fresh) != len(stored_cps) or any(a["type"] != b["type"] for a, b in zip(fresh, stored_cps)):
@@ -194,12 +180,16 @@ def verify(job, args):
         rec["diffs"] = {lab: {"n": n, **r} for lab, (n, r) in res.items()}
         if args.control:
             t0 = time.perf_counter()
-            rec["control"] = control_run(workdir, cps)
+            rec["control"] = control_run(workdir, cps, args.timeout)
             rec["control"]["multiwfn_s"] = round(time.perf_counter() - t0, 2)
         rec["status"] = "ok"
         return rec
+    except subprocess.TimeoutExpired as e:
+        rec["status"] = f"timeout: {e.cmd} after {e.timeout:.0f} s"
+        return rec
     except subprocess.CalledProcessError as e:
         rec["status"] = f"error: {e.cmd} exited {e.returncode}"
+        rec["stderr_tail"] = (e.stderr or b"")[-2000:].decode("latin1")
         return rec
     except Exception as e:
         # one bad job must not end the slice
@@ -220,14 +210,31 @@ def main():
     p.add_argument("--n_threads", type=int, default=4)
     p.add_argument("--control", action="store_true", help="also run fresh production QTAIM on the regenerated wfx")
     p.add_argument("--tmp_dir", default=None, help="where temporary job copies go (default: system tmp)")
+    p.add_argument("--timeout", type=float, default=3600, help="seconds per Multiwfn/orca_2mkl call")
     args = p.parse_args()
+    # create_jobs writes its scripts relative to the home directory unless given an absolute path
+    args.tmp_dir = os.path.abspath(args.tmp_dir) if args.tmp_dir else None
+    if args.tmp_dir:
+        os.makedirs(args.tmp_dir, exist_ok=True)
 
     import numba
 
     numba.set_num_threads(args.n_threads)
+    # Multiwfn needs a large stack; raise the soft limit to the hard one (inherited by children)
+    _, hard = resource.getrlimit(resource.RLIMIT_STACK)
+    resource.setrlimit(resource.RLIMIT_STACK, (hard, hard))
+    # preemption or walltime: raise SystemExit so the running subprocess is killed and
+    # its temporary directory removed; that job is left unrecorded and reruns on resume
+    signal.signal(signal.SIGTERM, lambda *a: sys.exit(143))
     with open(args.job_file) as f:
         jobs = [ln.strip() for ln in f if ln.strip() and not ln.startswith("#")]
+    done = set()
+    if os.path.isfile(args.out):
+        with open(args.out) as f:
+            done = {json.loads(ln)["job"] for ln in f if ln.strip()}
     for job in jobs:
+        if os.path.relpath(job, args.root_omol_inputs) in done:
+            continue
         rec = verify(job, args)
         with open(args.out, "a") as f:
             f.write(json.dumps(rec) + "\n")

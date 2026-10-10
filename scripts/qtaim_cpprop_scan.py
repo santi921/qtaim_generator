@@ -17,6 +17,7 @@ import collections
 import json
 import os
 import zipfile
+import zlib
 from concurrent.futures import ProcessPoolExecutor
 
 from qtaim_gen.source.utils.validation import QTAIM_COUNT_PATTERN, cpprop_integrity
@@ -39,19 +40,22 @@ def scan(folder):
     except FileNotFoundError:
         row["status"] = "no_zip"
         return row
-    except (zipfile.BadZipFile, OSError) as e:
-        row["status"] = f"bad_zip: {e}"
+    except (zipfile.BadZipFile, OSError, zlib.error, EOFError) as e:
+        # a damaged member (zlib.error, EOFError) is a finding, not a reason to stop the scan
+        row["status"] = f"bad_zip: {type(e).__name__}: {e}"
         return row
     row["reported_bcp"] = "" if reported is None else reported
-    if problems:
-        row["status"] = "corrupt"
-        row["problems"] = "; ".join(problems)
+    if not problems:
+        return row
+    row["status"] = "corrupt"
+    row["problems"] = "; ".join(problems)
+    # only written for damaged archives: does the parsed record still match qtaim.out?
     try:
         with open(os.path.join(gen, "qtaim.json")) as f:
             d = json.load(f)
-        # validate_qtaim_dict's convention: bond CP keys contain "_"
-        row["json_ncp"] = sum("_" not in k for k in d)
-        row["json_bcp"] = sum("_" in k for k in d)
+        # validate_qtaim_dict's convention: bond CP keys contain "_"; _meta is not a CP
+        row["json_ncp"] = sum(k != "_meta" and "_" not in k for k in d)
+        row["json_bcp"] = sum(k != "_meta" and "_" in k for k in d)
     except (OSError, ValueError):
         pass
     return row

@@ -3,8 +3,9 @@ CPprop.txt, printed to 12 decimals in Bohr), compare every property the engine
 evaluates (qtaim_engine.point_properties) with Multiwfn's printed value.
 
 Reports per property the largest relative difference |e - m| / |m| (absolute
-for ellipticity and eta, printed with 6 decimals; the gradient against the
-position-rounding bound), split by CP type.
+for ellipticity and eta, printed with 6 decimals, and for spin; the gradient
+against the position-rounding bound), split by CP type. A NaN on either side,
+or a property missing from CPprop.txt, reports inf, so it fails any threshold.
 
     python scripts/qtaim_compare_props.py --pairs pairs.txt
 where each line of pairs.txt is "path/to/CPprop.txt path/to/orca.wfx".
@@ -38,6 +39,12 @@ SCALARS = {
 ABSOLUTE = {"ellipticity", "eta", "spin"}
 
 
+def _worst(d):
+    """Largest difference, inf if any is NaN (np.nanmax would drop it)."""
+    d = np.asarray(d, dtype=float)
+    return float(np.inf) if np.isnan(d).any() else float(np.max(d))
+
+
 def compare_cps(cps, wfx, basis):
     """Per CP type: (count, {property: max difference}) between Multiwfn's
     printed values for cps (load_cpprop_full) and the engine at the printed
@@ -59,13 +66,13 @@ def compare_cps(cps, wfx, basis):
                 d = np.abs(val - ref)
             else:
                 d = np.abs(val - ref) / np.maximum(np.abs(ref), 1e-300)
-            res[key] = float(np.nanmax(d))
+            res[key] = _worst(d)
         ev_ref = np.array([cps[i]["eigenvalues"] for i in idx])
-        res["eigenvalues"] = float(np.max(np.abs(eng["eigenvalues"][idx] - np.sort(ev_ref, axis=1)) / np.maximum(np.abs(ev_ref), 1e-300)))
+        res["eigenvalues"] = _worst(np.abs(eng["eigenvalues"][idx] - np.sort(ev_ref, axis=1)) / np.maximum(np.abs(ev_ref), 1e-300))
         g_ref = np.array([cps[i]["gradient"] for i in idx])
         dg = np.linalg.norm(eng["gradient"][idx] - g_ref, axis=1)
         bound = np.abs(eng["eigenvalues"][idx]).max(axis=1) * 8.7e-13 + 5e-11 * np.linalg.norm(g_ref, axis=1) + 1e-20
-        res["gradient_bound"] = float(np.max(dg / bound))
+        res["gradient_bound"] = _worst(dg / bound)
         out[lab] = (len(idx), res)
     return out
 
@@ -89,7 +96,7 @@ def main():
         for lab, (n, r) in res.items():
             print(f"{name[:34]} | {lab} x{n} | " + " ".join(f"{k} {v:.1e}" for k, v in r.items()))
             for k, v in r.items():
-                worst[(lab, k)] = max(worst.get((lab, k), 0.0), v)
+                worst[(lab, k)] = max(worst.get((lab, k), 0.0), v)  # v is never NaN (_worst)
     print("\nworst over all jobs (relative; absolute for ellipticity, eta, spin; gradient_bound <= 1 is consistent):")
     for lab in ("NCP", "BCP", "RCP", "CCP"):
         row = {k: v for (l2, k), v in worst.items() if l2 == lab}

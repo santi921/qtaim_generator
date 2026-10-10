@@ -17,6 +17,7 @@ import os
 import random
 import re
 import zipfile
+import zlib
 
 SIZE_BINS = (20, 50, 100, 200)
 
@@ -44,7 +45,7 @@ def inspect(results_folder, input_folder):
             if "qtaim.out" in names:
                 m = re.search(rb"update date:\s+(\S+)", z.read(names["qtaim.out"])[:4000])
                 build = m.group(1).decode() if m else None
-    except (zipfile.BadZipFile, OSError):
+    except (zipfile.BadZipFile, OSError, zlib.error, EOFError):
         return None
     try:
         mult = int(os.path.basename(results_folder.rstrip("/")).split("_")[-1])
