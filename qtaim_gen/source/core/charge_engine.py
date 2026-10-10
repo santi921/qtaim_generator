@@ -265,6 +265,106 @@ def orbital_values(pts, coords, basis, block=512):
     return out
 
 
+@njit(nogil=True, cache=True)
+def _primitive_block_derivs(pts, atcoords, groups, g_center, g_alpha, g_start, g_end, lmn, ncols):
+    """_primitive_block plus first and second derivatives: out[q, point, column]
+    with q = value, d/dx, d/dy, d/dz, d2/dx2, d2/dy2, d2/dz2, d2/dxdy, d2/dxdz,
+    d2/dydz. For x^l exp(-a r^2) the 1D factors are f0 = x^l,
+    f1 = l x^(l-1) - 2a x^(l+1), f2 = l(l-1) x^(l-2) - 2a(2l+1) x^l + 4a^2 x^(l+2)."""
+    n = pts.shape[0]
+    out = np.zeros((10, n, ncols))
+    f = np.empty((3, 3))
+    d = np.zeros(3)
+    for ip in range(n):
+        x, y, z = pts[ip, 0], pts[ip, 1], pts[ip, 2]
+        col = 0
+        last = -1
+        r2 = 0.0
+        for gi in range(groups.shape[0]):
+            g = groups[gi]
+            a = g_center[g]
+            if a != last:
+                d[0] = x - atcoords[a, 0]
+                d[1] = y - atcoords[a, 1]
+                d[2] = z - atcoords[a, 2]
+                r2 = d[0] * d[0] + d[1] * d[1] + d[2] * d[2]
+                last = a
+            alpha = g_alpha[g]
+            ar2 = alpha * r2
+            if ar2 > EXP_CUTOFF:
+                col += g_end[g] - g_start[g]
+                continue
+            e = np.exp(-ar2)
+            for p in range(g_start[g], g_end[g]):
+                for k in range(3):
+                    lk = lmn[p, k]
+                    u = d[k]
+                    pk = 1.0
+                    for _ in range(lk):
+                        pk *= u
+                    pkm1 = 0.0
+                    if lk >= 1:
+                        pkm1 = 1.0
+                        for _ in range(lk - 1):
+                            pkm1 *= u
+                    pkm2 = 0.0
+                    if lk >= 2:
+                        pkm2 = 1.0
+                        for _ in range(lk - 2):
+                            pkm2 *= u
+                    f[k, 0] = pk
+                    f[k, 1] = lk * pkm1 - 2.0 * alpha * pk * u
+                    f[k, 2] = lk * (lk - 1) * pkm2 - 2.0 * alpha * (2 * lk + 1) * pk + 4.0 * alpha * alpha * pk * u * u
+                out[0, ip, col] = f[0, 0] * f[1, 0] * f[2, 0] * e
+                out[1, ip, col] = f[0, 1] * f[1, 0] * f[2, 0] * e
+                out[2, ip, col] = f[0, 0] * f[1, 1] * f[2, 0] * e
+                out[3, ip, col] = f[0, 0] * f[1, 0] * f[2, 1] * e
+                out[4, ip, col] = f[0, 2] * f[1, 0] * f[2, 0] * e
+                out[5, ip, col] = f[0, 0] * f[1, 2] * f[2, 0] * e
+                out[6, ip, col] = f[0, 0] * f[1, 0] * f[2, 2] * e
+                out[7, ip, col] = f[0, 1] * f[1, 1] * f[2, 0] * e
+                out[8, ip, col] = f[0, 1] * f[1, 0] * f[2, 1] * e
+                out[9, ip, col] = f[0, 0] * f[1, 1] * f[2, 1] * e
+                col += 1
+    return out
+
+
+def orbital_derivatives(pts, coords, basis, block=128):
+    """Occupied MO values, gradients and Hessians at every point, as
+    orbital_values does them (blocks, group screening, one product per block):
+    returns (10, npts, nmo) in the order of _primitive_block_derivs."""
+    pts = np.asarray(pts, dtype=float)
+    ct = basis["ct"]
+    out = np.empty((10, len(pts), ct.shape[1]))
+    if not len(pts):
+        return out
+    order = _morton_order(pts)
+    sorted_pts = np.ascontiguousarray(pts[order])
+    gs, ge, ga, gc = basis["g_start"], basis["g_end"], basis["g_alpha"], basis["g_center"]
+    glen = ge - gs
+
+    def one_block(s0):
+        blk = sorted_pts[s0 : s0 + block]
+        lo, hi = blk.min(axis=0), blk.max(axis=0)
+        d2 = (np.maximum(0.0, np.maximum(lo - coords, coords - hi)) ** 2).sum(axis=1)
+        groups = np.flatnonzero(ga * d2[gc] <= EXP_CUTOFF)
+        n = glen[groups]
+        cols = np.arange(n.sum()) + np.repeat(gs[groups] - (np.cumsum(n) - n), n)
+        prim = _primitive_block_derivs(blk, coords, groups, gc, ga, gs, ge, basis["lmn"], len(cols))
+        mo = prim.reshape(10 * len(blk), len(cols)) @ ct[cols]
+        out[:, order[s0 : s0 + block]] = mo.reshape(10, len(blk), ct.shape[1])
+
+    starts = range(0, len(pts), block)
+    nthreads = numba.get_num_threads()
+    if nthreads == 1 or len(starts) == 1:
+        for s0 in starts:
+            one_block(s0)
+    else:
+        with ThreadPoolExecutor(nthreads) as pool:
+            list(pool.map(one_block, starts))
+    return out
+
+
 def limit_blas_threads(fn):
     """Run fn with single-threaded BLAS. orbital_values parallelizes over blocks
     itself; a multithreaded BLAS inside those workers, or next to numba's
