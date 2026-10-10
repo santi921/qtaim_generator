@@ -245,6 +245,28 @@ Validation set:
 
 P0-P5, i.e. production on CPU: about 7-9 weeks.
 
+### 6a. Performance findings to fold into P2/P3 (code review, 2026-10-09)
+
+Measured on this workstation (Ryzen 7950X, AVX-512) with the P1 kernels, on 4-274 atom
+jobs and synthetic CP-search seeds (nuclei plus atom-pair midpoints under 4 Bohr) [V]
+unless marked [E]. The numerics review found no defect in the P1 kernels; these are cost
+items for the CP-search and ESP workloads, ranked by impact.
+
+| # | finding | measured | change for P2/P3 |
+|---|---|---|---|
+| 1 | `orbital_derivatives` block of 128 points fits sparse seeds badly: block screening keeps 72-100% of primitive columns while 31-45% are nonzero, and the (10, 128, ncols) buffer exceeds glibc's 32 MiB mmap threshold above ~3,300 columns, so every block pays an mmap and page faults | 274 atoms, 785 seeds: 968 us/pt at block 128 vs 508 at 16 (1 thread), 343 vs 175 (4 threads); 142 atoms, 4 threads: 209 vs 84. A caller-owned buffer alone: 209 -> 77 us/pt | default block 32, 8-16 for sparse points (or split Morton blocks whose box exceeds ~2 Bohr); per-worker scratch buffers; block size a function of the points only, never of the thread count, so summation order and output stay byte-identical across threads (criterion E) |
+| 2 | the 10-component GEMM is 67-86% of block time; only phi and grad phi are needed per MO | back-projection w = C(n phi): GEMM 680 -> 389 us/pt (K = 5,500, 403 MOs), 147 -> 81 (K = 2,300, 203 MOs), exact to 2.4e-15 | contract second derivatives, grad rho and K against w; 6 components for open shells; bond-path steps need only the gradient (1 forward + 1 back-projection). About 1.5x per evaluation [E] |
+| 3 | (10, npts, nmo) is materialized and reduced serially in numpy | 274 atoms: 1.24 GB RSS at 20k points, 3.26 GB at 75k (Multiwfn's seed count at ~342 atoms). UHF + EDF (MOR22): serial share 18% at 1 thread, 43% at 4; post-processing 19.7 us/pt, `_edf_derivatives` (Python loop) 9.7 us/pt; phi**2 recomputed 3-5 times | reduce inside the block worker to ~20 scalars per point; EDF as a numba kernel; a lean rho/gradient/Hessian entry point for Newton iterations (ELF, LOL, ALIE only at converged CPs) |
+| 4 | per-call overhead and BLAS threading | `orbital_derivatives` unprotected by `threadpool_limits(1)`: 1.24x slower at 4 threads; each limit entry 0.27-0.34 ms; one single-point `point_properties` call 0.60-0.92 ms | set the BLAS limit once per job (or inside `orbital_derivatives`); batch every seed per Newton iteration (per-seed calls at 750k seeds cost ~10 min of overhead alone [E]); few unconverged seeds late in Newton leave threads idle, so batch across molecules or drop to 1 thread there |
+| 5 | contracted basis | primitives with one centre and lmn whose coefficient rows are proportional form one function: 1.31-1.40x fewer GEMM columns | contract in `prepare_basis`; ~20-25% off the GEMM [E]; check parity with the per-primitive exp cutoff (differs ~1e-18) |
+| 6 | kernel micro-costs | kernel 7% of block time at block 32 | exponents are ascending within a centre, so once alpha r^2 > 40 skip to the next centre; hoist x^l powers out of the primitive loop. Under 10% once item 1 lands [E] |
+| 7 | numba cache keyed on source line | cold first call 0.73 s, cached 0.16 s | warm the cache once per install or point NUMBA_CACHE_DIR at a populated location; any edit above the kernel recompiles on every node's first run |
+
+Scan and verification tooling (not engine): `qtaim_cpprop_scan.py` reads all of
+qtaim.out per folder (12.97 MB stored uncompressed for a 142-atom job; full read + regex
+22.5 ms vs 0.34 ms reading the last 64 KB of a stored member) [V]; over millions of
+Lustre folders a tail read is worth it [I].
+
 ## 7. Risks
 
 - The ESP must match libreta to about 1e-10, including high angular momentum and large Boys arguments. This is the largest piece of new numerics.
