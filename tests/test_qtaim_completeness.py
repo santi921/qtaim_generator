@@ -8,12 +8,16 @@ nuclear CPs first so any surviving prefix still satisfies
 
 import json
 import os
+import shutil
 import zipfile
 
 import pytest
 
 from qtaim_gen.source.utils.validation import (
     count_reported_bcps,
+    cpprop_integrity,
+    qtaim_cpprop_problems,
+    storable_bcp_count,
     qtaim_run_status,
     validate_qtaim_dict,
 )
@@ -329,9 +333,11 @@ class TestCPpropArchived:
         folder.mkdir()
         for name in (
             "qtaim.out", "charge.out", "convert.out", "orca.out",
-            "CPprop.txt", "settings.ini", "qtaim.txt",
+            "settings.ini", "qtaim.txt",
         ):
             (folder / name).write_text(f"content of {name}\n")
+        # a real file: clean_jobs archives a damaged one as CPprop.corrupt.txt
+        shutil.copy(CPPROP_FIXTURE, folder / "CPprop.txt")
         (folder / "qtaim.json").write_text('{"0": {"cp_num": 1}}')
         return folder
 
@@ -384,6 +390,9 @@ class TestStorableVsReportedCount:
         " Position (Bohr):        1.000000000000    0.000000000000    {z:.12f}\n"
         " Position (Angstrom):    0.529177000000    0.000000000000    {z:.12f}\n"
         " Density of all electrons:  0.1000000000E+00\n"
+        " Norm of gradient is:  0.1000000000E-14\n"
+        " Eigenvalues of Hessian: -0.2000000000E+00 -0.1000000000E+00  0.3000000000E+00\n"
+        " Determinant of Hessian:  0.6000000000E-02\n"
     )
 
     def _cpprop(self, tmp_path, n_with_paths, n_without_paths):
@@ -401,7 +410,7 @@ class TestStorableVsReportedCount:
         for j in range(n_without_paths):
             # a CP Multiwfn found but could not attribute to an atom pair
             blocks.append(
-                self.CP_BLOCK.format(n=100 + j, z=50.0 + j, connected="")
+                self.CP_BLOCK.format(n=n_with_paths + 1 + j, z=50.0 + j, connected="")
             )
         (tmp_path / "CPprop.txt").write_text("".join(blocks))
 
@@ -760,6 +769,13 @@ class TestShortfallCheckCost:
                     blocks.append(
                         f" Connected atoms: {k:>5}(H )   --  {k + 1:>5}(H )"
                     )
+                blocks += [
+                    " Position (Bohr):        1.000000000000    0.000000000000    1.000000000000",
+                    " Density of all electrons:  0.1000000000E+00",
+                    " Norm of gradient is:  0.1000000000E-14",
+                    " Eigenvalues of Hessian: -0.2000000000E+00 -0.1000000000E+00  0.3000000000E+00",
+                    " Determinant of Hessian:  0.6000000000E-02",
+                ]
             body = "\n".join(blocks) + "\n"
             if zipped:
                 with zipfile.ZipFile(
@@ -937,3 +953,122 @@ class TestRequireProvenance:
             str(p), n_atoms=12, folder=str(tmp_path),
             check_bcp_count=True, bcp_tolerance=2, require_provenance=True,
         )
+
+
+CPPROP_FIXTURE = os.path.join(os.path.dirname(__file__), "test_files", "CPprop_w_bond_paths.txt")
+FIXTURE_COUNT_LINE = " Number of (3,-1) CPs:    13    Generating topology paths...\n"
+
+
+def _fixture_lines():
+    with open(CPPROP_FIXTURE) as f:
+        return f.read().splitlines()
+
+
+def _heads(lines):
+    return [i for i, ln in enumerate(lines) if "----------------   CP" in ln]
+
+
+def _truncated():
+    lines = _fixture_lines()
+    cut = next(i for i in range(_heads(lines)[-1], len(lines)) if "ESP from nuclear charges" in lines[i])
+    return "\n".join(lines[: cut + 1]) + "\n"
+
+
+class TestCpPropIntegrity:
+    """Damage found in archived out_files.zip on LRC (2026-10-09) behind a
+    complete qtaim.out, so qtaim_run_status cannot see it."""
+
+    def test_every_fixture_is_intact(self):
+        import glob
+
+        root = os.path.join(os.path.dirname(__file__), "test_files")
+        files = glob.glob(os.path.join(root, "**", "CPprop*.txt"), recursive=True)
+        assert files
+        for path in files:
+            with open(path, "rb") as f:
+                assert cpprop_integrity(f.read()) == [], path
+
+    def test_count_matches_qtaim_out(self):
+        with open(CPPROP_FIXTURE, "rb") as f:
+            assert cpprop_integrity(f.read(), reported_bcp=13) == []
+
+    def test_cut_inside_last_block(self):
+        n_last = len(_heads(_fixture_lines()))
+        assert cpprop_integrity(_truncated()) == [f"incomplete CP blocks [{n_last}]"]
+
+    def test_nul_splice(self):
+        # head of one write, a NUL hole, the tail of another
+        lines = _fixture_lines()
+        heads = _heads(lines)
+        cut = next(i for i in range(heads[5], heads[6]) if "Total ESP" in lines[i])
+        tail = next(i for i in range(heads[20], heads[21]) if "Total ESP" in lines[i])
+        data = ("\n".join(lines[:cut]) + "\n").encode() + b"\x00" * 64 + "\n".join(lines[tail:]).encode()
+        problems = cpprop_integrity(data, reported_bcp=13)
+        assert problems[0] == "64 NUL bytes"
+        assert any("CP numbers missing" in p for p in problems)
+        assert any("qtaim.out reports 13" in p for p in problems)
+
+    def test_bond_hessian_under_nuclear_header(self):
+        lines = _fixture_lines()
+        ncp = next(i for i, ln in enumerate(lines) if "Type (3,-3)" in ln)
+        bcp = next(i for i, ln in enumerate(lines) if "Type (3,-1)" in ln)
+        e_ncp = next(i for i in range(ncp, len(lines)) if "Eigenvalues of Hessian:" in lines[i])
+        e_bcp = next(i for i in range(bcp, len(lines)) if "Eigenvalues of Hessian:" in lines[i])
+        lines[e_ncp] = lines[e_bcp]
+        number = int(lines[ncp].split()[2].rstrip(","))
+        assert cpprop_integrity("\n".join(lines)) == [f"Hessian signs contradict CP type at CPs [{number}]"]
+
+    def test_reproducible_oddities_are_not_flagged(self):
+        # a rerun would print these again; flagging them would requeue forever
+        lines = _fixture_lines()
+        bcp = next(i for i, ln in enumerate(lines) if "Type (3,-1)" in ln)
+        e = next(i for i in range(bcp, len(lines)) if "Eigenvalues of Hessian:" in lines[i])
+        for text in ("NaN NaN NaN", "************ -0.1E+00 0.2E+00", "-0.1999917076-166 -0.3132422160-150 0.5E+00"):
+            lines[e] = " Eigenvalues of Hessian: " + text
+            assert cpprop_integrity("\n".join(lines)) == [], text
+
+    def test_empty(self):
+        assert cpprop_integrity(b"") == ["no CP blocks"]
+
+
+class TestDamagedArchiveForcesRerun:
+    """User decision 2026-10-09: a damaged archived CPprop.txt reruns QTAIM even
+    when qtaim.json is sound, since the archive is the only per-CP record. The
+    validator and the restart gate must agree, or the folder loops."""
+
+    def _job(self, tmp_path, cpprop_text):
+        gen = tmp_path / "generator"
+        gen.mkdir()
+        p = _write_qtaim_json(gen / "qtaim.json", n_atoms=13, n_bcps=13)
+        with zipfile.ZipFile(gen / "out_files.zip", "w") as z:
+            z.writestr("qtaim.out", FIXTURE_COUNT_LINE + EXPORT_LINE)
+            z.writestr("CPprop.txt", cpprop_text)
+        return tmp_path, p
+
+    def test_sound_archive_passes(self, tmp_path):
+        from qtaim_gen.source.core.omol import _has_usable_step_output
+
+        with open(CPPROP_FIXTURE) as f:
+            folder, p = self._job(tmp_path, f.read())
+        assert qtaim_cpprop_problems(str(folder)) == []
+        assert validate_qtaim_dict(str(p), n_atoms=13, folder=str(folder), check_bcp_count=True)
+        assert _has_usable_step_output(str(folder), "qtaim", n_atoms=13, check_bcp_count=True)
+
+    def test_damaged_archive_fails_validator_and_gate(self, tmp_path):
+        from qtaim_gen.source.core.omol import _has_usable_step_output
+
+        folder, p = self._job(tmp_path, _truncated())
+        assert qtaim_cpprop_problems(str(folder))
+        assert not validate_qtaim_dict(str(p), n_atoms=13, folder=str(folder), check_bcp_count=True)
+        assert not _has_usable_step_output(str(folder), "qtaim", n_atoms=13, check_bcp_count=True)
+
+    def test_only_under_check_bcp_count(self, tmp_path):
+        from qtaim_gen.source.core.omol import _has_usable_step_output
+
+        folder, p = self._job(tmp_path, _truncated())
+        assert validate_qtaim_dict(str(p), n_atoms=13, folder=str(folder))
+        assert _has_usable_step_output(str(folder), "qtaim", n_atoms=13)
+
+    def test_storable_count_ignores_a_damaged_archive(self, tmp_path):
+        folder, _ = self._job(tmp_path, _truncated())
+        assert storable_bcp_count(str(folder)) is None

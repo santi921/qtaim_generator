@@ -1,6 +1,18 @@
 import json
 import os
+import re
+
 import numpy as np
+
+# Fortran Ew.d drops the exponent letter when |exponent| > 99: 0.1999917076-166
+_BARE_EXPONENT = re.compile(r"(?<=\d)([-+]\d{3})$")
+
+
+def fortran_float(token: str) -> float:
+    token = token.replace("D", "E")
+    if "E" not in token:
+        token = _BARE_EXPONENT.sub(r"E\1", token)
+    return float(token)
 
 
 def parse_cp(lines, verbose=True):
@@ -94,7 +106,7 @@ def parse_cp(lines, verbose=True):
                         cp_dict[k] = int(i[2][:-1])
 
                     elif k == "pos_ang":
-                        cp_dict[k] = [float(x) for x in i[2:]]
+                        cp_dict[k] = [fortran_float(x) for x in i[2:]]
 
                     elif k == "ele_info":
                         if i[2] == "Unknown":
@@ -112,17 +124,17 @@ def parse_cp(lines, verbose=True):
                             cp_name = cp_dict["number"] + "_" + cp_dict["element"]
 
                     elif k == "esp_total":
-                        cp_dict[k] = float(i[2])
+                        cp_dict[k] = fortran_float(i[2])
 
                     elif k == "eig_hess":
-                        cp_dict[k] = np.sum(np.array([float(x) for x in i[-3:]]))
+                        cp_dict[k] = np.sum(np.array([fortran_float(x) for x in i[-3:]]))
 
                     elif k == "grad_norm" or k == "lap_norm":
-                        cp_dict[k] = float(lines_split[ind + 2][-1])
+                        cp_dict[k] = fortran_float(lines_split[ind + 2][-1])
 
                     else:
                         # print(i)
-                        cp_dict[k] = float(i[-1])
+                        cp_dict[k] = fortran_float(i[-1])
 
                     cp_atom_conditionals.pop(k)
                     break
@@ -146,16 +158,16 @@ def parse_cp(lines, verbose=True):
                         # print("list raw connected: ", list_raw)
                         cp_dict[k] = list_raw
                     elif k == "pos_ang":
-                        cp_dict[k] = [float(x) for x in i[2:]]
+                        cp_dict[k] = [fortran_float(x) for x in i[2:]]
                     elif k == "esp_total":
-                        cp_dict[k] = float(i[2])
+                        cp_dict[k] = fortran_float(i[2])
                     elif k == "eig_hess":
-                        cp_dict[k] = np.sum(np.array([float(x) for x in i[-3:]]))
+                        cp_dict[k] = np.sum(np.array([fortran_float(x) for x in i[-3:]]))
                     elif k == "grad_norm" or k == "lap_norm":
-                        cp_dict[k] = float(lines_split[ind + 2][-1])
+                        cp_dict[k] = fortran_float(lines_split[ind + 2][-1])
 
                     else:
-                        cp_dict[k] = float(i[-1])
+                        cp_dict[k] = fortran_float(i[-1])
                     # print(v)
                     cp_bond_conditionals.pop(k)
 

@@ -204,6 +204,7 @@ def get_folders_from_file(
     require_qtaim_provenance: bool = False,
     recheck_allalpha_qtaim: bool = False,
     recheck_cp_labels: bool = False,
+    enforce_poincare_hopf: bool = False,
     recheck_fuzzy: bool = False,
     check_ecp: bool = False,
     checkpoint_path: Optional[str] = None,
@@ -254,6 +255,7 @@ def get_folders_from_file(
                     require_qtaim_provenance=require_qtaim_provenance,
                     recheck_allalpha_qtaim=recheck_allalpha_qtaim,
                     recheck_cp_labels=recheck_cp_labels,
+                    enforce_poincare_hopf=enforce_poincare_hopf,
                     recheck_fuzzy=recheck_fuzzy,
                 )
                 if not tf_validation:

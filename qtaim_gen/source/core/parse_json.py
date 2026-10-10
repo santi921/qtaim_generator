@@ -17,6 +17,8 @@ def get_keys_qtaim(qtaim_dict):
     bonds_tf, atoms_tf = False, False
     dict_keys = []
     for k, v in qtaim_dict.items():
+        if k == "_meta":  # record provenance, not a critical point
+            continue
         # bond keys
         if "_" in k:
             if not bonds_tf:
@@ -50,6 +52,8 @@ def get_qtaim_data_impute(qtaim_dict, key_list):
         dict_res[k] = []
 
     for k, v in qtaim_dict.items():
+        if k == "_meta":  # record provenance, not a critical point
+            continue
         # bond keys
         if "_" in k:
             for i in v.keys():
@@ -82,6 +86,8 @@ def get_qtaim_data(qtaim_dict):
     # for k in key_list: dict_res[k] = []
 
     for k, v in qtaim_dict.items():
+        if k == "_meta":  # record provenance, not a critical point
+            continue
         # bond keys
         if "_" in k:
             bond_list.append(tuple([int(i) for i in k.split("_")]))

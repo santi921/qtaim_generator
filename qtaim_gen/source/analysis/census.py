@@ -65,7 +65,7 @@ def _charge_fn(_key, rec):
 def _qtaim_fn(_key, rec):
     if not isinstance(rec, dict):
         return {}
-    n_bcps = sum(1 for k in rec if isinstance(k, str) and k.count("_") == 1)
+    n_bcps = sum(1 for k in rec if isinstance(k, str) and k != "_meta" and k.count("_") == 1)
     return {"n_bcps": n_bcps}
 
 
