@@ -81,7 +81,7 @@ showptprop (MW/sub.f90:2347-2510) writes about 30 quantities. The parser keeps 2
 | delta_g_promolecular | IGM over an STO-fit promolecule (3920-3990) | STO table (not ported) |
 | delta_g_hirsh | IGMH over interpolated proatoms (4043) | multiwfn_atmraddens tables (ported) + their derivative |
 | esp_nuc | sum Zeff/r; set to 1000 exactly at a nucleus (4250-4262) | coordinates |
-| esp_e | libreta eleesp2, no EDF (MW/libreta_hybrid/libreta.f90:29-46) | nuclear-attraction integrals |
+| esp_e | eleesp1 (MW/function.f90:4283-4420): every primitive pair, unscreened, Fmch Boys good to ~1e-8; libreta is never initialized on this path. No EDF | nuclear-attraction integrals |
 | esp_total | sum of the two | - |
 | grad_norm | gradient norm at the converged point, i.e. the convergence residual | - |
 | det_hessian, ellip_e_dens, eta | det H, l1/l2 - 1, \|l1\|/l3 | Hessian eigenvalues |
@@ -267,9 +267,63 @@ qtaim.out per folder (12.97 MB stored uncompressed for a 142-atom job; full read
 22.5 ms vs 0.34 ms reading the last 64 KB of a stored member) [V]; over millions of
 Lustre folders a tail read is worth it [I].
 
+### 6b. P2 status (2026-10-12)
+
+Code: `core/esp.py` (Boys functions, McMurchie-Davidson ESP), `qtaim_engine.delta_g_hirsh`,
+`point_properties(..., esp=True)`; tests in tests/test_esp.py and tests/test_qtaim_engine.py.
+delta_g_promolecular is dropped (decision 7). [V] unless marked.
+
+Method:
+- Boys: series + downward recursion below x = 30, erf + upward recursion above (reference);
+  the kernel uses an 8-term Taylor table (step 0.05) for F_N, then downward recursion.
+  `boys_mode="multiwfn"` ports Fmch line for line, for parity checks only.
+- ESP: primitives grouped by (centre, exponent) as prepare_basis does; per group pair the
+  density-matrix-weighted Hermite coefficients are built once; per point, Boys values and
+  the Hermite Coulomb recursion (flat operation list, indices packed by total order).
+  A pair is dropped when its contribution is provably below 1e-15 at every point
+  (bound pref sum|D_tuv| W_s (2p)^(s/2)); 54-63% of pairs dropped, at most 1.4e-14 absolute.
+- Points run in blocks on numba.get_num_threads() workers; output is byte-identical at 1
+  and 4 threads.
+
+Accuracy, at Multiwfn's printed CP positions:
+
+| check | jobs | result |
+|---|---|---|
+| Boys functions vs mpmath (40 digits), m <= 12, x up to 1e4 | - | reference 1.5e-15, table 1.7e-15; Fmch copy 3.7e-9 (x <= 10), 6.9e-8 (x > 10) relative |
+| integrals vs independent quadrature (1/r as a Gaussian transform), lmn up to h | 7 pairs, 3 points each | <= 1e-11 relative |
+| esp_e, Multiwfn mode, vs CPprop.txt | 88 local jobs (2-39 atoms) + 9 ladder jobs (12-342 atoms) | <= 4.9e-10 relative (print and position rounding) |
+| esp_e, exact Boys, vs CPprop.txt | same | 3.8e-9 to 7.4e-9 relative: the Fmch divergence (changelog) |
+| esp_e, exact Boys, vs gbasis electrostatic_potential (full precision, horton env) | 26 local jobs (2-27 atoms, 7 with EDF, primitives up to g), 18-30 points each: non-NCP CPs, random, 0.05 Bohr from nuclei | <= 8.9e-14 relative |
+| esp_total, non-NCP | same | <= 4.6e-10, except where nuc and ele cancel to ~1e-4 (abs error <= 5e-14 of the components) |
+| delta_g_hirsh, BCP/RCP/CCP | 30 local jobs | <= 4.5e-10 relative |
+
+Not comparable at NCPs: esp_nuc, esp_total and delta_g_hirsh are set by the CP's distance to its
+nucleus (1e-8 to 1e-5 Bohr, wherever Newton stopped). A 1e-12 Bohr jitter of the printed position
+moves delta_g_hirsh by up to 4% there, and esp_nuc is ~Z/d (1e6-1e9 a.u.). [I] These three are
+ill-conditioned features at NCPs in the released data as well; scripts/qtaim_compare_props.py
+skips them at NCPs.
+
+Speed, ESP only, this workstation, 4 pinned threads, same CPs as Multiwfn (engine times exclude
+Python start-up and the one-off numba compile; Multiwfn's from the P0 ladder, section 3):
+
+| atoms | primitives | CPs | Multiwfn ESP stage | engine (pairs + evaluation) | ratio |
+|---|---|---|---|---|---|
+| 12 | 700 | 25 | 0.40 s | 0.05 s | 8.5x |
+| 26 | 1178 | 57 | 2.55 s | 0.12 s | 21x |
+| 39 (Cs+, EDF) | 2384 | 129 | 30.5 s | 1.10 s | 28x |
+| 39 (K+) | 2529 | 111 | 25.0 s | 0.55 s | 45x |
+| 110 | 3161 | 279 | 87.0 s | 2.66 s | 33x |
+| 178 | 5134 | 471 | 421.9 s | 8.99 s | 47x |
+| 227 | 7411 | 699 | 2197.5 s | 20.2 s | 109x |
+| 274 | 7665 | 779 | 1798.7 s | 25.7 s | 70x |
+| 342 | 9673 | 931 | 3604.1 s | 40.6 s | 89x |
+
+Open: the density matrix is dense nprim^2 (750 MB at 9673 primitives); block it before
+1000+ atom jobs. Far-field multipoles for distant pairs are not needed at these sizes.
+
 ## 7. Risks
 
-- The ESP must match libreta to about 1e-10, including high angular momentum and large Boys arguments. This is the largest piece of new numerics.
+- The ESP must match Multiwfn's eleesp1, whose Boys function (Fmch) is accurate only to about 1e-8 relative. The kernel is checked against a copy of Fmch at print precision and against gbasis at full precision; the exact Boys function is the default (decision 9). This is the largest piece of new numerics.
 - Properties at ECP nuclear CPs are extreme. One Tl NCP in tests/test_files/lmdb_tests/orca5_uks/qtaim.json has rho 9.6e6, Laplacian -1.9e15 and det -2.6e44 [V]. Tiny position differences get amplified, so criterion A is scored at Multiwfn's positions.
 - Near-degenerate topology (a BCP close to an RCP, flat vdW regions) is ill-posed. We flag these cases; we do not force a match.
 - A different CP set means different graph edges. The no-mixed-engine rule applies: new verticals or full regeneration only.
@@ -278,9 +332,9 @@ Lustre folders a tail read is worth it [I].
 ## 8. Open decisions
 
 - D1. RESOLVED 2026-10-08: robust superset. Every CP Multiwfn finds plus the ones it misses, flagged; divergences go in the release changelog (README.md).
-- D2. Drop delta_g_promolecular, or port Multiwfn 3.8's STO table?
+- D2. RESOLVED 2026-10-12: drop delta_g_promolecular.
 - D3. RESOLVED 2026-10-08 for ring and cage CPs: keep them, found mathematically, as a phase-two QTAIM task. Storage (qtaim.json or sidecar), NNAs and duplicate same-pair BCPs still open. The regeneration campaign is saving CPprop.txt now, so Multiwfn's RCP/CCP can be reparsed for validation.
-- D4. Keep the ESP fields (most of Multiwfn's cost) as features?
+- D4. RESOLVED 2026-10-12: keep the ESP fields.
 - D5. Pending: the user is asking Tian Lu whether Multiwfn's EDF tables may be redistributed. Until then, wfx files keep supplying the EDF.
 - D6. Weak-CP policy: keep everything, flag rho < 1e-3, or discard rho < 1e-5 as critic2 does?
 - D7. Invest in GPU, and on which clusters?

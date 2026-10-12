@@ -27,6 +27,18 @@ faster per job (median, same hardware, full_set 1).
 | - | Density-based steric descriptors | Pinned: must be included (descriptor_engine_vision.md, shortlist) |
 | - | gbw availability | All gbw files are on the HPC systems, so gbw-based descriptors can be backfilled |
 
+## Decisions (2026-10-12, QTAIM P2)
+
+| # | Question | Decision |
+|---|---|---|
+| 7 | delta_g_promolecular (QTAIM plan D2): drop or port Multiwfn's STO table | Drop. Its values differ between Multiwfn builds |
+| 8 | Keep the ESP fields at CPs as features (QTAIM plan D4) | Keep |
+| 9 | Boys function for the ESP kernel | Exact by default. A copy of Multiwfn's `Fmch` (series cut at 1e-8, sqrt(pi)/2 truncated to 0.88622692) exists only for tests; the difference goes in the divergence changelog |
+
+Production ESP at CPs comes from Multiwfn's old `eleesp1` routine, not libreta: the QTAIM
+stdin never initializes libreta, so `eleesp` falls back (MW/function.f90:4269-4280).
+Verified locally: iESPcode 1 and 2 give byte-identical CPprop.txt.
+
 Still open: see the "Open decisions" section of each plan; the resolved ones are marked there.
 
 ## Cross-cutting requirements
@@ -37,7 +49,10 @@ Each intentional difference from Multiwfn (a fixed bug, a different grid, extra 
 new convention) gets an entry: what Multiwfn does (source file:line), what the engine
 does, which descriptors change and by how much on the validation set, and the engine
 version that introduced it. The changelog ships with each dataset release and paper.
-Seed entries already known: bader spin integrated as Shannon/Fisher under ispecial=1
+Seed entries already known: ESP at CPs uses an exact Boys function, where Multiwfn's
+eleesp1 uses Fmch (series cut at 1e-8, sqrt(pi)/2 truncated to 0.88622692): esp_e differs by
+3.8e-9 to 7.4e-9 relative on 97 local jobs (qtaim_engine_plan.md section 6b); delta_g_promolecular
+is no longer produced; bader spin integrated as Shannon/Fisher under ispecial=1
 (verified in data/omol_test_spin_skip/orca6_uks/bader.out), IBSI on the 30x110 grid,
 QTAIM CPs Multiwfn misses (superset), ring/cage CPs (currently discarded by the parser).
 
