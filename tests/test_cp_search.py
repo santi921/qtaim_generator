@@ -104,3 +104,44 @@ def test_bond_path_pairs_match_multiwfn(job, mode):
         assert c["connected"] is not None
         assert sorted(int(a) + 1 for a in bp["atoms"][k]) == sorted(c["connected"])
     assert (bp["ncp_atom"][res["type"] == 0] >= 0).all()
+
+
+def test_fortran_e_format():
+    from qtaim_gen.source.core.cp_search import _fe
+
+    assert _fe(3102.474076) == "  0.3102474076E+04"
+    assert _fe(-0.3937299428e8) == " -0.3937299428E+08"
+    assert _fe(0.0) == "  0.0000000000E+00"
+    assert _fe(0.99999999999999) == "  0.1000000000E+01"
+    assert _fe(1.999917076e-167) == "  0.1999917076-166"
+
+
+def test_engine_cpprop_parses_like_multiwfn(tmp_path):
+    import contextlib
+    import io
+
+    from qtaim_gen.source.core.cp_search import analyze, write_cpprop
+    from qtaim_gen.source.core.parse_multiwfn import parse_qtaim
+    from qtaim_gen.source.utils.validation import cpprop_integrity
+
+    job = "XeCl4_step2_0_1"
+    wfx, basis, _ = _load(job)
+    res = analyze(wfx, basis, seeds="multiwfn", paths="multiwfn", boys_mode="multiwfn")
+    out = tmp_path / "CPprop.txt"
+    write_cpprop(out, res, wfx)
+    assert cpprop_integrity(out.read_bytes()) == []
+    inp = os.path.join(FIXTURES, job, "orca.inp")
+    with contextlib.redirect_stdout(io.StringIO()):
+        ref = parse_qtaim(os.path.join(FIXTURES, job, "multiwfn_cpprop.txt"), inp, orca_tf=True)
+        eng = parse_qtaim(str(out), inp, orca_tf=True)
+    assert set(ref) == set(eng)
+    for k in ref:
+        for f, v in ref[k].items():
+            if f in ("cp_num", "delta_g_promolecular") or not isinstance(v, float):
+                continue
+            if f == "grad_norm":
+                assert abs(eng[k][f] - v) < 1e-12, (k, f)
+            elif f in ("ellip_e_dens", "eta"):
+                assert abs(eng[k][f] - v) <= 2e-6, (k, f)
+            else:
+                assert eng[k][f] == pytest.approx(v, rel=1e-9, abs=1e-12 * abs(ref[k]["density_all"])), (k, f)

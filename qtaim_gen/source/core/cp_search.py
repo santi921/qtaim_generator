@@ -357,3 +357,140 @@ def bond_paths(cps, wfx, basis, mode="multiwfn"):
         if i >= 0 and j >= 0:
             pairs[b] = (i, j)
     return {"bcp": bcps, "ends": ends, "npts": npts, "atoms": pairs, "ncp_atom": atom}
+
+
+# ---------------------------------------------------------------- full analysis and CPprop.txt
+
+WEAK_DROP = 1e-5  # rho below this is dropped, after the Poincare-Hopf check (README decision 10)
+WEAK_FLAG = 1e-3  # rho below this is flagged
+AU2EV, AU2KCAL = 27.2113838, 627.51  # Multiwfn's constants (MW/define.f90:29)
+CP_LABELS = {0: "(3,-3)", 1: "(3,-1)", 2: "(3,+1)", 3: "(3,+3)"}
+
+
+def _canonical_order(cps, ncp_atom, bcp_pairs, bcp_index, coords):
+    """NCPs by atom (non-nuclear attractors after them), BCPs by sorted atom
+    pair (unpaired after them), RCPs and CCPs by their 3 / 4 nearest atoms;
+    ties by position rounded to 1e-6 Bohr."""
+    pair_of = {int(b): tuple(sorted(map(int, p))) if p[0] >= 0 else (10**9, 10**9) for b, p in zip(bcp_index, bcp_pairs)}
+    keys = []
+    for i, (p, t) in enumerate(zip(cps["pos"], cps["type"])):
+        rounded = tuple(np.round(p, 6))
+        if t == 0:
+            k = (ncp_atom[i] if ncp_atom[i] >= 0 else 10**9,)
+        elif t == 1:
+            k = pair_of[i]
+        else:
+            k = tuple(sorted(np.argsort(np.linalg.norm(coords - p, axis=1), kind="stable")[: t + 1].tolist()))
+        keys.append((int(t), k, rounded))
+    return np.array(sorted(range(len(keys)), key=lambda i: keys[i]), dtype=np.int64)
+
+
+def analyze(wfx, basis, seeds="superset", paths="engine", boys_mode="exact"):
+    """CP search, properties at every CP, bond paths and atom mapping.
+
+    Poincare-Hopf is counted on the full CP set; then CPs with rho < WEAK_DROP
+    are dropped and those with rho < WEAK_FLAG flagged. seeds="multiwfn" keeps
+    Multiwfn's CP order (so cp_num matches); other modes use the canonical order."""
+    from qtaim_gen.source.core.qtaim_engine import point_properties
+
+    cps = search(wfx, basis, seeds=seeds)
+    props = point_properties(cps["pos"], wfx, basis, esp=True, boys_mode=boys_mode)
+    counts = np.bincount(cps["type"], minlength=4)
+    ph = int(counts[0] - counts[1] + counts[2] - counts[3])
+    keep = np.flatnonzero(props["rho"] >= WEAK_DROP)
+    cps = {"pos": cps["pos"][keep], "type": cps["type"][keep], "stage": [cps["stage"][i] for i in keep],
+           "stats": cps["stats"]}
+    props = {k: v[keep] for k, v in props.items()}
+    bp = bond_paths(cps, wfx, basis, mode=paths)
+    order = np.arange(len(keep)) if seeds == "multiwfn" else _canonical_order(
+        cps, bp["ncp_atom"], bp["atoms"], bp["bcp"], wfx["coords"])
+    pair = np.full((len(keep), 2), -1, dtype=np.int64)
+    pair[bp["bcp"]] = bp["atoms"]
+    return {
+        "pos": cps["pos"][order], "type": cps["type"][order], "props": {k: v[order] for k, v in props.items()},
+        "ncp_atom": bp["ncp_atom"][order], "bcp_atoms": pair[order],
+        "weak": np.flatnonzero(props["rho"][order] < WEAK_FLAG),
+        "poincare_hopf_full_set": ph, "dropped": int(counts.sum() - len(keep)),
+        "counts_full_set": counts.tolist(), "stats": cps["stats"],
+    }
+
+
+def _fe(x, w=18, d=10):
+    """Fortran Ew.d: 0.dddddddddd E+xx, the E dropped for a three-digit exponent."""
+    if not np.isfinite(x):
+        return ("NaN" if np.isnan(x) else ("-Infinity" if x < 0 else "Infinity")).rjust(w)
+    if x == 0:
+        body, exp = "0." + "0" * d, 0
+    else:
+        s = f"{abs(x):.{d - 1}e}"
+        body, exp = "0." + s[0] + s[2 : d + 1], int(s.split("e")[1]) + 1
+    sign = "-" if x < 0 else ""
+    tail = f"E{exp:+03d}" if abs(exp) <= 99 else f"{exp:+04d}"
+    return (sign + body + tail).rjust(w)
+
+
+def write_cpprop(path, res, wfx):
+    """res (analyze) as Multiwfn's CPprop.txt (topology option 7 0, showptprop),
+    with the fields the engine computes; parse_qtaim, load_cpprop_full and
+    validation.cpprop_integrity read it like Multiwfn's."""
+    from qtaim_gen.source.utils.element_classes import SYMBOL_TO_Z
+
+    sym = {z: s for s, z in SYMBOL_TO_Z.items()}
+    name = [sym[int(z)].ljust(2) for z in wfx["atnums"]]
+    P = res["props"]
+    e3 = lambda v: "".join(_fe(x) for x in v)  # noqa: E731
+    lines = []
+    for i, (p, t) in enumerate(zip(res["pos"], res["type"])):
+        lines.append(f" ----------------   CP{i + 1:6d},     Type {CP_LABELS[int(t)]}   ----------------")
+        if t == 0:
+            a = res["ncp_atom"][i]
+            lines.append(" Corresponding nucleus:  Unknown" if a < 0 else f" Corresponding nucleus:{a + 1:6d}({name[a]})")
+        elif t == 1 and res["bcp_atoms"][i, 0] >= 0:
+            a, b = res["bcp_atoms"][i]
+            lines.append(f" Connected atoms:{a + 1:6d}({name[a]})   --{b + 1:6d}({name[b]})")
+        lines.append(" Position (Bohr):    " + "".join(f"{x:18.12f}" for x in p))
+        lines.append(" Position (Angstrom):" + "".join(f"{x:18.12f}" for x in p * B2A))
+        H = P["hessian"][i]
+        eig, vec = np.linalg.eigh(H)
+        tot = P["esp_total"][i]
+        lines += [
+            " Density of all electrons:" + _fe(P["rho"][i]),
+            " Density of Alpha electrons:" + _fe(P["rho_alpha"][i]),
+            " Density of Beta electrons:" + _fe(P["rho_beta"][i]),
+            " Spin density of electrons:" + _fe(P["spin"][i]),
+            " Lagrangian kinetic energy G(r):" + _fe(P["G"][i]),
+            " G(r) in X,Y,Z:" + e3(P["G_xyz"][i]),
+            " Hamiltonian kinetic energy K(r):" + _fe(P["K"][i]),
+            " Potential energy density V(r):" + _fe(P["V"][i]),
+            " Energy density E(r) or H(r):" + _fe(P["H"][i]),
+            " Laplacian of electron density:" + _fe(P["laplacian"][i]),
+            " Electron localization function (ELF):" + _fe(P["elf"][i]),
+            " Localized orbital locator (LOL):" + _fe(P["lol"][i]),
+            " Average local ionization energy (ALIE):" + _fe(P["alie"][i]),
+            " Delta-g (under Hirshfeld partition):" + _fe(P["delta_g_hirsh"][i]),
+            " ESP from nuclear charges:" + _fe(P["esp_nuc"][i]),
+            " ESP from electrons:" + _fe(P["esp_e"][i]),
+            " Total ESP:" + _fe(tot) + " a.u. (" + _fe(tot * AU2EV, 14, 7) + " eV," + _fe(tot * AU2KCAL, 14, 7) + " kcal/mol)",
+            " ",
+            " Note: Below information is for electron density",
+            " ",
+            " Components of gradient in x/y/z are:",
+            e3(P["gradient"][i]),
+            " Norm of gradient is:" + _fe(np.linalg.norm(P["gradient"][i])),
+            " ",
+            " Components of Laplacian in x/y/z are:",
+            e3(np.diag(H)),
+            " Total:" + _fe(np.trace(H)),
+            " ",
+            " Hessian matrix:",
+            *(e3(H[:, j]) for j in range(3)),
+            " Eigenvalues of Hessian:" + e3(eig),
+            " Eigenvectors (columns) of Hessian:",
+            *(e3(vec[r]) for r in range(3)),
+            " Determinant of Hessian:" + _fe(np.linalg.det(H)),
+            f" Ellipticity of electron density:{eig[0] / eig[1] - 1:12.6f}",
+            f" eta index:{abs(eig[0]) / eig[2]:12.6f}",
+            " ",
+        ]
+    with open(path, "w") as f:
+        f.write("\n".join(lines) + "\n")
