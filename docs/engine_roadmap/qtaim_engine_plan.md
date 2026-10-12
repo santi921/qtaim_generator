@@ -321,6 +321,60 @@ Python start-up and the one-off numba compile; Multiwfn's from the P0 ladder, se
 Open: the density matrix is dense nprim^2 (750 MB at 9673 primitives); block it before
 1000+ atom jobs. Far-field multipoles for distant pairs are not needed at these sizes.
 
+### 6c. P3 status (2026-10-12)
+
+Code: `qtaim_engine.density_derivatives` (P3.0), `core/cp_search.py` (seeds, batched Newton,
+dedup, order, bond paths, atom mapping, `analyze`, `write_cpprop`); tests in
+tests/test_cp_search.py. [V] unless marked.
+
+- P3.0: one product for MO values and gradients plus the back-projection w = (n phi) C^T,
+  reduced per point inside 32-point blocks; EDF as a numba kernel; `hessian=False` gives rho
+  and its gradient only (1.6x cheaper, used by the path tracer). 274 atoms, 20k points:
+  1.27 -> 0.59 GB; sparse seeds 3.1-3.3x faster. Values equal the old path to ~1e-15 of scale.
+- Seeds: `multiwfn` (Multiwfn's 4 stages, its loop order), `delaunay`, `superset` (both).
+  Delaunay alone missed 4 weak ring/cage CPs (rho 8e-4 to 4e-3) on 88 jobs, so `superset` is
+  the engine default. A 0.5 Bohr trust radius was dropped: seeds that should leave into vacuum
+  and stop on det H crawled to the cycle limit (55% of all Newton steps).
+- Newton: findcp's iteration for all seeds of a stage at once; dedup by ascending |g| outside
+  Multiwfn mode, so the kept CP does not depend on seed order.
+- Bond paths: findpath batched over all BCPs; `mode="engine"` follows the same trajectories
+  until Multiwfn would stop, then only nuclear CPs end a path and a rho decrease halves the step.
+
+Validation on 88 local jobs (2-39 atoms) and 9 ladder jobs (12-342 atoms):
+
+| check | result |
+|---|---|
+| seed counts per stage vs Multiwfn's printed counts | equal on 88/88 |
+| CP set, Multiwfn seeds (criterion B) | identical on 97/97, positions <= 8.4e-13 Bohr |
+| CP set, superset seeds | contains Multiwfn's on 97/97; one extra CP (HCNKrF+ BCP that only the exhaustive search finds) |
+| BCP atom pairs (criterion C), Multiwfn paths | 1,485 / 1,486 equal; the last is unpaired by both |
+| BCP atom pairs, engine paths | all 1,485 kept; the remaining one paired (Kr-H, 2.55 A) |
+| qtaim.json through parse_qtaim, all-Multiwfn modes | 87/87 same keys; fields identical at print precision (esp_total 4.6e-10 where it cancels) |
+| qtaim.json, engine defaults | 2 new bond keys (above); esp_e <= 6.8e-9; 32 weak CPs flagged, none dropped |
+| determinism | identical at 1 and 2 threads (test) |
+| Poincare-Hopf | MOR39 Ru3Au3 still 2 (needs P4 reseeding) |
+
+Full QTAIM step, this workstation, 4 pinned threads; Multiwfn = search + paths + properties +
+ESP from the P0 ladder (section 3); engine = superset seeds, engine paths, properties with ESP:
+
+| atoms | Multiwfn | engine | ratio | engine search share |
+|---|---|---|---|---|
+| 12 | 0.67 s | 0.30 s | 2.2x | 57% |
+| 26 | 3.77 s | 0.80 s | 4.7x | 59% |
+| 39 (K+) | 32.2 s | 2.72 s | 11.8x | 60% |
+| 110 | 136.2 s | 13.0 s | 10.5x | 76% |
+| 178 | 590.3 s | 40.6 s | 14.6x | 75% |
+| 227 | 2973.6 s | 130.3 s | 22.8x | 74% |
+| 274 | 2309.5 s | 117.7 s | 19.6x | 72% |
+| 342 | 4607.2 s | 188.9 s | 24.4x | 74% |
+
+Multiwfn seeds instead of superset: 342 atoms 163 s (28x). The CP search, i.e. Newton steps
+on Multiwfn's triad and quad seeds, is now 72-76% of the engine's time above 100 atoms.
+
+Open in P3: exhaustive (sphere) seeds; the multi-thread Multiwfn first-come dedup is not
+reproduced (the engine uses its 1-thread order); paths may still end at a non-nuclear CP in
+Multiwfn mode by design.
+
 ## 7. Risks
 
 - The ESP must match Multiwfn's eleesp1, whose Boys function (Fmch) is accurate only to about 1e-8 relative. The kernel is checked against a copy of Fmch at print precision and against gbasis at full precision; the exact Boys function is the default (decision 9). This is the largest piece of new numerics.
