@@ -85,9 +85,9 @@ def _tuples(close, k):
                 if k == 3:
                     out.append((i, j, m, -1))
                     continue
-                for l in range(m + 1, n):
-                    if close[i, l] and close[j, l] and close[m, l]:
-                        out.append((i, j, m, l))
+                for q in range(m + 1, n):
+                    if close[i, q] and close[j, q] and close[m, q]:
+                        out.append((i, j, m, q))
     res = np.empty((len(out), k), dtype=np.int64)
     for r in range(len(out)):
         for c in range(k):
@@ -187,7 +187,9 @@ def _engine_search(wfx, basis, minicpdis, superset):
         ok = np.flatnonzero(status == 1)
         eig = np.linalg.eigvalsh(hess[ok])
         keep = ~np.all(eig == 0, axis=1)
-        cand_x.append(x[ok][keep]); cand_eig.append(eig[keep]); cand_g.append(gnorm[ok][keep])
+        cand_x.append(x[ok][keep])
+        cand_eig.append(eig[keep])
+        cand_g.append(gnorm[ok][keep])
         cand_stage += [stage] * int(keep.sum())
         stats.append({"stage": stage, "seeds": len(pts), "converged": len(ok), "singular": int((status == -1).sum()),
                       "maxcyc": int((status == -2).sum()), "newton_steps": int(niter.sum())})

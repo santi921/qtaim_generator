@@ -229,14 +229,14 @@ def _lagintpol_d1(radpos, vals, npt, r):
                 poly *= (r - radpos[j]) / (radpos[m] - radpos[j])
         val += vals[m] * poly
         suml = 0.0
-        for l in range(istart - 1, iend):
-            if l == m:
+        for q in range(istart - 1, iend):
+            if q == m:
                 continue
             poly = 1.0
             for j in range(istart - 1, iend):
-                if j != m and j != l:
+                if j != m and j != q:
                     poly *= (r - radpos[j]) / (radpos[m] - radpos[j])
-            suml += poly / (radpos[m] - radpos[l])
+            suml += poly / (radpos[m] - radpos[q])
         der1 += vals[m] * suml
     return val, der1
 

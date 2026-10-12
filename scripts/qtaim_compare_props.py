@@ -128,3 +128,89 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+# ---------------------------------------------------------------- whole-step comparisons (P3)
+
+LABEL_TYPE = {"NCP": 0, "BCP": 1, "RCP": 2, "CCP": 3}
+SAME_CP = 0.03  # Bohr, Multiwfn's minicpdis
+
+
+def compare_cp_sets(ref_cps, res, weak_drop=1e-5):
+    """Engine CPs (cp_search.analyze) against Multiwfn's (load_cpprop_full).
+    Per type: counts [multiwfn, engine]; Multiwfn CPs with no engine CP of the
+    same type within SAME_CP (missing; those below weak_drop, which analyze
+    drops, are counted apart); engine CPs with no Multiwfn CP (extra); the
+    largest position difference of the matched ones. BCP atom pairs, compared
+    unordered as parse_qtaim does: same, differ, engine-only, Multiwfn-only."""
+    out = {"counts": {}, "missing": {}, "missing_weak": {}, "extra": {}, "max_pos_diff": 0.0}
+    pairs = {"same": 0, "differ": 0, "engine_only": 0, "multiwfn_only": 0, "both_unpaired": 0}
+    for lab, t in LABEL_TYPE.items():
+        ref = [c for c in ref_cps if c["label"] == lab]
+        rp = np.array([c["pos_bohr"] for c in ref]).reshape(-1, 3)
+        idx = np.flatnonzero(res["type"] == t)
+        ep = res["pos"][idx]
+        out["counts"][lab] = [len(rp), len(ep)]
+        if len(rp) and len(ep):
+            d = np.linalg.norm(rp[:, None] - ep[None], axis=2)
+            near, dmin = d.argmin(axis=1), d.min(axis=1)
+            matched = dmin < SAME_CP
+            out["extra"][lab] = int((d.min(axis=0) >= SAME_CP).sum())
+        else:
+            near, dmin, matched = np.zeros(len(rp), int), np.full(len(rp), np.inf), np.zeros(len(rp), bool)
+            out["extra"][lab] = len(ep)
+        weak = np.array([c["props"].get("Density of all electrons", 1.0) < weak_drop for c in ref], dtype=bool)
+        out["missing"][lab] = int((~matched & ~weak).sum())
+        out["missing_weak"][lab] = int((~matched & weak).sum())
+        if matched.any():
+            out["max_pos_diff"] = max(out["max_pos_diff"], float(dmin[matched].max()))
+        if lab == "BCP":
+            for c, m, k in zip(ref, matched, near):
+                if not m:
+                    continue
+                e = res["bcp_atoms"][idx[k]]
+                ep_pair = None if e[0] < 0 else tuple(sorted(int(a) + 1 for a in e))
+                mp = None if c["connected"] is None else tuple(sorted(c["connected"]))
+                key = ("both_unpaired" if mp is None and ep_pair is None else "engine_only" if mp is None
+                       else "multiwfn_only" if ep_pair is None else "same" if mp == ep_pair else "differ")
+                pairs[key] += 1
+    out["bcp_pairs"] = pairs
+    return out
+
+
+# qtaim.json fields: skipped, compared absolutely (printed f12.6), or set by the CP's
+# distance to its nucleus at NCPs (see NCP_POSITION_LIMITED)
+JSON_SKIP = {"cp_num", "delta_g_promolecular", "element", "number", "pos_ang", "connected_bond_paths"}
+JSON_ABS = {"ellip_e_dens", "eta"}
+JSON_NCP_LIMITED = {"esp_nuc", "esp_total", "delta_g_hirsh"}
+
+
+def compare_qtaim_json(ref, eng):
+    """Two qtaim.json dicts (parse_qtaim output or loaded JSON; keys compared as
+    strings, "_" keys such as _meta ignored): keys on one side only, and per
+    field the largest difference. Relative, except: ellipticity and eta
+    absolute; grad_norm absolute (it is the convergence residual); spin
+    relative to rho; esp_nuc, esp_total, delta_g_hirsh skipped at atom CPs."""
+    ref = {str(k): v for k, v in ref.items() if not str(k).startswith("_")}
+    eng = {str(k): v for k, v in eng.items() if not str(k).startswith("_")}
+    worst = {}
+    for k in set(ref) & set(eng):
+        atom = "_" not in k
+        r, e = ref[k], eng[k]
+        for f, v in r.items():
+            if f in JSON_SKIP or not isinstance(v, (int, float)) or not isinstance(e.get(f), (int, float)):
+                continue
+            if atom and f in JSON_NCP_LIMITED:
+                continue
+            if f in JSON_ABS or f == "grad_norm":
+                d = abs(e[f] - v)
+            elif f == "spin_density":
+                d = abs(e[f] - v) / max(abs(r.get("density_all", 0.0)), 1e-300)
+            else:
+                d = abs(e[f] - v) / max(abs(v), 1e-300)
+            if not np.isfinite(d):
+                d = float("inf")
+            if d > worst.get(f, (-1.0, ""))[0]:
+                worst[f] = (d, k)
+    return {"only_ref": sorted(set(ref) - set(eng)), "only_engine": sorted(set(eng) - set(ref)),
+            "worst": {f: {"diff": d, "key": k} for f, (d, k) in worst.items()}}
