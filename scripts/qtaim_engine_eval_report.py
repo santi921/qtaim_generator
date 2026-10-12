@@ -3,12 +3,18 @@ CP sets and bond pairs against the stored Multiwfn results, Poincare-Hopf,
 CPprop integrity, qtaim.json differences and time. Lists the jobs behind every
 failure count, so they can be pulled for a closer look.
 
-    python scripts/qtaim_engine_eval_report.py $WORK/qengine_*.jsonl [--show 10]
+    python scripts/qtaim_engine_eval_report.py $WORK/qengine_*.jsonl [--show 10] \
+        [--failing_list rerun.txt --root_omol_inputs SRC/]
+
+--failing_list writes the input folders (SRC/<job>) of every job that, in engine
+mode, breaks Poincare-Hopf, misses a Multiwfn CP, loses or changes a Multiwfn
+bond pair or fails with an error, for a rerun.
 """
 
 import argparse
 import collections
 import json
+import os
 
 import numpy as np
 
@@ -21,6 +27,8 @@ def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("files", nargs="+")
     p.add_argument("--show", type=int, default=10, help="jobs listed per failure class")
+    p.add_argument("--failing_list", help="write the input folders of engine-mode failures here")
+    p.add_argument("--root_omol_inputs", help="input root the records' job paths are relative to")
     args = p.parse_args()
     recs = {}
     for fn in args.files:
@@ -36,6 +44,7 @@ def main():
     stored_ph = sum(r["stored"]["poincare_hopf"] != 1 for r in ok)
     print(f"stored Multiwfn sets breaking Poincare-Hopf: {stored_ph}")
 
+    rerun = set()
     for mode in ("multiwfn", "engine"):
         rows = [(r["job"], r["engine"][mode]) for r in ok if mode in r["engine"]]
         errors = [(j, x["error"]) for j, x in rows if "error" in x]
@@ -61,7 +70,16 @@ def main():
             if x["bcp_pairs"]["engine_only"]:
                 fails["BCPs paired that Multiwfn leaves unpaired"].append(j)
             if x["poincare_hopf"] != 1:
-                fails["Poincare-Hopf != 1"].append(j)
+                fails["Poincare-Hopf != 1 (kept CPs; full set for records before f708b32+)"].append(j)
+            if x.get("poincare_hopf_full_set", x["poincare_hopf"]) != 1:
+                fails["Poincare-Hopf != 1 (full set)"].append(j)
+            if x.get("reseed_rounds"):
+                fails["reseeded"].append(j)
+            if x.get("near_pairs"):
+                fails["near-degenerate CP pairs flagged"].append(j)
+            if mode == "engine" and (x["poincare_hopf"] != 1 or miss or x["bcp_pairs"]["differ"]
+                                     or x["bcp_pairs"]["multiwfn_only"]):
+                rerun.add(j)
             if x["integrity"]:
                 fails["CPprop integrity problems"].append(j)
             if x["max_pos_diff"] > 1e-9:
@@ -84,9 +102,16 @@ def main():
             print(f"   {cmp}: largest field differences " + ", ".join(f"{f} {w[0]:.1e}" for f, w in items[:6]))
             for f, (d, j, k) in over[: args.show]:
                 print(f"      over print precision: {f} {d:.1e} at {j} key {k}")
+        if mode == "engine":
+            rerun.update(j for j, _ in errors)
         secs = np.array([x["s"] for _, x in rows])
         if len(secs):
             print(f"   time per job: median {np.median(secs):.1f} s, p90 {np.percentile(secs, 90):.1f} s, max {secs.max():.1f} s, total {secs.sum() / 3600:.2f} h")
+    if args.failing_list:
+        root = args.root_omol_inputs or ""
+        with open(args.failing_list, "w") as f:
+            f.writelines(os.path.join(root, j) + "\n" for j in sorted(rerun))
+        print(f"\n{len(rerun)} engine-mode failures written to {args.failing_list}")
 
 
 if __name__ == "__main__":

@@ -214,7 +214,9 @@ def engine_check(cps, stored_cpprop, wfx, basis, workdir, input_folder, results_
             t0 = time.perf_counter()
             res = analyze(wfx, basis, **cfg)
             r = {"s": round(time.perf_counter() - t0, 2), **compare_cp_sets(cps, res),
-                 "poincare_hopf": res["poincare_hopf_full_set"], "weak": len(res["weak"]), "dropped": res["dropped"]}
+                 "poincare_hopf": res["poincare_hopf"], "poincare_hopf_full_set": res["poincare_hopf_full_set"],
+                 "weak": len(res["weak"]), "dropped": res["dropped"], "near_pairs": len(res["near_pairs"]),
+                 "reseed_rounds": [st["stage"] for st in res["stats"] if st["stage"].startswith("sphere")]}
             path = os.path.join(workdir, f"CPprop_{name}.txt")
             write_cpprop(path, res, wfx)
             with open(path, "rb") as f:

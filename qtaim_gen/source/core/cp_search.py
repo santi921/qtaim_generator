@@ -283,13 +283,20 @@ def _poincare_hopf(types):
 
 
 def reseed(cps, wfx, basis, rounds=RESEED_ROUNDS, minicpdis=MINICPDIS):
-    """While Poincare-Hopf fails, add CPs from sphere seeds around every atom,
-    with more points per round. New CPs within minicpdis of a known one are
+    """While Poincare-Hopf fails on the CPs with rho >= WEAK_DROP (the ones
+    analyze keeps; README decision 10), add CPs from sphere seeds around every
+    atom, with more points per round. New CPs within minicpdis of a known one
     of the same type are dropped (known CPs are never replaced); among new ones
-    the lowest |g| is kept. Returns the updated cps and one stats entry per round run."""
+    the lowest |g| is kept. Rounds stop once the kept CPs or the full set satisfy
+    Poincare-Hopf. Returns the updated cps and one stats entry per round run."""
     stats = []
+    if not rounds:
+        return cps, stats
+    rho = density_derivatives(cps["pos"], wfx, basis, hessian=False)["rho"]
     for n in rounds:
-        if _poincare_hopf(cps["type"]) == 1:
+        # stop once the kept CPs satisfy it, or the full set does (then the kept set fails only
+        # because a CP lies below WEAK_DROP, which more seeds cannot change)
+        if _poincare_hopf(cps["type"][rho >= WEAK_DROP]) == 1 or (stats and _poincare_hopf(cps["type"]) == 1):
             break
         x, status, hess, gnorm, niter = newton(sphere_seeds(wfx["coords"], n), wfx, basis)
         ok = np.flatnonzero(status == 1)
@@ -306,10 +313,12 @@ def reseed(cps, wfx, basis, rounds=RESEED_ROUNDS, minicpdis=MINICPDIS):
             cps["type"] = np.append(cps["type"], t)
             cps["eigenvalues"] = np.vstack([cps["eigenvalues"], eig[j]])
             cps["stage"] = cps["stage"] + [f"sphere{n}"]
+            rho = np.append(rho, density_derivatives(p[None], wfx, basis, hessian=False)["rho"])
             added += 1
         stats.append({"stage": f"sphere{n}", "seeds": len(x), "converged": len(ok), "singular": int((status == -1).sum()),
                       "maxcyc": int((status == -2).sum()), "new_cps": added, "newton_steps": int(niter.sum()),
-                      "poincare_hopf_after": _poincare_hopf(cps["type"])})
+                      "poincare_hopf_after": _poincare_hopf(cps["type"][rho >= WEAK_DROP]),
+                      "poincare_hopf_full_set_after": _poincare_hopf(cps["type"])})
     return cps, stats
 
 
@@ -464,9 +473,10 @@ def _near_pairs(pos):
 def analyze(wfx, basis, seeds="superset", paths="engine", boys_mode="exact", reseed_rounds=None):
     """CP search, properties at every CP, bond paths and atom mapping.
 
-    When Poincare-Hopf fails, reseed adds sphere-seed rounds (reseed_rounds,
-    default RESEED_ROUNDS; () disables, and seeds="multiwfn" disables it unless
-    given). Poincare-Hopf is then counted on the full CP set; CPs with rho <
+    When Poincare-Hopf fails on the CPs with rho >= WEAK_DROP, reseed adds
+    sphere-seed rounds (reseed_rounds, default RESEED_ROUNDS; () disables, and
+    seeds="multiwfn" disables it unless given). Both sums are returned:
+    poincare_hopf (kept CPs) and poincare_hopf_full_set; then CPs with rho <
     WEAK_DROP are dropped and those with rho < WEAK_FLAG flagged.
     seeds="multiwfn" keeps Multiwfn's CP order (so cp_num matches); other modes
     use the canonical order."""
@@ -481,6 +491,7 @@ def analyze(wfx, basis, seeds="superset", paths="engine", boys_mode="exact", res
     counts = np.bincount(cps["type"], minlength=4)
     ph = int(counts[0] - counts[1] + counts[2] - counts[3])
     keep = np.flatnonzero(props["rho"] >= WEAK_DROP)
+    ph_kept = _poincare_hopf(cps["type"][keep])
     cps = {"pos": cps["pos"][keep], "type": cps["type"][keep], "stage": [cps["stage"][i] for i in keep],
            "stats": cps["stats"]}
     props = {k: v[keep] for k, v in props.items()}
@@ -494,7 +505,7 @@ def analyze(wfx, basis, seeds="superset", paths="engine", boys_mode="exact", res
         "ncp_atom": bp["ncp_atom"][order], "bcp_atoms": pair[order],
         "weak": np.flatnonzero(props["rho"][order] < WEAK_FLAG),
         "near_pairs": _near_pairs(cps["pos"][order]),
-        "poincare_hopf_full_set": ph, "dropped": int(counts.sum() - len(keep)),
+        "poincare_hopf": ph_kept, "poincare_hopf_full_set": ph, "dropped": int(counts.sum() - len(keep)),
         "counts_full_set": counts.tolist(), "stats": cps["stats"],
     }
 
