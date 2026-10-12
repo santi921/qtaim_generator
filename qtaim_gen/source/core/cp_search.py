@@ -16,7 +16,9 @@ Multiwfn's first-come order depends on scheduling), and each stage is sorted as
 sortCP does. All seeds of a stage iterate together, one density_derivatives
 call per Newton step.
 
-Engine mode (seeds="delaunay") replaces the O(N k^3) triads and quads with
+Engine mode (seeds="delaunay" or "superset") merges only CPs of the same type
+within minicpdis (Multiwfn's rule ignores the type and loses one CP of a close
+BCP-RCP pair). seeds="delaunay" replaces the O(N k^3) triads and quads with
 O(N) seeds from the Delaunay triangulation of the nuclei: nuclei; points at
 0.3, 0.5, 0.7 along every vdW-close pair; centroids of triangles and
 tetrahedra whose edges all pass the vdW test. Newton steps are capped at
@@ -194,15 +196,19 @@ def _engine_search(wfx, basis, minicpdis, superset):
         stats.append({"stage": stage, "seeds": len(pts), "converged": len(ok), "singular": int((status == -1).sum()),
                       "maxcyc": int((status == -2).sum()), "newton_steps": int(niter.sum())})
     x, eig, g = np.concatenate(cand_x), np.concatenate(cand_eig), np.concatenate(cand_g)
-    # nuclear CPs first (their gradient criterion is off), then ascending |g|, then position
+    ctype = (eig > 0).sum(axis=1)
+    # nuclear CPs first (their gradient criterion is off), then ascending |g|, then position;
+    # only CPs of the same type merge: a BCP and an RCP 0.01 Bohr apart (near a bifurcation)
+    # are two CPs, and Multiwfn's type-blind rule drops one of them
     rank = np.lexsort((x[:, 2], x[:, 1], x[:, 0], g, np.array([s != "nuclei" for s in cand_stage])))
     kept = []
     for i in rank:
-        if kept and np.min(np.linalg.norm(x[kept] - x[i], axis=1)) <= minicpdis:
+        same = [k for k in kept if ctype[k] == ctype[i]]
+        if same and np.min(np.linalg.norm(x[same] - x[i], axis=1)) <= minicpdis:
             continue
         kept.append(i)
     kept = np.array(kept, dtype=np.int64)
-    types = (eig[kept] > 0).sum(axis=1)
+    types = ctype[kept]
     order = np.lexsort((_sort_key(x[kept]), types))
     kept = kept[order]
     return {"pos": x[kept], "type": types[order], "eigenvalues": eig[kept],
@@ -250,6 +256,61 @@ def search(wfx, basis, seeds="multiwfn", minicpdis=MINICPDIS):
         "pos": np.array(found_pos).reshape(-1, 3), "type": np.array(found_type, dtype=np.int64),
         "eigenvalues": np.array(found_eig).reshape(-1, 3), "stage": found_stage, "stats": stats,
     }
+
+
+# ---------------------------------------------------------------- reseeding (P4)
+
+SPHERE_RADIUS = 3.0  # Bohr, Multiwfn's toposphrad
+RESEED_ROUNDS = (128, 512, 1000)  # sphere points per atom per round; Multiwfn's exhaustive search uses 1000
+
+
+def sphere_seeds(coords, n, radius=SPHERE_RADIUS):
+    """n deterministic points per atom inside a radius-Bohr ball: a scrambled
+    Sobol sequence (fixed seed) in the cube, kept inside the ball, the same
+    pattern translated to every nucleus. Multiwfn's sphere search (topology
+    option 6) draws 1000 random points per atom in the same ball."""
+    from scipy.stats import qmc
+
+    m = 1 << int(np.ceil(np.log2(4 * n)))
+    cube = qmc.Sobol(d=3, scramble=True, seed=0).random(m) * 2 - 1
+    ball = cube[(cube**2).sum(axis=1) <= 1][:n] * radius
+    return (coords[:, None, :] + ball[None, :, :]).reshape(-1, 3)
+
+
+def _poincare_hopf(types):
+    c = np.bincount(types, minlength=4)
+    return int(c[0] - c[1] + c[2] - c[3])
+
+
+def reseed(cps, wfx, basis, rounds=RESEED_ROUNDS, minicpdis=MINICPDIS):
+    """While Poincare-Hopf fails, add CPs from sphere seeds around every atom,
+    with more points per round. New CPs within minicpdis of a known one are
+    of the same type are dropped (known CPs are never replaced); among new ones
+    the lowest |g| is kept. Returns the updated cps and one stats entry per round run."""
+    stats = []
+    for n in rounds:
+        if _poincare_hopf(cps["type"]) == 1:
+            break
+        x, status, hess, gnorm, niter = newton(sphere_seeds(wfx["coords"], n), wfx, basis)
+        ok = np.flatnonzero(status == 1)
+        eig = np.linalg.eigvalsh(hess[ok])
+        good = ~np.all(eig == 0, axis=1)
+        ok, eig = ok[good], eig[good]
+        added = 0
+        for j in np.lexsort((x[ok, 2], x[ok, 1], x[ok, 0], gnorm[ok])):
+            p, t = x[ok[j]], int((eig[j] > 0).sum())
+            same = cps["type"] == t
+            if same.any() and np.min(np.linalg.norm(cps["pos"][same] - p, axis=1)) <= minicpdis:
+                continue
+            cps["pos"] = np.vstack([cps["pos"], p])
+            cps["type"] = np.append(cps["type"], t)
+            cps["eigenvalues"] = np.vstack([cps["eigenvalues"], eig[j]])
+            cps["stage"] = cps["stage"] + [f"sphere{n}"]
+            added += 1
+        stats.append({"stage": f"sphere{n}", "seeds": len(x), "converged": len(ok), "singular": int((status == -1).sum()),
+                      "maxcyc": int((status == -2).sum()), "new_cps": added, "newton_steps": int(niter.sum()),
+                      "poincare_hopf_after": _poincare_hopf(cps["type"])})
+    return cps, stats
 
 
 # ---------------------------------------------------------------- bond paths
@@ -387,15 +448,35 @@ def _canonical_order(cps, ncp_atom, bcp_pairs, bcp_index, coords):
     return np.array(sorted(range(len(keys)), key=lambda i: keys[i]), dtype=np.int64)
 
 
-def analyze(wfx, basis, seeds="superset", paths="engine", boys_mode="exact"):
+NEAR_DEGENERATE = 0.1  # Bohr: CP pairs closer than this are flagged (plan section 4)
+
+
+def _near_pairs(pos):
+    """Index pairs (i < j) of CPs closer than NEAR_DEGENERATE, e.g. a BCP and an
+    RCP about to annihilate; their properties are ill-conditioned."""
+    if len(pos) < 2:
+        return []
+    d = np.linalg.norm(pos[:, None] - pos[None], axis=2)
+    i, j = np.where(np.triu(d < NEAR_DEGENERATE, k=1))
+    return [(int(a), int(b)) for a, b in zip(i, j)]
+
+
+def analyze(wfx, basis, seeds="superset", paths="engine", boys_mode="exact", reseed_rounds=None):
     """CP search, properties at every CP, bond paths and atom mapping.
 
-    Poincare-Hopf is counted on the full CP set; then CPs with rho < WEAK_DROP
-    are dropped and those with rho < WEAK_FLAG flagged. seeds="multiwfn" keeps
-    Multiwfn's CP order (so cp_num matches); other modes use the canonical order."""
+    When Poincare-Hopf fails, reseed adds sphere-seed rounds (reseed_rounds,
+    default RESEED_ROUNDS; () disables, and seeds="multiwfn" disables it unless
+    given). Poincare-Hopf is then counted on the full CP set; CPs with rho <
+    WEAK_DROP are dropped and those with rho < WEAK_FLAG flagged.
+    seeds="multiwfn" keeps Multiwfn's CP order (so cp_num matches); other modes
+    use the canonical order."""
     from qtaim_gen.source.core.qtaim_engine import point_properties
 
     cps = search(wfx, basis, seeds=seeds)
+    if reseed_rounds is None:
+        reseed_rounds = () if seeds == "multiwfn" else RESEED_ROUNDS
+    cps, reseed_stats = reseed(cps, wfx, basis, rounds=reseed_rounds)
+    cps["stats"] = cps["stats"] + reseed_stats
     props = point_properties(cps["pos"], wfx, basis, esp=True, boys_mode=boys_mode)
     counts = np.bincount(cps["type"], minlength=4)
     ph = int(counts[0] - counts[1] + counts[2] - counts[3])
@@ -412,6 +493,7 @@ def analyze(wfx, basis, seeds="superset", paths="engine", boys_mode="exact"):
         "pos": cps["pos"][order], "type": cps["type"][order], "props": {k: v[order] for k, v in props.items()},
         "ncp_atom": bp["ncp_atom"][order], "bcp_atoms": pair[order],
         "weak": np.flatnonzero(props["rho"][order] < WEAK_FLAG),
+        "near_pairs": _near_pairs(cps["pos"][order]),
         "poincare_hopf_full_set": ph, "dropped": int(counts.sum() - len(keep)),
         "counts_full_set": counts.tolist(), "stats": cps["stats"],
     }

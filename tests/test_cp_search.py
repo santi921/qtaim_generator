@@ -145,3 +145,36 @@ def test_engine_cpprop_parses_like_multiwfn(tmp_path):
                 assert abs(eng[k][f] - v) <= 2e-6, (k, f)
             else:
                 assert eng[k][f] == pytest.approx(v, rel=1e-9, abs=1e-12 * abs(ref[k]["density_all"])), (k, f)
+
+
+def test_sphere_seeds_are_deterministic_and_inside_the_ball():
+    from qtaim_gen.source.core.cp_search import SPHERE_RADIUS, sphere_seeds
+
+    coords = np.array([[0.0, 0.0, 0.0], [5.0, 1.0, -2.0]])
+    a, b = sphere_seeds(coords, 128), sphere_seeds(coords, 128)
+    assert a.shape == (256, 3) and np.array_equal(a, b)
+    assert np.linalg.norm(a[:128] - coords[0], axis=1).max() <= SPHERE_RADIUS
+    assert np.allclose(a[128:] - coords[1], a[:128] - coords[0])
+
+
+def test_reseed_recovers_a_missing_cp():
+    from qtaim_gen.source.core.cp_search import _poincare_hopf, reseed, search
+
+    wfx, basis, _ = _load("XeCl4_step2_0_1")
+    full = search(wfx, basis, seeds="superset")
+    assert _poincare_hopf(full["type"]) == 1
+    drop = int(np.flatnonzero(full["type"] == 1)[0])
+    keep = [i for i in range(len(full["pos"])) if i != drop]
+    cps = {"pos": full["pos"][keep], "type": full["type"][keep], "eigenvalues": full["eigenvalues"][keep],
+           "stage": [full["stage"][i] for i in keep], "stats": []}
+    assert _poincare_hopf(cps["type"]) == 2
+    cps, stats = reseed(cps, wfx, basis)
+    assert _poincare_hopf(cps["type"]) == 1 and stats
+    assert np.linalg.norm(cps["pos"] - full["pos"][drop], axis=1).min() < 1e-8
+
+
+def test_near_pairs_flags_close_cps():
+    from qtaim_gen.source.core.cp_search import _near_pairs
+
+    pos = np.array([[0.0, 0.0, 0.0], [0.0115, 0.0, 0.0], [1.0, 0.0, 0.0]])
+    assert _near_pairs(pos) == [(0, 1)]
