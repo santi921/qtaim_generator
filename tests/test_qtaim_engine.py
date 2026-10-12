@@ -125,3 +125,33 @@ def test_sampler_element_classes():
     cls = {s: element_class(ELEMENTS.index(s) + 1) for s in ("H", "Br", "Fe", "Zn", "Rb", "Cs", "I", "Ag", "Hf", "Hg", "La", "Lu", "U")}
     assert cls == {"H": 0, "Br": 0, "Fe": 1, "Zn": 1, "Rb": 2, "Cs": 2, "I": 2, "Ag": 3, "Hf": 3, "Hg": 3,
                    "La": 4, "Lu": 4, "U": 4}
+
+
+def test_delta_g_hirsh_and_esp_match_multiwfn_away_from_nuclei():
+    from qtaim_gen.source.core.charge_engine import prepare_basis, read_wfx
+    from qtaim_gen.source.core.qtaim_engine import point_properties
+
+    cps = [c for c in load_cpprop_full(CPPROP) if c["label"] != "NCP"]
+    wfx = read_wfx(os.path.join(os.path.dirname(CPPROP), "orca.wfx"))
+    eng = point_properties(np.array([c["pos_bohr"] for c in cps]), wfx, prepare_basis(wfx), esp=True, boys_mode="multiwfn")
+    # at NCPs these three are set by the CP's distance to the nucleus, which the printed positions do not resolve
+    for name, key in (("Delta-g (under Hirshfeld partition)", "delta_g_hirsh"), ("ESP from nuclear charges", "esp_nuc"),
+                      ("ESP from electrons", "esp_e"), ("Total ESP", "esp_total")):
+        ref = np.array([c["props"][name] for c in cps])
+        assert np.max(np.abs(eng[key] - ref) / np.abs(ref)) < 1e-9, key
+
+
+def test_lagintpol_derivative_matches_finite_differences():
+    from qtaim_gen.source.core.qtaim_engine import _lagintpol_d1
+    from qtaim_gen.source.data import multiwfn_atmraddens as R
+
+    radpos, vals = np.array(R.RADPOS), np.array(R.RHO[8])
+    npt = len(vals)
+    for r in (1e-5, 0.003, 0.4, 1.7, 5.0, radpos[npt - 1] * 1.01):
+        v, d1 = _lagintpol_d1(radpos, vals, npt, r)
+        if r >= radpos[npt - 1]:
+            assert v == 0.0 and d1 == 0.0
+            continue
+        h = 1e-7 * max(r, 1e-3)
+        fd = (_lagintpol_d1(radpos, vals, npt, r + h)[0] - _lagintpol_d1(radpos, vals, npt, r - h)[0]) / (2 * h)
+        assert d1 == pytest.approx(fd, rel=1e-6, abs=1e-9)

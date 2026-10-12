@@ -36,9 +36,17 @@ SCALARS = {
     "Determinant of Hessian": "det_hessian",
     "Ellipticity of electron density": "ellipticity",
     "eta index": "eta",
+    "Delta-g (under Hirshfeld partition)": "delta_g_hirsh",
+    "ESP from nuclear charges": "esp_nuc",
+    "ESP from electrons": "esp_e",
+    "Total ESP": "esp_total",
 }
 # printed with 6 decimals, so compared as absolute differences
 ABSOLUTE = {"ellipticity", "eta"}
+# Not compared at NCPs: there they are set by the CP's distance to its nucleus (1e-8
+# to 1e-5 Bohr, where Newton stopped), which the 12-decimal positions do not resolve;
+# esp_nuc is ~Z/d, and a printed position equal to the nucleus gives Multiwfn's 1000.
+NCP_POSITION_LIMITED = {"esp_nuc", "esp_total", "delta_g_hirsh"}
 # spin is relative to max(|spin|, SPIN_FLOOR * rho): an absolute difference would pass
 # large relative errors where |spin| is small and flag print rounding where |spin| ~ 10.
 # Spin is a difference of alpha and beta densities, so its roundoff scales with rho
@@ -53,14 +61,15 @@ def _worst(d):
     return float(np.inf) if np.isnan(d).any() else float(np.max(d))
 
 
-def compare_cps(cps, wfx, basis):
+def compare_cps(cps, wfx, basis, boys_mode="multiwfn"):
     """Per CP type: (count, {property: max difference}) between Multiwfn's
     printed values for cps (load_cpprop_full) and the engine at the printed
-    positions. gradient_bound is max |g_engine - g_mwfn| over the rounding
+    positions. The ESP uses Multiwfn's Boys function (Fmch) by default, so the
+    comparison checks the integrals; boys_mode="exact" measures the divergence. gradient_bound is max |g_engine - g_mwfn| over the rounding
     bound ||H||_2 * 8.7e-13 + 5e-11 |g| + 1e-20 (positions printed to 1e-12
     Bohr per coordinate, values to E18.10); <= 1 means consistent."""
     pts = np.array([c["pos_bohr"] for c in cps])
-    eng = point_properties(pts, wfx, basis)
+    eng = point_properties(pts, wfx, basis, esp=True, boys_mode=boys_mode)
     out = {}
     for lab in ("NCP", "BCP", "RCP", "CCP"):
         idx = [i for i, c in enumerate(cps) if c["label"] == lab]
@@ -68,6 +77,8 @@ def compare_cps(cps, wfx, basis):
             continue
         res = {}
         for name, key in SCALARS.items():
+            if lab == "NCP" and key in NCP_POSITION_LIMITED:
+                continue
             ref = np.array([cps[i]["props"].get(name, np.nan) for i in idx])
             val = eng[key][idx]
             if key in ABSOLUTE:
