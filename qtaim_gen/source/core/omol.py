@@ -241,6 +241,7 @@ def create_jobs(
     patch_path: bool = False,
     wfx: bool = True,
     exhaustive_qtaim: bool = False,
+    libreta_esp: bool = False,
 ) -> None:
     """
     Create job files for multiwfn analysis
@@ -255,6 +256,7 @@ def create_jobs(
         full_set(int): whether to use full set of analysis (1) or minimal (0)
         patch_path(bool): whether to patch the pathing in the multiwfn input files
         wfx(bool): whether to use .wfx format instead of .wfn for conversion
+        libreta_esp(bool): evaluate the QTAIM CP ESP with LIBRETA instead of eleesp1
 
     """
     if logger is None:
@@ -322,7 +324,7 @@ def create_jobs(
                 job_dict["qtaim"] = os.path.join(folder, "qtaim.txt")
                 # write qtaim data file
                 with open(os.path.join(folder, "qtaim.txt"), "w") as f:
-                    data = qtaim_data(exhaustive=exhaustive_qtaim)
+                    data = qtaim_data(exhaustive=exhaustive_qtaim, libreta_esp=libreta_esp)
                     f.write(data)
 
             elif routine == "fuzzy_full":
@@ -2396,6 +2398,7 @@ def gbw_analysis(
     require_qtaim_provenance: bool = False,
     wfx: bool = True,
     exhaustive_qtaim: bool = False,
+    libreta_esp: bool = False,
     subprocess_env: Optional[dict] = None,
     patch_timings: bool = False,
     horton_python: str = "",
@@ -2424,6 +2427,8 @@ def gbw_analysis(
         full_set(int): refined set of cheaper calcs or full set of analysis
         move_results(bool): whether to move results to a single results folder after analysis
         wfx(bool): whether to use .wfx format instead of .wfn for conversion
+        libreta_esp(bool): evaluate the QTAIM CP ESP with LIBRETA instead of
+            eleesp1 (default off; see docs/LIBRETA_ESP.md before enabling)
         horton_python(str): python interpreter of the separate horton environment;
             non-empty enables the HORTON charge engine post-step (default off)
         check_bcp_count(bool): reject qtaim.json records holding fewer bond
@@ -2842,6 +2847,7 @@ def gbw_analysis(
             patch_path=patch_path,
             wfx=wfx,
             exhaustive_qtaim=exhaustive_qtaim,
+            libreta_esp=libreta_esp,
         )
         # run jobs
         run_jobs(

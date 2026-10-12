@@ -125,12 +125,23 @@ def other_data_dict(full_set: int) -> dict:
     return string_dict
  
 
-def qtaim_data(exhaustive: bool = False) -> str:  # can work in one go
+# A 2x2 ESP plane map (main function 4, function 12, XY plane at Z=0, then -5 back
+# to the main menu) only to make Multiwfn initialize LIBRETA. Topology never does
+# that on its own, so CPprop.txt ESP otherwise comes from the old eleesp1 code. The
+# topology settings stay at their defaults. See docs/LIBRETA_ESP.md.
+LIBRETA_ESP_PREFIX = "4\n12\n1\n2,2\n1\n0\n-5\n"
+
+
+def qtaim_data(exhaustive: bool = False, libreta_esp: bool = False) -> str:  # can work in one go
     """
     qtaim data - critical points search and analysis
+    libreta_esp: evaluate the CP ESP with LIBRETA (faster, but esp_e differs from
+        eleesp1 by up to ~5e-5 relative; never mix the two within a dataset)
     """
     if exhaustive:
         string_ret = "2\n2\n3\n4\n5\n6\n-1\n-9\n8\n7\n0\n-10\nq\n"
     else:  # skips spherical search around atoms
         string_ret = "2\n2\n3\n4\n5\n8\n7\n0\n-10\nq\n"
+    if libreta_esp:
+        string_ret = LIBRETA_ESP_PREFIX + string_ret
     return string_ret

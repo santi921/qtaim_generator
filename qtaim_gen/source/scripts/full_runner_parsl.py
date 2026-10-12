@@ -187,6 +187,17 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
 
     parser.add_argument(
+        "--libreta_esp",
+        action="store_true",
+        help=(
+            "evaluate the QTAIM CP ESP with Multiwfn's LIBRETA instead of eleesp1: "
+            "about 2x faster on mid-size jobs, but esp_e differs by up to ~5e-5 relative "
+            "and init briefly needs ~3.9e-7 * GTF^2 GB. Never mix with eleesp1 runs in "
+            "one dataset; see docs/LIBRETA_ESP.md"
+        ),
+    )
+
+    parser.add_argument(
         "--patch_timings",
         action="store_true",
         help=(
@@ -305,6 +316,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     clean_first: bool = bool(getattr(args, "clean_first", False))
     wfx: bool = bool(getattr(args, "wfx", True))
     exhaustive_qtaim: bool = bool(getattr(args, "exhaustive_qtaim", False))
+    libreta_esp: bool = bool(getattr(args, "libreta_esp", False))
     patch_timings: bool = bool(getattr(args, "patch_timings", False))
     horton_python: str = str(getattr(args, "horton_python", ""))
     check_bcp_count: bool = bool(getattr(args, "check_bcp_count", False))
@@ -411,6 +423,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             clean_first=clean_first,
             wfx=wfx,
             exhaustive_qtaim=exhaustive_qtaim,
+            libreta_esp=libreta_esp,
             patch_timings=patch_timings,
             horton_python=horton_python,
             check_bcp_count=check_bcp_count,

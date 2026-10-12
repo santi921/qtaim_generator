@@ -813,6 +813,23 @@ def qtaim_out_banner(folder: Optional[str]) -> Optional[tuple]:
     return None
 
 
+def qtaim_esp_code(qtaim_out_text: Optional[str]) -> Optional[str]:
+    """Which Multiwfn code evaluated the CP ESP in CPprop.txt: "libreta_fast",
+    "libreta_slow" or "eleesp1"; None without a qtaim.out.
+
+    Multiwfn prints the init line only when it initializes LIBRETA, and without
+    that init eleesp falls back to eleesp1 whatever iESPcode says. Intended for
+    the qtaim.json _meta block (fix/cpprop-integrity) once that lands.
+    """
+    if qtaim_out_text is None:
+        return None
+    if "Initializing LIBRETA library (fast version)" in qtaim_out_text:
+        return "libreta_fast"
+    if "Initializing LIBRETA library (slow version)" in qtaim_out_text:
+        return "libreta_slow"
+    return "eleesp1"
+
+
 def qtaim_fixed_in_place(record: dict) -> bool:
     """fix-allalpha-qtaim's signature: density_alpha == density_beta and spin_density == 0 exactly at
     every CP. Such a record keeps the all-alpha banner in its archived qtaim.out; no unrestricted run
