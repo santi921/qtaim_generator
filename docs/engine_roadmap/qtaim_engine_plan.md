@@ -336,7 +336,7 @@ Open: the density matrix is dense nprim^2 (750 MB at 9673 primitives); block it 
 - D3. RESOLVED 2026-10-08 for ring and cage CPs: keep them, found mathematically, as a phase-two QTAIM task. Storage (qtaim.json or sidecar), NNAs and duplicate same-pair BCPs still open. The regeneration campaign is saving CPprop.txt now, so Multiwfn's RCP/CCP can be reparsed for validation.
 - D4. RESOLVED 2026-10-12: keep the ESP fields.
 - D5. Pending: the user is asking Tian Lu whether Multiwfn's EDF tables may be redistributed. Until then, wfx files keep supplying the EDF.
-- D6. Weak-CP policy: keep everything, flag rho < 1e-3, or discard rho < 1e-5 as critic2 does?
+- D6. RESOLVED 2026-10-12: Poincare-Hopf on the full set, then drop rho < 1e-5 and flag rho < 1e-3 in `_meta` (README decision 10).
 - D7. Invest in GPU, and on which clusters?
 - D8. Is the `_meta` block enough provenance for --require_qtaim_provenance?
 

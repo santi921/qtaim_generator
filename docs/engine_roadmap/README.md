@@ -34,6 +34,8 @@ faster per job (median, same hardware, full_set 1).
 | 7 | delta_g_promolecular (QTAIM plan D2): drop or port Multiwfn's STO table | Drop. Its values differ between Multiwfn builds |
 | 8 | Keep the ESP fields at CPs as features (QTAIM plan D4) | Keep |
 | 9 | Boys function for the ESP kernel | Exact by default. A copy of Multiwfn's `Fmch` (series cut at 1e-8, sqrt(pi)/2 truncated to 0.88622692) exists only for tests; the difference goes in the divergence changelog |
+| 10 | Weak CPs (QTAIM plan D6) | Check Poincare-Hopf on the full CP set first, then drop CPs with rho < 1e-5 and flag rho < 1e-3 in `_meta` (list of CP keys; the per-CP schema is unchanged). Whether flagged CPs become graph edges is a converter setting. Local data (97 jobs, 6,563 CPs): none below 1e-5, 141 (2.1%) between 1e-5 and 1e-3 |
+| 11 | esp_nuc, esp_total, delta_g_hirsh at nuclear CPs | Keep, for parity, although they are set by where the search stopped near the nucleus |
 
 Production ESP at CPs comes from Multiwfn's old `eleesp1` routine, not libreta: the QTAIM
 stdin never initializes libreta, so `eleesp` falls back (MW/function.f90:4269-4280).
