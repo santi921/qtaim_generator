@@ -75,3 +75,16 @@ def test_tuples_follow_multiwfn_loop_order():
     assert _tuples(close, 2).tolist() == [[0, 1], [0, 2], [1, 2], [1, 3], [2, 3]]
     assert _tuples(close, 3).tolist() == [[0, 1, 2], [1, 2, 3]]
     assert _tuples(close, 4).tolist() == []
+
+
+@pytest.mark.parametrize("job", JOBS)
+def test_superset_seeds_keep_every_multiwfn_cp(job):
+    from qtaim_gen.source.core.cp_search import search
+
+    wfx, basis, ref = _load(job)
+    res = search(wfx, basis, seeds="superset")
+    for lab, t in LABEL_TYPE.items():
+        rp = np.array([c["pos_bohr"] for c in ref if c["label"] == lab]).reshape(-1, 3)
+        ep = res["pos"][res["type"] == t]
+        if len(rp):
+            assert len(ep) and np.linalg.norm(rp[:, None] - ep[None], axis=2).min(axis=1).max() < 5e-12, lab

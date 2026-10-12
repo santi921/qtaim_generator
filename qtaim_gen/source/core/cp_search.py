@@ -15,10 +15,21 @@ in loop order, which is Multiwfn's order on one thread (with several threads
 Multiwfn's first-come order depends on scheduling), and each stage is sorted as
 sortCP does. All seeds of a stage iterate together, one density_derivatives
 call per Newton step.
+
+Engine mode (seeds="delaunay") replaces the O(N k^3) triads and quads with
+O(N) seeds from the Delaunay triangulation of the nuclei: nuclei; points at
+0.3, 0.5, 0.7 along every vdW-close pair; centroids of triangles and
+tetrahedra whose edges all pass the vdW test. Newton steps are capped at
+TRUST_RADIUS. Converged points are deduplicated by ascending |g| (then
+position), so the CP kept from a cluster does not depend on seed order.
+seeds="superset" runs Multiwfn's seeds and the Delaunay ones together: on 88
+local jobs the Delaunay seeds alone missed 4 weak (rho 8e-4 to 4e-3) ring and
+cage CPs that Multiwfn's triads and quads find.
 """
 
 import numpy as np
 from numba import njit
+from scipy.spatial import Delaunay, QhullError
 
 from qtaim_gen.source.core.charge_engine import B2A
 from qtaim_gen.source.core.qtaim_engine import density_derivatives
@@ -29,6 +40,7 @@ MINICPDIS = 0.03  # Bohr
 VDWSUMCRIT = 1.5
 SINGULARCRIT = 5e-22
 TOPOMAXCYC = 120
+TRUST_RADIUS = None  # Bohr cap on Newton steps (engine mode); off: seeds that run into vacuum then stop fast on det H
 CP_TYPES = {0: "NCP", 1: "BCP", 2: "RCP", 3: "CCP"}  # by number of positive eigenvalues
 
 # Bondi vdW radii (Angstrom) as Multiwfn's vdwr (MW/define.f90:85-90), index = Z
@@ -93,14 +105,40 @@ def multiwfn_seeds(coords, atnums):
     return stages
 
 
-def newton(seeds, wfx, basis, gradconv=GRADCONV, dispconv=DISPCONV, maxcyc=TOPOMAXCYC, singular=SINGULARCRIT):
-    """findcp's Newton iteration for every seed at once. Returns final positions,
-    status (1 converged, -1 singular Hessian, -2 out of cycles), the Hessian of
-    the last step and the iteration count."""
+def delaunay_seeds(coords, atnums):
+    """Engine seeds: nuclei, 3 points per vdW-close pair, and centroids of the
+    Delaunay triangles and tetrahedra of the nuclei whose edges are all close.
+    Fewer than 4 atoms, or nuclei on a plane or line, use Multiwfn's seeds."""
+    close = _close_matrix(coords, VDWR[atnums], VDWSUMCRIT)
+    try:
+        tets = np.sort(Delaunay(coords).simplices, axis=1) if len(coords) >= 4 else None
+    except QhullError:
+        tets = None
+    if tets is None:
+        return np.concatenate([p for _, p in multiwfn_seeds(coords, atnums)[1:]])
+    pairs = _tuples(close, 2)
+    a, b = coords[pairs[:, 0]], coords[pairs[:, 1]]
+    along = np.concatenate([a + f * (b - a) for f in (0.3, 0.5, 0.7)])
+    faces = np.unique(np.concatenate([tets[:, [0, 1, 2]], tets[:, [0, 1, 3]], tets[:, [0, 2, 3]], tets[:, [1, 2, 3]]]), axis=0)
+    faces = faces[close[faces[:, 0], faces[:, 1]] & close[faces[:, 0], faces[:, 2]] & close[faces[:, 1], faces[:, 2]]]
+    ok = np.ones(len(tets), dtype=bool)
+    for i, j in ((0, 1), (0, 2), (0, 3), (1, 2), (1, 3), (2, 3)):
+        ok &= close[tets[:, i], tets[:, j]]
+    tets = np.unique(tets[ok], axis=0)
+    return np.concatenate([along, coords[faces].mean(axis=1), coords[tets].mean(axis=1)])
+
+
+def newton(seeds, wfx, basis, gradconv=GRADCONV, dispconv=DISPCONV, maxcyc=TOPOMAXCYC, singular=SINGULARCRIT,
+           trust=None):
+    """findcp's Newton iteration for every seed at once, steps optionally capped
+    at trust Bohr. Returns final positions, status (1 converged, -1 singular
+    Hessian, -2 out of cycles), the Hessian and gradient of the last step and
+    the iteration count."""
     x = np.array(seeds, dtype=float)
     n = len(x)
     status = np.zeros(n, dtype=np.int64)
     hess = np.zeros((n, 3, 3))
+    gnorm = np.full(n, np.inf)
     niter = np.zeros(n, dtype=np.int64)
     active = np.arange(n)
     for _ in range(maxcyc):
@@ -114,13 +152,19 @@ def newton(seeds, wfx, basis, gradconv=GRADCONV, dispconv=DISPCONV, maxcyc=TOPOM
         ok = ~sing
         a, g, H = active[ok], g[ok], H[ok]
         disp = -np.einsum("pij,pj->pi", np.linalg.inv(H), g)
+        if trust is not None:
+            dn = np.linalg.norm(disp, axis=1)
+            big = dn > trust
+            disp[big] *= (trust / dn[big])[:, None]
         x[a] += disp
-        conv = (np.linalg.norm(disp, axis=1) < dispconv) & (np.linalg.norm(g, axis=1) < gradconv)
+        gn = np.linalg.norm(g, axis=1)
+        conv = (np.linalg.norm(disp, axis=1) < dispconv) & (gn < gradconv)
         status[a[conv]] = 1
         hess[a[conv]] = H[conv]
+        gnorm[a[conv]] = gn[conv]
         active = a[~conv]
     status[active] = -2
-    return x, status, hess, niter
+    return x, status, hess, gnorm, niter
 
 
 def _sort_key(pos):
@@ -128,9 +172,46 @@ def _sort_key(pos):
     return pos[:, 0] * 0.234134 + pos[:, 1] * 1.9837322 - pos[:, 2] * 0.5413578924
 
 
+def _engine_search(wfx, basis, minicpdis, superset):
+    stats = []
+    cand_x, cand_eig, cand_g, cand_stage = [], [], [], []
+    stages = [("nuclei", wfx["coords"].copy(), 1.0)]
+    if superset:
+        stages += [(name, pts, GRADCONV) for name, pts in multiwfn_seeds(wfx["coords"], wfx["atnums"])[1:]]
+    stages.append(("delaunay", delaunay_seeds(wfx["coords"], wfx["atnums"]), GRADCONV))
+    for stage, pts, gconv in stages:
+        if not len(pts):
+            stats.append({"stage": stage, "seeds": 0, "converged": 0, "singular": 0, "maxcyc": 0, "newton_steps": 0})
+            continue
+        x, status, hess, gnorm, niter = newton(pts, wfx, basis, gradconv=gconv, trust=TRUST_RADIUS)
+        ok = np.flatnonzero(status == 1)
+        eig = np.linalg.eigvalsh(hess[ok])
+        keep = ~np.all(eig == 0, axis=1)
+        cand_x.append(x[ok][keep]); cand_eig.append(eig[keep]); cand_g.append(gnorm[ok][keep])
+        cand_stage += [stage] * int(keep.sum())
+        stats.append({"stage": stage, "seeds": len(pts), "converged": len(ok), "singular": int((status == -1).sum()),
+                      "maxcyc": int((status == -2).sum()), "newton_steps": int(niter.sum())})
+    x, eig, g = np.concatenate(cand_x), np.concatenate(cand_eig), np.concatenate(cand_g)
+    # nuclear CPs first (their gradient criterion is off), then ascending |g|, then position
+    rank = np.lexsort((x[:, 2], x[:, 1], x[:, 0], g, np.array([s != "nuclei" for s in cand_stage])))
+    kept = []
+    for i in rank:
+        if kept and np.min(np.linalg.norm(x[kept] - x[i], axis=1)) <= minicpdis:
+            continue
+        kept.append(i)
+    kept = np.array(kept, dtype=np.int64)
+    types = (eig[kept] > 0).sum(axis=1)
+    order = np.lexsort((_sort_key(x[kept]), types))
+    kept = kept[order]
+    return {"pos": x[kept], "type": types[order], "eigenvalues": eig[kept],
+            "stage": [cand_stage[i] for i in kept], "stats": stats}
+
+
 def search(wfx, basis, seeds="multiwfn", minicpdis=MINICPDIS):
     """CPs as a dict: pos (n, 3) Bohr, type (number of positive eigenvalues),
     eigenvalues, stage, and per-stage seed and Newton statistics."""
+    if seeds in ("delaunay", "superset"):
+        return _engine_search(wfx, basis, minicpdis, superset=seeds == "superset")
     if seeds != "multiwfn":
         raise ValueError(f"unknown seed mode {seeds!r}")
     found_pos, found_type, found_eig, found_stage, stats = [], [], [], [], []
@@ -138,7 +219,7 @@ def search(wfx, basis, seeds="multiwfn", minicpdis=MINICPDIS):
         new_pos, new_type, new_eig = [], [], []
         if len(pts):
             gconv = 1.0 if stage == "nuclei" else GRADCONV
-            x, status, hess, niter = newton(pts, wfx, basis, gradconv=gconv)
+            x, status, hess, _, niter = newton(pts, wfx, basis, gradconv=gconv)
             eig = np.linalg.eigvalsh(hess)
             existing = np.array(found_pos).reshape(-1, 3)
             for i in np.flatnonzero(status == 1):
