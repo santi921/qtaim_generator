@@ -329,42 +329,6 @@ def _primitive_block_derivs(pts, atcoords, groups, g_center, g_alpha, g_start, g
     return out
 
 
-def orbital_derivatives(pts, coords, basis, block=128):
-    """Occupied MO values, gradients and Hessians at every point, as
-    orbital_values does them (blocks, group screening, one product per block):
-    returns (10, npts, nmo) in the order of _primitive_block_derivs."""
-    pts = np.asarray(pts, dtype=float)
-    ct = basis["ct"]
-    out = np.empty((10, len(pts), ct.shape[1]))
-    if not len(pts):
-        return out
-    order = _morton_order(pts)
-    sorted_pts = np.ascontiguousarray(pts[order])
-    gs, ge, ga, gc = basis["g_start"], basis["g_end"], basis["g_alpha"], basis["g_center"]
-    glen = ge - gs
-
-    def one_block(s0):
-        blk = sorted_pts[s0 : s0 + block]
-        lo, hi = blk.min(axis=0), blk.max(axis=0)
-        d2 = (np.maximum(0.0, np.maximum(lo - coords, coords - hi)) ** 2).sum(axis=1)
-        groups = np.flatnonzero(ga * d2[gc] <= EXP_CUTOFF)
-        n = glen[groups]
-        cols = np.arange(n.sum()) + np.repeat(gs[groups] - (np.cumsum(n) - n), n)
-        prim = _primitive_block_derivs(blk, coords, groups, gc, ga, gs, ge, basis["lmn"], len(cols))
-        mo = prim.reshape(10 * len(blk), len(cols)) @ ct[cols]
-        out[:, order[s0 : s0 + block]] = mo.reshape(10, len(blk), ct.shape[1])
-
-    starts = range(0, len(pts), block)
-    nthreads = numba.get_num_threads()
-    if nthreads == 1 or len(starts) == 1:
-        for s0 in starts:
-            one_block(s0)
-    else:
-        with ThreadPoolExecutor(nthreads) as pool:
-            list(pool.map(one_block, starts))
-    return out
-
-
 def limit_blas_threads(fn):
     """Run fn with single-threaded BLAS. orbital_values parallelizes over blocks
     itself; a multithreaded BLAS inside those workers, or next to numba's
