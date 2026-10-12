@@ -107,9 +107,10 @@ _HESS_PAIRS = np.array([(0, 0), (1, 1), (2, 2), (0, 1), (0, 2), (1, 2)])
 
 
 @limit_blas_threads
-def density_derivatives(pts, wfx, basis, block=DERIV_BLOCK):
+def density_derivatives(pts, wfx, basis, block=DERIV_BLOCK, hessian=True):
     """rho, its gradient and Hessian (MOs + EDF) at every point, and the MO-only
-    parts point_properties needs (rho_mo, grad_mo, spin, alpha/beta
+    parts point_properties needs. hessian=False returns only rho and its gradient
+    (grad rho = 2 w . grad chi), which needs MO values but no MO gradients (rho_mo, grad_mo, spin, alpha/beta
     densities and gradients, G components, K, the ALIE numerator).
 
     Per block of spatially compact points: primitive values and derivatives for
@@ -124,11 +125,15 @@ def density_derivatives(pts, wfx, basis, block=DERIV_BLOCK):
     dspin = basis["occ_a"] - basis["occ_b"]
     open_shell = wavefunction_type(wfx) not in (0, 3)
     out = {"rho": np.zeros(n), "gradient": np.zeros((n, 3)), "h6": np.zeros((n, 6))}
-    for key, shape in (("rho_mo", ()), ("spin", ()), ("K", ()), ("alie_num", ()), ("grad_mo", (3,)),
-                       ("G_xyz", (3,)), ("rho_a", ()), ("rho_b", ()), ("grad_a", (3,)), ("grad_b", (3,))):
+    extras = () if not hessian else (
+        ("rho_mo", ()), ("spin", ()), ("K", ()), ("alie_num", ()), ("grad_mo", (3,)),
+        ("G_xyz", (3,)), ("rho_a", ()), ("rho_b", ()), ("grad_a", (3,)), ("grad_b", (3,)))
+    for key, shape in extras:
         out[key] = np.zeros((n,) + shape)
     if not n:
-        out["hessian"] = np.zeros((0, 3, 3))
+        out.pop("h6")
+        if hessian:
+            out["hessian"] = np.zeros((0, 3, 3))
         return out
     order = _morton_order(pts)
     sorted_pts = np.ascontiguousarray(pts[order])
@@ -147,6 +152,12 @@ def density_derivatives(pts, wfx, basis, block=DERIV_BLOCK):
         cols = np.arange(nc.sum()) + np.repeat(gs[groups] - (np.cumsum(nc) - nc), nc)
         prim = _primitive_block_derivs(blk, coords, groups, gc, ga, gs, ge, basis["lmn"], len(cols))
         C = ct[cols]
+        if not hessian:
+            phi = prim[0] @ C
+            w = (phi * occ) @ C.T
+            out["rho"][idx] = (phi * phi) @ occ
+            out["gradient"][idx] = 2.0 * np.einsum("pm,kpm->pk", w, prim[1:4])
+            return
         m4 = (prim[:4].reshape(4 * nb, len(cols)) @ C).reshape(4, nb, C.shape[1])
         phi, dphi = m4[0], m4[1:]
         nphi = phi * occ
@@ -184,7 +195,9 @@ def density_derivatives(pts, wfx, basis, block=DERIV_BLOCK):
     if len(wfx["edf_center"]):
         _edf_kernel(pts, coords, wfx["edf_center"], wfx["edf_exp"], wfx["edf_coef"],
                     out["rho"], out["gradient"], out["h6"])
-    out["hessian"] = _hess_from6(out.pop("h6"))
+    h6 = out.pop("h6")
+    if hessian:
+        out["hessian"] = _hess_from6(h6)
     return out
 
 

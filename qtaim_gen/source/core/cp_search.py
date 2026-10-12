@@ -248,3 +248,112 @@ def search(wfx, basis, seeds="multiwfn", minicpdis=MINICPDIS):
         "pos": np.array(found_pos).reshape(-1, 3), "type": np.array(found_type, dtype=np.int64),
         "eigenvalues": np.array(found_eig).reshape(-1, 3), "stage": found_stage, "stats": stats,
     }
+
+
+# ---------------------------------------------------------------- bond paths
+
+PATH_STEP = 0.03  # Bohr, pathstepsize
+PATH_END = 0.05  # Bohr, discritpathfin
+PATH_MAXPT = 451  # maxpathpttry
+NCP_ATOM_DIST = 0.15 / B2A  # NCP2atmidx: a nucleus within 0.15 Angstrom
+ENGINE_PATH_MAXPT = 2000
+
+
+def ncp_atoms(cps, coords):
+    """NCP2atmidx: for each CP, the first atom (0-based) within 0.15 Angstrom
+    if it is a nuclear CP, else -1."""
+    out = np.full(len(cps["pos"]), -1, dtype=np.int64)
+    for i in np.flatnonzero(cps["type"] == 0):
+        near = np.flatnonzero(np.linalg.norm(coords - cps["pos"][i], axis=1) < NCP_ATOM_DIST)
+        if len(near):
+            out[i] = near[0]
+    return out
+
+
+def bond_paths(cps, wfx, basis, mode="multiwfn"):
+    """findpath (MW/topology.f90:1903) from every BCP, both directions at once:
+    a first step of PATH_STEP along the eigenvector of the positive Hessian
+    eigenvalue, then RK2 midpoint steps along grad rho / |grad rho|. A path
+    ends at the first CP (in list order, other than its BCP) within PATH_END;
+    it fails when rho decreases or after PATH_MAXPT points. Returns, per BCP,
+    the two end CP indices (-1 for a failed path) and the path lengths in
+    points, and per BCP the connected atoms as BCP2atmidx assigns them (both
+    paths must end at nuclear CPs mapped to atoms, else (-1, -1)).
+
+    mode="engine" keeps every trajectory identical until Multiwfn would stop,
+    so every pair Multiwfn assigns is kept, and removes its three failure
+    modes: only nuclear CPs end a path (Multiwfn also stops at any other CP
+    within PATH_END), a rho decrease halves that path's step and retries from
+    the last point (down to PATH_STEP / 64), and up to ENGINE_PATH_MAXPT points."""
+    engine = mode == "engine"
+    if mode not in ("multiwfn", "engine"):
+        raise ValueError(f"unknown path mode {mode!r}")
+    maxpt = ENGINE_PATH_MAXPT if engine else PATH_MAXPT
+    pos = cps["pos"]
+    targets = np.flatnonzero(cps["type"] == 0) if engine else np.arange(len(pos))
+    bcps = np.flatnonzero(cps["type"] == 1)
+    nb = len(bcps)
+    ends = np.full((nb, 2), -1, dtype=np.int64)
+    npts = np.zeros((nb, 2), dtype=np.int64)
+    if nb:
+        d = density_derivatives(pos[bcps], wfx, basis)
+        eigval, eigvec = np.linalg.eigh(d["hessian"])
+        v = eigvec[np.arange(nb), :, np.argmax(eigval > 0, axis=1)]
+        x = np.concatenate([pos[bcps] + PATH_STEP * v, pos[bcps] - PATH_STEP * v])
+        x_prev = np.concatenate([pos[bcps], pos[bcps]])
+        rho_old = np.concatenate([d["rho"], d["rho"]])
+        h = np.full(2 * nb, PATH_STEP)
+        owner = np.concatenate([bcps, bcps])
+        slot = np.concatenate([np.zeros(nb, dtype=np.int64), np.ones(nb, dtype=np.int64)])
+        row = np.concatenate([np.arange(nb), np.arange(nb)])
+        active = np.arange(2 * nb)
+        tpos = pos[targets]
+        for ipt in range(2, maxpt + 1):
+            if not len(active):
+                break
+            npts[row[active], slot[active]] = ipt
+            dist = np.linalg.norm(x[active, None, :] - tpos[None, :, :], axis=2)
+            dist[targets[None, :] == owner[active, None]] = np.inf
+            hit = dist < PATH_END
+            reached = hit.any(axis=1)
+            ends[row[active[reached]], slot[active[reached]]] = targets[np.argmax(hit, axis=1)[reached]]
+            active = active[~reached]
+            if ipt == maxpt or not len(active):
+                break
+            g = density_derivatives(x[active], wfx, basis, hessian=False)
+            rho, k1 = g["rho"], g["gradient"]
+            ok = rho >= rho_old[active]
+            if engine:
+                back = active[~ok]
+                h[back] *= 0.5
+                x[back] = x_prev[back]
+                retry = back[h[back] >= PATH_STEP / 64]
+                # a retried path steps again from its last accepted point, whose rho is rho_old
+                if len(retry):
+                    gr = density_derivatives(x[retry], wfx, basis, hessian=False)["gradient"]
+                    k1 = np.concatenate([k1[ok], gr])
+                    active = np.concatenate([active[ok], retry])
+                    rho = np.concatenate([rho[ok], rho_old[retry]])
+                else:
+                    active, rho, k1 = active[ok], rho[ok], k1[ok]
+            else:
+                active, rho, k1 = active[ok], rho[ok], k1[ok]
+            rho_old[active] = rho
+            k1 = k1 / np.linalg.norm(k1, axis=1)[:, None]
+            k2 = density_derivatives(x[active] + 0.5 * h[active, None] * k1, wfx, basis, hessian=False)["gradient"]
+            x_prev[active] = x[active]
+            x[active] += h[active, None] * k2 / np.linalg.norm(k2, axis=1)[:, None]
+    atom = ncp_atoms(cps, wfx["coords"])
+    pairs = np.full((nb, 2), -1, dtype=np.int64)
+    for b in range(nb):
+        got = [atom[e] for e in ends[b] if e >= 0 and cps["type"][e] == 0]
+        # BCP2atmidx: the first NCP end fills i, the second j; an unmapped NCP (atom -1) leaves i empty
+        i = j = -1
+        for a in got:
+            if i == -1:
+                i = a
+            else:
+                j = a
+        if i >= 0 and j >= 0:
+            pairs[b] = (i, j)
+    return {"bcp": bcps, "ends": ends, "npts": npts, "atoms": pairs, "ncp_atom": atom}

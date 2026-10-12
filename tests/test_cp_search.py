@@ -88,3 +88,19 @@ def test_superset_seeds_keep_every_multiwfn_cp(job):
         ep = res["pos"][res["type"] == t]
         if len(rp):
             assert len(ep) and np.linalg.norm(rp[:, None] - ep[None], axis=2).min(axis=1).max() < 5e-12, lab
+
+
+@pytest.mark.parametrize("job", JOBS)
+@pytest.mark.parametrize("mode", ["multiwfn", "engine"])
+def test_bond_path_pairs_match_multiwfn(job, mode):
+    from qtaim_gen.source.core.cp_search import bond_paths, search
+
+    wfx, basis, ref = _load(job)
+    res = search(wfx, basis)
+    bp = bond_paths(res, wfx, basis, mode=mode)
+    epos = res["pos"][bp["bcp"]]
+    for c in (c for c in ref if c["label"] == "BCP"):
+        k = int(np.argmin(np.linalg.norm(epos - c["pos_bohr"], axis=1)))
+        assert c["connected"] is not None
+        assert sorted(int(a) + 1 for a in bp["atoms"][k]) == sorted(c["connected"])
+    assert (bp["ncp_atom"][res["type"] == 0] >= 0).all()
