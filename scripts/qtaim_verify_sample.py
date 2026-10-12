@@ -3,8 +3,10 @@
 Scans random job folders of one vertical (fixed seed) and keeps those whose
 results folder has generator/out_files.zip with a CPprop.txt and whose input
 folder has orca.gbw(.zstd0). Each candidate is binned by size (nuclear CPs in
-the stored CPprop.txt) and multiplicity (the last token of the folder name), and
-the sample is drawn round-robin across bins so rare bins are not crowded out.
+the stored CPprop.txt), multiplicity (the last token of the folder name) and
+element class (the heaviest present among the nuclear CPs' elements; classes
+2-4 are exactly the jobs with def2 ECPs, so with EDF core densities), and the
+sample is drawn round-robin across bins so rare bins are not crowded out.
 Writes the input folder paths, one per line, plus a .tsv with the bins and the
 Multiwfn build from the qtaim.out banner.
 
@@ -20,6 +22,13 @@ import zipfile
 import zlib
 
 SIZE_BINS = (20, 50, 100, 200)
+ELEMENTS = (
+    "H He Li Be B C N O F Ne Na Mg Al Si P S Cl Ar K Ca Sc Ti V Cr Mn Fe Co Ni Cu Zn Ga Ge As Se Br Kr "
+    "Rb Sr Y Zr Nb Mo Tc Ru Rh Pd Ag Cd In Sn Sb Te I Xe Cs Ba La Ce Pr Nd Pm Sm Eu Gd Tb Dy Ho Er Tm Yb "
+    "Lu Hf Ta W Re Os Ir Pt Au Hg Tl Pb Bi Po At Rn Fr Ra Ac Th Pa U Np Pu Am Cm Bk Cf Es Fm Md No Lr"
+).split()
+ELEMENT_CLASSES = ("light main group", "3d", "heavy main group (ECP)", "4d/5d (ECP)", "lanthanide/actinide (ECP)")
+NUCLEUS = re.compile(rb"Corresponding nucleus:\s+\d+\(\s*([A-Za-z]+)\s*\)")
 
 
 def size_bin(n):
@@ -27,6 +36,19 @@ def size_bin(n):
         if n <= edge:
             return i
     return len(SIZE_BINS)
+
+
+def element_class(z):
+    """Index into ELEMENT_CLASSES; def2 puts an ECP on every element from Rb (Z = 37)."""
+    if 57 <= z <= 71 or 89 <= z <= 103:
+        return 4
+    if 39 <= z <= 48 or 72 <= z <= 80:
+        return 3
+    if z >= 37:
+        return 2
+    if 21 <= z <= 30:
+        return 1
+    return 0
 
 
 def inspect(results_folder, input_folder):
@@ -40,7 +62,11 @@ def inspect(results_folder, input_folder):
             names = {os.path.basename(n): n for n in z.namelist()}
             if "CPprop.txt" not in names:
                 return None
-            ncp = z.read(names["CPprop.txt"]).count(b"Type (3,-3)")
+            cpprop = z.read(names["CPprop.txt"])
+            ncp = cpprop.count(b"Type (3,-3)")
+            zs = {ELEMENTS.index(m.decode().capitalize()) + 1 for m in NUCLEUS.findall(cpprop)
+                  if m.decode().capitalize() in ELEMENTS}
+            eclass = max((element_class(z) for z in zs), default=0)
             build = None
             if "qtaim.out" in names:
                 m = re.search(rb"update date:\s+(\S+)", z.read(names["qtaim.out"])[:4000])
@@ -51,7 +77,7 @@ def inspect(results_folder, input_folder):
         mult = int(os.path.basename(results_folder.rstrip("/")).split("_")[-1])
     except ValueError:
         mult = 0
-    return {"ncp": ncp, "mult": mult, "build": build}
+    return {"ncp": ncp, "mult": mult, "build": build, "eclass": eclass}
 
 
 def main():
@@ -75,7 +101,7 @@ def main():
         info = inspect(os.path.join(vdir, name), os.path.join(args.root_omol_inputs, args.vertical, name))
         if info is None:
             continue
-        key = (size_bin(info["ncp"]), min(info["mult"], 3))
+        key = (size_bin(info["ncp"]), min(info["mult"], 3), info["eclass"])
         bins.setdefault(key, []).append((name, info))
     picked = []
     queues = [bins[k] for k in sorted(bins)]
@@ -87,9 +113,10 @@ def main():
         for name, _ in picked:
             f.write(os.path.join(args.root_omol_inputs, args.vertical, name) + "\n")
     with open(os.path.splitext(args.out)[0] + ".tsv", "w") as f:
-        f.write("job\tnuclear_cps\tmult\tmultiwfn_build\n")
+        f.write("job\tnuclear_cps\tmult\telement_class\tmultiwfn_build\n")
         for name, info in picked:
-            f.write(f"{args.vertical}/{name}\t{info['ncp']}\t{info['mult']}\t{info['build']}\n")
+            f.write(f"{args.vertical}/{name}\t{info['ncp']}\t{info['mult']}\t"
+                    f"{ELEMENT_CLASSES[info['eclass']]}\t{info['build']}\n")
     usable = sum(len(v) for v in bins.values()) + len(picked)
     print(f"{args.vertical}: scanned {scanned}, usable {usable}, picked {len(picked)} across {len(bins)} bins -> {args.out}")
 

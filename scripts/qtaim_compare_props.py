@@ -3,8 +3,9 @@ CPprop.txt, printed to 12 decimals in Bohr), compare every property the engine
 evaluates (qtaim_engine.point_properties) with Multiwfn's printed value.
 
 Reports per property the largest relative difference |e - m| / |m| (absolute
-for ellipticity and eta, printed with 6 decimals, and for spin; the gradient
-against the position-rounding bound), split by CP type. A NaN on either side,
+for ellipticity and eta, printed with 6 decimals; spin relative to
+max(|spin|, 1e-6 rho); the gradient against the position-rounding bound),
+split by CP type. A NaN on either side,
 or a property missing from CPprop.txt, reports inf, so it fails any threshold.
 
     python scripts/qtaim_compare_props.py --pairs pairs.txt
@@ -36,7 +37,14 @@ SCALARS = {
     "Ellipticity of electron density": "ellipticity",
     "eta index": "eta",
 }
-ABSOLUTE = {"ellipticity", "eta", "spin"}
+# printed with 6 decimals, so compared as absolute differences
+ABSOLUTE = {"ellipticity", "eta"}
+# spin is relative to max(|spin|, SPIN_FLOOR * rho): an absolute difference would pass
+# large relative errors where |spin| is small and flag print rounding where |spin| ~ 10.
+# Spin is a difference of alpha and beta densities, so its roundoff scales with rho
+# (~1e-16 rho, measured on a ROKS radical's SOMO node); below 1e-6 rho the relative
+# measure is roundoff, not a spin difference.
+SPIN_FLOOR = 1e-6
 
 
 def _worst(d):
@@ -64,6 +72,9 @@ def compare_cps(cps, wfx, basis):
             val = eng[key][idx]
             if key in ABSOLUTE:
                 d = np.abs(val - ref)
+            elif key == "spin":
+                rho_ref = np.array([cps[i]["props"].get("Density of all electrons", np.nan) for i in idx])
+                d = np.abs(val - ref) / np.maximum(np.abs(ref), SPIN_FLOOR * np.abs(rho_ref))
             else:
                 d = np.abs(val - ref) / np.maximum(np.abs(ref), 1e-300)
             res[key] = _worst(d)
@@ -97,7 +108,7 @@ def main():
             print(f"{name[:34]} | {lab} x{n} | " + " ".join(f"{k} {v:.1e}" for k, v in r.items()))
             for k, v in r.items():
                 worst[(lab, k)] = max(worst.get((lab, k), 0.0), v)  # v is never NaN (_worst)
-    print("\nworst over all jobs (relative; absolute for ellipticity, eta, spin; gradient_bound <= 1 is consistent):")
+    print("\nworst over all jobs (relative; absolute for ellipticity, eta; gradient_bound <= 1 is consistent):")
     for lab in ("NCP", "BCP", "RCP", "CCP"):
         row = {k: v for (l2, k), v in worst.items() if l2 == lab}
         if row:

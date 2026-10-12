@@ -42,12 +42,15 @@ Multiwfn's print format.
     cusps, in random directions;
   - 500 points uniform in the molecular box (plus 3 Bohr).
 - Quantities compared (`scripts/qtaim_horton_check.py`): rho, alpha and beta densities,
-  gradient, Hessian, Laplacian, G, and K through the identity K = G - lap/4. ELF, LOL, ALIE,
-  spin and G_xyz are not compared here; they rest on the tier 2 comparison with Multiwfn's
-  printed values only (code review, 2026-10-09).
-- Known limitation: for ROKS wavefunctions the alpha/beta split on the HORTON side is
-  wrong (iodata loads them as restricted, occupations 2/1, and the script halves them);
-  total rho is unaffected.
+  spin, gradient, Hessian, Laplacian, G, K through the identity K = G - lap/4, and ELF,
+  LOL and ALIE rebuilt from HORTON's own ingredients (per-spin densities, gradients, G,
+  MO values with |e_i|) with Multiwfn's definitions written out independently, where
+  rho > 1e-6. G_xyz is not compared. Alpha/beta come from iodata's occsa/occsb, which
+  split closed-shell, ROKS and natural-orbital wavefunctions correctly (the first version
+  halved every restricted occupation, wrong for ROKS).
+- Spin is compared relative to max(|spin|, 1e-6 rho): it is a difference of alpha and
+  beta densities, so its roundoff scales with rho (7e-17 rho measured at a ROKS radical's
+  SOMO node), and below 1e-6 rho the relative measure is roundoff.
 - Jobs: every local wavefunction with a wfx.
   - The 87 wfx_pull files (25 with EDF; transition metals, lanthanides, multiplicities up
     to 11).
@@ -87,12 +90,18 @@ Multiwfn's print format.
     unscreened 80-bit value, HORTON ~1e-15. With the engine's exp(-40) primitive cutoff
     applied to the 80-bit sum, the engine matches it to <= 3e-15. The difference is the
     screening convention, which the engine shares with Multiwfn (expcutoff -40).
+- Tier 1 extended (2026-10-12), five wavefunction types: ROKS (CH3 radical, ORCA 6.0.1
+  ROKS B3LYP/def2-SVP, converted with the production step), closed shell, UKS, closed
+  shell with EDF (Xe), UKS with EDF (I) [V]: ELF <= 1.9e-12, LOL <= 9.5e-13, ALIE
+  <= 5.6e-13 relative; spin <= 8.3e-10 relative (the reference's alpha-minus-beta
+  cancellation); ROKS rho_alpha/rho_beta 1.8e-15.
 - Tier 2 on LRC, 1500 sampled jobs (5A_elytes, rgd_uks, tm_react; 2026-10-09) [V]:
   1432 compared, no engine disagreement beyond print precision; 2 stored CPprop.txt
   files corrupt (one NUL-spliced, one truncated; their qtaim.json are intact); 3 BCP
   Laplacians at 3.2e-8 to 1.5e-7 relative, unconfirmed as position rounding [I]; 68 jobs
-  lost to a parser bug (Fortran three-digit exponents), since fixed. The summary was
-  NaN-blind until the 2026-10-09 review fix; the NaN recount is pending.
+  lost to a parser bug (Fortran three-digit exponents), since fixed. Rerun with the
+  NaN-safe comparison (qverify_v2, 2026-10-12): 1500 distinct jobs, 1498 ok, 2
+  corrupt_reference, 0 NaN or missing properties, the same 3 BCP Laplacians over 1e-8.
   Control (15 jobs, fresh Multiwfn on the regenerated wfx): identical CP sets, position
   differences 0.
 - P0 cost ladder, local Multiwfn, 4 threads, 12-274 atoms [V]:
@@ -131,9 +140,13 @@ data distribution, reusing the QTAIM regeneration campaign instead of rerunning 
   - Bins (`scripts/qtaim_verify_sample.py`): nuclear-CP count from the stored CPprop.txt
     (1-20, 21-50, 51-100, 101-200, 200+) and multiplicity (1, 2, 3+), drawn round-robin
     across bins so small bins are not crowded out.
-  - Not binned yet: ECP/EDF presence and element class (main group, 3d, 4d/5d,
-    lanthanide/actinide). Until they are, tier 2 does not guarantee EDF or heavy-element
-    coverage (code review, 2026-10-09).
+  - Element class, the heaviest among the nuclear CPs' elements: light main group, 3d,
+    heavy main group, 4d/5d, lanthanide/actinide. def2 puts an ECP on every element from
+    Rb (Z = 37), so the last three classes are exactly the jobs with EDF core densities.
+    Added 2026-10-12; the 1500-job LRC sample predates it.
+- The engine refuses (ValueError) a wavefunction with an ECP atom that has no EDF core
+  density (`qtaim_engine.ecp_atoms_without_edf`), so such a job cannot pass as compared;
+  only tier 1's deliberately MO-only comparison opts out.
   - Run on each cluster where the regeneration outputs live: LRC, ALCF and LLNL, as their
     campaigns finish.
 - Kept wavefunctions for repeatable offline checks: 10 per vertical locally, 100 per

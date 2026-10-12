@@ -60,10 +60,22 @@ def _edf_derivatives(pts, coords, wfx):
     return rho, grad, hess
 
 
+def ecp_atoms_without_edf(wfx):
+    """Indices of ECP atoms (zeff < Z) with no EDF primitive: their core density
+    is missing, so rho, its Laplacian and the nuclear CPs there are wrong (a
+    uranium ECP job without EDF lost a nuclear CP and had every bond unpaired)."""
+    ecp = np.flatnonzero(wfx["zeff"] != wfx["atnums"])
+    return [int(i) for i in ecp if not np.any(wfx["edf_center"] == i)]
+
+
 @limit_blas_threads
-def point_properties(pts, wfx, basis):
+def point_properties(pts, wfx, basis, allow_missing_edf=False):
     """Every P1 property at each point, as arrays keyed like the CPprop.txt
-    labels' meaning (see module docstring)."""
+    labels' meaning (see module docstring). Raises when an ECP atom has no EDF
+    core density, unless allow_missing_edf (an MO-only comparison on purpose)."""
+    missing = ecp_atoms_without_edf(wfx)
+    if missing and not allow_missing_edf:
+        raise ValueError(f"ECP atoms without EDF core density (0-based): {missing[:10]}")
     coords = wfx["coords"]
     D = orbital_derivatives(pts, coords, basis)
     phi, dphi = D[0], D[1:4]
