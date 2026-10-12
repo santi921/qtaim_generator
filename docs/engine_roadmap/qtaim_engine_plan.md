@@ -375,6 +375,28 @@ Open in P3: exhaustive (sphere) seeds; the multi-thread Multiwfn first-come dedu
 reproduced (the engine uses its 1-thread order); paths may still end at a non-nuclear CP in
 Multiwfn mode by design.
 
+### 6d. P4 started: Poincare-Hopf repair (2026-10-12)
+
+Cases: the 4 Poincare-Hopf failures among the first 37 LRC tier 2 jobs (5A_elytes; stored
+Multiwfn 2025-Jun-26 sets, which the engine reproduces exactly), plus MOR39 Ru3Au3 locally. [V]
+
+| job (atoms) | stored sum | cause | Multiwfn exhaustive | engine |
+|---|---|---|---|---|
+| Fe/Cl, 2722_Cl-1 (8) | 2 | missing weak CCP (rho 4.5e-4, 5.1 Bohr from atoms) | finds it, 2.7 s | reseed, 512-point round, 1.0 s |
+| Na+, 2584 (28) | 0 | missing weak RCP (rho 3.6e-3, 2.7 Bohr) | finds it, 57.9 s | reseed, 1.3 s |
+| Rb+, 397 (49) | 2 | missing weak BCP (rho 4.2e-4, 4.0 Bohr; the pair is beyond the 1.5 x vdW seed cutoff) | finds it, 24.4 s | reseed, 1.0 s |
+| water shell, 1875 (186) | 2 | BCP 0.0115 Bohr from an RCP, dropped by the type-blind 0.03 Bohr dedup | does not fix it, 710 s | type-aware dedup keeps it; pair flagged |
+| MOR39 Ru3Au3 (12) | 2 | missing BCP with rho < 1e-5 | finds it | reseed 0.3 s; counted for Poincare-Hopf, then dropped (decision 10) |
+
+- `reseed()` runs only when Poincare-Hopf fails: rounds of 128, 512 and 1000 deterministic
+  Sobol points per atom within 3 Bohr (Multiwfn's toposphrad), stopping once it holds.
+- Engine modes merge only CPs of the same type within 0.03 Bohr; `analyze` reports CP pairs
+  closer than 0.1 Bohr as `near_pairs`. Multiwfn mode keeps Multiwfn's rules.
+- On the 88 local jobs nothing Multiwfn finds is lost and Poincare-Hopf holds on all 88.
+
+Still open in P4: non-nuclear attractors, the EDF policy, `_meta` flags in the output, LRC
+validation of the repair, critic2 adjudication of extra CPs.
+
 ## 7. Risks
 
 - The ESP must match Multiwfn's eleesp1, whose Boys function (Fmch) is accurate only to about 1e-8 relative. The kernel is checked against a copy of Fmch at print precision and against gbasis at full precision; the exact Boys function is the default (decision 9). This is the largest piece of new numerics.
