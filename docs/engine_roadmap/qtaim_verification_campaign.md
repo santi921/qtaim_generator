@@ -78,9 +78,15 @@ Multiwfn's print format.
   with chunked HORTON evaluation) [V]: worst point over each job, relative, rho
   1.2e-13 to 1.8e-12, gradient 7.1e-13 to 3.8e-12, Hessian 4.5e-12 to 1.4e-11, Laplacian
   5.1e-12 to 6.3e-11. These maxima exceed the 1e-12 acceptance figure for rho on 2 jobs
-  and for the Laplacian on all 7; the pattern (growing with size, largest where the
-  Laplacian's terms cancel) points to summation roundoff over thousands of primitives
-  rather than a kernel error [I], which an extended-precision check on one job would settle.
+  and for the Laplacian on all 7. An 80-bit long-double evaluation at the 15 worst points
+  of the 342-atom job (2026-10-12) explains both, and neither is a kernel error [V]:
+  - Near-zero Laplacian (rho 0.1-0.18, |Laplacian| 1e-5 to 4e-4, cancelling terms):
+    engine within 7.3e-12 relative of the 80-bit value, HORTON within 5.6e-11. The large
+    tier 1 Laplacian figures are mostly HORTON's roundoff; absolute errors are ~1e-16.
+  - Far field (rho 7e-12 to 2e-9): the engine is 1e-12 to 2e-12 relative from the
+    unscreened 80-bit value, HORTON ~1e-15. With the engine's exp(-40) primitive cutoff
+    applied to the 80-bit sum, the engine matches it to <= 3e-15. The difference is the
+    screening convention, which the engine shares with Multiwfn (expcutoff -40).
 - Tier 2 on LRC, 1500 sampled jobs (5A_elytes, rgd_uks, tm_react; 2026-10-09) [V]:
   1432 compared, no engine disagreement beyond print precision; 2 stored CPprop.txt
   files corrupt (one NUL-spliced, one truncated; their qtaim.json are intact); 3 BCP
