@@ -1704,13 +1704,20 @@ def _run_charge_engine(
         atomic_json_write(os.path.join(folder, f"{routine}.json"), out[routine])
         written.append(routine)
 
+    if len(written) != len(wanted):
+        # no charge_engine timing for a partial run: validation then fails and the
+        # engine reruns, instead of a missing routine keeping an older (e.g. Multiwfn)
+        # value under a timing that says the engine produced it
+        logger.error("charge_engine: wrote %d of %d routines in %s; not stamping the timing",
+                     len(written), len(wanted), folder)
+        return False
     _update_timing(folder, "charge_engine", elapsed, logger)
     logger.info(
         "charge_engine: %d routines in %.2f s (nelec grid %.4f of %.1f)",
         len(written), elapsed, meta.get("nelec_grid_becke", float("nan")),
         meta.get("nelec_wfx", float("nan")),
     )
-    return len(written) == len(wanted)
+    return True
 
 
 def _run_surface_engine(
@@ -2768,6 +2775,7 @@ def gbw_analysis(
             _report = _recheck(
                 folder, int(_dft["spin"]), logger=logger, wfx=wfx,
                 preprocess_compressed=preprocess_compressed,
+                skip_routines=ENGINE_ROUTINES if charge_engine else None,
             )
             if not _report["ok"]:
                 logger.error("recheck_fuzzy: %s - not running", _report["wavefunction"])
@@ -3086,6 +3094,8 @@ def gbw_analysis(
                         debug=debug,
                         logger=logger,
                         full_set=full_set,
+                        # leftover Multiwfn .out files must not fill engine routines
+                        skip_routines=ENGINE_ROUTINES if charge_engine else None,
                     )
 
                     # Also reparse ORCA output

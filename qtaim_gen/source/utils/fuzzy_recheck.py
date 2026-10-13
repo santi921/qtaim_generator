@@ -325,8 +325,12 @@ def recheck_fuzzy(
     dry_run: bool = False,
     wfx: bool = True,
     preprocess_compressed: bool = False,
+    skip_routines: Optional[frozenset] = None,
 ) -> Dict[str, object]:
     """Recheck, repair by reparse, and invalidate for rerun. See module docstring.
+    skip_routines (ENGINE_ROUTINES under --charge_engine) are left alone: the
+    engine's values do not have the Multiwfn defects this repairs, and a reparse
+    from archived Multiwfn output would put Multiwfn values back.
 
     Returns {"reparse": [...], "rerun": [...], "derived": [...], "wavefunction": str, "ok": bool}.
     Reparses are always applied (they need no wavefunction). Rerun steps are
@@ -334,6 +338,12 @@ def recheck_fuzzy(
     current values are left in place and `ok` is False.
     """
     plan = plan_recheck(folder, mult)
+    if skip_routines:
+        plan = {
+            "reparse": {k: v for k, v in plan["reparse"].items() if k not in skip_routines},
+            "rerun": [k for k in plan["rerun"] if k not in skip_routines],
+            "derived": [k for k in plan["derived"] if k not in skip_routines],
+        }
     reparse, rerun = plan["reparse"], plan["rerun"]
     ok, wf_note, wfns = _wavefunction_plan(folder, rerun, mult, wfx, preprocess_compressed)
     report = {

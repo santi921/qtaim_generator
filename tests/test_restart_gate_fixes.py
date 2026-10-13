@@ -517,3 +517,50 @@ def test_patch_timings_leaves_engine_routines_alone(tmp_path):
     assert patch_timings_from_log(str(tmp_path), full_set=0, move_results=True)
     patched = json.loads((gen / "timings.json").read_text())["_timings_patched"]
     assert set(patched) == {"qtaim"}
+
+
+def test_partial_engine_run_is_not_stamped(tmp_path, monkeypatch):
+    # a routine the engine did not write would keep an older (e.g. Multiwfn) value under
+    # a charge_engine timing claiming the engine produced it; no timing means validation
+    # fails and the engine reruns
+    from qtaim_gen.source.core import charge_engine, omol
+
+    (tmp_path / "orca.wfx").write_text("wfx")
+    monkeypatch.setattr(omol, "check_spin", lambda folder: False)
+    wanted = sorted(omol._engine_routines(0, False))
+    monkeypatch.setattr(charge_engine, "run", lambda path, full_set=0: {r: {"x": 1.0} for r in wanted[1:]})
+    assert omol._run_charge_engine(str(tmp_path), n_threads=1, logger=logging.getLogger("t")) is False
+    for timings in (tmp_path / "timings.json", tmp_path / "generator" / "timings.json"):
+        assert not timings.exists() or "charge_engine" not in json.loads(timings.read_text())
+    monkeypatch.setattr(charge_engine, "run", lambda path, full_set=0: {r: {"x": 1.0} for r in wanted})
+    assert omol._run_charge_engine(str(tmp_path), n_threads=1, logger=logging.getLogger("t")) is True
+
+
+def test_every_parse_in_gbw_analysis_leaves_engine_routines_to_the_engine():
+    # the reparse fallback parsed leftover Multiwfn .out files into engine routines
+    import ast
+    import inspect
+    import textwrap
+
+    from qtaim_gen.source.core.omol import gbw_analysis
+
+    tree = ast.parse(textwrap.dedent(inspect.getsource(gbw_analysis)))
+    calls = [n for n in ast.walk(tree) if isinstance(n, ast.Call) and getattr(n.func, "id", None) == "parse_multiwfn"]
+    assert len(calls) >= 2
+    for call in calls:
+        assert "skip_routines" in {k.arg for k in call.keywords}, call.lineno
+
+
+def test_fuzzy_recheck_leaves_engine_routines_alone(tmp_path, monkeypatch):
+    # an archived Multiwfn fuzzy_bond.out must not replace the engine's values
+    from qtaim_gen.source.data.multiwfn import ENGINE_ROUTINES
+    from qtaim_gen.source.utils import fuzzy_recheck
+
+    plan = {"reparse": {"fuzzy_bond": {"1_O_to_2_H": 0.9}, "elf_fuzzy": {"x": 1.0}},
+            "rerun": ["becke_fuzzy_spin"], "derived": []}
+    monkeypatch.setattr(fuzzy_recheck, "plan_recheck", lambda folder, mult: plan)
+    monkeypatch.setattr(fuzzy_recheck, "_wavefunction_plan", lambda *a: (True, "wfx", []))
+    report = fuzzy_recheck.recheck_fuzzy(str(tmp_path), 2, dry_run=True, skip_routines=ENGINE_ROUTINES)
+    assert report["reparse"] == ["elf_fuzzy"] and report["rerun"] == []
+    report = fuzzy_recheck.recheck_fuzzy(str(tmp_path), 2, dry_run=True)
+    assert report["reparse"] == ["elf_fuzzy", "fuzzy_bond"] and report["rerun"] == ["becke_fuzzy_spin"]
