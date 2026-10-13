@@ -92,6 +92,9 @@ def check_qtaim(pairs):
         n = load(os.path.join(new, "generator", "qtaim.json"))
         if not o or not n:
             continue
+        # "_" keys (_meta) are record provenance, not critical points
+        o = {k: v for k, v in o.items() if not k.startswith("_")}
+        n = {k: v for k, v in n.items() if not k.startswith("_")}
         n_jobs += 1
         if set(o) != set(n):
             worst.append((rel, f"CP keys differ: only orig {sorted(set(o) - set(n))[:4]}, only new {sorted(set(n) - set(o))[:4]}"))

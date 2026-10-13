@@ -9,6 +9,8 @@ Tests cover:
 
 import json
 import os
+import shutil
+from pathlib import Path
 import time
 import pytest
 
@@ -1352,7 +1354,8 @@ class TestMoveResultsQuarantine:
         if new is not None:
             _write_json(folder / "qtaim.json", new)
         if cpprop:
-            (folder / "CPprop.txt").write_text("CP data\n")
+            # a real file: move_results_to_folder never promotes a record over a damaged one
+            shutil.copy(Path(__file__).parent / "test_files" / "CPprop_w_bond_paths.txt", folder / "CPprop.txt")
             t = os.path.getmtime(gen / "qtaim.json")
             os.utime(folder / "CPprop.txt", (t + 60, t + 60) if cpprop == "fresh" else (t - 60, t - 60))
         return folder, gen

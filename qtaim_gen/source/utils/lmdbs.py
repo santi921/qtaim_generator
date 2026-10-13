@@ -23,6 +23,20 @@ from qtaim_gen.source.core.parse_qtaim import (
 from qtaim_gen.source.core.parse_orca import ORCA_PARSER_VERSION
 
 
+# Left out of qtaim.lmdb and graph features. Multiwfn 3.8(dev) builds 2024-Oct-6 and 2025-Jun-26 give
+# different delta_g_promolecular (IGM, promolecular density) for every element, and OMol4M mixes both
+# builds; every other qtaim field agrees. delta_g_hirsh (IGMH, the real density) is the alternative.
+DROPPED_QTAIM_FIELDS = ("delta_g_promolecular",)
+
+
+def drop_qtaim_fields(record: dict) -> dict:
+    """The qtaim.json record without the DROPPED_QTAIM_FIELDS at any critical point,
+    and without its "_meta" provenance block (not a critical point; qtaim.lmdb keeps
+    the CP-keyed schema every reader expects)."""
+    return {k: ({f: x for f, x in v.items() if f not in DROPPED_QTAIM_FIELDS} if isinstance(v, dict) else v)
+            for k, v in record.items() if k != "_meta"}
+
+
 class StaleOrcaParseError(ValueError):
     """orca.json was written by an older parser than the caller requires."""
 
@@ -302,6 +316,8 @@ def json_2_lmdbs(
         for file in chunk:
             with open(file, "r") as f:
                 data = json.load(f)
+                if data_type == "qtaim":
+                    data = drop_qtaim_fields(data)
                 if folder_paths is not None:
                     # Folder-list mode: key from full job-folder relpath under root_dir
                     job_folder = os.path.dirname(os.path.dirname(file)) if move_files else os.path.dirname(file)
@@ -646,6 +662,7 @@ def parse_qtaim_data(
         bond_feats (Dict[Tuple[int, int], Dict[str, Any]]): Dictionary containing bond features to be updated with QTAIM data.
         atom_keys (Optional[List[str]]): List of keys to extract for atom features. If None, all keys will be extracted. Defaults to None.
         bond_keys (Optional[List[str]]): List of keys to extract for bond features. If None, all keys will be extracted. Defaults to None.  
+        DROPPED_QTAIM_FIELDS are left out in both cases.
 
     Returns:
         atom_keys (List[str]): List of keys used for atom features.
@@ -660,7 +677,7 @@ def parse_qtaim_data(
     if atom_keys is None:
         atom_keys = []
         for k, v in dict_qtaim.items():
-            if "_" not in k:
+            if k != "_meta" and "_" not in k:
                 atom_keys = list(v.keys())
                 break
         for rem in ("cp_num", "element", "number", "pos_ang"):
@@ -670,18 +687,25 @@ def parse_qtaim_data(
     if bond_keys is None:
         bond_keys = []
         for k, v in dict_qtaim.items():
-            if "_" in k:
+            # "_meta" (record provenance) also has an underscore; its fields are not bond features
+            if k != "_meta" and "_" in k:
                 bond_keys = list(v.keys())
                 break
         for rem in ("cp_num", "connected_bond_paths", "pos_ang"):
             if rem in bond_keys:
                 bond_keys.remove(rem)
 
+    # never a feature, even when the caller lists it (LMDBs built before the drop carry it)
+    atom_keys = [k for k in atom_keys if k not in DROPPED_QTAIM_FIELDS]
+    bond_keys = [k for k in bond_keys if k not in DROPPED_QTAIM_FIELDS]
+
     # Build integer-keyed maps to avoid repeated str/int conversions while updating
     qtaim_atoms_int: Dict[int, Dict[str, Any]] = {}
     qtaim_bonds_conv: Dict[Tuple[int, int], Dict[str, Any]] = {}
 
     for k, v in dict_qtaim.items():
+        if k == "_meta":
+            continue
         if "_" not in k:
             try:
                 ik = int(k)

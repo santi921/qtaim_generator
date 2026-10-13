@@ -118,6 +118,9 @@ def qtaim_same(o, n, rtol=1e-10, atol=1e-9):
     CP index follows search order."""
     if not isinstance(o, dict) or not isinstance(n, dict):
         return o == n
+    # "_" keys (_meta) are record provenance, not critical points
+    o = {k: v for k, v in o.items() if not k.startswith("_")}
+    n = {k: v for k, v in n.items() if not k.startswith("_")}
     if set(o) != set(n):
         return False
     for cp in o:

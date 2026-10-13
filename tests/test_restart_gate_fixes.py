@@ -13,6 +13,7 @@ Ways a folder was re-queued forever:
 import json
 import logging
 import os
+import subprocess
 import shutil
 import zipfile
 from pathlib import Path
@@ -335,17 +336,184 @@ def test_multiwfn_wrapper_passes_bare_wavefunction_name(tmp_path):
         assert cmd.startswith("Multiwfn 'orca.wfx' < ")
 
 
-def test_conversion_script_keeps_molden_from_a_killed_run(tmp_path):
-    # A leftover orca.molden.input used to add an rm right after orca_2mkl, so the
-    # fresh molden was deleted before the convert step could read it (exit 24).
+def _run_convert(folder, orca_2mkl_cmd):
+    write_conversion(out_folder=str(folder), read_file=str(folder / "orca.gbw"), overwrite=True,
+                     orca_2mkl_cmd=orca_2mkl_cmd)
+    subprocess.run(["bash", "convert.in"], cwd=folder, check=False)
+
+
+def test_conversion_replaces_a_stale_molden(tmp_path):
+    # a molden left by a killed run is removed before orca_2mkl writes the new one;
+    # removing it afterwards deleted the fresh file and convert failed on every retry
+    fake = tmp_path / "fake_2mkl"
+    fake.write_text('#!/bin/bash\necho fresh > "$1.molden.input"\n')
+    fake.chmod(0o755)
     (tmp_path / "orca.gbw").write_text("gbw")
     (tmp_path / "orca.molden.input").write_text("stale")
-    write_conversion(
-        out_folder=str(tmp_path),
-        read_file=str(tmp_path / "orca.gbw"),
-        overwrite=True,
-        orca_2mkl_cmd="orca_2mkl",
-    )
-    lines = (tmp_path / "convert.in").read_text().splitlines()
-    assert lines[1].startswith("orca_2mkl ") and lines[1].endswith(" -molden")
-    assert not any("molden.input" in line for line in lines)
+    _run_convert(tmp_path, str(fake))
+    assert (tmp_path / "orca.molden.input").read_text() == "fresh\n"
+    assert not (tmp_path / "orca.gbw").exists()
+
+
+def test_failed_conversion_keeps_the_gbw(tmp_path):
+    # a stale non-empty molden must not let the gbw guard fire when orca_2mkl fails
+    (tmp_path / "orca.gbw").write_text("gbw")
+    (tmp_path / "orca.molden.input").write_text("stale, truncated")
+    _run_convert(tmp_path, "false")
+    assert (tmp_path / "orca.gbw").read_text() == "gbw"
+    assert not (tmp_path / "orca.molden.input").exists()
+
+
+def test_conversion_without_a_gbw_leaves_the_molden(tmp_path):
+    # with no gbw the molden is the only source: nothing removes it
+    (tmp_path / "orca.molden.input").write_text("source")
+    _run_convert(tmp_path, "false")
+    assert (tmp_path / "orca.molden.input").read_text() == "source"
+
+
+def test_multiwfn_wrapper_reaches_a_wavefunction_kept_in_generator(tmp_path):
+    # horton's wavefunction gate can pick generator/orca.wfx as the only copy;
+    # the script runs with cwd=folder, so the path must be relative to it
+    folder = tmp_path / ("x" * 120) / ("y" * 120)
+    (folder / "generator").mkdir(parents=True)
+    (folder / "generator" / "orca.wfx").write_text("wfx")
+    inp = folder / "hirshfeld.txt"
+    inp.write_text("7\n1\n1\nn\n0\nq\n")
+    write_multiwfn_exe(out_folder=str(folder), read_file=str(folder / "generator" / "orca.wfx"),
+                       multi_wfn_cmd="Multiwfn", multiwfn_input_file=str(inp),
+                       name="props_hirshfeld.mfwn", overwrite=True)
+    cmd = (folder / "props_hirshfeld.mfwn").read_text().splitlines()[-1]
+    assert cmd.startswith("Multiwfn 'generator/orca.wfx' < ")
+    assert (folder / "generator" / "orca.wfx").is_file()
+
+
+def _damaged_cpprop_text():
+    """CPprop_w_bond_paths.txt cut inside its last block, as found on LRC (2026-10-09)."""
+    lines = CPPROP_FIXTURE.read_text().splitlines()
+    last = max(i for i, ln in enumerate(lines) if "----------------   CP" in ln)
+    cut = next(i for i in range(last, len(lines)) if "ESP from nuclear charges" in lines[i])
+    return "\n".join(lines[: cut + 1]) + "\n"
+
+
+class TestDamagedCpprop:
+    """A CPprop.txt damaged after the run carries a complete qtaim.out, so the
+    export marker cannot catch it; cpprop_integrity must, at every gate."""
+
+    def _folder(self, tmp_path):
+        (tmp_path / "CPprop.txt").write_text(_damaged_cpprop_text())
+        shutil.copy(INP_FIXTURE, tmp_path / "input.in")
+        (tmp_path / "qtaim.out").write_text(BANNER + COUNT_LINE + EXPORT_LINE + BANNER)
+        return str(tmp_path)
+
+    def test_not_parsed(self, tmp_path):
+        folder = self._folder(tmp_path)
+        parse_multiwfn(folder, separate=False, logger=logging.getLogger("t"))
+        assert not os.path.exists(os.path.join(folder, "qtaim.json"))
+
+    def test_raw_output_is_not_usable(self, tmp_path):
+        assert not _qtaim_output_complete(self._folder(tmp_path), n_atoms=_n_atoms_in_fixture())
+
+    def test_archived_under_a_name_that_cannot_replace_a_sound_copy(self, tmp_path):
+        from qtaim_gen.source.core.omol import clean_jobs
+
+        folder = self._folder(tmp_path)
+        gen = tmp_path / "generator"
+        gen.mkdir()
+        sound = CPPROP_FIXTURE.read_bytes()
+        with zipfile.ZipFile(gen / "out_files.zip", "w") as z:
+            z.writestr("CPprop.txt", sound)
+            z.writestr("qtaim.out", BANNER + COUNT_LINE + EXPORT_LINE + BANNER)
+        archived_out = BANNER + COUNT_LINE + EXPORT_LINE + BANNER
+        clean_jobs(folder, logger=logging.getLogger("t"), move_results=True)
+        with zipfile.ZipFile(gen / "out_files.zip") as z:
+            assert z.read("CPprop.txt") == sound
+            assert z.read("CPprop.corrupt.txt").decode() == _damaged_cpprop_text()
+            # the sound pair stays from one run: the damaged run's qtaim.out does not replace it
+            assert z.read("qtaim.out").decode() == archived_out
+            assert "qtaim.corrupt.out" in z.namelist()
+
+    def test_sound_cpprop_is_archived_as_is(self, tmp_path):
+        from qtaim_gen.source.core.omol import clean_jobs
+
+        shutil.copy(CPPROP_FIXTURE, tmp_path / "CPprop.txt")
+        (tmp_path / "qtaim.out").write_text(BANNER + COUNT_LINE + EXPORT_LINE + BANNER)
+        clean_jobs(str(tmp_path), logger=logging.getLogger("t"), move_results=True)
+        with zipfile.ZipFile(tmp_path / "generator" / "out_files.zip") as z:
+            assert "CPprop.corrupt.txt" not in z.namelist()
+            assert z.read("CPprop.txt") == CPPROP_FIXTURE.read_bytes()
+
+    def test_damaged_root_copy_fails_without_check_bcp_count(self, tmp_path):
+        from qtaim_gen.source.utils.validation import validate_qtaim_dict
+
+        folder = self._folder(tmp_path)
+        gen = tmp_path / "generator"
+        gen.mkdir()
+        rec = {str(i): {"density_all": 1.0} for i in range(_n_atoms_in_fixture())}
+        rec.update({f"{i}_{i + 1}": {"density_all": 0.1} for i in range(13)})
+        (gen / "qtaim.json").write_text(json.dumps(rec))
+        n = _n_atoms_in_fixture()
+        assert not validate_qtaim_dict(str(gen / "qtaim.json"), n_atoms=n, folder=folder)
+        assert not _qtaim_output_complete(folder, n_atoms=n)
+
+    def test_stale_root_record_is_not_promoted_over_a_damaged_cpprop(self, tmp_path):
+        # parse_multiwfn refuses the damaged CPprop.txt and leaves the old root
+        # qtaim.json; that leftover must not replace the generator/ record
+        import time
+        from qtaim_gen.source.core.omol import move_results_to_folder
+
+        gen = tmp_path / "generator"
+        gen.mkdir()
+        (tmp_path / "qtaim.json").write_text(json.dumps({"0": {"density_all": 9.9}}))
+        (gen / "qtaim.json").write_text(json.dumps({"0": {"density_all": 1.0}}))
+        time.sleep(0.02)
+        self._folder(tmp_path)  # damaged CPprop.txt, newer than both records
+        move_results_to_folder(str(tmp_path), logger=logging.getLogger("t"), clean=False)
+        assert json.loads((gen / "qtaim.json").read_text()) == {"0": {"density_all": 1.0}}
+
+    def test_archive_outranks_a_legacy_loose_generator_copy(self, tmp_path):
+        # nothing writes generator/CPprop.txt any more; read first, a damaged one
+        # would outlive every rerun that refreshes the archive
+        from qtaim_gen.source.utils.validation import qtaim_cpprop_problems
+
+        gen = tmp_path / "generator"
+        gen.mkdir()
+        (gen / "CPprop.txt").write_text(_damaged_cpprop_text())
+        with zipfile.ZipFile(gen / "out_files.zip", "w") as z:
+            z.writestr("CPprop.txt", CPPROP_FIXTURE.read_bytes())
+            z.writestr("qtaim.out", COUNT_LINE + EXPORT_LINE)
+        assert qtaim_cpprop_problems(str(tmp_path)) == []
+
+
+def test_every_validation_in_gbw_analysis_forwards_the_mode_flags():
+    # merging feat/horton-charge-engine dropped charge_engine from the revalidation
+    # after a timing patch, so a Multiwfn folder could pass an engine run and be cleaned
+    import ast
+    import inspect
+    import textwrap
+
+    from qtaim_gen.source.core.omol import gbw_analysis
+
+    tree = ast.parse(textwrap.dedent(inspect.getsource(gbw_analysis)))
+    calls = [n for n in ast.walk(tree) if isinstance(n, ast.Call) and getattr(n.func, "id", None) == "validation_checks"]
+    assert calls
+    required = {"charge_engine", "recheck_fuzzy", "recheck_allalpha_qtaim", "recheck_cp_labels", "enforce_poincare_hopf"}
+    for call in calls:
+        assert required <= {k.arg for k in call.keywords}, (call.lineno, required - {k.arg for k in call.keywords})
+
+
+def test_patch_timings_leaves_engine_routines_alone(tmp_path):
+    # a charge_engine timing stands in for ENGINE_ROUTINES and a surface_engine one for
+    # 'other' (validate_timing_dict); only keys that are really missing get patched
+    from qtaim_gen.source.core.omol import patch_timings_from_log
+    from qtaim_gen.source.data.multiwfn import ENGINE_ROUTINES
+    from qtaim_gen.source.utils.validation import get_expected_timing_keys
+
+    expected, _ = get_expected_timing_keys(full_set=0, spin_tf=False)
+    timings = {k: 1.0 for k in expected if k not in ENGINE_ROUTINES and k not in ("other", "qtaim")}
+    timings.update(charge_engine=5.0, surface_engine=2.0)
+    gen = tmp_path / "generator"
+    gen.mkdir()
+    (gen / "timings.json").write_text(json.dumps(timings))
+    assert patch_timings_from_log(str(tmp_path), full_set=0, move_results=True)
+    patched = json.loads((gen / "timings.json").read_text())["_timings_patched"]
+    assert set(patched) == {"qtaim"}

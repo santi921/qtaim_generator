@@ -242,6 +242,41 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
 
     parser.add_argument(
+        "--recheck_cp_labels",
+        action="store_true",
+        help=(
+            "treat a qtaim.json whose nuclear CP sits on another atom as incomplete (records parsed "
+            "before the exact-index mapper fix: swapped or duplicated close same-element atoms) and rerun "
+            "the QTAIM step. Run relabel-qtaim-cps first; it repairs clean swaps in place. Combine with "
+            "--recheck_allalpha_qtaim so an open-shell folder reruns from a .wfx."
+        ),
+    )
+
+    parser.add_argument(
+        "--enforce_poincare_hopf",
+        action="store_true",
+        help=(
+            "fail a qtaim.json whose Poincare-Hopf sum n - b + r - c != 1 (all four CP types) from the "
+            "standard CP search and rerun QTAIM with the exhaustive search (sphere search around each "
+            "atom, about 5-7x the cost); an exhaustive result is accepted whatever its sum, so a folder "
+            "escalates at most once. The sum is logged and stored in qtaim.json under _meta."
+        ),
+    )
+
+    parser.add_argument(
+        "--recheck_allalpha_qtaim",
+        action="store_true",
+        help=(
+            "treat a qtaim.json from an unrestricted .wfn read as all-alpha as incomplete: the "
+            "qtaim.out banner of a finished run shows beta == 0 (or, without one, the densities "
+            "are all-alpha), unless every electron is alpha or fix-allalpha-qtaim repaired it. "
+            "The QTAIM step then reruns from a .wfx: the unrestricted .wfn is set aside as "
+            "*.wfn.allalpha and the loose CPprop.txt and qtaim.out are removed first (needs --wfx "
+            "and a gbw source). Run fix-allalpha-qtaim first; it repairs UKS singlets in place."
+        ),
+    )
+
+    parser.add_argument(
         "--require_qtaim_provenance",
         action="store_true",
         help=(
@@ -288,6 +323,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     require_qtaim_provenance = bool(
         getattr(args, "require_qtaim_provenance", False)
     )
+    recheck_allalpha_qtaim = bool(getattr(args, "recheck_allalpha_qtaim", False))
+    recheck_cp_labels = bool(getattr(args, "recheck_cp_labels", False))
+    enforce_poincare_hopf = bool(getattr(args, "enforce_poincare_hopf", False))
     recheck_fuzzy = bool(getattr(args, "recheck_fuzzy", False))
 
     # parsl args
@@ -346,6 +384,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         check_bcp_count=check_bcp_count,
         bcp_tolerance=bcp_tolerance,
         require_qtaim_provenance=require_qtaim_provenance,
+        recheck_allalpha_qtaim=recheck_allalpha_qtaim,
+        recheck_cp_labels=recheck_cp_labels,
+        enforce_poincare_hopf=enforce_poincare_hopf,
         recheck_fuzzy=recheck_fuzzy,
     )
 
@@ -388,6 +429,9 @@ def main(argv: Optional[List[str]] = None) -> int:
             check_bcp_count=check_bcp_count,
             bcp_tolerance=bcp_tolerance,
             require_qtaim_provenance=require_qtaim_provenance,
+            recheck_allalpha_qtaim=recheck_allalpha_qtaim,
+            recheck_cp_labels=recheck_cp_labels,
+            enforce_poincare_hopf=enforce_poincare_hopf,
             recheck_fuzzy=recheck_fuzzy,
         )
         for f in folders_run

@@ -11,6 +11,18 @@ from qtaim_gen.source.utils.validation import (
     get_charge_spin_n_atoms_from_folder,
     get_expected_timing_keys,
     qtaim_run_status,
+    read_qtaim_out,
+    cpprop_integrity,
+    qtaim_cpprop_problems,
+    qtaim_topology_meta,
+    qtaim_poincare_hopf,
+    poincare_hopf_needs_exhaustive,
+    QTAIM_META_KEY,
+    QTAIM_SEARCH_EXHAUSTIVE,
+    qtaim_copy_has_all_alpha_defect,
+    qtaim_copy_has_mislabeled_cps,
+    all_electron_count,
+    _FIRST_ECP_Z,
     TIMINGS_PATCHED_KEY,
     TIMING_PLACEHOLDER,
 )
@@ -137,18 +149,18 @@ def write_conversion(
         f.write("#!/bin/bash\n")
         # remove .gbw from file name
         read_file = read_file.split(".gbw")[0]
-        f.write(
-            "{} ".format(orca_2mkl_cmd)
-            + "'" + str(Path.home().joinpath(out_folder, read_file)) + "'"
-            + " -molden\n"
-        )
-        # No rm of the .molden.input here: it would delete the molden orca_2mkl just
-        # wrote, before the convert step reads it (a leftover molden from a killed
-        # run made convert fail on every retry). clean_jobs removes it at the end.
-
-        # check if gbw file exists
-        if os.path.exists(str(Path.home().joinpath(out_folder, read_file + ".gbw"))):
-            f.write("rm '{}.gbw'\n".format(str(Path.home().joinpath(out_folder, read_file))))
+        base = str(Path.home().joinpath(out_folder, read_file))
+        convert = "{} '{}' -molden".format(orca_2mkl_cmd, base)
+        if os.path.exists(base + ".gbw"):
+            # A molden left by a killed run is removed first, before orca_2mkl writes
+            # the new one (removing it afterwards deleted the fresh file, so convert
+            # failed on every retry). The gbw goes only once orca_2mkl succeeded and
+            # wrote a non-empty molden: a failed conversion keeps the only source.
+            # Without a gbw, an existing molden is the source and is left alone.
+            f.write("rm -f '{}.molden.input'\n".format(base))
+            f.write("{0} && [ -s '{1}.molden.input' ] && rm '{1}.gbw'\n".format(convert, base))
+        else:
+            f.write(convert + "\n")
 
     st = os.stat(out_file)
     os.chmod(out_file, st.st_mode | stat.S_IEXEC)
@@ -176,8 +188,8 @@ def write_multiwfn_exe(
         mv_cpprop(bool): whether to move the cpprop file to the output folder
         overwrite(bool): whether to overwrite the file if it already exists
         name(str): name of the bash script
-        gbw_override(bool): no-op; the wavefunction is always passed by bare
-            name (Multiwfn's 200-char input path limit)
+        gbw_override(bool): no-op; the wavefunction is always passed relative to
+            out_folder (Multiwfn's 200-char input path limit)
     """
 
     out_file = str(Path.home().joinpath(out_folder, name))
@@ -196,10 +208,13 @@ def write_multiwfn_exe(
                 f.write("orca_2mkl '" + str(Path.home().joinpath(out_folder)) + "'\n")
 
             multiwfn_input_file_root = multiwfn_input_file.split("/")[-1].split(".")[0]
-            # Always the bare name: Multiwfn 3.8 truncates input paths over 200
-            # chars ("Unable to find the input file", exit 24), and the script is
-            # run with cwd=out_folder. gbw_override is kept as a no-op.
-            bare_file = read_file.split("/")[-1]
+            # Relative to out_folder, the script's cwd: Multiwfn 3.8 truncates input
+            # paths over 200 chars ("Unable to find the input file", exit 24), and a
+            # wavefunction kept only in generator/ must stay reachable
+            # (generator/orca.wfx). gbw_override is kept as a no-op.
+            bare_file = os.path.relpath(
+                str(Path.home().joinpath(out_folder, read_file)), str(Path.home().joinpath(out_folder))
+            )
 
             f.write(
                 "{} ".format(multi_wfn_cmd)  # multiwfn command
@@ -493,6 +508,9 @@ def run_jobs(
     bcp_tolerance: int = 2,
     require_qtaim_provenance: bool = False,
     skip_routines: Optional[frozenset] = None,
+    recheck_allalpha_qtaim: bool = False,
+    recheck_cp_labels: bool = False,
+    enforce_poincare_hopf: bool = False,
 ) -> None:
     """
     Run conversion and multiwfn jobs
@@ -645,6 +663,10 @@ def run_jobs(
             "Could not determine n_atoms for skip-completeness check: %s", e
         )
     _fuzzy_routine_set = set(fuzzy_dict.keys()) if separate else set()
+    n_electrons_for_skip = all_electron_count(dft_dict) if (recheck_allalpha_qtaim and dft_dict) else None
+    mult_for_skip = int(dft_dict["spin"]) if (dft_dict and dft_dict.get("spin") is not None) else None
+    atoms_for_skip = ({int(i): a["pos"] for i, a in dft_dict["mol"].items()}
+                      if (recheck_cp_labels and dft_dict and dft_dict.get("mol")) else None)
 
     for order in order_of_operations:
         if skip_routines and order in skip_routines:
@@ -669,6 +691,12 @@ def run_jobs(
                 require_qtaim_provenance=require_qtaim_provenance,
                 charge=charge_for_skip,
                 fuzzy_routines=_fuzzy_routine_set,
+                recheck_allalpha_qtaim=recheck_allalpha_qtaim,
+                recheck_cp_labels=recheck_cp_labels,
+                enforce_poincare_hopf=enforce_poincare_hopf,
+                n_electrons=n_electrons_for_skip,
+                mult=mult_for_skip,
+                atoms=atoms_for_skip,
             )
             if step_done:
                 has_positive_timing = (
@@ -703,6 +731,23 @@ def run_jobs(
             memory = {}
 
         mfwn_file = os.path.join(folder, "props_{}.mfwn".format(order))
+
+        # Under --recheck_allalpha_qtaim or --recheck_cp_labels QTAIM never reads an unrestricted .wfn:
+        # Multiwfn would read it as all-alpha and overwrite a good record. A rerun for another reason
+        # (CP counts, CP labels) needs a .wfx.
+        if order == "qtaim" and (recheck_allalpha_qtaim or recheck_cp_labels):
+            wf_path = _wavefunction_path(folder)
+            if wf_path is not None and wf_path.endswith(".wfn"):
+                from qtaim_gen.source.utils.fuzzy_recheck import unrestricted_input
+
+                if (mult_for_skip is not None and mult_for_skip > 1) or unrestricted_input(folder):
+                    logger.error(
+                        f"refusing to run qtaim from the unrestricted {wf_path}; "
+                        f"needs a .wfx (rerun with --wfx after removing the .wfn)")
+                    timings[order] = -1
+                    # recorded now: steps after this one may all be skipped, and they are what saves
+                    atomic_json_write(os.path.join(folder, "timings.json"), timings)
+                    continue
 
         # Precondition: non-convert multiwfn sub-jobs need a wavefunction file.
         # Surfacing it here beats a downstream KeyError in parse_multiwfn.
@@ -899,6 +944,20 @@ def parse_multiwfn(
                     f"CPprop.txt export never completed, so CPprop.txt is partial"
                 )
                 continue
+            # damage qtaim.out cannot show (truncated or spliced after the run)
+            try:
+                with open(cp_prop_path, "rb") as f:
+                    _cpprop_data = f.read()
+            except OSError as e:
+                logger.error(f"Skipping qtaim parse in {folder}: cannot read CPprop.txt ({e})")
+                continue
+            _cpprop_problems = cpprop_integrity(_cpprop_data, reported_bcp=_qstat["reported_bcp"])
+            if _cpprop_problems:
+                logger.error(
+                    f"Skipping qtaim parse in {folder}: damaged CPprop.txt "
+                    f"({'; '.join(_cpprop_problems)})"
+                )
+                continue
 
             inp_loc = None
             inp_orca = None
@@ -920,6 +979,13 @@ def parse_multiwfn(
                         f"QTAIM parsing returned empty dictionary for {folder}"
                     )
                     continue
+                # record-level provenance, last so CP keys keep their order
+                meta = qtaim_topology_meta(_cpprop_data, read_qtaim_out(folder))
+                qtaim_dict[QTAIM_META_KEY] = meta
+                (logger.info if meta["poincare_hopf"] == 1 else logger.warning)(
+                    f"QTAIM Poincare-Hopf sum {meta['poincare_hopf']} {meta['cp_counts']} "
+                    f"({meta['qtaim_search']} search) in {folder}"
+                )
 
                 atomic_json_write(json_file, qtaim_dict)
                 # if return_dicts:
@@ -1098,16 +1164,45 @@ def clean_jobs(
         except Exception as e:
             logger.info(f"Couldn't rm file {file}: {e}")
 
+    # unrestricted .wfn set aside by --recheck_allalpha_qtaim; only reached after validation passed
+    for base in (folder, os.path.join(folder, "generator")):
+        if os.path.isdir(base):
+            for file in os.listdir(base):
+                if file.endswith(".wfn" + ALLALPHA_WFN_SUFFIX):
+                    try:
+                        os.remove(os.path.join(base, file))
+                        logger.info(f"Removed {file}")
+                    except OSError as e:
+                        logger.info(f"Couldn't rm file {file}: {e}")
+
     # zip all out files - collect first, delete only after zip is safely merged
     files_to_zip = [
         f for f in os.listdir(folder)
         if (f.endswith(".out") and f != "orca.out") or f.endswith("CPprop.txt")
     ]
     successfully_zipped = []
+    cpprop_problems = []
+    if "CPprop.txt" in files_to_zip:
+        try:
+            with open(os.path.join(folder, "CPprop.txt"), "rb") as f:
+                cpprop_problems = cpprop_integrity(f.read(), reported_bcp=qtaim_run_status(folder)["reported_bcp"])
+        except OSError as e:
+            cpprop_problems = [f"unreadable: {e}"]
+    if cpprop_problems:
+        logger.error(f"Archiving damaged CPprop.txt in {folder} as CPprop.corrupt.txt "
+                     f"(with its qtaim.out as qtaim.corrupt.out): {'; '.join(cpprop_problems)}")
     with zipfile.ZipFile(zip_file_out, "w") as zipf:
         for file in files_to_zip:
             try:
-                zipf.write(os.path.join(folder, file), arcname=file)
+                arcname = file
+                # kept as evidence under names that cannot replace the sound
+                # CPprop.txt and its own qtaim.out in generator/out_files.zip,
+                # which would leave the archive pairing two different runs
+                if cpprop_problems and file == "CPprop.txt":
+                    arcname = "CPprop.corrupt.txt"
+                elif cpprop_problems and file == "qtaim.out":
+                    arcname = "qtaim.corrupt.out"
+                zipf.write(os.path.join(folder, file), arcname=arcname)
                 successfully_zipped.append(file)
                 logger.info(f"Zipped {file}")
             except Exception as e:
@@ -1246,8 +1341,15 @@ def patch_timings_from_log(
     log_timings = _parse_timings_from_log(log_path)
 
     expected, _ = get_expected_timing_keys(full_set=full_set, spin_tf=spin_tf)
+    # as validate_timing_dict: a charge_engine timing stands in for ENGINE_ROUTINES and a
+    # surface_engine timing for 'other', so their keys are not missing and get no placeholder
+    if isinstance(timings.get("charge_engine"), (int, float)) and timings["charge_engine"] > 0:
+        expected = [k for k in expected if k not in ENGINE_ROUTINES]
+    surface_done = isinstance(timings.get("surface_engine"), (int, float)) and timings["surface_engine"] > 0
     patched: dict = {}
     for key in expected:
+        if key == "other" and surface_done:
+            continue
         # validate_timing_dict accepts 'other' or 'other_alie'; if asked for
         # 'other' but only 'other_alie' is present (or vice versa), don't patch
         if key == "other" and ("other" in timings or "other_alie" in timings):
@@ -1338,15 +1440,18 @@ def move_results_to_folder(
                 try:
                     if file == "qtaim.json":
                         # A root qtaim.json is only this run's result when the CPprop.txt it
-                        # was parsed from is newer than the generator/ record. Otherwise it is
-                        # a leftover (clean=False keeps the root copy and CPprop.txt, and every
-                        # pass re-parses them) and must not undo a later rerun or patch.
+                        # was parsed from is newer than the generator/ record and intact.
+                        # Otherwise it is a leftover (clean=False keeps the root copy and
+                        # CPprop.txt, and every pass re-parses them; parse_multiwfn refuses a
+                        # damaged CPprop.txt and leaves the old root copy in place) and must
+                        # not undo a later rerun or patch.
                         cpprop = os.path.join(folder, "CPprop.txt")
                         if not (os.path.isfile(cpprop)
-                                and os.path.getmtime(cpprop) > os.path.getmtime(existing_path)):
+                                and os.path.getmtime(cpprop) > os.path.getmtime(existing_path)
+                                and not qtaim_cpprop_problems(folder, root_only=True)):
                             logger.warning(
-                                "Kept generator/qtaim.json in %s: root qtaim.json is not from a "
-                                "CPprop.txt newer than it", folder,
+                                "Kept generator/qtaim.json in %s: root qtaim.json is not from an "
+                                "intact CPprop.txt newer than it", folder,
                             )
                             if clean:
                                 os.remove(new_path)
@@ -1911,7 +2016,7 @@ def _normalize_wavefunction_name(
 # def2 basis sets put an ECP on every element from Rb (Z=37) up. The wfx of
 # such a system counts core electrons only if Multiwfn loaded the EDF library,
 # so an all-electron expectation cannot be compared against it reliably.
-_FIRST_ECP_Z = 37
+# _FIRST_ECP_Z (37) is shared with validation's all-alpha classifier.
 
 
 def _has_ecp_atoms(dft_dict: dict) -> bool:
@@ -2058,12 +2163,77 @@ def _reject_wavefunction_with_wrong_electron_count(
     return True
 
 
+ALLALPHA_WFN_SUFFIX = ".allalpha"
+
+
+def _prepare_allalpha_qtaim_rerun(
+    folder: str, wfx: bool, preprocess_compressed: bool, logger: logging.Logger,
+    recheck_allalpha_qtaim: bool = True, recheck_cp_labels: bool = False,
+) -> bool:
+    """Set a folder with an all-alpha qtaim.json up for a QTAIM rerun from a .wfx.
+
+    With recheck_cp_labels a mislabeled record of an unrestricted calculation gets the same
+    treatment: it reruns QTAIM, and run_jobs refuses an unrestricted .wfn.
+
+    Every .wfn (folder and generator/) is set aside as *.wfn.allalpha and the loose CPprop.txt and
+    qtaim.out are removed, so the reparse cannot rebuild the record, extraction rebuilds a .wfx from
+    the gbw source, and the old banner cannot outrank the rerun's qtaim.out. The set-aside file is
+    removed by clean_jobs once validation passes, and by clean_omol. A sound record is left alone
+    (run_jobs refuses to run QTAIM from an unrestricted .wfn under the flag).
+    False (do not run) when the record could only be reproduced: no --wfx, or no .wfx and no gbw
+    source. True otherwise.
+    """
+    from qtaim_gen.source.utils.fuzzy_recheck import unrestricted_input
+
+    dft_dict = get_charge_spin_n_atoms_from_folder(folder, logger=logger)
+    mult = int(dft_dict["spin"]) if (dft_dict and dft_dict.get("spin") is not None) else None
+    n_electrons = all_electron_count(dft_dict) if dft_dict else None
+    if recheck_allalpha_qtaim and qtaim_copy_has_all_alpha_defect(folder, n_electrons=n_electrons, mult=mult):
+        what = "all-alpha qtaim.json"
+    elif (recheck_cp_labels and dft_dict and dft_dict.get("mol")
+          and ((mult is not None and mult > 1) or unrestricted_input(folder))
+          and qtaim_copy_has_mislabeled_cps(folder, atoms={int(i): a["pos"] for i, a in dft_dict["mol"].items()})):
+        what = "mislabeled unrestricted qtaim.json"
+    else:
+        # a sound record is left alone: setting its .wfn aside made extraction unpack and
+        # decompress folders that then returned early as valid
+        return True
+    if not wfx:
+        logger.error("%s in %s needs --wfx; not running", what, folder)
+        return False
+    existing = _wavefunction_path(folder)
+    if not (existing is not None and existing.endswith(".wfx")) and not _gbw_source_present(
+        folder, preprocess_compressed
+    ):
+        logger.error("%s in %s and no .wfx or gbw source to rerun from; not running", what, folder)
+        return False
+    for base in (folder, os.path.join(folder, "generator")):
+        if not os.path.isdir(base):
+            continue
+        for name in sorted(os.listdir(base)):
+            path = os.path.join(base, name)
+            if name.endswith(".wfn"):
+                os.replace(path, path + ALLALPHA_WFN_SUFFIX)
+                logger.info("%s: set %s aside before QTAIM", what, path)
+            elif name in ("CPprop.txt", "qtaim.out"):
+                # a loose qtaim.out would outrank the rerun's copy in out_files.zip
+                os.remove(path)
+                logger.info("%s: removed %s before the QTAIM rerun", what, path)
+    return True
+
+
 def _qtaim_output_complete(
     folder: str,
     n_atoms: Optional[int] = None,
     check_bcp_count: bool = False,
     bcp_tolerance: int = 2,
     require_qtaim_provenance: bool = False,
+    recheck_allalpha_qtaim: bool = False,
+    recheck_cp_labels: bool = False,
+    n_electrons: Optional[int] = None,
+    mult: Optional[int] = None,
+    atoms: Optional[dict] = None,
+    enforce_poincare_hopf: bool = False,
 ) -> bool:
     """Whether qtaim.json looks complete enough to skip the QTAIM step.
 
@@ -2079,8 +2249,21 @@ def _qtaim_output_complete(
     consults qtaim.out, rejecting a run whose CP search or CPprop.txt export
     never finished or whose stored bond-CP count falls short of what Multiwfn
     reported; conversely, an empty BCP set is then acceptable when a complete
-    run itself reported none (genuinely non-interacting fragments).
+    run itself reported none (genuinely non-interacting fragments). With
+    recheck_allalpha_qtaim it rejects an all-alpha or partly all-alpha record,
+    the same rule validation_checks applies: any defective copy (root or
+    generator/) rejects, so the gate, the validator and the pre-extraction
+    cleanup can never disagree about a folder. With recheck_cp_labels it
+    rejects a record whose nuclear CP sits on another atom, again on either copy
+    (atoms: {index: position}, read from the geometry input when not given).
+    With enforce_poincare_hopf it rejects a record whose n - b + r - c != 1 from a
+    standard search, as validate_qtaim_dict does; gbw_analysis then reruns QTAIM
+    with the exhaustive search, whose result is accepted whatever the sum.
     """
+    if recheck_allalpha_qtaim and qtaim_copy_has_all_alpha_defect(folder, n_electrons=n_electrons, mult=mult):
+        return False
+    if recheck_cp_labels and qtaim_copy_has_mislabeled_cps(folder, atoms=atoms):
+        return False
     for base in (folder, os.path.join(folder, "generator")):
         path = os.path.join(base, "qtaim.json")
         if not os.path.isfile(path) or os.path.getsize(path) == 0:
@@ -2121,6 +2304,10 @@ def _qtaim_output_complete(
                 # no qtaim.out means completeness is unverifiable; must match
                 # the validator or the step is skipped and then fails validation
                 return False
+        # same rule as validate_qtaim_dict: a damaged root CPprop.txt always reruns
+        # QTAIM, any damaged copy (the archived one included) under check_bcp_count
+        if qtaim_cpprop_problems(folder, root_only=not check_bcp_count):
+            return False
         if check_bcp_count:
             if status is None:
                 status = qtaim_run_status(folder)
@@ -2145,15 +2332,19 @@ def _qtaim_output_complete(
                     expected = storable if storable is not None else reported
                     if expected - n_bcp > bcp_tolerance:
                         return False
+        if enforce_poincare_hopf and poincare_hopf_needs_exhaustive(qtaim_poincare_hopf(data, folder)):
+            return False
         return True
 
     # No usable qtaim.json. parse_multiwfn writes it only after every step has
     # run, so a job killed between the qtaim step and the final parse holds
     # complete raw output and no json; that must count as done.
-    return _qtaim_raw_output_complete(folder, n_atoms=n_atoms)
+    return _qtaim_raw_output_complete(folder, n_atoms=n_atoms, enforce_poincare_hopf=enforce_poincare_hopf)
 
 
-def _qtaim_raw_output_complete(folder: str, n_atoms: Optional[int] = None) -> bool:
+def _qtaim_raw_output_complete(
+    folder: str, n_atoms: Optional[int] = None, enforce_poincare_hopf: bool = False
+) -> bool:
     """Root qtaim.out carries both completion markers and root CPprop.txt holds
     one nuclear CP per atom, so parse_multiwfn can build qtaim.json from it."""
     cpprop = os.path.join(folder, "CPprop.txt")
@@ -2171,6 +2362,17 @@ def _qtaim_raw_output_complete(folder: str, n_atoms: Optional[int] = None) -> bo
     # exists here, so the status describes the same run as CPprop.txt.
     status = qtaim_run_status(folder)
     if not (status["search_done"] and status["export_done"]):
+        return False
+    # parse_multiwfn refuses a damaged CPprop.txt, so it is not usable output
+    try:
+        with open(cpprop, "rb") as f:
+            data = f.read()
+    except OSError:
+        return False
+    if cpprop_integrity(data, reported_bcp=status["reported_bcp"]):
+        return False
+    if enforce_poincare_hopf and poincare_hopf_needs_exhaustive(
+            qtaim_topology_meta(data, read_qtaim_out(folder))):
         return False
     if n_atoms is None:
         return True
@@ -2234,6 +2436,40 @@ def _step_out_parses(
     return True
 
 
+def _poincare_hopf_needs_escalation(folder: str, logger: logging.Logger) -> bool:
+    """Whether a QTAIM rerun in this folder must use the exhaustive search: its record
+    fails Poincare-Hopf from a standard search (poincare_hopf_needs_exhaustive), or
+    already came from the exhaustive search (kept, so a rerun for another reason does
+    not fall back to standard and escalate again). Reads the copy the restart gate
+    reads (_qtaim_output_complete: root then generator/, skipping empty files), else
+    the raw CPprop.txt, so it must run while the old record is still on disk."""
+    record = None
+    for base in (folder, os.path.join(folder, "generator")):
+        path = os.path.join(base, "qtaim.json")
+        if not os.path.isfile(path) or os.path.getsize(path) == 0:
+            continue
+        try:
+            with open(path, "r") as f:
+                data = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            continue
+        if isinstance(data, dict) and data:
+            record = data
+            break
+    topology = qtaim_poincare_hopf(record, folder)
+    if topology is not None and topology.get("qtaim_search") == QTAIM_SEARCH_EXHAUSTIVE:
+        logger.info("QTAIM record in %s came from the exhaustive search; any rerun keeps it", folder)
+        return True
+    if not poincare_hopf_needs_exhaustive(topology):
+        return False
+    logger.warning(
+        "Poincare-Hopf sum %s != 1 %s from a %s search in %s: rerunning QTAIM with the "
+        "exhaustive search", topology["poincare_hopf"], topology.get("cp_counts"),
+        topology.get("qtaim_search") or "unknown", folder,
+    )
+    return True
+
+
 def _has_usable_step_output(
     folder: str,
     order: str,
@@ -2243,6 +2479,12 @@ def _has_usable_step_output(
     require_qtaim_provenance: bool = False,
     charge: Optional[int] = None,
     fuzzy_routines: Optional[set] = None,
+    recheck_allalpha_qtaim: bool = False,
+    recheck_cp_labels: bool = False,
+    enforce_poincare_hopf: bool = False,
+    n_electrons: Optional[int] = None,
+    mult: Optional[int] = None,
+    atoms: Optional[dict] = None,
 ) -> bool:
     """Check whether a sub-job appears to have produced usable output on disk.
 
@@ -2272,6 +2514,12 @@ def _has_usable_step_output(
             check_bcp_count=check_bcp_count,
             bcp_tolerance=bcp_tolerance,
             require_qtaim_provenance=require_qtaim_provenance,
+            recheck_allalpha_qtaim=recheck_allalpha_qtaim,
+            recheck_cp_labels=recheck_cp_labels,
+            enforce_poincare_hopf=enforce_poincare_hopf,
+            n_electrons=n_electrons,
+            mult=mult,
+            atoms=atoms,
         )
 
     for base in (folder, os.path.join(folder, "generator")):
@@ -2435,6 +2683,9 @@ def gbw_analysis(
     horton_python: str = "",
     recheck_fuzzy: bool = False,
     charge_engine: bool = False,
+    recheck_allalpha_qtaim: bool = False,
+    recheck_cp_labels: bool = False,
+    enforce_poincare_hopf: bool = False,
 ) -> None:
     """
     Run a full analysis on a folder of gbw files
@@ -2469,6 +2720,19 @@ def gbw_analysis(
             spin, fuzzy_bond) with core/charge_engine.py instead of Multiwfn;
             validation then requires a charge_engine timing, so folders whose
             data came from Multiwfn are recomputed
+        recheck_cp_labels(bool): treat a qtaim.json whose nuclear CP sits on another
+            atom (parsed before the exact-index mapper fix) as incomplete and rerun
+            the QTAIM step (implies restart)
+        enforce_poincare_hopf(bool): treat a qtaim.json whose n - b + r - c != 1 from a
+            standard CP search as incomplete and rerun QTAIM with the exhaustive search
+            (implies restart); the exhaustive result is accepted whatever its sum
+        recheck_allalpha_qtaim(bool): treat an all-alpha qtaim.json (decided by
+            the qtaim.out banner of a finished run, else the densities) as
+            incomplete and rerun QTAIM from a .wfx. Before extraction the
+            unrestricted .wfn is set aside (*.wfn.allalpha, removed after
+            validation passes) and the loose CPprop.txt and qtaim.out are
+            removed, so neither the reparse nor the rerun can reproduce the
+            record (needs wfx and a gbw source; implies restart)
     Writes:
         - settings.ini file with memory and n_threads
         - jobs for conversion to wfn/wfx and multiwfn analysis
@@ -2510,6 +2774,16 @@ def gbw_analysis(
                 return False
         else:
             logger.warning("recheck_fuzzy: multiplicity unreadable in %s - recheck skipped", folder)
+
+    # Also before extraction: a rejected all-alpha record came from an unrestricted
+    # .wfn, and the loose CPprop.txt holds the same values, so the reparse below
+    # would rebuild it and a rerun from that .wfn would reproduce it.
+    if (recheck_allalpha_qtaim or recheck_cp_labels) and not parse_only:
+        if not _prepare_allalpha_qtaim_rerun(
+            folder, wfx, preprocess_compressed, logger,
+            recheck_allalpha_qtaim=recheck_allalpha_qtaim, recheck_cp_labels=recheck_cp_labels,
+        ):
+            return False
 
     # check if there is a .wfn or .gbw file in the folder. If there is an
     # option to preprocess compressed files
@@ -2624,6 +2898,9 @@ def gbw_analysis(
         legacy_orca5 = ["orca5.gbw", "orca5.wfn", "orca5.wfx"]
         for file in os.listdir(folder):
             is_intermediate = any(file.endswith(ext) for ext in always_intermediate)
+            if file.endswith(".gbw.zstd0") and not canonical_gbw_present:
+                # extraction was attempted but produced no orca.gbw: keep the only source
+                is_intermediate = False
             is_legacy_orca5 = file in legacy_orca5
             if is_intermediate or (is_legacy_orca5 and canonical_source_present):
                 try:
@@ -2657,7 +2934,13 @@ def gbw_analysis(
         else:
             logger.info("Timings file found at %s - restarting.", timings_path)
 
-    if recheck_fuzzy and not restart and not overwrite:
+    if enforce_poincare_hopf and parse_only:
+        # nothing can rerun QTAIM, so a violation would fail validation on every pass
+        logger.warning("--enforce_poincare_hopf has no effect with parse_only; ignored")
+        enforce_poincare_hopf = False
+
+    if (recheck_fuzzy or recheck_allalpha_qtaim or recheck_cp_labels or enforce_poincare_hopf) \
+            and not restart and not overwrite:
         # data presence drives the per-step skip; without restart every step
         # reruns. --overwrite asks for exactly that, so it is left alone.
         restart = True
@@ -2685,6 +2968,9 @@ def gbw_analysis(
                     require_qtaim_provenance=require_qtaim_provenance,
                     recheck_fuzzy=recheck_fuzzy,
                     charge_engine=charge_engine,
+                    recheck_allalpha_qtaim=recheck_allalpha_qtaim,
+                    recheck_cp_labels=recheck_cp_labels,
+                    enforce_poincare_hopf=enforce_poincare_hopf,
                 )
             except Exception as e:
                 logger.error(f"Error during validation checks: {e}")
@@ -2722,6 +3008,9 @@ def gbw_analysis(
                         require_qtaim_provenance=require_qtaim_provenance,
                         recheck_fuzzy=recheck_fuzzy,
                         charge_engine=charge_engine,
+                        recheck_allalpha_qtaim=recheck_allalpha_qtaim,
+                        recheck_cp_labels=recheck_cp_labels,
+                        enforce_poincare_hopf=enforce_poincare_hopf,
                     )
                 except Exception:
                     tf_without_orca = False
@@ -2756,6 +3045,9 @@ def gbw_analysis(
                             require_qtaim_provenance=require_qtaim_provenance,
                             recheck_fuzzy=recheck_fuzzy,
                             charge_engine=charge_engine,
+                            recheck_allalpha_qtaim=recheck_allalpha_qtaim,
+                            recheck_cp_labels=recheck_cp_labels,
+                            enforce_poincare_hopf=enforce_poincare_hopf,
                         )
                     except Exception as e:
                         logger.error(f"Error validating orca-only parse: {e}")
@@ -2814,6 +3106,9 @@ def gbw_analysis(
                         require_qtaim_provenance=require_qtaim_provenance,
                         recheck_fuzzy=recheck_fuzzy,
                         charge_engine=charge_engine,
+                        recheck_allalpha_qtaim=recheck_allalpha_qtaim,
+                        recheck_cp_labels=recheck_cp_labels,
+                        enforce_poincare_hopf=enforce_poincare_hopf,
                     )
 
                     if tf_validation:
@@ -2840,6 +3135,8 @@ def gbw_analysis(
 
     if not parse_only:
         print("... Creating jobs")
+        escalate = (enforce_poincare_hopf and not exhaustive_qtaim
+                    and _poincare_hopf_needs_escalation(folder, logger))
         # create jobs for conversion to wfn and multiwfn analysis
         create_jobs(
             folder=folder,
@@ -2851,7 +3148,7 @@ def gbw_analysis(
             full_set=full_set,
             patch_path=patch_path,
             wfx=wfx,
-            exhaustive_qtaim=exhaustive_qtaim,
+            exhaustive_qtaim=exhaustive_qtaim or escalate,
         )
         # run jobs
         run_jobs(
@@ -2870,6 +3167,9 @@ def gbw_analysis(
             bcp_tolerance=bcp_tolerance,
             require_qtaim_provenance=require_qtaim_provenance,
             skip_routines=ENGINE_ROUTINES if charge_engine else None,
+            recheck_allalpha_qtaim=recheck_allalpha_qtaim,
+            recheck_cp_labels=recheck_cp_labels,
+            enforce_poincare_hopf=enforce_poincare_hopf,
         )
         # after run_jobs: its convert step is what produces orca.wfx
         if charge_engine:
@@ -2912,15 +3212,17 @@ def gbw_analysis(
         require_qtaim_provenance=require_qtaim_provenance,
         recheck_fuzzy=recheck_fuzzy,
         charge_engine=charge_engine,
+        recheck_allalpha_qtaim=recheck_allalpha_qtaim,
+        recheck_cp_labels=recheck_cp_labels,
+        enforce_poincare_hopf=enforce_poincare_hopf,
     )
 
     # Optional repair pass: if validation failed and patch_timings is on,
     # recover missing timing keys from gbw_analysis.log (or stamp -1.0
-    # placeholders). patch_timings_from_log only writes positive timing
-    # values, so if the only validation failure was missing/zero timing
-    # keys, the patch necessarily satisfies validate_timing_dict - skip
-    # the second full validation_checks pass. Other validation failures
-    # (missing JSONs, n_atoms mismatch) are not patched and remain failures.
+    # placeholders). The patch repairs timings only, so validation runs
+    # again: other failures (missing JSONs, n_atoms mismatch, an all-alpha
+    # record) must remain failures, or cleanup deletes the gbw of a folder
+    # that still needs a rerun.
     if not tf_validation and patch_timings:
         dft_dict = get_charge_spin_n_atoms_from_folder(
             folder, logger=logger, verbose=False
@@ -2939,7 +3241,23 @@ def gbw_analysis(
             logger=logger,
         )
         if did_patch:
-            tf_validation = True
+            # the patch only repairs timings; anything else that failed must still fail
+            tf_validation = validation_checks(
+                folder,
+                full_set=full_set,
+                verbose=False,
+                move_results=move_results,
+                logger=logger,
+                check_orca=check_orca,
+                check_bcp_count=check_bcp_count,
+                bcp_tolerance=bcp_tolerance,
+                require_qtaim_provenance=require_qtaim_provenance,
+                recheck_fuzzy=recheck_fuzzy,
+                recheck_allalpha_qtaim=recheck_allalpha_qtaim,
+                recheck_cp_labels=recheck_cp_labels,
+                enforce_poincare_hopf=enforce_poincare_hopf,
+                charge_engine=charge_engine,
+            )
 
     logger.info("gbw_analysis completed in folder: {}".format(folder))
     logger.info("Validation status: {}".format(tf_validation))
