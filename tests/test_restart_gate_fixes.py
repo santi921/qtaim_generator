@@ -27,6 +27,7 @@ from qtaim_gen.source.core.omol import (
     _step_out_parses,
     _wavefunction_electrons,
     parse_multiwfn,
+    write_conversion,
     write_multiwfn_exe,
 )
 from qtaim_gen.source.core.parse_multiwfn import parse_charge_base, parse_charge_doc
@@ -408,3 +409,42 @@ class TestDamagedCpprop:
             z.writestr("CPprop.txt", CPPROP_FIXTURE.read_bytes())
             z.writestr("qtaim.out", COUNT_LINE + EXPORT_LINE)
         assert qtaim_cpprop_problems(str(tmp_path)) == []
+
+
+def test_multiwfn_wrapper_passes_bare_wavefunction_name(tmp_path):
+    # Multiwfn 3.8 rejects input paths over 200 chars, so the script must
+    # name the wavefunction relative to its cwd even for deep job folders.
+    folder = tmp_path / ("x" * 120) / ("y" * 120)
+    folder.mkdir(parents=True)
+    inp = folder / "hirshfeld.txt"
+    inp.write_text("7\n1\n1\nn\n0\nq\n")
+    for override in (False, True):
+        write_multiwfn_exe(
+            out_folder=str(folder),
+            read_file=str(folder / "orca.wfx"),
+            multi_wfn_cmd="Multiwfn",
+            multiwfn_input_file=str(inp),
+            name="props_hirshfeld.mfwn",
+            overwrite=True,
+            gbw_override=override,
+        )
+        cmd = (folder / "props_hirshfeld.mfwn").read_text().splitlines()[-1]
+        assert cmd.startswith("Multiwfn 'orca.wfx' < ")
+
+
+def test_conversion_script_keeps_molden_from_a_killed_run(tmp_path):
+    # A leftover orca.molden.input used to add an rm right after orca_2mkl, so the
+    # fresh molden was deleted before the convert step could read it (exit 24).
+    (tmp_path / "orca.gbw").write_text("gbw")
+    (tmp_path / "orca.molden.input").write_text("stale")
+    write_conversion(
+        out_folder=str(tmp_path),
+        read_file=str(tmp_path / "orca.gbw"),
+        overwrite=True,
+        orca_2mkl_cmd="orca_2mkl",
+    )
+    lines = (tmp_path / "convert.in").read_text().splitlines()
+    assert lines[1].startswith("orca_2mkl ") and lines[1].endswith(" -molden")
+    # the molden is never removed here; the gbw only once orca_2mkl wrote a non-empty molden
+    assert not any(line.startswith("rm ") and "molden.input" in line for line in lines)
+    assert lines[-1] == "[ -s '{0}.molden.input' ] && rm '{0}.gbw'".format(tmp_path / "orca")
