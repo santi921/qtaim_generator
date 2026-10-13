@@ -41,6 +41,10 @@ def main():
     ok = [r for r in recs.values() if r["status"] == "ok" and "engine" in r]
     print(f"with engine records: {len(ok)}; stored qtaim.json present: {sum(r['engine'].get('stored_json', False) for r in ok)}; "
           f"orca.inp found: {sum(r['engine'].get('inp', False) for r in ok)}")
+    for key in ("inp_error", "ref_parse_error"):
+        bad = [r["job"] for r in ok if r["engine"].get(key)]
+        if bad:
+            print(f"{key}: {len(bad)} jobs (runner side; qtaim.json comparisons missing), e.g. {bad[: args.show]}")
     stored_ph = sum(r["stored"]["poincare_hopf"] != 1 for r in ok)
     print(f"stored Multiwfn sets breaking Poincare-Hopf: {stored_ph}")
 

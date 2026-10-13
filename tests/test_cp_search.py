@@ -178,3 +178,52 @@ def test_near_pairs_flags_close_cps():
 
     pos = np.array([[0.0, 0.0, 0.0], [0.0115, 0.0, 0.0], [1.0, 0.0, 0.0]])
     assert _near_pairs(pos) == [(0, 1)]
+
+
+@pytest.mark.parametrize("job", JOBS)
+def test_engine_types_agree_with_printed_eigenvalues(job, tmp_path):
+    # the type must come from the Hessian CPprop.txt prints, or cpprop_integrity
+    # rejects a near-degenerate CP on every rerun
+    from qtaim_gen.source.core.cp_search import analyze, write_cpprop
+    from qtaim_gen.source.utils.validation import cpprop_integrity
+
+    wfx, basis, _ = _load(job)
+    res = analyze(wfx, basis)
+    assert np.array_equal(res["type"], (res["props"]["eigenvalues"] > 0).sum(axis=1))
+    write_cpprop(tmp_path / "CPprop.txt", res, wfx)
+    assert cpprop_integrity((tmp_path / "CPprop.txt").read_bytes()) == []
+
+
+def test_reseed_skips_when_only_weak_cps_break_the_kept_set():
+    # the full set satisfies Poincare-Hopf and a CP below WEAK_DROP breaks the kept
+    # set: more seeds cannot change that, so no round runs
+    from qtaim_gen.source.core.cp_search import _poincare_hopf, reseed, search
+
+    wfx, basis, _ = _load("XeCl4_step2_0_1")
+    full = search(wfx, basis, seeds="superset")
+    drop = int(np.flatnonzero(full["type"] == 1)[0])
+    keep = [i for i in range(len(full["pos"])) if i != drop]
+    far = wfx["coords"].max(axis=0) + 40.0  # rho ~ 0 there
+    cps = {"pos": np.vstack([full["pos"][keep], far]), "type": np.append(full["type"][keep], 1),
+           "eigenvalues": np.vstack([full["eigenvalues"][keep], [-1.0, 1.0, 2.0]]),
+           "stage": [full["stage"][i] for i in keep] + ["test"], "stats": []}
+    assert _poincare_hopf(cps["type"]) == 1
+    _, stats = reseed(cps, wfx, basis)
+    assert stats == []
+
+
+def test_engine_check_survives_a_corrupt_input_tarball(tmp_path):
+    import sys
+
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
+    import qtaim_verify_stored as V
+
+    wfx, basis, ref = _load("XeCl4_step2_0_1")
+    src, res, work = tmp_path / "src", tmp_path / "res", tmp_path / "work"
+    for d in (src, res, work):
+        d.mkdir()
+    (src / "orca.tar.zst").write_bytes(b"not a zstd tarball")
+    out = V.engine_check(ref, os.path.join(FIXTURES, "XeCl4_step2_0_1", "multiwfn_cpprop.txt"), wfx, basis,
+                         str(work), str(src), str(res))
+    assert out["inp"] is False
+    assert "error" not in out["multiwfn"] and out["multiwfn"]["counts"]["BCP"][0] == out["multiwfn"]["counts"]["BCP"][1]

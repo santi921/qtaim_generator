@@ -198,36 +198,51 @@ def _orca_inp_from_tar(input_folder, workdir):
 
 def engine_check(cps, stored_cpprop, wfx, basis, workdir, input_folder, results_folder):
     """The engine's whole QTAIM step in each ENGINE_MODES entry against the
-    stored Multiwfn results (see the module docstring, step 5)."""
-    inps = sorted(glob.glob(os.path.join(input_folder, "*.inp"))) or sorted(glob.glob(os.path.join(results_folder, "*.inp")))
-    inp = inps[0] if inps else _orca_inp_from_tar(input_folder, workdir)
+    stored Multiwfn results (see the module docstring, step 5). A failure in
+    one part is recorded under an *_error key and the rest still runs, so the
+    job keeps its record and reaches the report's failing list."""
+    out = {}
+    inp = None
+    try:
+        inps = sorted(glob.glob(os.path.join(input_folder, "*.inp"))) or sorted(glob.glob(os.path.join(results_folder, "*.inp")))
+        inp = inps[0] if inps else _orca_inp_from_tar(input_folder, workdir)
+    except Exception as e:
+        out["inp_error"] = f"{type(e).__name__}: {e}"
     stored_json = None
     try:
         with open(os.path.join(results_folder, "generator", "qtaim.json")) as f:
             stored_json = json.load(f)
     except (OSError, ValueError):
         pass
-    ref_parsed = _quiet_parse(stored_cpprop, inp) if inp else None
-    out = {"inp": inp is not None, "stored_json": stored_json is not None}
+    ref_parsed = None
+    if inp:
+        try:
+            ref_parsed = _quiet_parse(stored_cpprop, inp)
+        except Exception as e:
+            out["ref_parse_error"] = f"{type(e).__name__}: {e}"
+    out.update(inp=inp is not None, stored_json=stored_json is not None)
     for name, cfg in ENGINE_MODES.items():
+        r = {}
         try:
             t0 = time.perf_counter()
             res = analyze(wfx, basis, **cfg)
-            r = {"s": round(time.perf_counter() - t0, 2), **compare_cp_sets(cps, res),
-                 "poincare_hopf": res["poincare_hopf"], "poincare_hopf_full_set": res["poincare_hopf_full_set"],
-                 "weak": len(res["weak"]), "dropped": res["dropped"], "near_pairs": len(res["near_pairs"]),
-                 "reseed_rounds": [st["stage"] for st in res["stats"] if st["stage"].startswith("sphere")]}
+            r.update(s=round(time.perf_counter() - t0, 2), **compare_cp_sets(cps, res),
+                     poincare_hopf=res["poincare_hopf"], poincare_hopf_full_set=res["poincare_hopf_full_set"],
+                     weak=len(res["weak"]), dropped=res["dropped"], near_pairs=len(res["near_pairs"]),
+                     reseed_rounds=[st["stage"] for st in res["stats"] if st["stage"].startswith("sphere")])
             path = os.path.join(workdir, f"CPprop_{name}.txt")
             write_cpprop(path, res, wfx)
             with open(path, "rb") as f:
                 r["integrity"] = cpprop_integrity(f.read())
             if inp:
                 eng = _quiet_parse(path, inp)
-                r["vs_stored_cpprop"] = compare_qtaim_json(ref_parsed, eng)
+                if ref_parsed is not None:
+                    r["vs_stored_cpprop"] = compare_qtaim_json(ref_parsed, eng)
                 if stored_json is not None:
                     r["vs_stored_json"] = compare_qtaim_json(stored_json, eng)
         except Exception as e:
-            r = {"error": f"{type(e).__name__}: {e}"}
+            # keep what was computed before the failure
+            r["error"] = f"{type(e).__name__}: {e}"
         out[name] = r
     return out
 

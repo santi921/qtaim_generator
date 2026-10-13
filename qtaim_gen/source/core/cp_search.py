@@ -174,6 +174,18 @@ def _sort_key(pos):
     return pos[:, 0] * 0.234134 + pos[:, 1] * 1.9837322 - pos[:, 2] * 0.5413578924
 
 
+DEGENERATE_CP = 1e-4  # Bohr: converged points this close are one CP, whatever their type
+
+
+def _final_eigenvalues(pos, wfx, basis):
+    """Hessian eigenvalues at the converged points, the ones CPprop.txt prints:
+    typing from the Hessian before Newton's last step (findcp) can disagree in
+    sign with them for a near-degenerate CP, which cpprop_integrity rejects."""
+    if not len(pos):
+        return np.zeros((0, 3))
+    return np.linalg.eigvalsh(density_derivatives(pos, wfx, basis)["hessian"])
+
+
 def _engine_search(wfx, basis, minicpdis, superset):
     stats = []
     cand_x, cand_eig, cand_g, cand_stage = [], [], [], []
@@ -187,7 +199,7 @@ def _engine_search(wfx, basis, minicpdis, superset):
             continue
         x, status, hess, gnorm, niter = newton(pts, wfx, basis, gradconv=gconv, trust=TRUST_RADIUS)
         ok = np.flatnonzero(status == 1)
-        eig = np.linalg.eigvalsh(hess[ok])
+        eig = _final_eigenvalues(x[ok], wfx, basis)
         keep = ~np.all(eig == 0, axis=1)
         cand_x.append(x[ok][keep])
         cand_eig.append(eig[keep])
@@ -203,6 +215,8 @@ def _engine_search(wfx, basis, minicpdis, superset):
     rank = np.lexsort((x[:, 2], x[:, 1], x[:, 0], g, np.array([s != "nuclei" for s in cand_stage])))
     kept = []
     for i in rank:
+        if kept and np.min(np.linalg.norm(x[kept] - x[i], axis=1)) <= DEGENERATE_CP:
+            continue
         same = [k for k in kept if ctype[k] == ctype[i]]
         if same and np.min(np.linalg.norm(x[same] - x[i], axis=1)) <= minicpdis:
             continue
@@ -296,16 +310,18 @@ def reseed(cps, wfx, basis, rounds=RESEED_ROUNDS, minicpdis=MINICPDIS):
     for n in rounds:
         # stop once the kept CPs satisfy it, or the full set does (then the kept set fails only
         # because a CP lies below WEAK_DROP, which more seeds cannot change)
-        if _poincare_hopf(cps["type"][rho >= WEAK_DROP]) == 1 or (stats and _poincare_hopf(cps["type"]) == 1):
+        if _poincare_hopf(cps["type"][rho >= WEAK_DROP]) == 1 or _poincare_hopf(cps["type"]) == 1:
             break
         x, status, hess, gnorm, niter = newton(sphere_seeds(wfx["coords"], n), wfx, basis)
         ok = np.flatnonzero(status == 1)
-        eig = np.linalg.eigvalsh(hess[ok])
+        eig = _final_eigenvalues(x[ok], wfx, basis)
         good = ~np.all(eig == 0, axis=1)
         ok, eig = ok[good], eig[good]
         added = 0
         for j in np.lexsort((x[ok, 2], x[ok, 1], x[ok, 0], gnorm[ok])):
             p, t = x[ok[j]], int((eig[j] > 0).sum())
+            if np.min(np.linalg.norm(cps["pos"] - p, axis=1)) <= DEGENERATE_CP:
+                continue
             same = cps["type"] == t
             if same.any() and np.min(np.linalg.norm(cps["pos"][same] - p, axis=1)) <= minicpdis:
                 continue
@@ -394,25 +410,27 @@ def bond_paths(cps, wfx, basis, mode="multiwfn"):
                 break
             g = density_derivatives(x[active], wfx, basis, hessian=False)
             rho, k1 = g["rho"], g["gradient"]
+            # findpath compares rho here with the value of its last density call, which
+            # is the RK2 midpoint of the step that led here (rho_old), not the last point
             ok = rho >= rho_old[active]
             if engine:
                 back = active[~ok]
                 h[back] *= 0.5
                 x[back] = x_prev[back]
                 retry = back[h[back] >= PATH_STEP / 64]
-                # a retried path steps again from its last accepted point, whose rho is rho_old
+                # a retried path steps again from its last accepted point
                 if len(retry):
                     gr = density_derivatives(x[retry], wfx, basis, hessian=False)["gradient"]
                     k1 = np.concatenate([k1[ok], gr])
                     active = np.concatenate([active[ok], retry])
-                    rho = np.concatenate([rho[ok], rho_old[retry]])
                 else:
-                    active, rho, k1 = active[ok], rho[ok], k1[ok]
+                    active, k1 = active[ok], k1[ok]
             else:
-                active, rho, k1 = active[ok], rho[ok], k1[ok]
-            rho_old[active] = rho
+                active, k1 = active[ok], k1[ok]
             k1 = k1 / np.linalg.norm(k1, axis=1)[:, None]
-            k2 = density_derivatives(x[active] + 0.5 * h[active, None] * k1, wfx, basis, hessian=False)["gradient"]
+            mid = density_derivatives(x[active] + 0.5 * h[active, None] * k1, wfx, basis, hessian=False)
+            k2 = mid["gradient"]
+            rho_old[active] = mid["rho"]
             x_prev[active] = x[active]
             x[active] += h[active, None] * k2 / np.linalg.norm(k2, axis=1)[:, None]
     atom = ncp_atoms(cps, wfx["coords"])
