@@ -1339,8 +1339,15 @@ def patch_timings_from_log(
     log_timings = _parse_timings_from_log(log_path)
 
     expected, _ = get_expected_timing_keys(full_set=full_set, spin_tf=spin_tf)
+    # as validate_timing_dict: a charge_engine timing stands in for ENGINE_ROUTINES and a
+    # surface_engine timing for 'other', so their keys are not missing and get no placeholder
+    if isinstance(timings.get("charge_engine"), (int, float)) and timings["charge_engine"] > 0:
+        expected = [k for k in expected if k not in ENGINE_ROUTINES]
+    surface_done = isinstance(timings.get("surface_engine"), (int, float)) and timings["surface_engine"] > 0
     patched: dict = {}
     for key in expected:
+        if key == "other" and surface_done:
+            continue
         # validate_timing_dict accepts 'other' or 'other_alie'; if asked for
         # 'other' but only 'other_alie' is present (or vice versa), don't patch
         if key == "other" and ("other" in timings or "other_alie" in timings):
@@ -3247,6 +3254,7 @@ def gbw_analysis(
                 recheck_allalpha_qtaim=recheck_allalpha_qtaim,
                 recheck_cp_labels=recheck_cp_labels,
                 enforce_poincare_hopf=enforce_poincare_hopf,
+                charge_engine=charge_engine,
             )
 
     logger.info("gbw_analysis completed in folder: {}".format(folder))

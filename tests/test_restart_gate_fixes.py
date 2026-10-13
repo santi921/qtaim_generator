@@ -448,3 +448,38 @@ class TestDamagedCpprop:
             z.writestr("CPprop.txt", CPPROP_FIXTURE.read_bytes())
             z.writestr("qtaim.out", COUNT_LINE + EXPORT_LINE)
         assert qtaim_cpprop_problems(str(tmp_path)) == []
+
+
+def test_every_validation_in_gbw_analysis_forwards_the_mode_flags():
+    # merging feat/horton-charge-engine dropped charge_engine from the revalidation
+    # after a timing patch, so a Multiwfn folder could pass an engine run and be cleaned
+    import ast
+    import inspect
+    import textwrap
+
+    from qtaim_gen.source.core.omol import gbw_analysis
+
+    tree = ast.parse(textwrap.dedent(inspect.getsource(gbw_analysis)))
+    calls = [n for n in ast.walk(tree) if isinstance(n, ast.Call) and getattr(n.func, "id", None) == "validation_checks"]
+    assert calls
+    required = {"charge_engine", "recheck_fuzzy", "recheck_allalpha_qtaim", "recheck_cp_labels", "enforce_poincare_hopf"}
+    for call in calls:
+        assert required <= {k.arg for k in call.keywords}, (call.lineno, required - {k.arg for k in call.keywords})
+
+
+def test_patch_timings_leaves_engine_routines_alone(tmp_path):
+    # a charge_engine timing stands in for ENGINE_ROUTINES and a surface_engine one for
+    # 'other' (validate_timing_dict); only keys that are really missing get patched
+    from qtaim_gen.source.core.omol import patch_timings_from_log
+    from qtaim_gen.source.data.multiwfn import ENGINE_ROUTINES
+    from qtaim_gen.source.utils.validation import get_expected_timing_keys
+
+    expected, _ = get_expected_timing_keys(full_set=0, spin_tf=False)
+    timings = {k: 1.0 for k in expected if k not in ENGINE_ROUTINES and k not in ("other", "qtaim")}
+    timings.update(charge_engine=5.0, surface_engine=2.0)
+    gen = tmp_path / "generator"
+    gen.mkdir()
+    (gen / "timings.json").write_text(json.dumps(timings))
+    assert patch_timings_from_log(str(tmp_path), full_set=0, move_results=True)
+    patched = json.loads((gen / "timings.json").read_text())["_timings_patched"]
+    assert set(patched) == {"qtaim"}

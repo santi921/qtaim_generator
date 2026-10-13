@@ -217,16 +217,6 @@ def get_qtaim_descs(file="./CPprop_1157_1118_1158.txt", verbose=False):
 
 CP_TYPE_LABEL = {"(3,-3)": "NCP", "(3,-1)": "BCP", "(3,+1)": "RCP", "(3,+3)": "CCP"}
 
-# Fortran Ew.d drops the exponent letter when |exponent| > 99: 0.1999917076-166
-_BARE_EXPONENT = re.compile(r"(?<=\d)([-+]\d{3})$")
-
-
-def fortran_float(token: str) -> float:
-    token = token.replace("D", "E")
-    if "E" not in token:
-        token = _BARE_EXPONENT.sub(r"E\1", token)
-    return float(token)
-
 
 def load_cpprop_full(path: str) -> list:
     """Every CP in a Multiwfn CPprop.txt, ring and cage CPs included (parse_cp
