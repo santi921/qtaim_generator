@@ -445,4 +445,6 @@ def test_conversion_script_keeps_molden_from_a_killed_run(tmp_path):
     )
     lines = (tmp_path / "convert.in").read_text().splitlines()
     assert lines[1].startswith("orca_2mkl ") and lines[1].endswith(" -molden")
-    assert not any("molden.input" in line for line in lines)
+    # the molden is never removed here; the gbw only once orca_2mkl wrote a non-empty molden
+    assert not any(line.startswith("rm ") and "molden.input" in line for line in lines)
+    assert lines[-1] == "[ -s '{0}.molden.input' ] && rm '{0}.gbw'".format(tmp_path / "orca")
