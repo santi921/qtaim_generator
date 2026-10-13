@@ -227,3 +227,61 @@ def test_engine_check_survives_a_corrupt_input_tarball(tmp_path):
                          str(work), str(src), str(res))
     assert out["inp"] is False
     assert "error" not in out["multiwfn"] and out["multiwfn"]["counts"]["BCP"][0] == out["multiwfn"]["counts"]["BCP"][1]
+
+
+def _fake_maximum(eigs, floor):
+    # density_derivatives near a sharp maximum at the origin with Hessian diag(eigs) and a gradient that
+    # never drops below floor, as at a heavy all-electron nucleus in double precision
+    H = np.diag(eigs)
+    calls = [0]
+
+    def fake(pts, wfx, basis, **kw):
+        calls[0] += 1
+        g = pts @ H + floor * (-1) ** calls[0]  # roundoff Newton cannot cancel
+        return {"gradient": g, "hessian": np.broadcast_to(H, (len(pts), 3, 3)).copy()}
+
+    return fake
+
+
+@pytest.mark.parametrize("eigs,accept,expected", [
+    ((-3e15, -3e15, -3e15), False, -2),
+    ((-3e15, -3e15, -3e15), True, 2),
+    ((-3e15, -3e15, 3e15), True, -2),
+])
+def test_newton_accepts_a_precision_limited_maximum_only_when_asked(monkeypatch, eigs, accept, expected):
+    import qtaim_gen.source.core.cp_search as C
+
+    monkeypatch.setattr(C, "density_derivatives", _fake_maximum(eigs, 16.0))
+    x, status, hess, gnorm, _ = C.newton([[1e-3, 0.0, 0.0]], {}, None, gradconv=1.0, accept_maximum=accept)
+    assert status[0] == expected
+    assert np.abs(x[0]).max() < 1e-13
+    if expected == 2:
+        assert np.allclose(hess[0], np.diag(eigs)) and gnorm[0] > 1.0
+
+
+def test_newton_accept_maximum_leaves_normal_convergence_alone(monkeypatch):
+    import qtaim_gen.source.core.cp_search as C
+
+    monkeypatch.setattr(C, "density_derivatives", _fake_maximum((-3e15, -3e15, -3e15), 0.0))
+    runs = [C.newton([[1e-3, 2e-3, 0.0]], {}, None, gradconv=1.0, accept_maximum=a) for a in (False, True)]
+    assert runs[0][1][0] == runs[1][1][0] == 1
+    for a, b in zip(runs[0], runs[1]):
+        assert np.array_equal(a, b)
+
+
+UCL6 = "/home/santiagovargas/dev/qtaim_generator/data/joe_collab/lrc_results/ijb_05_121a_UCl6_1/orca.wfx"
+
+
+@pytest.mark.skipif(not os.path.exists(UCL6), reason="local X2C UCl6 wavefunction")
+def test_x2c_uranium_nuclear_cp_is_found():
+    from qtaim_gen.source.core.charge_engine import prepare_basis, read_wfx
+    from qtaim_gen.source.core.cp_search import analyze
+
+    wfx = read_wfx(UCL6)
+    r = analyze(wfx, prepare_basis(wfx))
+    u = int(np.flatnonzero(wfx["atnums"] == 92)[0])
+    assert r["counts_full_set"] == [7, 6, 0, 0] and r["poincare_hopf"] == 1
+    assert np.count_nonzero(r["ncp_atom"] == u) == 1
+    bcp = r["bcp_atoms"][r["type"] == 1]
+    assert (bcp >= 0).all() and np.isin(bcp, [u]).any(axis=1).all()
+    assert [s for s in r["stats"] if s["stage"] == "nuclei"][0]["precision_limited"] == 1

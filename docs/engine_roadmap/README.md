@@ -57,6 +57,15 @@ eleesp1 uses Fmch (series cut at 1e-8, sqrt(pi)/2 truncated to 0.88622692): esp_
 is no longer produced; bader spin integrated as Shannon/Fisher under ispecial=1
 (verified in data/omol_test_spin_skip/orca6_uks/bader.out), IBSI on the 30x110 grid,
 QTAIM CPs Multiwfn misses (superset), ring/cage CPs (currently discarded by the parser).
+Heavy all-electron nuclei: Multiwfn relaxes findcp's gradient criterion to |g| < 1 for
+nuclear seeds (MW/topology.f90:1018, "for very heavy atoms"), but at an X2C uranium or
+thorium nucleus (Hessian about -3e15) Newton stops within 5e-15 Bohr with |g| about 16
+left by roundoff, so the seed runs out of cycles and the actinide NCP is lost: no atomic
+descriptors for it, every actinide-ligand BCP unpaired, Poincare-Hopf 0. The engine
+modes accept such a seed when its last step was below dispconv and its Hessian is
+negative definite (status 2, counted as `precision_limited` in the nuclei stage stats);
+seeds that converge normally are unchanged. Local X2C jobs: 5 of 9 U/Th jobs had lost
+the NCP; all 9 now have it, with Poincare-Hopf 1 and every actinide BCP paired.
 
 ### Parity across levels of theory
 

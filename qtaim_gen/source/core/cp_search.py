@@ -131,11 +131,19 @@ def delaunay_seeds(coords, atnums):
 
 
 def newton(seeds, wfx, basis, gradconv=GRADCONV, dispconv=DISPCONV, maxcyc=TOPOMAXCYC, singular=SINGULARCRIT,
-           trust=None):
+           trust=None, accept_maximum=False):
     """findcp's Newton iteration for every seed at once, steps optionally capped
-    at trust Bohr. Returns final positions, status (1 converged, -1 singular
-    Hessian, -2 out of cycles), the Hessian and gradient of the last step and
-    the iteration count."""
+    at trust Bohr. Returns final positions, status (1 converged, 2 converged at a
+    maximum by displacement only, -1 singular Hessian, -2 out of cycles), the
+    Hessian and gradient of the last step and the iteration count.
+
+    accept_maximum: a seed still unconverged after maxcyc whose last step was
+    below dispconv with a negative-definite Hessian gets status 2 instead of -2.
+    Seeds that converge normally are untouched. At a heavy all-electron nucleus
+    (X2C uranium: exponents to 5.7e7, Hessian -3e15) Newton lands within 5e-15
+    Bohr of the maximum, but the gradient there is still ~16 because no closer
+    point is representable in double precision; findcp's nuclear criterion
+    (|g| < 1) then never holds and the nuclear CP is lost."""
     x = np.array(seeds, dtype=float)
     n = len(x)
     status = np.zeros(n, dtype=np.int64)
@@ -143,6 +151,7 @@ def newton(seeds, wfx, basis, gradconv=GRADCONV, dispconv=DISPCONV, maxcyc=TOPOM
     gnorm = np.full(n, np.inf)
     niter = np.zeros(n, dtype=np.int64)
     active = np.arange(n)
+    at_max = np.zeros(n, dtype=bool)
     for _ in range(maxcyc):
         if not len(active):
             break
@@ -160,12 +169,18 @@ def newton(seeds, wfx, basis, gradconv=GRADCONV, dispconv=DISPCONV, maxcyc=TOPOM
             disp[big] *= (trust / dn[big])[:, None]
         x[a] += disp
         gn = np.linalg.norm(g, axis=1)
-        conv = (np.linalg.norm(disp, axis=1) < dispconv) & (gn < gradconv)
+        small = np.linalg.norm(disp, axis=1) < dispconv
+        conv = small & (gn < gradconv)
         status[a[conv]] = 1
         hess[a[conv]] = H[conv]
         gnorm[a[conv]] = gn[conv]
+        if accept_maximum:
+            at_max[a] = small & ~conv & np.all(np.linalg.eigvalsh(H) < 0, axis=1)
+            hess[a[~conv]] = H[~conv]
+            gnorm[a[~conv]] = gn[~conv]
         active = a[~conv]
     status[active] = -2
+    status[active[at_max[active]]] = 2
     return x, status, hess, gnorm, niter
 
 
@@ -195,10 +210,12 @@ def _engine_search(wfx, basis, minicpdis, superset):
     stages.append(("delaunay", delaunay_seeds(wfx["coords"], wfx["atnums"]), GRADCONV))
     for stage, pts, gconv in stages:
         if not len(pts):
-            stats.append({"stage": stage, "seeds": 0, "converged": 0, "singular": 0, "maxcyc": 0, "newton_steps": 0})
+            stats.append({"stage": stage, "seeds": 0, "converged": 0, "singular": 0, "maxcyc": 0, "newton_steps": 0,
+                          "precision_limited": 0})
             continue
-        x, status, hess, gnorm, niter = newton(pts, wfx, basis, gradconv=gconv, trust=TRUST_RADIUS)
-        ok = np.flatnonzero(status == 1)
+        x, status, hess, gnorm, niter = newton(pts, wfx, basis, gradconv=gconv, trust=TRUST_RADIUS,
+                                               accept_maximum=stage == "nuclei")
+        ok = np.flatnonzero(status >= 1)
         eig = _final_eigenvalues(x[ok], wfx, basis)
         keep = ~np.all(eig == 0, axis=1)
         cand_x.append(x[ok][keep])
@@ -206,7 +223,8 @@ def _engine_search(wfx, basis, minicpdis, superset):
         cand_g.append(gnorm[ok][keep])
         cand_stage += [stage] * int(keep.sum())
         stats.append({"stage": stage, "seeds": len(pts), "converged": len(ok), "singular": int((status == -1).sum()),
-                      "maxcyc": int((status == -2).sum()), "newton_steps": int(niter.sum())})
+                      "maxcyc": int((status == -2).sum()), "newton_steps": int(niter.sum()),
+                      "precision_limited": int((status == 2).sum())})
     x, eig, g = np.concatenate(cand_x), np.concatenate(cand_eig), np.concatenate(cand_g)
     ctype = (eig > 0).sum(axis=1)
     # nuclear CPs first (their gradient criterion is off), then ascending |g|, then position;
