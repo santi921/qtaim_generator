@@ -275,7 +275,8 @@ def split_qtaim_atom_bond(
     bond_entries: dict[str, dict[str, Any]] = {}
 
     for key, value in entry.items():
-        if not isinstance(value, dict):
+        # "_meta" is record provenance, not a critical point
+        if not isinstance(value, dict) or key == "_meta":
             continue
         if "_" in key:
             bond_entries[key] = value

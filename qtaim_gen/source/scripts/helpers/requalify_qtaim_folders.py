@@ -18,7 +18,9 @@ Per folder, under the runners' .processing.lock (no lock with --dry_run):
 
 Statuses: same (nothing to do), replaced, would_replace (--dry_run), missing (no folder),
 no_qtaim_json, no_provenance (no qtaim.out, or the run did not finish), no_cpprop (pre-archiving
-run), no_inp, parse_failed, ncp_mismatch, count_mismatch, different_run, locked, failed.
+run), damaged_cpprop (validation.cpprop_integrity: truncated, spliced or a count different from
+qtaim.out's; a truncated file still parses, minus its tail), no_inp, parse_failed, ncp_mismatch,
+count_mismatch, different_run, locked, failed.
 --list_remaining writes the entries (as given) that need a real QTAIM rerun or a look:
 everything except same, replaced and would_replace.
 
@@ -51,6 +53,7 @@ STATUS_MISSING = "missing"
 STATUS_NO_QTAIM_JSON = "no_qtaim_json"
 STATUS_NO_PROVENANCE = "no_provenance"
 STATUS_NO_CPPROP = "no_cpprop"
+STATUS_DAMAGED_CPPROP = "damaged_cpprop"
 STATUS_NO_INP = "no_inp"
 STATUS_PARSE_FAILED = "parse_failed"
 STATUS_NCP_MISMATCH = "ncp_mismatch"
@@ -59,7 +62,7 @@ STATUS_DIFFERENT_RUN = "different_run"
 STATUS_LOCKED = "locked"
 STATUS_FAILED = "failed"
 STATUSES = (STATUS_SAME, STATUS_REPLACED, STATUS_WOULD_REPLACE, STATUS_MISSING, STATUS_NO_QTAIM_JSON,
-            STATUS_NO_PROVENANCE, STATUS_NO_CPPROP, STATUS_NO_INP, STATUS_PARSE_FAILED,
+            STATUS_NO_PROVENANCE, STATUS_NO_CPPROP, STATUS_DAMAGED_CPPROP, STATUS_NO_INP, STATUS_PARSE_FAILED,
             STATUS_NCP_MISMATCH, STATUS_COUNT_MISMATCH, STATUS_DIFFERENT_RUN, STATUS_LOCKED,
             STATUS_FAILED)
 DONE = (STATUS_SAME, STATUS_REPLACED, STATUS_WOULD_REPLACE)
@@ -130,7 +133,9 @@ def _close(a, b) -> bool:
 def _plan(folder: str, inputs: Optional[str]) -> Tuple[str, Optional[dict], str]:
     """(status, re-parsed record to write or None, stored path)."""
     from qtaim_gen.source.core.parse_multiwfn import parse_qtaim
-    from qtaim_gen.source.utils.validation import qtaim_run_status
+    from qtaim_gen.source.utils.validation import (
+        QTAIM_META_KEY, cpprop_integrity, qtaim_run_status, qtaim_topology_meta, read_qtaim_out,
+    )
 
     stored_path = _stored_path(folder)
     if stored_path is None:
@@ -143,12 +148,17 @@ def _plan(folder: str, inputs: Optional[str]) -> Tuple[str, Optional[dict], str]
         cpprop = _cpprop(folder, tmp)
         if cpprop is None:
             return STATUS_NO_CPPROP, None, stored_path
+        with open(cpprop, "rb") as f:
+            data = f.read()
+        if cpprop_integrity(data, reported_bcp=run["reported_bcp"]):
+            return STATUS_DAMAGED_CPPROP, None, stored_path
         if geom is None:
             return STATUS_NO_INP, None, stored_path
         inp, n_atoms = geom
         try:
             parsed = json.loads(json.dumps(parse_qtaim(cprop_file=cpprop, inp_loc=inp,
                                                        orca_tf=inp.endswith(".inp"))))
+            meta = qtaim_topology_meta(data, read_qtaim_out(folder))
         except Exception:
             return STATUS_PARSE_FAILED, None, stored_path
     if not parsed:
@@ -161,8 +171,9 @@ def _plan(folder: str, inputs: Optional[str]) -> Tuple[str, Optional[dict], str]
         stored = json.load(f)
     if not all(_close(parsed[k], stored[k]) for k in parsed.keys() & stored.keys()):
         return STATUS_DIFFERENT_RUN, None, stored_path
-    if parsed.keys() == stored.keys():
+    if parsed.keys() == stored.keys() - {QTAIM_META_KEY}:
         return STATUS_SAME, None, stored_path
+    parsed[QTAIM_META_KEY] = meta
     return STATUS_REPLACED, parsed, stored_path
 
 
@@ -184,9 +195,9 @@ def process_folder(entry: str, root_inputs: Optional[str], root_results: Optiona
         status, parsed, stored_path = _plan(folder, inputs)
         if parsed is not None:
             with open(stored_path) as f:
-                stored_keys = set(json.load(f))
+                stored_keys = set(json.load(f)) - {"_meta"}
             result["only_stored"] = sorted(stored_keys - parsed.keys())
-            result["only_reparsed"] = sorted(parsed.keys() - stored_keys)
+            result["only_reparsed"] = sorted(parsed.keys() - stored_keys - {"_meta"})
             if dry_run:
                 status = STATUS_WOULD_REPLACE
             else:

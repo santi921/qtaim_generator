@@ -3,11 +3,13 @@ import math
 import os
 import json
 import re
+import collections
 import shutil
 import tempfile
 import zipfile
+import zlib
 from typing import Optional
-from qtaim_gen.source.core.parse_qtaim import dft_inp_to_dict
+from qtaim_gen.source.core.parse_qtaim import dft_inp_to_dict, fortran_float
 from qtaim_gen.source.core.parse_orca import ORCA_PARSER_VERSION
 import numpy as np
 from datetime import datetime
@@ -606,6 +608,194 @@ def qtaim_run_status(folder: str) -> dict:
     }
 
 
+CPPROP_HEADER = re.compile(r"----------------\s+CP\s+(\d+),\s+Type\s+\(3,([-+][13])\)")
+CPPROP_REQUIRED = ("Position (Bohr):", "Density of all electrons:", "Norm of gradient is:",
+                   "Eigenvalues of Hessian:", "Determinant of Hessian:")
+CPPROP_POSITIVE_EIGENVALUES = {"-3": 0, "-1": 1, "+1": 2, "+3": 3}
+
+
+def cpprop_integrity(data, reported_bcp: Optional[int] = None) -> list:
+    """Reasons a Multiwfn CPprop.txt cannot be trusted; [] when it is intact.
+
+    qtaim_run_status reads only qtaim.out, so it passes a CPprop.txt damaged
+    after (or outside) the Multiwfn run. Two such files were found in archived
+    out_files.zip on LRC (2026-10-09, 2 of 1500 sampled), both with complete
+    qtaim.out: one cut off inside its last CP block, one with 769,644 NUL bytes
+    where two writes spliced (CPs 48-277 missing, CP 47 carrying a bond CP's
+    Hessian). Checks: NUL bytes, CP numbering 1..max with no gaps or repeats,
+    every block holding the sections through the Hessian, Hessian signs matching
+    the CP type, and the (3,-1) count against qtaim.out's reported count.
+
+    Only damage a rerun can repair is flagged: Multiwfn classifies a CP by its
+    own Hessian signs, so a mismatch means the block was spliced. Eigenvalues
+    that are non-finite or unparsable (overflow stars) would recur on a rerun
+    and are not flagged; failing them would requeue the job forever.
+
+    data: the file's bytes or text."""
+    problems = []
+    if isinstance(data, bytes):
+        n_nul = data.count(b"\x00")
+        if n_nul:
+            problems.append(f"{n_nul} NUL bytes")
+        data = data.decode("latin1")
+    lines = data.splitlines()
+    heads = [(i, int(m.group(1)), m.group(2)) for i, ln in enumerate(lines) if (m := CPPROP_HEADER.search(ln))]
+    if not heads:
+        return problems + ["no CP blocks"]
+    idx = [h[1] for h in heads]
+    repeated = sorted(k for k, c in collections.Counter(idx).items() if c > 1)
+    missing = sorted(set(range(1, max(idx) + 1)) - set(idx))
+    if repeated:
+        problems.append(f"repeated CP numbers {repeated[:5]}")
+    if missing:
+        problems.append(f"{len(missing)} CP numbers missing, first {missing[:5]}")
+    incomplete, wrong_signs = [], []
+    for n, (start, number, cp_type) in enumerate(heads):
+        block = lines[start + 1:heads[n + 1][0] if n + 1 < len(heads) else len(lines)]
+        if not all(any(key in ln for ln in block) for key in CPPROP_REQUIRED):
+            incomplete.append(number)
+            continue
+        eig = next(ln for ln in block if "Eigenvalues of Hessian:" in ln).split(":", 1)[1].split()
+        try:
+            values = [fortran_float(x) for x in eig[:3]]
+        except ValueError:
+            continue
+        if len(values) == 3 and all(math.isfinite(v) for v in values):
+            if sum(v > 0 for v in values) != CPPROP_POSITIVE_EIGENVALUES[cp_type]:
+                wrong_signs.append(number)
+    if incomplete:
+        problems.append(f"incomplete CP blocks {incomplete[:5]}")
+    if wrong_signs:
+        problems.append(f"Hessian signs contradict CP type at CPs {wrong_signs[:5]}")
+    n_bcp = sum(h[2] == "-1" for h in heads)
+    if reported_bcp is not None and n_bcp != reported_bcp:
+        problems.append(f"{n_bcp} (3,-1) blocks but qtaim.out reports {reported_bcp}")
+    return problems
+
+
+def _reported_bcp(qtaim_out_text: Optional[str]) -> Optional[int]:
+    found = QTAIM_COUNT_PATTERN.findall(qtaim_out_text or "")
+    return int(found[-1]) if found else None
+
+
+def _cpprop_copy(folder: str, root_only: bool = False):
+    """(CPprop.txt bytes, qtaim.out text or None, location) for the first
+    CPprop.txt found in root, generator/out_files.zip, out_files.zip, then a legacy
+    loose generator/CPprop.txt, with the qtaim.out from that same location (the same
+    step wrote both). The legacy copy comes last: nothing writes it any more, and
+    read before the archive a damaged one would outlive every rerun. root_only: the
+    loose root copy only, the current run's output. None when there is no CPprop.txt."""
+    def loose(base):
+        path = os.path.join(base, "CPprop.txt")
+        if not (os.path.isfile(path) and os.path.getsize(path) > 0):
+            return None
+        try:
+            with open(path, "rb") as f:
+                data = f.read()
+            out = os.path.join(base, "qtaim.out")
+            text = None
+            if os.path.isfile(out):
+                with open(out, "r", errors="replace") as f:
+                    text = f.read()
+            return data, text, path
+        except OSError:
+            return None
+
+    copy = loose(folder)
+    if copy is not None or root_only:
+        return copy
+    for zip_path in (os.path.join(folder, "generator", "out_files.zip"), os.path.join(folder, "out_files.zip")):
+        if not os.path.isfile(zip_path):
+            continue
+        try:
+            with zipfile.ZipFile(zip_path, "r") as zf:
+                names = zf.namelist()
+                if "CPprop.txt" not in names:
+                    continue
+                text = zf.read("qtaim.out").decode("utf-8", errors="replace") if "qtaim.out" in names else None
+                return zf.read("CPprop.txt"), text, zip_path + ":CPprop.txt"
+        except (zipfile.BadZipFile, OSError, KeyError, zlib.error, EOFError):
+            # a damaged member is as good as absent here; cpprop_integrity judges content
+            continue
+    return loose(os.path.join(folder, "generator"))
+
+
+def qtaim_cpprop_problems(folder: str, root_only: bool = False) -> list:
+    """cpprop_integrity of the folder's CPprop.txt (see _cpprop_copy for which
+    copy), each reason prefixed with its location; [] if intact or absent."""
+    copy = _cpprop_copy(folder, root_only=root_only)
+    if copy is None:
+        return []
+    data, text, where = copy
+    return [f"{where}: {p}" for p in cpprop_integrity(data, reported_bcp=_reported_bcp(text))]
+
+
+# qtaim.json key holding record-level provenance (not a critical point); every
+# reader that tells nuclear from bond CPs by "_" in the key must skip it
+QTAIM_META_KEY = "_meta"
+# printed only when Multiwfn runs the sphere search (topology option 6), which
+# qtaim_data(exhaustive=True) adds
+QTAIM_SPHERE_SEARCH_MARKER = "Distribute starting points in sphere(s)"
+QTAIM_SEARCH_STANDARD, QTAIM_SEARCH_EXHAUSTIVE = "standard", "exhaustive"
+
+
+def cpprop_cp_counts(data) -> dict:
+    """{"NCP", "BCP", "RCP", "CCP": count} from a CPprop.txt's block headers."""
+    if isinstance(data, bytes):
+        data = data.decode("latin1")
+    labels = {"-3": "NCP", "-1": "BCP", "+1": "RCP", "+3": "CCP"}
+    counts = dict.fromkeys(labels.values(), 0)
+    for m in CPPROP_HEADER.finditer(data):
+        counts[labels[m.group(2)]] += 1
+    return counts
+
+
+def qtaim_topology_meta(cpprop_data, qtaim_out_text: Optional[str]) -> dict:
+    """The _meta block parse_multiwfn stores in qtaim.json: CP counts by type,
+    the Poincare-Hopf sum n - b + r - c (1 for a complete topology of an
+    isolated molecule) and which Multiwfn search produced them (None when no
+    qtaim.out says)."""
+    counts = cpprop_cp_counts(cpprop_data)
+    if qtaim_out_text is None:
+        search = None
+    elif QTAIM_SPHERE_SEARCH_MARKER in qtaim_out_text:
+        search = QTAIM_SEARCH_EXHAUSTIVE
+    else:
+        search = QTAIM_SEARCH_STANDARD
+    return {
+        "poincare_hopf": counts["NCP"] - counts["BCP"] + counts["RCP"] - counts["CCP"],
+        "cp_counts": counts,
+        "qtaim_search": search,
+    }
+
+
+def qtaim_poincare_hopf(record: Optional[dict], folder: Optional[str] = None) -> Optional[dict]:
+    """Topology of a QTAIM record: its _meta when present, else computed from
+    the folder's CPprop.txt and the qtaim.out beside it (records parsed before
+    _meta existed). None when neither is available, which is never a failure."""
+    meta = record.get(QTAIM_META_KEY) if isinstance(record, dict) else None
+    if isinstance(meta, dict) and isinstance(meta.get("poincare_hopf"), int):
+        return meta
+    if folder is None:
+        return None
+    copy = _cpprop_copy(folder)
+    if copy is None or cpprop_integrity(copy[0]):
+        return None
+    return qtaim_topology_meta(copy[0], copy[1])
+
+
+def poincare_hopf_needs_exhaustive(topology: Optional[dict]) -> bool:
+    """True when --enforce_poincare_hopf should rerun QTAIM with the exhaustive
+    search: n - b + r - c != 1 from a search that was not already exhaustive.
+    An exhaustive result is accepted whatever its sum (a rerun reproduces it),
+    so the escalation happens at most once and cannot loop."""
+    return (
+        topology is not None
+        and topology["poincare_hopf"] != 1
+        and topology.get("qtaim_search") != QTAIM_SEARCH_EXHAUSTIVE
+    )
+
+
 # How many bond CPs may be missing before a record counts as defective.
 # Measured on 19 residual jobs from a repair test: 17 were missing exactly one
 # CP and 2 were missing two, and the count did not scale with system size (one
@@ -684,6 +874,9 @@ def storable_bcp_count(folder: str) -> Optional[int]:
         return None
 
     try:
+        with open(text_path, "rb") as f:
+            if cpprop_integrity(f.read()):
+                return None
         _atoms, bonds = only_atom_cps(get_qtaim_descs(text_path))
         pairs = {
             tuple(sorted(v["connected_bond_paths"]))
@@ -937,9 +1130,13 @@ def validate_qtaim_dict(
     check_bcp_count: bool = False,
     bcp_tolerance: int = DEFAULT_BCP_TOLERANCE,
     require_provenance: bool = False,
+    enforce_poincare_hopf: bool = False,
 ):
     """
-    Basic check that the qtaim json file has the expected structure
+    Basic check that the qtaim json file has the expected structure.
+    With enforce_poincare_hopf, a record whose n - b + r - c != 1 fails unless an
+    exhaustive search produced it (see poincare_hopf_needs_exhaustive); a record
+    without that information (no _meta, no CPprop.txt) passes.
     Check that it has the keys 'atoms', 'bonds', 'charges', and 'fuzzy'.
     If n_atoms is provided, check that the number of non-bonded critical points matches n_atoms.
     If harsh_check is True, also check that the number of nuclear critical points matches n_atoms.
@@ -953,10 +1150,8 @@ def validate_qtaim_dict(
             print("QTAIM json file is empty.")
         return False
 
-    # dict_ncps = {qtaim_dict[key] for key in qtaim_dict if "_" not in key}
-    dict_ncps = [qtaim_dict[key] for key in list(qtaim_dict.keys()) if "_" not in key]
-    # dict_bcps = {qtaim_dict[key] for key in qtaim_dict if "_" in key}
-    dict_bcps = [qtaim_dict[key] for key in list(qtaim_dict.keys()) if "_" in key]
+    dict_ncps = [v for k, v in qtaim_dict.items() if k != QTAIM_META_KEY and "_" not in k]
+    dict_bcps = [v for k, v in qtaim_dict.items() if k != QTAIM_META_KEY and "_" in k]
 
     if n_atoms is not None:
         if len(dict_ncps) != n_atoms:
@@ -1019,6 +1214,21 @@ def validate_qtaim_dict(
                 logger.error(msg)
             return False
 
+    if folder is not None:
+        # A damaged CPprop.txt fails even when qtaim.json is sound: the loose root
+        # copy always (parse_multiwfn refused this run's output), any copy including
+        # the archived one under check_bcp_count (the archive is the only per-CP
+        # record, and the rerun replaces it). _qtaim_output_complete applies the
+        # same rule, so the gate and the validator agree.
+        cpprop_problems = qtaim_cpprop_problems(folder, root_only=not check_bcp_count)
+        if cpprop_problems:
+            msg = f"Damaged CPprop.txt, QTAIM must rerun: {'; '.join(cpprop_problems)}"
+            if verbose:
+                print(msg)
+            if logger:
+                logger.error(msg)
+            return False
+
     if check_bcp_count and folder is not None:
         # An incomplete run is a defect even when the counts happen to agree:
         # if the search or the export never finished, the record cannot be
@@ -1040,7 +1250,6 @@ def validate_qtaim_dict(
             if logger:
                 logger.error(msg)
             return False
-
         reported = status["reported_bcp"]
         raw_deficit = reported - len(dict_bcps) if reported is not None else 0
         # 0 < raw_deficit <= tolerance is deliberately silent. Those records are
@@ -1093,6 +1302,26 @@ def validate_qtaim_dict(
                     print(msg)
                 if logger:
                     logger.warning(msg)
+
+    if enforce_poincare_hopf:
+        topology = qtaim_poincare_hopf(qtaim_dict, folder)
+        if topology is not None and topology["poincare_hopf"] != 1:
+            counts = topology.get("cp_counts")
+            if poincare_hopf_needs_exhaustive(topology):
+                msg = (f"Poincare-Hopf sum {topology['poincare_hopf']} != 1 {counts} from a "
+                       f"{topology.get('qtaim_search') or 'unknown'} search; QTAIM reruns with the "
+                       f"exhaustive search ({qtaim_json_loc})")
+                if verbose:
+                    print(msg)
+                if logger:
+                    logger.error(msg)
+                return False
+            msg = (f"Poincare-Hopf sum {topology['poincare_hopf']} != 1 {counts} after the "
+                   f"exhaustive search; accepted, a rerun reproduces it ({qtaim_json_loc})")
+            if verbose:
+                print(msg)
+            if logger:
+                logger.warning(msg)
 
     if verbose:
         print(f"Number of nuclear critical points: {len(dict_ncps)}")
@@ -1235,6 +1464,7 @@ def validation_checks(
     orca_min_parser_version: Optional[int] = ORCA_PARSER_VERSION,
     recheck_allalpha_qtaim: bool = False,
     recheck_cp_labels: bool = False,
+    enforce_poincare_hopf: bool = False,
 ):
     """
     Run all validation checks on the json files in the given folder.
@@ -1261,6 +1491,9 @@ def validation_checks(
             Dry run: nothing is written.
         recheck_cp_labels (bool): fail a qtaim.json (either copy) whose nuclear CP sits on
             another atom (misplaced_nuclear_cps), so the runner reruns QTAIM.
+        enforce_poincare_hopf (bool): fail a qtaim.json whose n - b + r - c != 1 from a
+            standard search, so the runner reruns QTAIM with the exhaustive search
+            (accepted afterwards whatever the sum; see poincare_hopf_needs_exhaustive).
         recheck_allalpha_qtaim (bool): fail an all-alpha or partly all-alpha qtaim.json
             (an unrestricted .wfn read as all-alpha), unless every electron is alpha.
         orca_min_parser_version (Optional[int]): with check_orca, also fail when
@@ -1367,6 +1600,7 @@ def validation_checks(
         check_bcp_count=check_bcp_count,
         bcp_tolerance=bcp_tolerance,
         require_provenance=require_qtaim_provenance,
+        enforce_poincare_hopf=enforce_poincare_hopf,
     ):
         if logger:
             logger.error(f"QTAIM json validation failed in folder: {folder}")

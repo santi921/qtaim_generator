@@ -30,9 +30,11 @@ DROPPED_QTAIM_FIELDS = ("delta_g_promolecular",)
 
 
 def drop_qtaim_fields(record: dict) -> dict:
-    """The qtaim.json record without the DROPPED_QTAIM_FIELDS at any critical point."""
+    """The qtaim.json record without the DROPPED_QTAIM_FIELDS at any critical point,
+    and without its "_meta" provenance block (not a critical point; qtaim.lmdb keeps
+    the CP-keyed schema every reader expects)."""
     return {k: ({f: x for f, x in v.items() if f not in DROPPED_QTAIM_FIELDS} if isinstance(v, dict) else v)
-            for k, v in record.items()}
+            for k, v in record.items() if k != "_meta"}
 
 
 class StaleOrcaParseError(ValueError):
@@ -675,7 +677,7 @@ def parse_qtaim_data(
     if atom_keys is None:
         atom_keys = []
         for k, v in dict_qtaim.items():
-            if "_" not in k:
+            if k != "_meta" and "_" not in k:
                 atom_keys = list(v.keys())
                 break
         for rem in ("cp_num", "element", "number", "pos_ang"):
@@ -685,7 +687,8 @@ def parse_qtaim_data(
     if bond_keys is None:
         bond_keys = []
         for k, v in dict_qtaim.items():
-            if "_" in k:
+            # "_meta" (record provenance) also has an underscore; its fields are not bond features
+            if k != "_meta" and "_" in k:
                 bond_keys = list(v.keys())
                 break
         for rem in ("cp_num", "connected_bond_paths", "pos_ang"):
@@ -701,6 +704,8 @@ def parse_qtaim_data(
     qtaim_bonds_conv: Dict[Tuple[int, int], Dict[str, Any]] = {}
 
     for k, v in dict_qtaim.items():
+        if k == "_meta":
+            continue
         if "_" not in k:
             try:
                 ik = int(k)

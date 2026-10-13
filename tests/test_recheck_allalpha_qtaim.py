@@ -25,6 +25,20 @@ INP = "! {ref} wB97M-V\n*xyz {charge} {mult}\nO 0.0 0.0 0.0\nH 0.0 0.0 0.97\n*\n
 SET_ASIDE = ".allalpha"
 
 
+# a well-formed CPprop.txt (validation.cpprop_integrity checks loose copies) with the one
+# (3,-1) block _banner reports
+CPPROP_TEXT = "".join(
+    f" ----------------   CP{n:>6},     Type {kind}   ----------------\n"
+    " Position (Bohr):      0.000000000000    0.000000000000    0.000000000000\n"
+    " Density of all electrons:  0.1000000000E+00\n"
+    " Norm of gradient is:  0.1000000000E-14\n"
+    f" Eigenvalues of Hessian: {eig}\n"
+    " Determinant of Hessian:  0.6000000000E-02\n"
+    for n, kind, eig in ((1, "(3,-3)", "-0.3E+00 -0.2E+00 -0.1E+00"), (2, "(3,-3)", "-0.3E+00 -0.2E+00 -0.1E+00"),
+                         (3, "(3,-1)", "-0.3E+00 -0.2E+00  0.1E+00"))
+)
+
+
 def _folder(tmp_path, record, mult=1, charge=0, gbw=True, wfn=True, cpprop=True, ref="UKS"):
     job = tmp_path / "job"
     (job / "generator").mkdir(parents=True)
@@ -36,8 +50,8 @@ def _folder(tmp_path, record, mult=1, charge=0, gbw=True, wfn=True, cpprop=True,
         (job / "orca.wfn").write_text("wfn")
         (job / "generator" / "orca.wfn").write_text("wfn")
     if cpprop:
-        (job / "CPprop.txt").write_text("old")
-        (job / "generator" / "CPprop.txt").write_text("old")
+        (job / "CPprop.txt").write_text(CPPROP_TEXT)
+        (job / "generator" / "CPprop.txt").write_text(CPPROP_TEXT)
     return job
 
 

@@ -289,6 +289,17 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
 
     parser.add_argument(
+        "--enforce_poincare_hopf",
+        action="store_true",
+        help=(
+            "fail a qtaim.json whose Poincare-Hopf sum n - b + r - c != 1 (all four CP types) from the "
+            "standard CP search and rerun QTAIM with the exhaustive search (sphere search around each "
+            "atom, about 5-7x the cost); an exhaustive result is accepted whatever its sum, so a folder "
+            "escalates at most once. The sum is logged and stored in qtaim.json under _meta."
+        ),
+    )
+
+    parser.add_argument(
         "--recheck_allalpha_qtaim",
         action="store_true",
         help=(
@@ -355,6 +366,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
     recheck_allalpha_qtaim = bool(getattr(args, "recheck_allalpha_qtaim", False))
     recheck_cp_labels = bool(getattr(args, "recheck_cp_labels", False))
+    enforce_poincare_hopf = bool(getattr(args, "enforce_poincare_hopf", False))
     recheck_fuzzy = bool(getattr(args, "recheck_fuzzy", False))
 
     # parsl args
@@ -434,6 +446,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         require_qtaim_provenance=require_qtaim_provenance,
         recheck_allalpha_qtaim=recheck_allalpha_qtaim,
         recheck_cp_labels=recheck_cp_labels,
+        enforce_poincare_hopf=enforce_poincare_hopf,
         recheck_fuzzy=recheck_fuzzy,
         check_ecp=check_ecp,
     )
@@ -482,6 +495,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             require_qtaim_provenance=require_qtaim_provenance,
             recheck_allalpha_qtaim=recheck_allalpha_qtaim,
             recheck_cp_labels=recheck_cp_labels,
+            enforce_poincare_hopf=enforce_poincare_hopf,
             recheck_fuzzy=recheck_fuzzy,
         )
         for f in folders_run

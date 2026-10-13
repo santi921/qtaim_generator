@@ -6,7 +6,7 @@ import zipfile
 from typing import Optional, Dict, Any, List
 import shutil
 
-from qtaim_gen.source.core.omol import gbw_analysis
+from qtaim_gen.source.core.omol import _poincare_hopf_needs_escalation, gbw_analysis
 from qtaim_gen.source.utils.atomic_write import atomic_json_write
 from qtaim_gen.source.utils.validation import validation_checks
 
@@ -223,6 +223,7 @@ def process_folder(
     require_qtaim_provenance: bool = False,
     recheck_allalpha_qtaim: bool = False,
     recheck_cp_labels: bool = False,
+    enforce_poincare_hopf: bool = False,
     exhaustive_qtaim: bool = False,
     patch_timings: bool = False,
     horton_python: str = "",
@@ -261,6 +262,9 @@ def process_folder(
     rerun_ok = False
     try:
         _settle_stash(folder, keep_new=False, logger=logger)
+        # decided before _clean_first, which moves the record it reads out of the way
+        if clean_first and enforce_poincare_hopf and not exhaustive_qtaim:
+            exhaustive_qtaim = _poincare_hopf_needs_escalation(folder, logger)
         if clean_first:
             _clean_first(folder, logger, keep_inputs=True)
             overwrite, restart = True, False
@@ -291,6 +295,7 @@ def process_folder(
                     recheck_fuzzy=recheck_fuzzy,
                     recheck_allalpha_qtaim=recheck_allalpha_qtaim,
                     recheck_cp_labels=recheck_cp_labels,
+                    enforce_poincare_hopf=enforce_poincare_hopf,
                 )
 
                 if not tf_validation:
@@ -335,6 +340,7 @@ def process_folder(
             require_qtaim_provenance=require_qtaim_provenance,
             recheck_allalpha_qtaim=recheck_allalpha_qtaim,
             recheck_cp_labels=recheck_cp_labels,
+            enforce_poincare_hopf=enforce_poincare_hopf,
             exhaustive_qtaim=exhaustive_qtaim,
             subprocess_env=subprocess_env,
             patch_timings=patch_timings,
@@ -422,6 +428,7 @@ def process_folder_alcf(
     require_qtaim_provenance: bool = False,
     recheck_allalpha_qtaim: bool = False,
     recheck_cp_labels: bool = False,
+    enforce_poincare_hopf: bool = False,
     exhaustive_qtaim: bool = False,
     patch_timings: bool = False,
     horton_python: str = "",
@@ -490,6 +497,9 @@ def process_folder_alcf(
     rerun_ok = False
     try:
         _settle_stash(folder, keep_new=False, logger=logger)
+        # decided before _clean_first, which moves the record it reads out of the way
+        if clean_first and enforce_poincare_hopf and not exhaustive_qtaim:
+            exhaustive_qtaim = _poincare_hopf_needs_escalation(folder, logger)
         if clean_first:
             _clean_first(folder, logger)
             overwrite, restart = True, False
@@ -544,6 +554,7 @@ def process_folder_alcf(
                 require_qtaim_provenance=require_qtaim_provenance,
                 recheck_allalpha_qtaim=recheck_allalpha_qtaim,
                 recheck_cp_labels=recheck_cp_labels,
+                enforce_poincare_hopf=enforce_poincare_hopf,
                 recheck_fuzzy=recheck_fuzzy,
             )
 
@@ -622,6 +633,7 @@ def process_folder_alcf(
             require_qtaim_provenance=require_qtaim_provenance,
             recheck_allalpha_qtaim=recheck_allalpha_qtaim,
             recheck_cp_labels=recheck_cp_labels,
+            enforce_poincare_hopf=enforce_poincare_hopf,
             exhaustive_qtaim=exhaustive_qtaim,
             subprocess_env=subprocess_env,
             patch_timings=patch_timings,
