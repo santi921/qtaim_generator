@@ -65,6 +65,7 @@ from qtaim_gen.source.data.multiwfn import (
     other_data_dict,
 )
 from qtaim_gen.source.utils.validation import (
+    all_electron_count,
     get_charge_spin_n_atoms_from_folder,
     validate_orca_dict,
     validation_checks,
@@ -136,6 +137,9 @@ def classify_folder(
     preprocess_compressed: bool = False,
     check_orca: bool = False,
     wfx: bool = True,
+    recheck_allalpha_qtaim: bool = False,
+    recheck_cp_labels: bool = False,
+    enforce_poincare_hopf: bool = False,
 ) -> dict:
     folder = resolve_results_folder(folder_inputs, root_omol_inputs, root_omol_results)
     rec = {"folder": folder_inputs, "results_folder": folder}
@@ -152,12 +156,16 @@ def classify_folder(
     charge = None
     spin_tf = False
     mult = None
+    n_electrons = None
+    atoms = None
     try:
         dft_dict = get_charge_spin_n_atoms_from_folder(folder)
         if dft_dict and dft_dict.get("mol"):
             n_atoms = len(dft_dict["mol"])
             spin_tf = dft_dict.get("spin", 1) != 1
             mult = dft_dict.get("spin")
+            n_electrons = all_electron_count(dft_dict)
+            atoms = {int(i): a["pos"] for i, a in dft_dict["mol"].items()}
             if dft_dict.get("charge") is not None and not _has_ecp_atoms(dft_dict):
                 charge = int(dft_dict["charge"])
     except Exception:
@@ -207,6 +215,9 @@ def classify_folder(
                 move_results=move_results,
                 verbose=False,
                 logger=None,
+                recheck_allalpha_qtaim=recheck_allalpha_qtaim,
+                recheck_cp_labels=recheck_cp_labels,
+                enforce_poincare_hopf=enforce_poincare_hopf,
             )
         )
     except Exception:
@@ -242,7 +253,11 @@ def classify_folder(
             fuzzy_routines=fuzzy_routines,
             charge=charge,
         ) or _has_usable_step_output(
-            folder, op, n_atoms=n_atoms, charge=charge, fuzzy_routines=fuzzy_routines
+            folder, op, n_atoms=n_atoms, charge=charge, fuzzy_routines=fuzzy_routines,
+            recheck_allalpha_qtaim=recheck_allalpha_qtaim, n_electrons=n_electrons,
+            mult=int(mult) if mult is not None else None,
+            recheck_cp_labels=recheck_cp_labels, atoms=atoms,
+            enforce_poincare_hopf=enforce_poincare_hopf,
         )
         if will_skip:
             continue
@@ -301,6 +316,15 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--wfn", action="store_true",
                         help="the runner converts to .wfn (no --wfx): spin steps and fuzzy_bond reruns "
                              "are then reported as refused, as the runner would refuse them")
+    parser.add_argument("--recheck_allalpha_qtaim", action="store_true",
+                        help="predict the skips the runner makes under --recheck_allalpha_qtaim "
+                             "(all-alpha qtaim.json reruns QTAIM)")
+    parser.add_argument("--recheck_cp_labels", action="store_true",
+                        help="predict the skips the runner makes under --recheck_cp_labels "
+                             "(a nuclear CP filed under the wrong atom reruns QTAIM)")
+    parser.add_argument("--enforce_poincare_hopf", action="store_true",
+                        help="predict the skips the runner makes under --enforce_poincare_hopf "
+                             "(n - b + r - c != 1 from a standard search reruns QTAIM)")
     parser.add_argument("--requeue_file", type=str, default=None,
                         help="if set, write non-complete folder paths here")
     args = parser.parse_args(argv)
@@ -331,6 +355,9 @@ def main(argv: Optional[List[str]] = None) -> int:
                 args.preprocess_compressed,
                 args.check_orca,
                 not args.wfn,
+                args.recheck_allalpha_qtaim,
+                args.recheck_cp_labels,
+                args.enforce_poincare_hopf,
             ): folder
             for folder in folders
         }

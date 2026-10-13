@@ -1,12 +1,13 @@
 from asyncio.log import logger
-import collections
 import math
 import os
 import json
 import re
+import collections
 import shutil
 import tempfile
 import zipfile
+import zlib
 from typing import Optional
 from qtaim_gen.source.core.parse_qtaim import dft_inp_to_dict, fortran_float
 from qtaim_gen.source.core.parse_orca import ORCA_PARSER_VERSION
@@ -577,26 +578,30 @@ QTAIM_EXPORT_MARKER = "have been outputted to CPprop.txt"
 QTAIM_COUNT_PATTERN = re.compile(r"Number of \(3,-1\) CPs:\s*(\d+)")
 
 
-def read_multiwfn_out(folder: str, name: str) -> Optional[str]:
-    """Text of a Multiwfn `<step>.out`, or None. Checks root, generator/, then
-    the out_files.zip that survives cleanup."""
+def _multiwfn_out_texts(folder: str, name: str):
+    """Every copy of a Multiwfn `<step>.out`, most recent location first: root, generator/,
+    generator/out_files.zip (move_results), then the root out_files.zip (move_results=False)."""
     for rel in (name, os.path.join("generator", name)):
         path = os.path.join(folder, rel)
         if os.path.isfile(path) and os.path.getsize(path) > 0:
             try:
                 with open(path, "r", errors="replace") as f:
-                    return f.read()
+                    yield f.read()
             except OSError:
                 pass
-    zip_path = os.path.join(folder, "generator", "out_files.zip")
-    if os.path.isfile(zip_path):
-        try:
-            with zipfile.ZipFile(zip_path, "r") as zf:
-                if name in zf.namelist():
-                    return zf.read(name).decode("utf-8", errors="replace")
-        except (zipfile.BadZipFile, OSError, KeyError):
-            pass
-    return None
+    for zip_path in (os.path.join(folder, "generator", "out_files.zip"), os.path.join(folder, "out_files.zip")):
+        if os.path.isfile(zip_path):
+            try:
+                with zipfile.ZipFile(zip_path, "r") as zf:
+                    if name in zf.namelist():
+                        yield zf.read(name).decode("utf-8", errors="replace")
+            except (zipfile.BadZipFile, OSError, KeyError):
+                pass
+
+
+def read_multiwfn_out(folder: str, name: str) -> Optional[str]:
+    """Text of a Multiwfn `<step>.out`, or None: the first copy _multiwfn_out_texts finds."""
+    return next(_multiwfn_out_texts(folder, name), None)
 
 
 def read_qtaim_out(folder: str) -> Optional[str]:
@@ -698,6 +703,129 @@ def cpprop_integrity(data, reported_bcp: Optional[int] = None) -> list:
     return problems
 
 
+def _reported_bcp(qtaim_out_text: Optional[str]) -> Optional[int]:
+    found = QTAIM_COUNT_PATTERN.findall(qtaim_out_text or "")
+    return int(found[-1]) if found else None
+
+
+def _cpprop_copy(folder: str, root_only: bool = False):
+    """(CPprop.txt bytes, qtaim.out text or None, location) for the first
+    CPprop.txt found in root, generator/out_files.zip, out_files.zip, then a legacy
+    loose generator/CPprop.txt, with the qtaim.out from that same location (the same
+    step wrote both). The legacy copy comes last: nothing writes it any more, and
+    read before the archive a damaged one would outlive every rerun. root_only: the
+    loose root copy only, the current run's output. None when there is no CPprop.txt."""
+    def loose(base):
+        path = os.path.join(base, "CPprop.txt")
+        if not (os.path.isfile(path) and os.path.getsize(path) > 0):
+            return None
+        try:
+            with open(path, "rb") as f:
+                data = f.read()
+            out = os.path.join(base, "qtaim.out")
+            text = None
+            if os.path.isfile(out):
+                with open(out, "r", errors="replace") as f:
+                    text = f.read()
+            return data, text, path
+        except OSError:
+            return None
+
+    copy = loose(folder)
+    if copy is not None or root_only:
+        return copy
+    for zip_path in (os.path.join(folder, "generator", "out_files.zip"), os.path.join(folder, "out_files.zip")):
+        if not os.path.isfile(zip_path):
+            continue
+        try:
+            with zipfile.ZipFile(zip_path, "r") as zf:
+                names = zf.namelist()
+                if "CPprop.txt" not in names:
+                    continue
+                text = zf.read("qtaim.out").decode("utf-8", errors="replace") if "qtaim.out" in names else None
+                return zf.read("CPprop.txt"), text, zip_path + ":CPprop.txt"
+        except (zipfile.BadZipFile, OSError, KeyError, zlib.error, EOFError):
+            # a damaged member is as good as absent here; cpprop_integrity judges content
+            continue
+    return loose(os.path.join(folder, "generator"))
+
+
+def qtaim_cpprop_problems(folder: str, root_only: bool = False) -> list:
+    """cpprop_integrity of the folder's CPprop.txt (see _cpprop_copy for which
+    copy), each reason prefixed with its location; [] if intact or absent."""
+    copy = _cpprop_copy(folder, root_only=root_only)
+    if copy is None:
+        return []
+    data, text, where = copy
+    return [f"{where}: {p}" for p in cpprop_integrity(data, reported_bcp=_reported_bcp(text))]
+
+
+# qtaim.json key holding record-level provenance (not a critical point); every
+# reader that tells nuclear from bond CPs by "_" in the key must skip it
+QTAIM_META_KEY = "_meta"
+# printed only when Multiwfn runs the sphere search (topology option 6), which
+# qtaim_data(exhaustive=True) adds
+QTAIM_SPHERE_SEARCH_MARKER = "Distribute starting points in sphere(s)"
+QTAIM_SEARCH_STANDARD, QTAIM_SEARCH_EXHAUSTIVE = "standard", "exhaustive"
+
+
+def cpprop_cp_counts(data) -> dict:
+    """{"NCP", "BCP", "RCP", "CCP": count} from a CPprop.txt's block headers."""
+    if isinstance(data, bytes):
+        data = data.decode("latin1")
+    labels = {"-3": "NCP", "-1": "BCP", "+1": "RCP", "+3": "CCP"}
+    counts = dict.fromkeys(labels.values(), 0)
+    for m in CPPROP_HEADER.finditer(data):
+        counts[labels[m.group(2)]] += 1
+    return counts
+
+
+def qtaim_topology_meta(cpprop_data, qtaim_out_text: Optional[str]) -> dict:
+    """The _meta block parse_multiwfn stores in qtaim.json: CP counts by type,
+    the Poincare-Hopf sum n - b + r - c (1 for a complete topology of an
+    isolated molecule) and which Multiwfn search produced them (None when no
+    qtaim.out says)."""
+    counts = cpprop_cp_counts(cpprop_data)
+    if qtaim_out_text is None:
+        search = None
+    elif QTAIM_SPHERE_SEARCH_MARKER in qtaim_out_text:
+        search = QTAIM_SEARCH_EXHAUSTIVE
+    else:
+        search = QTAIM_SEARCH_STANDARD
+    return {
+        "poincare_hopf": counts["NCP"] - counts["BCP"] + counts["RCP"] - counts["CCP"],
+        "cp_counts": counts,
+        "qtaim_search": search,
+    }
+
+
+def qtaim_poincare_hopf(record: Optional[dict], folder: Optional[str] = None) -> Optional[dict]:
+    """Topology of a QTAIM record: its _meta when present, else computed from
+    the folder's CPprop.txt and the qtaim.out beside it (records parsed before
+    _meta existed). None when neither is available, which is never a failure."""
+    meta = record.get(QTAIM_META_KEY) if isinstance(record, dict) else None
+    if isinstance(meta, dict) and isinstance(meta.get("poincare_hopf"), int):
+        return meta
+    if folder is None:
+        return None
+    copy = _cpprop_copy(folder)
+    if copy is None or cpprop_integrity(copy[0]):
+        return None
+    return qtaim_topology_meta(copy[0], copy[1])
+
+
+def poincare_hopf_needs_exhaustive(topology: Optional[dict]) -> bool:
+    """True when --enforce_poincare_hopf should rerun QTAIM with the exhaustive
+    search: n - b + r - c != 1 from a search that was not already exhaustive.
+    An exhaustive result is accepted whatever its sum (a rerun reproduces it),
+    so the escalation happens at most once and cannot loop."""
+    return (
+        topology is not None
+        and topology["poincare_hopf"] != 1
+        and topology.get("qtaim_search") != QTAIM_SEARCH_EXHAUSTIVE
+    )
+
+
 # How many bond CPs may be missing before a record counts as defective.
 # Measured on 19 residual jobs from a repair test: 17 were missing exactly one
 # CP and 2 were missing two, and the count did not scale with system size (one
@@ -776,6 +904,9 @@ def storable_bcp_count(folder: str) -> Optional[int]:
         return None
 
     try:
+        with open(text_path, "rb") as f:
+            if cpprop_integrity(f.read()):
+                return None
         _atoms, bonds = only_atom_cps(get_qtaim_descs(text_path))
         pairs = {
             tuple(sorted(v["connected_bond_paths"]))
@@ -803,6 +934,223 @@ def count_reported_bcps(folder: str) -> Optional[int]:
     return qtaim_run_status(folder)["reported_bcp"]
 
 
+QTAIM_ALL_ALPHA, QTAIM_ALL_ALPHA_ECP = "all_alpha", "all_alpha_ecp"
+QTAIM_RESOLVED, QTAIM_AMBIGUOUS = "resolved", "ambiguous"
+# Multiwfn adds an ECP atom's EDF core density to alpha and beta evenly, so even an all-alpha read
+# has beta ~ alpha at the nucleus of an atom at or beyond Rb (the first def2 ECP element)
+_FIRST_ECP_Z = 37
+
+
+def _num(x) -> bool:
+    return isinstance(x, (int, float)) and not isinstance(x, bool)
+
+
+_PERIODIC_TABLE = None
+
+
+def _atomic_number(element) -> int:
+    global _PERIODIC_TABLE
+    if _PERIODIC_TABLE is None:
+        from rdkit import Chem
+
+        _PERIODIC_TABLE = Chem.GetPeriodicTable()
+    try:
+        return _PERIODIC_TABLE.GetAtomicNumber(re.match(r"[A-Za-z]+", element or "").group(0))
+    except Exception:
+        return 0
+
+
+def _beta_zero(cp: dict) -> bool:
+    # rounding noise in a stored zero scales with the density (up to ~3e-12 relative seen)
+    return abs(cp["density_beta"]) <= 1e-9 * max(1.0, abs(cp["density_all"]))
+
+
+def qtaim_spin_class(record: dict) -> str:
+    """How a qtaim.json record resolves alpha and beta density.
+
+    Among CPs with density_all > 1e-6, leaving out the nuclear CPs of ECP atoms (Z >= 37) whose
+    beta is non-zero (the EDF core density, split evenly):
+    all_alpha: density_beta == 0 (to rounding) and density_alpha == density_all at every CP --
+        what Multiwfn writes when it reads an unrestricted .wfn as all-alpha
+    all_alpha_ecp: the same, in a record whose ECP nuclei carry the split core density
+    resolved: no such CP has density_beta == 0 (or the record has no spin fields)
+    ambiguous: anything in between, e.g. stale all-alpha CPs merged into a resolved record
+    """
+    cps = {k: v for k, v in record.items() if isinstance(v, dict) and _num(v.get("density_all"))
+           and v["density_all"] > 1e-6}
+    # the common case, decided without element lookups: no CP is missing beta or has it at zero
+    if cps and all(_num(v.get("density_beta")) and not _beta_zero(v) for v in cps.values()):
+        return QTAIM_RESOLVED
+    split = {k for k, v in cps.items() if "_" not in k and _num(v.get("density_beta")) and not _beta_zero(v)
+             and _atomic_number(v.get("element")) >= _FIRST_ECP_Z}
+    rest = [v for k, v in cps.items() if k not in split]
+    if not rest or not any("density_beta" in v for v in rest):
+        return QTAIM_RESOLVED
+    if not all(_num(v.get("density_beta")) for v in rest):
+        return QTAIM_AMBIGUOUS
+    zero = [_beta_zero(v) for v in rest]
+    if not any(zero):
+        return QTAIM_RESOLVED
+    if not all(zero):
+        return QTAIM_AMBIGUOUS
+    for v in rest:
+        alpha = v.get("density_alpha")
+        if not _num(alpha) or abs(alpha - v["density_all"]) > 1e-8 * max(1.0, abs(v["density_all"])):
+            return QTAIM_AMBIGUOUS
+    return QTAIM_ALL_ALPHA_ECP if split else QTAIM_ALL_ALPHA
+
+
+def all_electron_count(dft_dict) -> Optional[int]:
+    """sum(Z) - net charge of the parsed geometry input (core electrons included); None if unknown."""
+    try:
+        zs = [_atomic_number(a["element"]) for a in dft_dict["mol"].values()]
+        if not zs or 0 in zs:
+            return None
+        return sum(zs) - int(dft_dict.get("charge", 0))
+    except Exception:
+        return None
+
+
+_QTAIM_BANNER = re.compile(r"Total/Alpha/Beta electrons:\s*(\S+)\s+(\S+)\s+(\S+)")
+
+
+def qtaim_out_banner(folder: Optional[str]) -> Optional[tuple]:
+    """(alpha, beta) electrons Multiwfn loaded for the QTAIM run; None if unknown.
+
+    Taken from the first qtaim.out copy whose run finished (CP count and CPprop.txt export both
+    printed). Multiwfn prints the banner as soon as it loads the wavefunction, so a rerun killed
+    mid-search leaves a beta > 0 banner next to the old all-alpha record; that copy is skipped and
+    the archived one decides. An unrestricted .wfn read as all-alpha shows beta == 0.
+    """
+    if not folder:
+        return None
+    for text in _multiwfn_out_texts(folder, "qtaim.out"):
+        if not (QTAIM_COUNT_PATTERN.search(text) and QTAIM_EXPORT_MARKER in text):
+            continue
+        m = _QTAIM_BANNER.search(text)
+        if m:
+            try:
+                return float(m.group(2)), float(m.group(3))
+            except ValueError:
+                return None
+    return None
+
+
+def qtaim_fixed_in_place(record: dict) -> bool:
+    """fix-allalpha-qtaim's signature: density_alpha == density_beta and spin_density == 0 exactly at
+    every CP. Such a record keeps the all-alpha banner in its archived qtaim.out; no unrestricted run
+    gives exact zeros, and a restricted one shows beta > 0 in the banner."""
+    cps = [v for v in record.values() if isinstance(v, dict) and _num(v.get("density_all"))]
+    return bool(cps) and all(
+        _num(v.get("density_alpha")) and v.get("density_alpha") == v.get("density_beta")
+        and v.get("spin_density") == 0.0 for v in cps)
+
+
+def qtaim_all_alpha_defect(
+    record: dict,
+    n_electrons: Optional[int] = None,
+    mult: Optional[int] = None,
+    banner: Optional[tuple] = None,
+) -> bool:
+    """True if the record needs a QTAIM rerun from a .wfx because Multiwfn read the wavefunction as all-alpha.
+
+    With the banner of a finished QTAIM run (qtaim_out_banner: alpha, beta electrons):
+    - beta > 0, a resolved run: a defect only if the record is all_alpha or all_alpha_ecp, i.e. not from
+      that run. A resolved .wfx run has beta at every CP, so its own record always passes (no loop).
+      An ambiguous record (stale all-alpha CPs in a resolved one) passes: a density cutoff there could
+      reject a correct, strongly spin-polarized record after every rerun; those go to a rerun list.
+    - beta == 0, an all-alpha run: a defect unless every electron is alpha (alpha == mult - 1),
+      fix-allalpha-qtaim already repaired the record, or the multiplicity is unknown (a rerun of a
+      genuinely all-alpha system would reproduce beta == 0 forever).
+    Without a banner the densities decide: all_alpha, all_alpha_ecp and ambiguous are defects, unless
+    every electron is alpha (n_electrons == mult - 1, e.g. an H atom); unknown counts count as a defect.
+    """
+    if banner is not None:
+        alpha_e, beta_e = banner
+        if beta_e > 0:
+            return qtaim_spin_class(record) in (QTAIM_ALL_ALPHA, QTAIM_ALL_ALPHA_ECP)
+        if mult is None or alpha_e == mult - 1:
+            return False
+        return not qtaim_fixed_in_place(record)
+    spin_class = qtaim_spin_class(record)
+    if spin_class in (QTAIM_AMBIGUOUS, QTAIM_ALL_ALPHA_ECP):
+        return True
+    if spin_class != QTAIM_ALL_ALPHA:
+        return False
+    return not (n_electrons is not None and mult is not None and n_electrons == mult - 1)
+
+
+def qtaim_copy_has_all_alpha_defect(folder: str, n_electrons: Optional[int] = None,
+                                     mult: Optional[int] = None) -> bool:
+    """True if either qtaim.json copy (folder root or generator/) is an all-alpha defect.
+
+    One rule for the validator, the restart gate and the pre-extraction cleanup: with
+    clean=False a stale root copy survives next to generator/, and checking only one copy
+    let the gate skip QTAIM while the validator failed the folder, every pass.
+    """
+    banner = qtaim_out_banner(folder)
+    for base in (folder, os.path.join(folder, "generator")):
+        try:
+            with open(os.path.join(base, "qtaim.json"), "r") as f:
+                record = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            continue
+        if isinstance(record, dict) and qtaim_all_alpha_defect(
+                record, n_electrons=n_electrons, mult=mult, banner=banner):
+            return True
+    return False
+
+
+# A nuclear CP more than CP_MOVED_A from its own atom and within CP_ON_ATOM_A of another atom was
+# filed under the wrong atom: records parsed before find_cp_map's exact-index pass (swaps and
+# duplicates of close same-element atoms). The current mapper matches Multiwfn's own atom label first,
+# so a fresh parse cannot produce this, and a rerun cannot loop. relabel-qtaim-cps uses the same limits.
+CP_MOVED_A = 0.1
+CP_ON_ATOM_A = 0.05
+
+
+def misplaced_nuclear_cps(record: dict, atoms: dict) -> dict:
+    """{stored atom index: atom the nuclear CP actually sits on} for CPs filed under the wrong atom.
+    atoms: {index: position (Angstrom)}."""
+    def point(p):
+        return isinstance(p, (list, tuple)) and len(p) == 3 and all(
+            isinstance(x, (int, float)) and math.isfinite(x) for x in p)
+
+    atoms = {n: p for n, p in atoms.items() if point(p)}
+    out = {}
+    for key, cp in record.items():
+        if not key.isdigit() or not isinstance(cp, dict):
+            continue
+        pos, k = cp.get("pos_ang"), int(key)
+        if k not in atoms or not point(pos):
+            continue
+        if math.dist(pos, atoms[k]) <= CP_MOVED_A:
+            continue
+        j = min(atoms, key=lambda n: math.dist(pos, atoms[n]))
+        if j != k and math.dist(pos, atoms[j]) <= CP_ON_ATOM_A:
+            out[k] = j
+    return out
+
+
+def qtaim_copy_has_mislabeled_cps(folder: str, atoms: Optional[dict] = None) -> bool:
+    """True if either qtaim.json copy (folder root or generator/) has a nuclear CP filed under the
+    wrong atom. atoms: {index: position}; read from the folder's geometry input when not given."""
+    if atoms is None:
+        parsed = get_charge_spin_n_atoms_from_folder(folder)
+        if not parsed:
+            return False
+        atoms = {int(i): a["pos"] for i, a in parsed["mol"].items()}
+    for base in (folder, os.path.join(folder, "generator")):
+        try:
+            with open(os.path.join(base, "qtaim.json"), "r") as f:
+                record = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            continue
+        if isinstance(record, dict) and misplaced_nuclear_cps(record, atoms):
+            return True
+    return False
+
+
 def validate_qtaim_dict(
     qtaim_json_loc: str,
     n_atoms: int = None,
@@ -812,9 +1160,13 @@ def validate_qtaim_dict(
     check_bcp_count: bool = False,
     bcp_tolerance: int = DEFAULT_BCP_TOLERANCE,
     require_provenance: bool = False,
+    enforce_poincare_hopf: bool = False,
 ):
     """
-    Basic check that the qtaim json file has the expected structure
+    Basic check that the qtaim json file has the expected structure.
+    With enforce_poincare_hopf, a record whose n - b + r - c != 1 fails unless an
+    exhaustive search produced it (see poincare_hopf_needs_exhaustive); a record
+    without that information (no _meta, no CPprop.txt) passes.
     Check that it has the keys 'atoms', 'bonds', 'charges', and 'fuzzy'.
     If n_atoms is provided, check that the number of non-bonded critical points matches n_atoms.
     If harsh_check is True, also check that the number of nuclear critical points matches n_atoms.
@@ -828,10 +1180,8 @@ def validate_qtaim_dict(
             print("QTAIM json file is empty.")
         return False
 
-    # dict_ncps = {qtaim_dict[key] for key in qtaim_dict if "_" not in key}
-    dict_ncps = [qtaim_dict[key] for key in list(qtaim_dict.keys()) if "_" not in key]
-    # dict_bcps = {qtaim_dict[key] for key in qtaim_dict if "_" in key}
-    dict_bcps = [qtaim_dict[key] for key in list(qtaim_dict.keys()) if "_" in key]
+    dict_ncps = [v for k, v in qtaim_dict.items() if k != QTAIM_META_KEY and "_" not in k]
+    dict_bcps = [v for k, v in qtaim_dict.items() if k != QTAIM_META_KEY and "_" in k]
 
     if n_atoms is not None:
         if len(dict_ncps) != n_atoms:
@@ -894,6 +1244,21 @@ def validate_qtaim_dict(
                 logger.error(msg)
             return False
 
+    if folder is not None:
+        # A damaged CPprop.txt fails even when qtaim.json is sound: the loose root
+        # copy always (parse_multiwfn refused this run's output), any copy including
+        # the archived one under check_bcp_count (the archive is the only per-CP
+        # record, and the rerun replaces it). _qtaim_output_complete applies the
+        # same rule, so the gate and the validator agree.
+        cpprop_problems = qtaim_cpprop_problems(folder, root_only=not check_bcp_count)
+        if cpprop_problems:
+            msg = f"Damaged CPprop.txt, QTAIM must rerun: {'; '.join(cpprop_problems)}"
+            if verbose:
+                print(msg)
+            if logger:
+                logger.error(msg)
+            return False
+
     if check_bcp_count and folder is not None:
         # An incomplete run is a defect even when the counts happen to agree:
         # if the search or the export never finished, the record cannot be
@@ -915,7 +1280,6 @@ def validate_qtaim_dict(
             if logger:
                 logger.error(msg)
             return False
-
         reported = status["reported_bcp"]
         raw_deficit = reported - len(dict_bcps) if reported is not None else 0
         # 0 < raw_deficit <= tolerance is deliberately silent. Those records are
@@ -968,6 +1332,26 @@ def validate_qtaim_dict(
                     print(msg)
                 if logger:
                     logger.warning(msg)
+
+    if enforce_poincare_hopf:
+        topology = qtaim_poincare_hopf(qtaim_dict, folder)
+        if topology is not None and topology["poincare_hopf"] != 1:
+            counts = topology.get("cp_counts")
+            if poincare_hopf_needs_exhaustive(topology):
+                msg = (f"Poincare-Hopf sum {topology['poincare_hopf']} != 1 {counts} from a "
+                       f"{topology.get('qtaim_search') or 'unknown'} search; QTAIM reruns with the "
+                       f"exhaustive search ({qtaim_json_loc})")
+                if verbose:
+                    print(msg)
+                if logger:
+                    logger.error(msg)
+                return False
+            msg = (f"Poincare-Hopf sum {topology['poincare_hopf']} != 1 {counts} after the "
+                   f"exhaustive search; accepted, a rerun reproduces it ({qtaim_json_loc})")
+            if verbose:
+                print(msg)
+            if logger:
+                logger.warning(msg)
 
     if verbose:
         print(f"Number of nuclear critical points: {len(dict_ncps)}")
@@ -1109,6 +1493,9 @@ def validation_checks(
     recheck_fuzzy: bool = False,
     orca_min_parser_version: Optional[int] = ORCA_PARSER_VERSION,
     charge_engine: bool = False,
+    recheck_allalpha_qtaim: bool = False,
+    recheck_cp_labels: bool = False,
+    enforce_poincare_hopf: bool = False,
 ):
     """
     Run all validation checks on the json files in the given folder.
@@ -1133,6 +1520,13 @@ def validation_checks(
             are present but physically wrong (all-zero densities, spin not
             summing to multiplicity - 1, all-alpha or alpha-only fuzzy bonds).
             Dry run: nothing is written.
+        recheck_cp_labels (bool): fail a qtaim.json (either copy) whose nuclear CP sits on
+            another atom (misplaced_nuclear_cps), so the runner reruns QTAIM.
+        enforce_poincare_hopf (bool): fail a qtaim.json whose n - b + r - c != 1 from a
+            standard search, so the runner reruns QTAIM with the exhaustive search
+            (accepted afterwards whatever the sum; see poincare_hopf_needs_exhaustive).
+        recheck_allalpha_qtaim (bool): fail an all-alpha or partly all-alpha qtaim.json
+            (an unrestricted .wfn read as all-alpha), unless every electron is alpha.
         orca_min_parser_version (Optional[int]): with check_orca, also fail when
             orca.json predates this parser version (orca_parser_version, 1 when
             absent), so the runner reparses it. None or 0 disables the gate.
@@ -1240,9 +1634,31 @@ def validation_checks(
         check_bcp_count=check_bcp_count,
         bcp_tolerance=bcp_tolerance,
         require_provenance=require_qtaim_provenance,
+        enforce_poincare_hopf=enforce_poincare_hopf,
     ):
         if logger:
             logger.error(f"QTAIM json validation failed in folder: {folder}")
+        tf_cond = False
+    elif recheck_allalpha_qtaim and qtaim_copy_has_all_alpha_defect(
+        folder, n_electrons=all_electron_count(dft_dict), mult=spin
+    ):
+        # both copies (root and generator/) and the qtaim.out banner, the restart gate's rule
+        msg = (f"QTAIM json is all-alpha or partly all-alpha (an unrestricted .wfn read as "
+               f"all-alpha); rerun QTAIM from a .wfx: {folder}")
+        if verbose:
+            print(msg)
+        if logger:
+            logger.error(msg)
+        tf_cond = False
+    elif recheck_cp_labels and qtaim_copy_has_mislabeled_cps(
+        folder, atoms={int(i): a["pos"] for i, a in dft_dict["mol"].items()}
+    ):
+        msg = (f"QTAIM json has a nuclear CP filed under the wrong atom (pre-fix CP mapper); "
+               f"rerun QTAIM: {folder}")
+        if verbose:
+            print(msg)
+        if logger:
+            logger.error(msg)
         tf_cond = False
 
     if not validate_bond_dict(

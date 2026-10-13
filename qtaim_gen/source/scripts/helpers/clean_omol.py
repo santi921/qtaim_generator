@@ -60,6 +60,8 @@ STATIC_SUFFIXES = (
     ".molden.input",
     "settings.ini",
     "orca.gbw.zstd0",
+    # unrestricted .wfn set aside by --recheck_allalpha_qtaim (rebuilt from the gbw when needed)
+    ".wfn.allalpha",
 )
 
 # Heavy ORCA artifacts in a results tree, mapped to the source-tree files that

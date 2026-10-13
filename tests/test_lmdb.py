@@ -668,14 +668,14 @@ class TestConverters:
         # for atom feats just check that each key has a non-None valude and that the length of the dict is consistent 
         for key, value in atom_feats_qtaim.items():
             assert value is not None, f"Expected non-None value for {key}, got {value}"
-            assert len(value) == 22, f"Expected 22, got {len(value)} for {key}"
+            assert len(value) == 21, f"Expected 21, got {len(value)} for {key}"
         
         for key, value in bond_feats_qtaim.items():
             assert value is not None, f"Expected non-None value for {key}, got {value}"
-            assert len(value) == 22, f"Expected 22, got {len(value)} for {key}"
-        #assert that bond_keys_qtaim is len 22, likewise for atom_keys_qtaim
-        assert len(atom_keys) == 22, f"Expected 22, got {len(atom_keys)} for atom_keys"
-        assert len(bond_keys) == 22, f"Expected 22, got {len(bond_keys)} for bond_keys"
+            assert len(value) == 21, f"Expected 21, got {len(value)} for {key}"
+        # 22 qtaim.json properties minus delta_g_promolecular (DROPPED_QTAIM_FIELDS)
+        assert len(atom_keys) == 21, f"Expected 21, got {len(atom_keys)} for atom_keys"
+        assert len(bond_keys) == 21, f"Expected 21, got {len(bond_keys)} for bond_keys"
     
     def test_parser_merge(self):
         # test parsers by using general converter
