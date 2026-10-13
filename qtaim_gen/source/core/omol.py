@@ -1707,9 +1707,19 @@ def _run_charge_engine(
     if len(written) != len(wanted):
         # no charge_engine timing for a partial run: validation then fails and the
         # engine reruns, instead of a missing routine keeping an older (e.g. Multiwfn)
-        # value under a timing that says the engine produced it
-        logger.error("charge_engine: wrote %d of %d routines in %s; not stamping the timing",
+        # value under a timing that says the engine produced it. A stamp from an
+        # earlier complete run is removed too: move_results merges timings.json, so
+        # it would otherwise survive this run.
+        logger.error("charge_engine: wrote %d of %d routines in %s; removing the charge_engine timing",
                      len(written), len(wanted), folder)
+        for timings_path in (os.path.join(folder, "timings.json"), os.path.join(folder, "generator", "timings.json")):
+            try:
+                with open(timings_path) as f:
+                    timings = json.load(f)
+            except (OSError, json.JSONDecodeError):
+                continue
+            if isinstance(timings, dict) and timings.pop("charge_engine", None) is not None:
+                atomic_json_write(timings_path, timings)
         return False
     _update_timing(folder, "charge_engine", elapsed, logger)
     logger.info(

@@ -68,6 +68,23 @@ def _multiplicity(folder: str, entry: str) -> Optional[int]:
     return None
 
 
+def _engine_routines_of(folder: str) -> Optional[frozenset]:
+    """ENGINE_ROUTINES when the folder's results came from the charge engine (a
+    positive charge_engine timing): the recheck must not put archived Multiwfn
+    values back over them."""
+    from qtaim_gen.source.data.multiwfn import ENGINE_ROUTINES
+
+    for path in (os.path.join(folder, "generator", "timings.json"), os.path.join(folder, "timings.json")):
+        try:
+            with open(path) as f:
+                value = json.load(f).get("charge_engine")
+        except (OSError, ValueError, AttributeError):
+            continue
+        if isinstance(value, (int, float)) and value > 0:
+            return ENGINE_ROUTINES
+    return None
+
+
 def process_folder(
     entry: str,
     root_inputs: Optional[str],
@@ -89,7 +106,8 @@ def process_folder(
         if mult is None:
             result["status"] = STATUS_NO_MULT
             return result
-        plan = recheck_fuzzy(folder, mult, dry_run=True)
+        skip = _engine_routines_of(folder)
+        plan = recheck_fuzzy(folder, mult, dry_run=True, skip_routines=skip)
         result.update(reparse=plan["reparse"], rerun=plan["rerun"], derived=plan["derived"])
         if plan["rerun"]:
             result["status"] = STATUS_NEEDS_MULTIWFN
@@ -105,17 +123,17 @@ def process_folder(
             return result
         try:
             # re-plan under the lock: another job may have fixed or changed the folder
-            plan = recheck_fuzzy(folder, mult, dry_run=True)
+            plan = recheck_fuzzy(folder, mult, dry_run=True, skip_routines=skip)
             if plan["rerun"]:
                 result.update(rerun=plan["rerun"], status=STATUS_NEEDS_MULTIWFN)
                 return result
             if not plan["reparse"]:
                 result["status"] = STATUS_CLEAN
                 return result
-            recheck_fuzzy(folder, mult, logger=logging.getLogger("recheck_fuzzy"))
+            recheck_fuzzy(folder, mult, logger=logging.getLogger("recheck_fuzzy"), skip_routines=skip)
             valid = validation_checks(
                 folder, full_set=full_set, verbose=False, move_results=move_results,
-                check_orca=check_orca, recheck_fuzzy=True,
+                check_orca=check_orca, recheck_fuzzy=True, charge_engine=skip is not None,
             )
             result["status"] = STATUS_FIXED if valid else STATUS_STILL_INVALID
         finally:

@@ -1702,7 +1702,8 @@ def validation_checks(
     if recheck_fuzzy and tf_cond and spin is not None:
         from qtaim_gen.source.utils.fuzzy_recheck import recheck_fuzzy as _recheck
 
-        report = _recheck(folder, int(spin), logger=logger, dry_run=True)
+        report = _recheck(folder, int(spin), logger=logger, dry_run=True,
+                          skip_routines=ENGINE_ROUTINES if charge_engine else None)
         if report["reparse"] or report["rerun"]:
             if logger:
                 logger.error(
