@@ -159,10 +159,12 @@ def _delta_g_hirsh(pts, rho, grad, atcoords, atnums, radpos, table, npts_of, cut
 
 
 def delta_g_hirsh(pts, rho, grad, wfx):
-    """delta_g_Hirsh at each point from rho and its gradient (MOs + EDF)."""
+    """delta_g_Hirsh at each point from rho and its gradient (MOs + EDF). NaN at
+    every point when an element has no built-in radial density (the promolecule
+    is then undefined), so the other properties are still returned."""
     tables, missing = mwfn_proatom_tables(wfx["atnums"])
     if missing:
-        raise ValueError(f"no built-in radial density for Z = {missing}")
+        return np.full(len(pts), np.nan)
     atnums, radpos, table, npts_of, cut_of = tables
     return _delta_g_hirsh(np.ascontiguousarray(pts, dtype=float), rho, np.ascontiguousarray(grad),
                           wfx["coords"], atnums, radpos, table, npts_of, cut_of)
