@@ -13,6 +13,7 @@ Ways a folder was re-queued forever:
 import json
 import logging
 import os
+import subprocess
 import shutil
 import zipfile
 from pathlib import Path
@@ -335,22 +336,55 @@ def test_multiwfn_wrapper_passes_bare_wavefunction_name(tmp_path):
         assert cmd.startswith("Multiwfn 'orca.wfx' < ")
 
 
-def test_conversion_script_keeps_molden_from_a_killed_run(tmp_path):
-    # A leftover orca.molden.input used to add an rm right after orca_2mkl, so the
-    # fresh molden was deleted before the convert step could read it (exit 24).
+def _run_convert(folder, orca_2mkl_cmd):
+    write_conversion(out_folder=str(folder), read_file=str(folder / "orca.gbw"), overwrite=True,
+                     orca_2mkl_cmd=orca_2mkl_cmd)
+    subprocess.run(["bash", "convert.in"], cwd=folder, check=False)
+
+
+def test_conversion_replaces_a_stale_molden(tmp_path):
+    # a molden left by a killed run is removed before orca_2mkl writes the new one;
+    # removing it afterwards deleted the fresh file and convert failed on every retry
+    fake = tmp_path / "fake_2mkl"
+    fake.write_text('#!/bin/bash\necho fresh > "$1.molden.input"\n')
+    fake.chmod(0o755)
     (tmp_path / "orca.gbw").write_text("gbw")
     (tmp_path / "orca.molden.input").write_text("stale")
-    write_conversion(
-        out_folder=str(tmp_path),
-        read_file=str(tmp_path / "orca.gbw"),
-        overwrite=True,
-        orca_2mkl_cmd="orca_2mkl",
-    )
-    lines = (tmp_path / "convert.in").read_text().splitlines()
-    assert lines[1].startswith("orca_2mkl ") and lines[1].endswith(" -molden")
-    # the molden is never removed here; the gbw only once orca_2mkl wrote a non-empty molden
-    assert not any(line.startswith("rm ") and "molden.input" in line for line in lines)
-    assert lines[-1] == "[ -s '{0}.molden.input' ] && rm '{0}.gbw'".format(tmp_path / "orca")
+    _run_convert(tmp_path, str(fake))
+    assert (tmp_path / "orca.molden.input").read_text() == "fresh\n"
+    assert not (tmp_path / "orca.gbw").exists()
+
+
+def test_failed_conversion_keeps_the_gbw(tmp_path):
+    # a stale non-empty molden must not let the gbw guard fire when orca_2mkl fails
+    (tmp_path / "orca.gbw").write_text("gbw")
+    (tmp_path / "orca.molden.input").write_text("stale, truncated")
+    _run_convert(tmp_path, "false")
+    assert (tmp_path / "orca.gbw").read_text() == "gbw"
+    assert not (tmp_path / "orca.molden.input").exists()
+
+
+def test_conversion_without_a_gbw_leaves_the_molden(tmp_path):
+    # with no gbw the molden is the only source: nothing removes it
+    (tmp_path / "orca.molden.input").write_text("source")
+    _run_convert(tmp_path, "false")
+    assert (tmp_path / "orca.molden.input").read_text() == "source"
+
+
+def test_multiwfn_wrapper_reaches_a_wavefunction_kept_in_generator(tmp_path):
+    # horton's wavefunction gate can pick generator/orca.wfx as the only copy;
+    # the script runs with cwd=folder, so the path must be relative to it
+    folder = tmp_path / ("x" * 120) / ("y" * 120)
+    (folder / "generator").mkdir(parents=True)
+    (folder / "generator" / "orca.wfx").write_text("wfx")
+    inp = folder / "hirshfeld.txt"
+    inp.write_text("7\n1\n1\nn\n0\nq\n")
+    write_multiwfn_exe(out_folder=str(folder), read_file=str(folder / "generator" / "orca.wfx"),
+                       multi_wfn_cmd="Multiwfn", multiwfn_input_file=str(inp),
+                       name="props_hirshfeld.mfwn", overwrite=True)
+    cmd = (folder / "props_hirshfeld.mfwn").read_text().splitlines()[-1]
+    assert cmd.startswith("Multiwfn 'generator/orca.wfx' < ")
+    assert (folder / "generator" / "orca.wfx").is_file()
 
 
 def _damaged_cpprop_text():

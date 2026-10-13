@@ -149,19 +149,18 @@ def write_conversion(
         f.write("#!/bin/bash\n")
         # remove .gbw from file name
         read_file = read_file.split(".gbw")[0]
-        f.write(
-            "{} ".format(orca_2mkl_cmd)
-            + "'" + str(Path.home().joinpath(out_folder, read_file)) + "'"
-            + " -molden\n"
-        )
-        # No rm of the .molden.input here: it would delete the molden orca_2mkl just
-        # wrote, before the convert step reads it (a leftover molden from a killed
-        # run made convert fail on every retry). clean_jobs removes it at the end.
-
-        # check if gbw file exists; keep it when orca_2mkl failed, it is the only source left
-        if os.path.exists(str(Path.home().joinpath(out_folder, read_file + ".gbw"))):
-            base = str(Path.home().joinpath(out_folder, read_file))
-            f.write("[ -s '{0}.molden.input' ] && rm '{0}.gbw'\n".format(base))
+        base = str(Path.home().joinpath(out_folder, read_file))
+        convert = "{} '{}' -molden".format(orca_2mkl_cmd, base)
+        if os.path.exists(base + ".gbw"):
+            # A molden left by a killed run is removed first, before orca_2mkl writes
+            # the new one (removing it afterwards deleted the fresh file, so convert
+            # failed on every retry). The gbw goes only once orca_2mkl succeeded and
+            # wrote a non-empty molden: a failed conversion keeps the only source.
+            # Without a gbw, an existing molden is the source and is left alone.
+            f.write("rm -f '{}.molden.input'\n".format(base))
+            f.write("{0} && [ -s '{1}.molden.input' ] && rm '{1}.gbw'\n".format(convert, base))
+        else:
+            f.write(convert + "\n")
 
     st = os.stat(out_file)
     os.chmod(out_file, st.st_mode | stat.S_IEXEC)
@@ -189,8 +188,8 @@ def write_multiwfn_exe(
         mv_cpprop(bool): whether to move the cpprop file to the output folder
         overwrite(bool): whether to overwrite the file if it already exists
         name(str): name of the bash script
-        gbw_override(bool): no-op; the wavefunction is always passed by bare
-            name (Multiwfn's 200-char input path limit)
+        gbw_override(bool): no-op; the wavefunction is always passed relative to
+            out_folder (Multiwfn's 200-char input path limit)
     """
 
     out_file = str(Path.home().joinpath(out_folder, name))
@@ -209,10 +208,13 @@ def write_multiwfn_exe(
                 f.write("orca_2mkl '" + str(Path.home().joinpath(out_folder)) + "'\n")
 
             multiwfn_input_file_root = multiwfn_input_file.split("/")[-1].split(".")[0]
-            # Always the bare name: Multiwfn 3.8 truncates input paths over 200
-            # chars ("Unable to find the input file", exit 24), and the script is
-            # run with cwd=out_folder. gbw_override is kept as a no-op.
-            bare_file = read_file.split("/")[-1]
+            # Relative to out_folder, the script's cwd: Multiwfn 3.8 truncates input
+            # paths over 200 chars ("Unable to find the input file", exit 24), and a
+            # wavefunction kept only in generator/ must stay reachable
+            # (generator/orca.wfx). gbw_override is kept as a no-op.
+            bare_file = os.path.relpath(
+                str(Path.home().joinpath(out_folder, read_file)), str(Path.home().joinpath(out_folder))
+            )
 
             f.write(
                 "{} ".format(multi_wfn_cmd)  # multiwfn command
