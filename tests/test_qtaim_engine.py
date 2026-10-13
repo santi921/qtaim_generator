@@ -155,3 +155,14 @@ def test_lagintpol_derivative_matches_finite_differences():
         h = 1e-7 * max(r, 1e-3)
         fd = (_lagintpol_d1(radpos, vals, npt, r + h)[0] - _lagintpol_d1(radpos, vals, npt, r - h)[0]) / (2 * h)
         assert d1 == pytest.approx(fd, rel=1e-6, abs=1e-9)
+
+
+def test_delta_g_is_nan_without_a_builtin_density():
+    from qtaim_gen.source.core.charge_engine import prepare_basis, read_wfx
+    from qtaim_gen.source.core.qtaim_engine import point_properties
+
+    cps = load_cpprop_full(CPPROP)
+    wfx = read_wfx(os.path.join(os.path.dirname(CPPROP), "orca.wfx"))
+    ghost = dict(wfx, atnums=np.where(np.arange(len(wfx["atnums"])) == 0, 999, wfx["atnums"]))
+    eng = point_properties(np.array([c["pos_bohr"] for c in cps]), ghost, prepare_basis(ghost), allow_missing_edf=True)
+    assert np.isnan(eng["delta_g_hirsh"]).all() and np.isfinite(eng["rho"]).all()

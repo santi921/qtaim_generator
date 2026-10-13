@@ -158,3 +158,21 @@ def test_nuclear_esp_is_1000_at_a_nucleus():
     coords = np.array([[0.0, 0.0, 0.0], [1.4, 0.0, 0.0]])
     v = esp.nuclear_esp(np.array([[0.0, 0.0, 0.0], [0.7, 0.0, 0.0]]), coords, np.array([1.0, 1.0]))
     assert v[0] == 1000.0 and v[1] == pytest.approx(2 / 0.7)
+
+
+def test_screening_tolerance_bounds_the_total():
+    from qtaim_gen.source.core import esp
+
+    cps, wfx, basis = _fixture()
+    pts = np.array([c["pos_bohr"] for c in cps])
+    _, full, _ = esp.electrostatic_potential(pts, wfx, basis, esp.esp_pairs(wfx, basis, cutoff=1e9, tol=0.0))
+    _, screened, _ = esp.electrostatic_potential(pts, wfx, basis, esp.esp_pairs(wfx, basis))
+    assert np.max(np.abs(full - screened)) <= esp.SCREEN_TOL
+
+
+def test_angular_momentum_beyond_h_is_refused():
+    from qtaim_gen.source.core import esp
+
+    wfx, basis = _two_primitive_system((6, 0, 0), (0, 0, 0), [0.0, 0.0, 0.0], [1.0, 0.0, 0.0], 1.0, 1.0)
+    with pytest.raises(ValueError, match="beyond h"):
+        esp.esp_pairs(wfx, basis)

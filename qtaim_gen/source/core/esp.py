@@ -139,7 +139,7 @@ def boys_multiwfn(mmax, x, out):
 BOYS_EXACT, BOYS_REFERENCE, BOYS_MULTIWFN = 0, 1, 2
 _BOYS_MODES = {"exact": BOYS_EXACT, "reference": BOYS_REFERENCE, "multiwfn": BOYS_MULTIWFN}
 LMAX_PAIR = 10  # h + h
-SCREEN_TOL = 1e-15  # drop a group pair whose contribution is provably below this at every point
+SCREEN_TOL = 1e-15  # dropped group pairs together contribute provably less than this at every point
 
 
 def _hermite_index():
@@ -272,6 +272,8 @@ def _group_pairs(coords, g_center, g_alpha, g_start, g_end, lmn, dmat, cutoff, t
                 cand1.append(g1)
                 cand2.append(g2)
     ncand = len(cand1)
+    # tol bounds the sum over every dropped pair, not each one
+    tol = tol / max(ncand, 1)
     p_exp = np.empty(ncand)
     p_ctr = np.empty((ncand, 3))
     pref = np.empty(ncand)
@@ -378,7 +380,12 @@ def nuclear_esp(pts, coords, zeff):
 
 def esp_pairs(wfx, basis, cutoff=60.0, tol=SCREEN_TOL):
     """Point-independent part of the electronic ESP: the screened group pairs
-    with their density-weighted Hermite coefficients."""
+    with their density-weighted Hermite coefficients. tol bounds the total
+    contribution of all dropped pairs at any point."""
+    lmax = int(basis["lmn"].sum(axis=1).max()) if len(basis["lmn"]) else 0
+    if lmax > LMAX_PAIR // 2:
+        # the Hermite tables are sized for h + h; numba does not bounds-check them
+        raise ValueError(f"primitive angular momentum {lmax} beyond h (5)")
     ct = basis["ct"]
     dmat = (ct * basis["occ"]) @ ct.T
     return _group_pairs(wfx["coords"], basis["g_center"], basis["g_alpha"], basis["g_start"],
