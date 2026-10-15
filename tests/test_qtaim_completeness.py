@@ -1094,3 +1094,42 @@ class TestDamagedArchiveForcesRerun:
     def test_storable_count_ignores_a_damaged_archive(self, tmp_path):
         folder, _ = self._job(tmp_path, _truncated())
         assert storable_bcp_count(str(folder)) is None
+
+
+class TestFarHeavyNuclei:
+    """qtaim.json _meta lists all-electron heavy nuclei far from the origin, where
+    Multiwfn's nuclear CP search can fail on double-precision spacing."""
+
+    def _wfx(self, tmp_path, atoms):
+        lines = ["<Atomic Numbers>"] + [f" {z}" for z, q, xyz in atoms] + ["</Atomic Numbers>", "<Nuclear Charges>"]
+        lines += [f" {q:.12E}" for z, q, xyz in atoms] + ["</Nuclear Charges>", "<Nuclear Cartesian Coordinates>"]
+        lines += [" " + " ".join(f"{c:.12E}" for c in xyz) for z, q, xyz in atoms] + ["</Nuclear Cartesian Coordinates>"]
+        path = tmp_path / "orca.wfx"
+        path.write_text("<Title>\n t\n</Title>\n" + "\n".join(lines) + "\n<Primitive Centers>\n 1\n")
+        return str(path)
+
+    def test_lists_only_far_all_electron_heavy_atoms(self, tmp_path):
+        from qtaim_gen.source.utils.validation import far_heavy_nuclei
+
+        wfx = self._wfx(tmp_path, [
+            (92, 92.0, (20.0, 0.0, 0.0)),   # far all-electron U: listed
+            (92, 92.0, (0.0, 0.0, 0.1)),    # U at the origin
+            (94, 34.0, (30.0, 0.0, 0.0)),   # far Pu with an ECP: no sharp core
+            (8, 8.0, (40.0, 0.0, 0.0)),     # far light atom
+        ])
+        assert far_heavy_nuclei(wfx) == [{"atom": 1, "z": 92, "distance_bohr": 20.0}]
+
+    def test_none_without_a_wfx(self, tmp_path):
+        from qtaim_gen.source.utils.validation import far_heavy_nuclei
+
+        assert far_heavy_nuclei(None) is None
+        assert far_heavy_nuclei(str(tmp_path / "orca.wfn")) is None
+        assert far_heavy_nuclei(str(tmp_path / "missing.wfx")) is None
+
+    def test_real_wavefunction_header(self):
+        from qtaim_gen.source.utils.validation import wfx_nuclei
+
+        wfx = os.path.join(os.path.dirname(__file__), "test_files", "charge_engine", "XeCl4_step2_0_1", "orca.wfx")
+        z, q, xyz = wfx_nuclei(wfx)
+        assert sorted(z.tolist()) == [17, 17, 17, 17, 54] and xyz.shape == (5, 3)
+        assert q[z.tolist().index(54)] < 54  # Xe carries an ECP

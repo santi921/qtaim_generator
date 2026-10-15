@@ -780,6 +780,56 @@ def cpprop_cp_counts(data) -> dict:
     return counts
 
 
+# All-electron nuclei above this Z, farther than QTAIM_FAR_NUCLEUS_BOHR from the
+# origin, can lose their nuclear CP in Multiwfn: Newton lands within ~1e-15 Bohr
+# of the maximum but double-precision spacing at that coordinate leaves |grad| above
+# findcp's nuclear criterion of 1 (X2C U/Th at 20-42 Bohr lost it; U at 17.5 kept it).
+QTAIM_FAR_NUCLEUS_Z = 54
+QTAIM_FAR_NUCLEUS_BOHR = 15.0
+
+
+def wfx_nuclei(path: str):
+    """(atomic numbers, nuclear charges, coordinates in Bohr) from a .wfx
+    header, reading only up to the nuclear coordinates; None if absent."""
+    want = {"<Atomic Numbers>": "z", "<Nuclear Charges>": "q", "<Nuclear Cartesian Coordinates>": "xyz"}
+    got, key, vals = {}, None, []
+    try:
+        with open(path, errors="replace") as f:
+            for line in f:
+                tag = line.strip()
+                if tag in want:
+                    key, vals = want[tag], []
+                elif key and tag.startswith("</"):
+                    got[key] = vals
+                    key = None
+                    if len(got) == 3:
+                        break
+                elif key:
+                    vals.extend(float(x) for x in tag.replace("D", "E").split())
+    except (OSError, ValueError):
+        return None
+    if len(got) != 3:
+        return None
+    z = np.array(got["z"], dtype=int)
+    return z, np.array(got["q"]), np.array(got["xyz"]).reshape(-1, 3)
+
+
+def far_heavy_nuclei(wavefunction_path: Optional[str]) -> Optional[list]:
+    """All-electron atoms with Z > QTAIM_FAR_NUCLEUS_Z farther than
+    QTAIM_FAR_NUCLEUS_BOHR from the origin, as [{"atom": 1-based index, "z": Z,
+    "distance_bohr": d}]; None when no .wfx is available."""
+    if not wavefunction_path or not wavefunction_path.endswith(".wfx"):
+        return None
+    nuclei = wfx_nuclei(wavefunction_path)
+    if nuclei is None:
+        return None
+    z, q, xyz = nuclei
+    dist = np.linalg.norm(xyz, axis=1)
+    far = (z > QTAIM_FAR_NUCLEUS_Z) & (np.abs(q - z) < 1e-6) & (dist > QTAIM_FAR_NUCLEUS_BOHR)
+    return [{"atom": int(i) + 1, "z": int(z[i]), "distance_bohr": round(float(dist[i]), 3)}
+            for i in np.flatnonzero(far)]
+
+
 def qtaim_topology_meta(cpprop_data, qtaim_out_text: Optional[str]) -> dict:
     """The _meta block parse_multiwfn stores in qtaim.json: CP counts by type,
     the Poincare-Hopf sum n - b + r - c (1 for a complete topology of an

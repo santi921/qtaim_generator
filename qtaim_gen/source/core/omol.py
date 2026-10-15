@@ -15,6 +15,7 @@ from qtaim_gen.source.utils.validation import (
     cpprop_integrity,
     qtaim_cpprop_problems,
     qtaim_topology_meta,
+    far_heavy_nuclei,
     qtaim_poincare_hopf,
     poincare_hopf_needs_exhaustive,
     QTAIM_META_KEY,
@@ -981,11 +982,17 @@ def parse_multiwfn(
                     continue
                 # record-level provenance, last so CP keys keep their order
                 meta = qtaim_topology_meta(_cpprop_data, read_qtaim_out(folder))
+                meta["far_heavy_nuclei"] = far_heavy_nuclei(_wavefunction_path(folder))
                 qtaim_dict[QTAIM_META_KEY] = meta
                 (logger.info if meta["poincare_hopf"] == 1 else logger.warning)(
                     f"QTAIM Poincare-Hopf sum {meta['poincare_hopf']} {meta['cp_counts']} "
                     f"({meta['qtaim_search']} search) in {folder}"
                 )
+                if meta["far_heavy_nuclei"]:
+                    logger.warning(
+                        "QTAIM: heavy all-electron nuclei far from the origin (Multiwfn may miss "
+                        f"their nuclear CP): {meta['far_heavy_nuclei']} in {folder}"
+                    )
 
                 atomic_json_write(json_file, qtaim_dict)
                 # if return_dicts:
