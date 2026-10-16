@@ -44,6 +44,9 @@ from qtaim_gen.source.data.multiwfn import (
     other_data,
     other_data_dict,
     qtaim_data,
+    CHELPG_INPUT_RADII_FILE,
+    CHELPG_RADII_FILE,
+    chelpg_radii_file,
 )
 from qtaim_gen.source.core.parse_multiwfn import (
     parse_charge_doc,
@@ -63,7 +66,7 @@ from qtaim_gen.source.core.parse_multiwfn import (
     parse_charge_chelpg,
     parse_fuzzy_real_space,
 )
-from qtaim_gen.source.core.parse_qtaim import get_qtaim_descs, only_atom_cps
+from qtaim_gen.source.core.parse_qtaim import dft_inp_to_dict, get_qtaim_descs, only_atom_cps
 
 from qtaim_gen.source.utils.io import (
     pull_ecp_dict,
@@ -369,6 +372,8 @@ def create_jobs(
             elif routine == "charge_separate":
                 charge_dict = charge_data_dict(full_set=full_set)
                 for key, value in charge_dict.items():
+                    if key == "chelpg":
+                        value = _chelpg_input(folder, value, logger)
                     job_dict[key] = os.path.join(folder, "{}.txt".format(key))
                     with open(os.path.join(folder, "{}.txt".format(key)), "w") as f:
                         f.write(value)
@@ -1982,6 +1987,45 @@ def _is_substantive_step_out(path: str, order: str = None) -> bool:
                     return True
     except OSError:
         return False
+
+
+def _input_atomic_numbers(folder: str) -> Optional[list]:
+    """Atomic numbers of the molecule from the folder's ORCA input (orca.inp or
+    another *.inp), or None when no geometry can be read."""
+    from rdkit import Chem
+
+    names = sorted(f for f in os.listdir(folder) if f.endswith(".inp") and "property" not in f)
+    names.sort(key=lambda f: f != "orca.inp")
+    pt = Chem.GetPeriodicTable()
+    for name in names:
+        try:
+            atoms = dft_inp_to_dict(os.path.join(folder, name))
+            out = []
+            for a in atoms.values():
+                sym = "".join(c for c in a["element"] if c.isalpha())
+                out.append(pt.GetAtomicNumber(sym[:1].upper() + sym[1:].lower()))
+            return out
+        except Exception:
+            continue
+    return None
+
+
+def _chelpg_input(folder: str, stock: str, logger: logging.Logger) -> str:
+    """Multiwfn input for CHELPG: the stock one, or, for a molecule with an
+    actinide, one that loads CHELPG_RADII_FILE (written here) with the actinide
+    radii of data/multiwfn.py. Falls back to the stock input when the elements
+    cannot be read."""
+    atnums = _input_atomic_numbers(folder)
+    if atnums is None:
+        logger.warning("chelpg: no readable ORCA input in %s, using Multiwfn's default radii", folder)
+        return stock
+    radii = chelpg_radii_file(atnums)
+    if radii is None:
+        return stock
+    with open(os.path.join(folder, CHELPG_RADII_FILE), "w") as f:
+        f.write(radii)
+    logger.info("chelpg: actinide radii from %s in %s", CHELPG_RADII_FILE, folder)
+    return CHELPG_INPUT_RADII_FILE
 
 
 def _wavefunction_path(folder: str) -> Optional[str]:

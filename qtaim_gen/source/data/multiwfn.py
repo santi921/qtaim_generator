@@ -29,6 +29,47 @@ def charge_data() -> str:
     return string_ret
 
 
+# CHELPG point-exclusion radii (Angstrom). Multiwfn defines them only for H-Ar
+# (Breneman-Wiberg, population.f90 setESPfitvdwr) and gives heavier elements
+# vdwr_UFF / 1.2 under ispecial=1 (U 1.415 A, below the 1.70 of O). Actinides get
+# Batsanov's van der Waals radii (Inorg. Mater. 2001, 37, 871: Th 2.4, U 2.3) and
+# CHELPG_ACTINIDE_DEFAULT where Batsanov gives none (ORCA's default CHELPG set uses
+# about 2.34 for every actinide). A molecule with an actinide is fitted with these
+# radii from a file (menu 10 -> 3); every other element keeps the radius Multiwfn
+# would use, so molecules without actinides keep the stock input and results.
+CHELPG_BRENEMAN_WIBERG = {1: 1.45, 2: 1.45, 3: 1.5, 4: 1.5, 5: 1.5, 6: 1.5, 7: 1.7, 8: 1.7, 9: 1.7, 10: 1.7,
+                          **{z: 2.0 for z in range(11, 19)}}
+CHELPG_ACTINIDE_RADII = {90: 2.4, 92: 2.3}
+CHELPG_ACTINIDE_DEFAULT = 2.34
+CHELPG_ACTINIDES = range(89, 104)
+CHELPG_RADII_FILE = "chelpg_radii.txt"
+CHELPG_INPUT = "7\n12\n1\nn\n0\n0\nq\n"
+CHELPG_INPUT_RADII_FILE = f"7\n12\n10\n3\n1\n{CHELPG_RADII_FILE}\nn\n0\n0\nq\n"
+
+
+def chelpg_radius(z: int) -> float:
+    """CHELPG radius (Angstrom) of element z, as written to CHELPG_RADII_FILE."""
+    from qtaim_gen.source.data.multiwfn_tables import VDWR_UFF
+
+    if z in CHELPG_BRENEMAN_WIBERG:
+        return CHELPG_BRENEMAN_WIBERG[z]
+    if z in CHELPG_ACTINIDES:
+        return CHELPG_ACTINIDE_RADII.get(z, CHELPG_ACTINIDE_DEFAULT)
+    return VDWR_UFF[z] / 1.2
+
+
+def chelpg_radii_file(atnums) -> "str | None":
+    """Contents of CHELPG_RADII_FILE for a molecule with these atomic numbers:
+    "Symbol radius" per element, or None when it has no actinide (stock input)."""
+    from rdkit import Chem
+
+    zs = sorted({int(z) for z in atnums})
+    if not any(z in CHELPG_ACTINIDES for z in zs):
+        return None
+    pt = Chem.GetPeriodicTable()
+    return "".join(f"{pt.GetElementSymbol(z)} {chelpg_radius(z)!r}\n" for z in zs)
+
+
 def charge_data_dict(full_set: int = 0) -> dict:
     """
     charge analysis data input - dictionary form
@@ -46,7 +87,7 @@ def charge_data_dict(full_set: int = 0) -> dict:
     if full_set > 0:
         string_dict["vdd"] = "7\n2\n1\nn\n0\nq\n"
         string_dict["mbis"] = "7\n20\n1\nn\n0\nq\n"
-        string_dict["chelpg"] = "7\n12\n1\nn\n0\n0\nq\n"  # might cut later
+        string_dict["chelpg"] = CHELPG_INPUT  # might cut later
 
     if full_set > 1:
         string_dict["bader"] = "17\n1\n1\n2\n7\n1\n1\n7\n1\n5\n-10\nq\n"
