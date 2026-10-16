@@ -414,4 +414,5 @@ def test_mbis_ecp_switch():
     off = run(wfx, full_set=1, mbis_ecp=False)
     assert on["_meta"]["has_ecp"] and "mbis" in on
     assert "mbis" not in off and "mbis_fuzzy_density" not in off
-    assert {"schemes": "mbis family", "reason": "ecp_disabled"} in off["_meta"]["skipped"]
+    assert {"schemes": "mbis family", "reason": "ecp_disabled",
+            "routines": ["mbis", "mbis_fuzzy_density", "mbis_fuzzy_spin"]} in off["_meta"]["skipped"]

@@ -519,6 +519,9 @@ def _voronoi_mask(pts, atcoords, center):
     return mask
 
 
+# routines a skip removes; every skip recorded in _meta["skipped"] is permanent for the
+# wavefunction (it depends only on its elements, ECP/EDF and the run options)
+from qtaim_gen.source.data.multiwfn import HIRSHFELD_FAMILY, MBIS_FAMILY  # noqa: E402
 MBIS_DENCUT = 1e-10  # MBIS dencut: shell densities below this are zeroed
 MBIS_MAXSHELL = 6  # shells of the initial guess (period 6 rule, also used for period 7)
 MBIS_MAX_Z = 118
@@ -1089,11 +1092,12 @@ def run(wfx_path, nrad=75, nang=434, radcut=10.0, bond_nrad=45, bond_nang=170, f
     skipped = []
     pro, missing = mwfn_proatom_tables(atnums)
     if missing:
-        skipped.append({"schemes": "hirshfeld family", "reason": "no_builtin_proatom", "elements": missing})
+        skipped.append({"schemes": "hirshfeld family", "reason": "no_builtin_proatom", "elements": missing,
+                        "routines": list(HIRSHFELD_FAMILY)})
     if has_ecp and not has_edf:
         # valence-only density against all-electron proatoms would be inconsistent
         pro = None
-        skipped.append({"schemes": "hirshfeld family", "reason": "ecp_without_edf"})
+        skipped.append({"schemes": "hirshfeld family", "reason": "ecp_without_edf", "routines": list(HIRSHFELD_FAMILY)})
     # full_set >= 1 adds vdd, mbis and the MBIS fuzzy integrals
     level1 = full_set >= 1
     # MBIS is defined for all-electron densities; with an ECP the EDF core density stands in
@@ -1103,7 +1107,7 @@ def run(wfx_path, nrad=75, nang=434, radcut=10.0, bond_nrad=45, bond_nang=170, f
     if level1 and not mbis_ok:
         reason = (f"z_above_{MBIS_MAX_Z}" if int(atnums.max()) > MBIS_MAX_Z
                   else "ecp_without_edf" if not has_edf else "ecp_disabled")
-        skipped.append({"schemes": "mbis family", "reason": reason})
+        skipped.append({"schemes": "mbis family", "reason": reason, "routines": list(MBIS_FAMILY)})
     if mbis_ok:
         td_rho = np.zeros((nat, len(grid_wts)))
         td_spin = np.zeros((nat, len(grid_wts))) if open_shell else None

@@ -20,6 +20,16 @@ from datetime import datetime
 # patch_timings_from_log in core/omol.py (producer). Keep in sync at one place
 # so a rename of either the marker key or the sentinel is a one-line change.
 TIMINGS_PATCHED_KEY = "_timings_patched"
+# timings.json key recording routines that can never be computed for this
+# wavefunction ({routine: {"reason": ..., "by": "charge_engine" | "multiwfn"}}):
+# validation stops expecting them, so the folder is complete without them
+TIMINGS_SKIPPED_KEY = "_skipped_routines"
+
+
+def skipped_routines(timing_dict) -> set:
+    """Routine names recorded under TIMINGS_SKIPPED_KEY of a timings dict."""
+    rec = (timing_dict or {}).get(TIMINGS_SKIPPED_KEY) if isinstance(timing_dict, dict) else None
+    return set(rec) if isinstance(rec, dict) else set()
 TIMING_PLACEHOLDER = -1.0
 
 
@@ -303,6 +313,9 @@ def validate_timing_dict(
     if engine_done:
         expected_keys = [k for k in expected_keys if k not in ENGINE_ROUTINES]
         excepted_spin_keys = [k for k in excepted_spin_keys if k not in ENGINE_ROUTINES]
+    skipped = skipped_routines(timing_dict)
+    expected_keys = [k for k in expected_keys if k not in skipped]
+    excepted_spin_keys = [k for k in excepted_spin_keys if k not in skipped]
 
     # Keys patched by patch_timings_from_log carry a TIMING_PLACEHOLDER (-1.0)
     # when log-scrape couldn't find them; accept those here so cleanup runs.
@@ -418,6 +431,7 @@ def validate_fuzzy_dict(
     verbose: bool = False,
     full_set: int = 0,
     logger: any = None,
+    skipped: Optional[set] = None,
 ):
     """
     Basic check that the fuzzy json file has the expected structure.
@@ -443,6 +457,7 @@ def validate_fuzzy_dict(
 
         if full_set > 0:
             expected_keys += ["mbis_fuzzy_spin"]
+    expected_keys = [k for k in expected_keys if k not in (skipped or ())]
 
     for key in expected_keys:
         if key not in fuzzy_dict:
@@ -523,6 +538,7 @@ def validate_charge_dict(
     verbose: bool = False,
     full_set: int = 0,
     logger: any = None,
+    skipped: Optional[set] = None,
 ):
     """
     Basic check that the charge json file has the expected structure.
@@ -539,6 +555,7 @@ def validate_charge_dict(
         expected_keys += ["mbis", "vdd", "chelpg"]
     if full_set > 1:
         expected_keys += ["bader"]
+    expected_keys = [k for k in expected_keys if k not in (skipped or ())]
 
     for key in expected_keys:
         if key not in charge_dict:
@@ -1643,6 +1660,10 @@ def validation_checks(
     # bonding_json_loc = os.path.join(folder, "bonding.json")
     tf_cond = True
 
+    skipped = skipped_routines(_safe_json_load(timing_json_loc, logger=logger))
+    if skipped and logger:
+        logger.info(f"Routines recorded as permanently skipped in {folder}: {sorted(skipped)}")
+
     if not validate_timing_dict(
         timing_json_loc, verbose=verbose, full_set=full_set, spin_tf=spin_tf,
         charge_engine=charge_engine,
@@ -1658,6 +1679,7 @@ def validation_checks(
         verbose=verbose,
         full_set=full_set,
         logger=logger,
+        skipped=skipped,
     ):
         if logger:
             logger.error(f"Fuzzy json validation failed in folder: {folder}")
@@ -1669,7 +1691,7 @@ def validation_checks(
         tf_cond = False
 
     if not validate_charge_dict(
-        charge_json_loc, n_atoms=n_atoms, verbose=verbose, logger=logger
+        charge_json_loc, n_atoms=n_atoms, verbose=verbose, logger=logger, skipped=skipped
     ):
         if logger:
             logger.error(f"Charge json validation failed in folder: {folder}")
@@ -1753,7 +1775,8 @@ def validation_checks(
         from qtaim_gen.source.utils.fuzzy_recheck import recheck_fuzzy as _recheck
 
         report = _recheck(folder, int(spin), logger=logger, dry_run=True,
-                          skip_routines=ENGINE_ROUTINES if charge_engine else None)
+                          skip_routines=(frozenset(ENGINE_ROUTINES) | skipped) if charge_engine
+                          else (frozenset(skipped) or None))
         if report["reparse"] or report["rerun"]:
             if logger:
                 logger.error(

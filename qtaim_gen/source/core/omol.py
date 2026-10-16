@@ -25,6 +25,8 @@ from qtaim_gen.source.utils.validation import (
     all_electron_count,
     _FIRST_ECP_Z,
     TIMINGS_PATCHED_KEY,
+    TIMINGS_SKIPPED_KEY,
+    skipped_routines,
     TIMING_PLACEHOLDER,
 )
 
@@ -47,6 +49,8 @@ from qtaim_gen.source.data.multiwfn import (
     CHELPG_INPUT_RADII_FILE,
     CHELPG_RADII_FILE,
     chelpg_radii_file,
+    MBIS_FAMILY,
+    MULTIWFN_MBIS_MAX_Z,
 )
 from qtaim_gen.source.core.parse_multiwfn import (
     parse_charge_doc,
@@ -1357,6 +1361,8 @@ def patch_timings_from_log(
     # surface_engine timing for 'other', so their keys are not missing and get no placeholder
     if isinstance(timings.get("charge_engine"), (int, float)) and timings["charge_engine"] > 0:
         expected = [k for k in expected if k not in ENGINE_ROUTINES]
+    # permanently skipped routines never ran, so they get no placeholder either
+    expected = [k for k in expected if k not in skipped_routines(timings)]
     surface_done = isinstance(timings.get("surface_engine"), (int, float)) and timings["surface_engine"] > 0
     patched: dict = {}
     for key in expected:
@@ -1641,13 +1647,14 @@ def _engine_outputs_present(folder: str, spin_tf: bool, full_set: int = 0) -> bo
         "becke": "charge.json", "vdd": "charge.json", "mbis": "charge.json",
         "fuzzy_bond": "bond.json",
     }
-    want = {}
-    for routine in _engine_routines(full_set, spin_tf):
-        want.setdefault(file_of.get(routine, "fuzzy_full.json"), []).append(routine)
     try:
         with open(os.path.join(gen, "timings.json")) as f:
-            if not json.load(f).get("charge_engine", 0) > 0:
-                return False
+            timings = json.load(f)
+        if not timings.get("charge_engine", 0) > 0:
+            return False
+        want = {}
+        for routine in _engine_routines(full_set, spin_tf) - skipped_routines(timings):
+            want.setdefault(file_of.get(routine, "fuzzy_full.json"), []).append(routine)
         for name, keys in want.items():
             with open(os.path.join(gen, name)) as f:
                 data = json.load(f)
@@ -1656,6 +1663,43 @@ def _engine_outputs_present(folder: str, spin_tf: bool, full_set: int = 0) -> bo
     except (OSError, json.JSONDecodeError, TypeError):
         return False
     return True
+
+
+def _record_skipped(folder: str, records: dict, logger: logging.Logger) -> None:
+    """Merge {routine: {"reason", "by"}} into timings.json under TIMINGS_SKIPPED_KEY."""
+    timings_path = os.path.join(folder, "timings.json")
+    timings = {}
+    if os.path.isfile(timings_path) and os.path.getsize(timings_path) > 0:
+        try:
+            with open(timings_path) as f:
+                timings = json.load(f)
+        except json.JSONDecodeError:
+            timings = {}
+    rec = timings.get(TIMINGS_SKIPPED_KEY)
+    rec = rec if isinstance(rec, dict) else {}
+    rec.update(records)
+    timings[TIMINGS_SKIPPED_KEY] = rec
+    atomic_json_write(timings_path, timings)
+    logger.info("recorded permanently skipped routines in %s: %s", folder, records)
+
+
+def _multiwfn_permanent_skips(folder: str, full_set: int) -> dict:
+    """Routines Multiwfn can never compute for the folder's molecule: the MBIS family
+    beyond MULTIWFN_MBIS_MAX_Z at full_set >= 1."""
+    if full_set < 1:
+        return {}
+    atnums = _input_atomic_numbers(folder)
+    if not atnums or max(atnums) <= MULTIWFN_MBIS_MAX_Z:
+        return {}
+    return {r: {"reason": f"z_above_{MULTIWFN_MBIS_MAX_Z}", "by": "multiwfn"} for r in MBIS_FAMILY}
+
+
+def _skip_routines(folder: str, full_set: int, charge_engine: bool) -> Optional[frozenset]:
+    """Routines never sent to Multiwfn: the engine's, or those Multiwfn cannot do."""
+    if charge_engine:
+        return ENGINE_ROUTINES
+    skips = _multiwfn_permanent_skips(folder, full_set)
+    return frozenset(skips) if skips else None
 
 
 def _update_timing(folder: str, key: str, seconds: float, logger: logging.Logger) -> None:
@@ -1705,9 +1749,16 @@ def _run_charge_engine(
     elapsed = time.time() - start
 
     meta = out.get("_meta", {})
-    if meta.get("skipped"):
-        logger.error("charge_engine skipped schemes in %s: %s", folder, meta["skipped"])
     wanted = _engine_routines(full_set, spin_tf)
+    # every engine skip is permanent for this wavefunction: record it so validation stops
+    # expecting those routines, instead of the folder rerunning the engine on every pass
+    permanent = {r: {"reason": entry["reason"], "by": "charge_engine"}
+                 for entry in meta.get("skipped", []) for r in entry.get("routines", ()) if r in wanted}
+    if meta.get("skipped"):
+        logger.warning("charge_engine skipped schemes in %s: %s", folder, meta["skipped"])
+    if permanent:
+        _record_skipped(folder, permanent, logger)
+    wanted = wanted - set(permanent)
     written = []
     for routine in sorted(wanted):
         if routine not in out:
@@ -2836,7 +2887,7 @@ def gbw_analysis(
             _report = _recheck(
                 folder, int(_dft["spin"]), logger=logger, wfx=wfx,
                 preprocess_compressed=preprocess_compressed,
-                skip_routines=ENGINE_ROUTINES if charge_engine else None,
+                skip_routines=_skip_routines(folder, full_set, charge_engine),
             )
             if not _report["ok"]:
                 logger.error("recheck_fuzzy: %s - not running", _report["wavefunction"])
@@ -3156,7 +3207,7 @@ def gbw_analysis(
                         logger=logger,
                         full_set=full_set,
                         # leftover Multiwfn .out files must not fill engine routines
-                        skip_routines=ENGINE_ROUTINES if charge_engine else None,
+                        skip_routines=_skip_routines(folder, full_set, charge_engine),
                     )
 
                     # Also reparse ORCA output
@@ -3237,11 +3288,15 @@ def gbw_analysis(
             check_bcp_count=check_bcp_count,
             bcp_tolerance=bcp_tolerance,
             require_qtaim_provenance=require_qtaim_provenance,
-            skip_routines=ENGINE_ROUTINES if charge_engine else None,
+            skip_routines=_skip_routines(folder, full_set, charge_engine),
             recheck_allalpha_qtaim=recheck_allalpha_qtaim,
             recheck_cp_labels=recheck_cp_labels,
             enforce_poincare_hopf=enforce_poincare_hopf,
         )
+        if not charge_engine:
+            multiwfn_skips = _multiwfn_permanent_skips(folder, full_set)
+            if multiwfn_skips:
+                _record_skipped(folder, multiwfn_skips, logger)
         # after run_jobs: its convert step is what produces orca.wfx
         if charge_engine:
             _run_charge_engine(folder, n_threads=n_threads, logger=logger, restart=restart, full_set=full_set)
@@ -3251,7 +3306,7 @@ def gbw_analysis(
     # parse those jobs to jsons for 5 categories
     parse_multiwfn(
         folder, separate=separate, debug=debug, logger=logger, full_set=full_set,
-        skip_routines=ENGINE_ROUTINES if charge_engine else None,
+        skip_routines=_skip_routines(folder, full_set, charge_engine),
     )
 
     # Parse ORCA output file (if present)
