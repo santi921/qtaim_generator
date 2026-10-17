@@ -70,6 +70,15 @@ def chelpg_radii_file(atnums) -> "str | None":
     return "".join(f"{pt.GetElementSymbol(z)} {chelpg_radius(z)!r}\n" for z in zs)
 
 
+# routines a permanent skip removes (see TIMINGS_SKIPPED_KEY in utils/validation.py):
+# the charge engine skips the Hirshfeld family without free-atom densities or with an
+# ECP atom but no EDF, and the MBIS family per its own limits; Multiwfn refuses MBIS
+# beyond MULTIWFN_MBIS_MAX_Z (it exits 64 for mbis and segfaults for the fuzzy steps)
+HIRSHFELD_FAMILY = ("hirshfeld", "adch", "cm5", "vdd", "hirsh_fuzzy_density", "hirsh_fuzzy_spin")
+MBIS_FAMILY = ("mbis", "mbis_fuzzy_density", "mbis_fuzzy_spin")
+MULTIWFN_MBIS_MAX_Z = 86
+
+
 def charge_data_dict(full_set: int = 0) -> dict:
     """
     charge analysis data input - dictionary form

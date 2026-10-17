@@ -1684,6 +1684,13 @@ class GeneralConverter(Converter):
         # Missing data strategy: "skip" (default) or "sentinel" (fill with NaN)
         self.missing_data_strategy = config_dict.get("missing_data_strategy", "skip")
         self.sentinel_value = config_dict.get("sentinel_value", float("nan"))
+        # Per scheme within a record: a charge_filter/fuzzy_filter scheme the record lacks (e.g.
+        # MBIS recorded as permanently skipped) gets sentinel_value and a missing_<kind>_<scheme>
+        # flag instead of leaving the record without those features
+        self.fill_missing_schemes = bool(config_dict.get("fill_missing_schemes", False))
+        self._scheme_fill = self.sentinel_value if self.fill_missing_schemes else None
+        if self.fill_missing_schemes and self.charge_filter is None and self.fuzzy_filter is None:
+            self.logger.warning("fill_missing_schemes needs charge_filter/fuzzy_filter to know the expected schemes")
 
         # Build reverse mapping: data_input name -> actual LMDB key in lmdb_dict
         # This resolves naming inconsistencies (e.g. "fuzzy" -> "fuzzy_full_lmdb" or "fuzzy_lmdb")
@@ -1746,7 +1753,7 @@ class GeneralConverter(Converter):
                 dict_charge_raw = self.__getitem__(self._data_input_to_lmdb_key["charge"], key)
                 if dict_charge_raw is not None:
                     atom_feats_charge, global_dipole_feats = parse_charge_data(
-                        dict_charge_raw, global_feats["n_atoms"], self.charge_filter
+                        dict_charge_raw, global_feats["n_atoms"], self.charge_filter, fill_missing=self._scheme_fill
                     )
                     global_feats.update(global_dipole_feats)
                     for atom_idx, charge_feats in atom_feats_charge.items():
@@ -1791,7 +1798,7 @@ class GeneralConverter(Converter):
                 dict_fuzzy_raw = self.__getitem__(self._data_input_to_lmdb_key["fuzzy"], key)
                 if dict_fuzzy_raw is not None:
                     atom_feats_fuzzy, global_fuzzy_feats = parse_fuzzy_data(
-                        dict_fuzzy_raw, global_feats["n_atoms"], self.fuzzy_filter
+                        dict_fuzzy_raw, global_feats["n_atoms"], self.fuzzy_filter, fill_missing=self._scheme_fill
                     )
                     global_feats.update(global_fuzzy_feats)
                     for atom_idx, fuzzy_feats in atom_feats_fuzzy.items():
@@ -2046,7 +2053,7 @@ class GeneralConverter(Converter):
                         dict_charge_raw = self.__getitem__(self._data_input_to_lmdb_key["charge"], key)
                         if dict_charge_raw is not None:
                             atom_feats_charge, global_dipole_feats = parse_charge_data(
-                                dict_charge_raw, global_feats["n_atoms"], self.charge_filter
+                                dict_charge_raw, global_feats["n_atoms"], self.charge_filter, fill_missing=self._scheme_fill
                             )
                             for feat_key in atom_feats_charge[0].keys():
                                 if feat_key not in self.keys_data["atom"]:
@@ -2079,7 +2086,7 @@ class GeneralConverter(Converter):
                         dict_fuzzy_raw = self.__getitem__(self._data_input_to_lmdb_key["fuzzy"], key)
                         if dict_fuzzy_raw is not None:
                             atom_feats_fuzzy, global_fuzzy_feats = parse_fuzzy_data(
-                                dict_fuzzy_raw, global_feats["n_atoms"], self.fuzzy_filter
+                                dict_fuzzy_raw, global_feats["n_atoms"], self.fuzzy_filter, fill_missing=self._scheme_fill
                             )
                             for feat_key in atom_feats_fuzzy.get(0, {}).keys():
                                 if feat_key not in self.keys_data["atom"]:

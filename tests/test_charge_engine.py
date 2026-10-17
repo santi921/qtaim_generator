@@ -139,7 +139,7 @@ def test_worker_reproduces_multiwfn_level1(tmp_path, name):
     subprocess.run(
         [sys.executable, "-m", "qtaim_gen.source.core.charge_engine",
          "--wfx", os.path.join(folder, "orca.wfx"), "--out", str(out), "--nthreads", "2",
-         "--full_set", "1"],
+         "--full_set", "1", "--mbis_mode", "multiwfn"],
         check=True,
         capture_output=True,
     )
@@ -263,16 +263,19 @@ def test_engine_jsons_compile_like_multiwfn(tmp_path, name):
 
 @pytest.mark.skipif(not HAS_NUMBA, reason="numba not installed")
 @pytest.mark.parametrize("name", _fixture_names())
-def test_engine_jsons_compile_like_multiwfn_level1_and_alie(tmp_path, name):
+def test_engine_jsons_compile_like_multiwfn_level1_and_alie(tmp_path, name, monkeypatch):
     """full_set 1: vdd/mbis/mbis_fuzzy_* from the charge engine and other_alie
     from the surface engine compile into charge.json, fuzzy_full.json and
     other.json with the values Multiwfn produces."""
     import logging
     import shutil
 
+    from qtaim_gen.source.core import charge_engine
     from qtaim_gen.source.core.omol import _run_charge_engine, _run_surface_engine, parse_multiwfn
     from qtaim_gen.source.data.multiwfn import ENGINE_ROUTINES
 
+    # the references are Multiwfn's MBIS, which stops by its own rule
+    monkeypatch.setattr(charge_engine, "MBIS_MODE", "multiwfn")
     src = os.path.join(FIXTURES, name)
     for f in ("orca.wfx", "orca.inp"):
         shutil.copy(os.path.join(src, f), tmp_path / f)
@@ -299,3 +302,117 @@ def test_engine_jsons_compile_like_multiwfn_level1_and_alie(tmp_path, name):
             assert fuzzy[step][k] == pytest.approx(v, abs=CHARGE_TOL), (step, k)
     assert other["ALIE_Volume"] == pytest.approx(ref_alie["ALIE_Volume"], abs=1e-5)
     assert other["ALIE_Overall_skewness"] == pytest.approx(ref_alie["ALIE_Overall_skewness"], abs=1e-9)
+
+
+def _mbis_grid_density(wfx_path):
+    """The MBIS charge grid's Becke-weighted density, as run() builds it."""
+    import numpy as np
+
+    from qtaim_gen.source.core import charge_engine as CE
+
+    wfx = CE.read_wfx(wfx_path)
+    basis = CE.prepare_basis(wfx)
+    atnums, coords = wfx["atnums"], wfx["coords"]
+    rinv, aij = CE.becke_pair_tables(atnums, coords)
+    pts0, wts = CE.multiwfn_atom_grid(*CE.mbis_grid_size(atnums), 10.0)
+    td = np.zeros((len(atnums), len(wts)))
+    for b in range(len(atnums)):
+        pts = pts0 + coords[b]
+        rho, _ = CE.density(pts, coords, basis, wfx)
+        td[b] = CE._becke(pts, coords, rinv, aij, CE.BECKE_TOL)[:, b] * wts * rho
+    qbase = atnums.astype(float) if len(wfx["edf_center"]) else wfx["zeff"]
+    return pts0, coords, td, atnums, qbase
+
+
+@pytest.mark.skipif(not HAS_NUMBA, reason="numba not installed")
+@pytest.mark.parametrize("name", _fixture_names())
+def test_mbis_converged_mode_reaches_the_plain_fixed_point(name):
+    """Converged (accelerated) MBIS lands where plain iteration run far past
+    Multiwfn's stopping rule does, from the default and the check guess."""
+    import numpy as np
+
+    from qtaim_gen.source.core import charge_engine as CE
+
+    args = _mbis_grid_density(os.path.join(FIXTURES, name, "orca.wfx"))
+    q_plain = CE.mbis_fit(*args, crit=1e-10, maxcyc=30000, mode="multiwfn")[0]
+    q_conv, m, p, s, ncyc = CE.mbis_fit(*args, mode="converged")
+    assert np.abs(q_conv - q_plain).max() < 1e-6
+    assert not CE.mbis_degenerate(m, p, s)
+    q_sel, *_, info = CE.mbis_select(*args)
+    assert info["solutions"] == 1 and np.abs(q_sel - q_conv).max() < 1e-6
+
+
+def test_mbis_degenerate_detects_merged_and_empty_shells():
+    import numpy as np
+
+    from qtaim_gen.source.core.charge_engine import mbis_degenerate
+
+    mshell = np.array([2, 3])
+    pop = np.array([[1.9, 4.1, 0.0], [2.0, 7.5, 6.5]])
+    sig = np.array([[0.07, 0.49, 0.0], [0.03, 0.2, 0.8]])
+    assert not mbis_degenerate(mshell, pop, sig)
+    merged = sig.copy()
+    merged[1, 2] = merged[1, 1] * (1 + 1e-4)
+    assert mbis_degenerate(mshell, pop, merged)
+    empty = pop.copy()
+    empty[0, 0] = 1e-9
+    assert mbis_degenerate(mshell, empty, sig)
+
+
+def test_mbis_guess_beyond_rn_keeps_six_shells():
+    """Period 7 uses Multiwfn's Rn rule: 6 shells, valence Z - 54."""
+    import numpy as np
+
+    from qtaim_gen.source.core.charge_engine import MBIS_MAX_Z, mbis_initial_shells
+
+    atnums = np.array([86, 90, 92, 94, 103])
+    mshell, pop, sig = mbis_initial_shells(atnums)
+    assert (mshell == 6).all()
+    assert np.allclose(pop.sum(axis=1), atnums)
+    assert np.allclose(pop[:, 5], atnums - 54)
+    assert np.allclose(sig[:, 0], 1 / (2 * atnums)) and np.allclose(sig[:, 5], 0.5)
+    assert MBIS_MAX_Z >= 103
+
+
+@pytest.mark.skipif(not HAS_NUMBA, reason="numba not installed")
+def test_run_records_mbis_mode_and_uniqueness():
+    from qtaim_gen.source.core.charge_engine import run
+
+    out = run(os.path.join(FIXTURES, "XeCl4_step2_0_1", "orca.wfx"), full_set=1)
+    meta = out["_meta"]
+    assert meta["mbis_mode"] == "converged"
+    assert meta["mbis_selection"]["selected"] == "default"
+    assert set(meta["mbis_selection"]["objective"]) == {"default", "sigma_x0.6", "sigma_x1.5"}
+    assert meta["mbis_unique"] is True
+    assert meta["mbis_degenerate"] == {"charge": False, "fuzzy": False}
+    assert meta["mbis_beyond_multiwfn"] is False
+
+
+def test_mbis_fitted_guess_covers_the_proatom_range():
+    import numpy as np
+
+    from qtaim_gen.source.core.charge_engine import mbis_fitted_shells
+    from qtaim_gen.source.data.mbis_free_atom import SHELLS
+
+    assert sorted(SHELLS) == list(range(1, 104))
+    atnums = np.array([1, 8, 26, 54, 92, 103])
+    mshell, pop, sig = mbis_fitted_shells(atnums)
+    assert np.allclose(pop.sum(axis=1), atnums, atol=0.05)
+    for a in range(len(atnums)):
+        widths = sig[a, : mshell[a]]
+        assert (widths > 0).all() and (np.diff(widths) > 0).all()
+
+
+@pytest.mark.skipif(not HAS_NUMBA, reason="numba not installed")
+def test_mbis_ecp_switch():
+    """XeCl4 has an ECP on Xe with EDF: MBIS runs by default and is skipped,
+    with its reason recorded, under mbis_ecp=False."""
+    from qtaim_gen.source.core.charge_engine import run
+
+    wfx = os.path.join(FIXTURES, "XeCl4_step2_0_1", "orca.wfx")
+    on = run(wfx, full_set=1)
+    off = run(wfx, full_set=1, mbis_ecp=False)
+    assert on["_meta"]["has_ecp"] and "mbis" in on
+    assert "mbis" not in off and "mbis_fuzzy_density" not in off
+    assert {"schemes": "mbis family", "reason": "ecp_disabled",
+            "routines": ["mbis", "mbis_fuzzy_density", "mbis_fuzzy_spin"]} in off["_meta"]["skipped"]

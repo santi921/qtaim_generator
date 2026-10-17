@@ -557,10 +557,15 @@ def parse_config_gen_to_embed(
     return config_dict
 
 
+# charge schemes whose records carry a molecular dipole (charge_<scheme>_dipole_mag)
+CHARGE_DIPOLE_SCHEMES = ("hirshfeld", "adch", "cm5", "becke", "vdd")
+
+
 def parse_charge_data( 
     dict_charge:dict, 
     n_atoms:int,
-    charge_filter: Optional[List[str]] = None
+    charge_filter: Optional[List[str]] = None,
+    fill_missing: Optional[float] = None,
 ) -> Tuple[Dict[int, Dict[str, Any]], Dict[str, float]]:
     """
     Parse charge-related data and update atom features.
@@ -569,6 +574,11 @@ def parse_charge_data(
         dict_charge (dict): Dictionary containing charge-related data.
         n_atoms (int): Number of atoms in the structure.
         charge_filter (Optional[List[str]]): List of charge types to filter. Defaults to None. An inclusion filter.
+        fill_missing (Optional[float]): with a charge_filter, a filtered scheme absent from
+            the record (or with no charges) gets this value (e.g. NaN) for every atom, and
+            its dipole for CHARGE_DIPOLE_SCHEMES; every filtered scheme gets a global flag
+            missing_charge_<scheme> (1.0 missing, 0.0 present), so all records share one
+            feature set. None (default) leaves absent schemes out.
     Returns:
         atom_feats_charge (Dict[int, Dict[str, Any]]): Dictionary containing atom features related
         to charge and spin information.
@@ -606,16 +616,31 @@ def parse_charge_data(
             if 0 <= idx < n_atoms:
                 atom_feats_charge[idx]["spin_" + charge_type] = float(v)
 
+    if fill_missing is not None and charge_filter is not None:
+        for scheme in charge_filter:
+            data = dict_charge.get(scheme)
+            missing = not isinstance(data, dict) or not data.get("charge")
+            global_dipole_feats["missing_charge_" + scheme] = float(missing)
+            if missing:
+                for idx in range(n_atoms):
+                    atom_feats_charge[idx]["charge_" + scheme] = float(fill_missing)
+                if scheme in CHARGE_DIPOLE_SCHEMES:
+                    global_dipole_feats["charge_" + scheme + "_dipole_mag"] = float(fill_missing)
+
     return atom_feats_charge, global_dipole_feats
 
 
-def parse_fuzzy_data(dict_fuzzy: dict, n_atoms: int, fuzzy_filter: Optional[List[str]] = None) -> Tuple[Dict[int, Dict[str, Any]], Dict[str, float]]:
+def parse_fuzzy_data(dict_fuzzy: dict, n_atoms: int, fuzzy_filter: Optional[List[str]] = None,
+                     fill_missing: Optional[float] = None) -> Tuple[Dict[int, Dict[str, Any]], Dict[str, float]]:
     """
     Parse fuzzy-related data and update atom features.
     Takes:
         dict_fuzzy: dict, dictionary containing fuzzy data
         n_atoms: int, number of atoms in the molecule
         fuzzy_filter: list of str, list of keys to filter in the fuzzy data, inclusion filter
+        fill_missing: with a fuzzy_filter, a filtered scheme absent from the record gets this
+            value for every atom and for its sum/abs_sum, and every filtered scheme a global
+            flag missing_fuzzy_<scheme> (1.0 missing, 0.0 present); None leaves them out
     Returns:
         atom_feats_fuzzy: dict, dictionary containing atom features related to fuzzy data
         global_fuzzy_feats: dict, dictionary containing global features related to fuzzy data
@@ -640,6 +665,16 @@ def parse_fuzzy_data(dict_fuzzy: dict, n_atoms: int, fuzzy_filter: Optional[List
                 continue
             if 0 <= idx < n_atoms:
                 atom_feats_fuzzy[idx][f"fuzzy_{fuzzy_type}"] = float(v)
+
+    if fill_missing is not None and fuzzy_filter is not None:
+        for scheme in fuzzy_filter:
+            missing = not isinstance(dict_fuzzy.get(scheme), dict) or not dict_fuzzy.get(scheme)
+            global_fuzzy_feats[f"missing_fuzzy_{scheme}"] = float(missing)
+            if missing:
+                for idx in range(n_atoms):
+                    atom_feats_fuzzy[idx][f"fuzzy_{scheme}"] = float(fill_missing)
+                for gk in ("sum", "abs_sum"):
+                    global_fuzzy_feats[f"fuzzy_{scheme}_{gk}"] = float(fill_missing)
 
     return atom_feats_fuzzy, global_fuzzy_feats
 
