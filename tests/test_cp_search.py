@@ -284,4 +284,36 @@ def test_x2c_uranium_nuclear_cp_is_found():
     assert np.count_nonzero(r["ncp_atom"] == u) == 1
     bcp = r["bcp_atoms"][r["type"] == 1]
     assert (bcp >= 0).all() and np.isin(bcp, [u]).any(axis=1).all()
-    assert [s for s in r["stats"] if s["stage"] == "nuclei"][0]["precision_limited"] == 1
+    nuc = [s for s in r["stats"] if s["stage"] == "nuclei"][0]
+    # U sits 26 Bohr from the origin: its seed converges in the nucleus frame, not by the rescue
+    assert nuc["nucleus_frame"] == 1 and nuc["precision_limited"] == 0
+
+
+NITRATE_U = ("/home/santiagovargas/dev/qtaim_generator/data/actinide_dev/work/multiwfn/TZVPP/"
+             "x2c_UN3O11_spin_1_PBE0_X2C-TZVPPall/orca.wfx")
+
+
+@pytest.mark.skipif(not os.path.exists(NITRATE_U), reason="local X2C nitrate wavefunction")
+def test_heavy_nucleus_cp_is_translation_invariant():
+    """The U nucleus of a centred nitrate, and the same molecule shifted 40 and 100 Bohr:
+    the shifted copies converge in the nucleus frame with the same offset from the nucleus,
+    a gradient at the 1e-13 level and the same density and Laplacian."""
+    from qtaim_gen.source.core.charge_engine import prepare_basis, read_wfx
+    from qtaim_gen.source.core.cp_search import analyze
+
+    out = {}
+    for shift in (0.0, 40.0, 100.0):
+        wfx = read_wfx(NITRATE_U)
+        wfx["coords"] = wfx["coords"] + np.array([shift, -0.7 * shift, 0.4 * shift]) / np.sqrt(1.65)
+        r = analyze(wfx, prepare_basis(wfx))
+        u = int(np.flatnonzero(wfx["atnums"] == 92)[0])
+        i = int(np.flatnonzero(r["ncp_atom"] == u)[0])
+        nuc = [s for s in r["stats"] if s["stage"] == "nuclei"][0]
+        out[shift] = (r["pos"][i] - wfx["coords"][u], {k: np.asarray(v)[i] for k, v in r["props"].items()}, nuc, r)
+    for shift in (40.0, 100.0):
+        off, props, nuc, r = out[shift]
+        assert r["poincare_hopf"] == 1 and nuc["nucleus_frame"] == 1 and nuc["precision_limited"] == 0
+        assert np.linalg.norm(props["gradient"]) < 1e-10
+        assert abs(props["rho"] - out[0.0][1]["rho"]) <= 1e-12 * abs(out[0.0][1]["rho"])
+        assert abs(props["laplacian"] - out[0.0][1]["laplacian"]) <= 1e-12 * abs(out[0.0][1]["laplacian"])
+        assert np.linalg.norm(off) < 1e-12

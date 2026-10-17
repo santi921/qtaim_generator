@@ -201,9 +201,15 @@ def _final_eigenvalues(pos, wfx, basis):
     return np.linalg.eigvalsh(density_derivatives(pos, wfx, basis)["hessian"])
 
 
+def _nucleus_frame(wfx, atom):
+    """wfx with the molecule translated so atom sits at the origin (the basis holds no
+    coordinates): points near that nucleus are then represented to full precision."""
+    return {**wfx, "coords": wfx["coords"] - wfx["coords"][atom]}
+
+
 def _engine_search(wfx, basis, minicpdis, superset):
     stats = []
-    cand_x, cand_eig, cand_g, cand_stage = [], [], [], []
+    cand_x, cand_eig, cand_g, cand_stage, cand_frame, cand_off = [], [], [], [], [], []
     stages = [("nuclei", wfx["coords"].copy(), 1.0)]
     if superset:
         stages += [(name, pts, GRADCONV) for name, pts in multiwfn_seeds(wfx["coords"], wfx["atnums"])[1:]]
@@ -211,21 +217,38 @@ def _engine_search(wfx, basis, minicpdis, superset):
     for stage, pts, gconv in stages:
         if not len(pts):
             stats.append({"stage": stage, "seeds": 0, "converged": 0, "singular": 0, "maxcyc": 0, "newton_steps": 0,
-                          "precision_limited": 0})
+                          "precision_limited": 0, "nucleus_frame": 0})
             continue
         x, status, hess, gnorm, niter = newton(pts, wfx, basis, gradconv=gconv, trust=TRUST_RADIUS,
                                                accept_maximum=stage == "nuclei")
+        frame = np.full(len(pts), -1, dtype=np.int64)
+        offset = np.zeros((len(pts), 3))
+        if stage == "nuclei":
+            # a nuclear seed that ran out of cycles or stopped on the gradient floor (heavy
+            # all-electron nucleus far from the origin: |g| ~ |H| * spacing of doubles at
+            # that coordinate stays above gconv) gets a second Newton run with its nucleus at
+            # the origin; status 3 when it converges there, else it keeps status 2 or -2
+            for i in np.flatnonzero((status == 2) | (status == -2)):
+                d, st, h, gn_, n_ = newton(pts[i:i + 1] - wfx["coords"][i], _nucleus_frame(wfx, i), basis,
+                                           gradconv=gconv, trust=TRUST_RADIUS)
+                niter[i] += n_[0]
+                if st[0] == 1:
+                    x[i], status[i], hess[i], gnorm[i], frame[i] = wfx["coords"][i] + d[0], 3, h[0], gn_[0], i
+                    offset[i] = d[0]  # exact; x[i] is rounded at the absolute coordinate
         ok = np.flatnonzero(status >= 1)
         eig = _final_eigenvalues(x[ok], wfx, basis)
         keep = ~np.all(eig == 0, axis=1)
         cand_x.append(x[ok][keep])
         cand_eig.append(eig[keep])
         cand_g.append(gnorm[ok][keep])
+        cand_frame.append(frame[ok][keep])
+        cand_off.append(offset[ok][keep])
         cand_stage += [stage] * int(keep.sum())
         stats.append({"stage": stage, "seeds": len(pts), "converged": len(ok), "singular": int((status == -1).sum()),
                       "maxcyc": int((status == -2).sum()), "newton_steps": int(niter.sum()),
-                      "precision_limited": int((status == 2).sum())})
+                      "precision_limited": int((status == 2).sum()), "nucleus_frame": int((status == 3).sum())})
     x, eig, g = np.concatenate(cand_x), np.concatenate(cand_eig), np.concatenate(cand_g)
+    fr, off = np.concatenate(cand_frame), np.concatenate(cand_off)
     ctype = (eig > 0).sum(axis=1)
     # nuclear CPs first (their gradient criterion is off), then ascending |g|, then position;
     # only CPs of the same type merge: a BCP and an RCP 0.01 Bohr apart (near a bifurcation)
@@ -244,7 +267,8 @@ def _engine_search(wfx, basis, minicpdis, superset):
     order = np.lexsort((_sort_key(x[kept]), types))
     kept = kept[order]
     return {"pos": x[kept], "type": types[order], "eigenvalues": eig[kept],
-            "stage": [cand_stage[i] for i in kept], "stats": stats}
+            "stage": [cand_stage[i] for i in kept], "frame_atom": fr[kept], "frame_offset": off[kept],
+            "stats": stats}
 
 
 def search(wfx, basis, seeds="multiwfn", minicpdis=MINICPDIS):
@@ -347,6 +371,9 @@ def reseed(cps, wfx, basis, rounds=RESEED_ROUNDS, minicpdis=MINICPDIS):
             cps["type"] = np.append(cps["type"], t)
             cps["eigenvalues"] = np.vstack([cps["eigenvalues"], eig[j]])
             cps["stage"] = cps["stage"] + [f"sphere{n}"]
+            if "frame_atom" in cps:
+                cps["frame_atom"] = np.append(cps["frame_atom"], -1)
+                cps["frame_offset"] = np.vstack([cps["frame_offset"], np.zeros(3)])
             rho = np.append(rho, density_derivatives(p[None], wfx, basis, hessian=False)["rho"])
             added += 1
         stats.append({"stage": f"sphere{n}", "seeds": len(x), "converged": len(ok), "singular": int((status == -1).sum()),
@@ -524,6 +551,15 @@ def analyze(wfx, basis, seeds="superset", paths="engine", boys_mode="exact", res
     cps, reseed_stats = reseed(cps, wfx, basis, rounds=reseed_rounds)
     cps["stats"] = cps["stats"] + reseed_stats
     props = point_properties(cps["pos"], wfx, basis, esp=True, boys_mode=boys_mode)
+    # nuclear CPs converged in their nucleus's frame: evaluate them there too, or the
+    # properties see the same rounded coordinate (the gradient back at its floor)
+    frame_atom = cps.get("frame_atom", np.full(len(cps["pos"]), -1))
+    for i in np.flatnonzero(frame_atom >= 0):
+        a = int(frame_atom[i])
+        local = point_properties(cps["frame_offset"][i:i + 1], _nucleus_frame(wfx, a), basis, esp=True,
+                                 boys_mode=boys_mode)
+        for k in props:
+            props[k][i] = local[k][0]
     counts = np.bincount(cps["type"], minlength=4)
     ph = int(counts[0] - counts[1] + counts[2] - counts[3])
     keep = np.flatnonzero(props["rho"] >= WEAK_DROP)

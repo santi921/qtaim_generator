@@ -61,11 +61,17 @@ Heavy all-electron nuclei: Multiwfn relaxes findcp's gradient criterion to |g| <
 nuclear seeds (MW/topology.f90:1018, "for very heavy atoms"), but at an X2C uranium or
 thorium nucleus (Hessian about -3e15) Newton stops within 5e-15 Bohr with |g| about 16
 left by roundoff, so the seed runs out of cycles and the actinide NCP is lost: no atomic
-descriptors for it, every actinide-ligand BCP unpaired, Poincare-Hopf 0. The engine
-modes accept such a seed when its last step was below dispconv and its Hessian is
-negative definite (status 2, counted as `precision_limited` in the nuclei stage stats);
-seeds that converge normally are unchanged. Local X2C jobs: 5 of 9 U/Th jobs had lost
-the NCP; all 9 now have it, with Poincare-Hopf 1 and every actinide BCP paired.
+descriptors for it, every actinide-ligand BCP unpaired, Poincare-Hopf 0. The cause is the
+spacing of doubles at the nuclear coordinate: a nucleus within about 0.1 Bohr of the origin
+converges (every production nitrate has its actinide there), one 18-50 Bohr away does not.
+In the engine modes such a seed is rerun with its nucleus at the origin (the molecule
+translated; status 3, `nucleus_frame` in the nuclei stage stats), and its properties are
+evaluated in that frame. It converges there to |g| about 1e-13, with the density and
+Laplacian of the unshifted molecule to 4e-16 relative at shifts up to 100 Bohr. The earlier
+rescue (accept the seed when its last step was below dispconv and its Hessian is negative
+definite: status 2, `precision_limited`) stays as the last resort. Seeds that converge
+normally are unchanged. Local X2C jobs: 5 of 9 U/Th jobs had lost the NCP; all 9 now have
+it through the nucleus frame, with Poincare-Hopf 1 and every actinide BCP paired.
 
 ### Parity across levels of theory
 
