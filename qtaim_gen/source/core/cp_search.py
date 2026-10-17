@@ -496,6 +496,9 @@ def bond_paths(cps, wfx, basis, mode="multiwfn"):
 
 # ---------------------------------------------------------------- full analysis and CPprop.txt
 
+# Version of the QTAIM engine's results (search, paths, properties) recorded in every
+# record's _meta.qtaim_engine; bump it when a change alters the stored values
+QTAIM_ENGINE_VERSION = 1
 WEAK_DROP = 1e-5  # rho below this is dropped, after the Poincare-Hopf check (README decision 10)
 WEAK_FLAG = 1e-3  # rho below this is flagged
 AU2EV, AU2KCAL = 27.2113838, 627.51  # Multiwfn's constants (MW/define.f90:29)
@@ -661,3 +664,43 @@ def write_cpprop(path, res, wfx):
         ]
     with open(path, "w") as f:
         f.write("\n".join(lines) + "\n")
+
+
+def qtaim_engine_out(res, seconds, settings):
+    """qtaim.out for an engine run: the banner and metadata line that
+    utils/validation.py reads back (QTAIM_ENGINE_MARKER, QTAIM_ENGINE_META_PREFIX),
+    and Multiwfn's count and export lines for the run-status and bond-count gates.
+    CP numbers in the metadata are those of the CPprop.txt write_cpprop writes."""
+    import json
+
+    from qtaim_gen.source.utils.validation import QTAIM_ENGINE_MARKER, QTAIM_ENGINE_META_PREFIX
+
+    counts = np.bincount(res["type"], minlength=4)
+    nuc = next((st for st in res["stats"] if st["stage"] == "nuclei"), {})
+    meta = {
+        "version": QTAIM_ENGINE_VERSION,
+        **settings,
+        "poincare_hopf": int(res["poincare_hopf"]),
+        "poincare_hopf_full_set": int(res["poincare_hopf_full_set"]),
+        "counts_full_set": [int(c) for c in res["counts_full_set"]],
+        "dropped_below_rho": WEAK_DROP,
+        "dropped": int(res["dropped"]),
+        "weak_below_rho": WEAK_FLAG,
+        "weak_cps": [int(i) + 1 for i in res["weak"]],
+        "near_pairs": [[int(i) + 1, int(j) + 1] for i, j in res["near_pairs"]],
+        "nucleus_frame": int(nuc.get("nucleus_frame", 0)),
+        "precision_limited": int(nuc.get("precision_limited", 0)),
+        "reseed_rounds": [st["stage"] for st in res["stats"] if st["stage"].startswith("sphere")],
+        "seconds": round(float(seconds), 3),
+    }
+    lines = [
+        f" {QTAIM_ENGINE_MARKER}, version {QTAIM_ENGINE_VERSION}",
+        f" {QTAIM_ENGINE_META_PREFIX}{json.dumps(meta, sort_keys=True)}",
+        f" Number of (3,-3) CPs:{int(counts[0]):7d}",
+        f" Number of (3,-1) CPs:{int(counts[1]):7d}",
+        f" Number of (3,+1) CPs:{int(counts[2]):7d}",
+        f" Number of (3,+3) CPs:{int(counts[3]):7d}",
+        f" Poincare-Hopf sum (kept CPs): {int(res['poincare_hopf'])}, all CPs found: {int(res['poincare_hopf_full_set'])}",
+        " All CP information have been outputted to CPprop.txt",
+    ]
+    return "\n".join(lines) + "\n"

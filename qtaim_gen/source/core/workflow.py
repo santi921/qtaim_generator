@@ -229,6 +229,7 @@ def process_folder(
     horton_python: str = "",
     recheck_fuzzy: bool = False,
     charge_engine: bool = False,
+    qtaim_engine: bool = False,
 ) -> Dict[str, Any]:
     """Process a single folder and return a small status dict.
 
@@ -295,6 +296,7 @@ def process_folder(
                     logger=logger,
                     recheck_fuzzy=recheck_fuzzy,
                     charge_engine=charge_engine,
+                    qtaim_engine=qtaim_engine,
                     recheck_allalpha_qtaim=recheck_allalpha_qtaim,
                     recheck_cp_labels=recheck_cp_labels,
                     enforce_poincare_hopf=enforce_poincare_hopf,
@@ -349,6 +351,7 @@ def process_folder(
             horton_python=horton_python,
             recheck_fuzzy=recheck_fuzzy,
             charge_engine=charge_engine,
+            qtaim_engine=qtaim_engine,
         )
         t1: float = time.time()
         rerun_ok = bool(tf_validation)
@@ -437,6 +440,7 @@ def process_folder_alcf(
     horton_python: str = "",
     recheck_fuzzy: bool = False,
     charge_engine: bool = False,
+    qtaim_engine: bool = False,
 ) -> Dict[str, Any]:
     """Process a single folder and return a small status dict.
 
@@ -561,6 +565,7 @@ def process_folder_alcf(
                 enforce_poincare_hopf=enforce_poincare_hopf,
                 recheck_fuzzy=recheck_fuzzy,
                 charge_engine=charge_engine,
+                qtaim_engine=qtaim_engine,
             )
 
             if not overwrite and tf_validation:
@@ -645,6 +650,7 @@ def process_folder_alcf(
             horton_python=horton_python,
             recheck_fuzzy=recheck_fuzzy,
             charge_engine=charge_engine,
+            qtaim_engine=qtaim_engine,
         )
         t1: float = time.time()
         rerun_ok = bool(tf_validation)

@@ -1357,6 +1357,8 @@ def patch_timings_from_log(
     # surface_engine timing for 'other', so their keys are not missing and get no placeholder
     if isinstance(timings.get("charge_engine"), (int, float)) and timings["charge_engine"] > 0:
         expected = [k for k in expected if k not in ENGINE_ROUTINES]
+    if isinstance(timings.get("qtaim_engine"), (int, float)) and timings["qtaim_engine"] > 0:
+        expected = [k for k in expected if k != "qtaim"]
     surface_done = isinstance(timings.get("surface_engine"), (int, float)) and timings["surface_engine"] > 0
     patched: dict = {}
     for key in expected:
@@ -1739,6 +1741,54 @@ def _run_charge_engine(
         len(written), elapsed, meta.get("nelec_grid_becke", float("nan")),
         meta.get("nelec_wfx", float("nan")),
     )
+    return True
+
+
+def _run_qtaim_engine(folder: str, n_threads: int, logger: logging.Logger, restart: bool = False) -> bool:
+    """The QTAIM step with the QTAIM engine (core/cp_search.analyze: superset seeds,
+    reseeding on a failing Poincare-Hopf sum, engine bond paths, exact Boys function)
+    instead of Multiwfn. Writes CPprop.txt in Multiwfn's format, which parse_multiwfn
+    and the CPprop integrity gates read unchanged, a qtaim.out with the engine banner
+    and metadata (validation.qtaim_engine_meta), and a 'qtaim_engine' timing."""
+    if restart:
+        timings = {}
+        for base in (os.path.join(folder, "generator"), folder):
+            try:
+                with open(os.path.join(base, "timings.json")) as f:
+                    timings = json.load(f)
+                break
+            except (OSError, json.JSONDecodeError):
+                continue
+        if (timings.get("qtaim_engine") or 0) > 0 and _qtaim_output_complete(folder):
+            logger.info("qtaim_engine: completed run found - skipping")
+            return True
+
+    wf_path = _wavefunction_path(folder)
+    if wf_path is None or not wf_path.endswith(".wfx"):
+        logger.error("qtaim_engine: needs orca.wfx, found %s", wf_path)
+        return False
+
+    import numba
+    from qtaim_gen.source.core import cp_search
+    from qtaim_gen.source.core.charge_engine import prepare_basis, read_wfx
+
+    numba.set_num_threads(max(1, min(n_threads, numba.config.NUMBA_NUM_THREADS)))
+    settings = {"seeds": "superset", "paths": "engine", "boys_mode": "exact"}
+    start = time.time()
+    try:
+        wfx = read_wfx(wf_path)
+        res = cp_search.analyze(wfx, prepare_basis(wfx), **settings)
+        cp_search.write_cpprop(os.path.join(folder, "CPprop.txt"), res, wfx)
+    except Exception as e:
+        logger.error("qtaim_engine failed on %s: %s", wf_path, e)
+        return False
+    elapsed = time.time() - start
+    with open(os.path.join(folder, "qtaim.out"), "w") as f:
+        f.write(cp_search.qtaim_engine_out(res, elapsed, settings))
+    _update_timing(folder, "qtaim_engine", elapsed, logger)
+    logger.info("qtaim_engine: %d CPs %s, Poincare-Hopf %d (all found %d) in %.2f s",
+                len(res["pos"]), [int((res["type"] == t).sum()) for t in range(4)], res["poincare_hopf"],
+                res["poincare_hopf_full_set"], elapsed)
     return True
 
 
@@ -2751,6 +2801,7 @@ def gbw_analysis(
     horton_python: str = "",
     recheck_fuzzy: bool = False,
     charge_engine: bool = False,
+    qtaim_engine: bool = False,
     recheck_allalpha_qtaim: bool = False,
     recheck_cp_labels: bool = False,
     enforce_poincare_hopf: bool = False,
@@ -2784,6 +2835,10 @@ def gbw_analysis(
             fuzzy integrations / unrestricted fuzzy bond orders by reparsing the
             archived output where it is trustworthy, and invalidate the rest
             so the restart reruns only those steps (implies restart)
+        qtaim_engine(bool): run the QTAIM step with core/cp_search.py instead of
+            Multiwfn (CPprop.txt and qtaim.out written in Multiwfn's format); validation
+            then requires a qtaim_engine timing. Engine records never escalate to
+            Multiwfn's exhaustive search.
         charge_engine(bool): compute ENGINE_ROUTINES (charges, fuzzy density/
             spin, fuzzy_bond) with core/charge_engine.py instead of Multiwfn;
             validation then requires a charge_engine timing, so folders whose
@@ -3037,6 +3092,7 @@ def gbw_analysis(
                     require_qtaim_provenance=require_qtaim_provenance,
                     recheck_fuzzy=recheck_fuzzy,
                     charge_engine=charge_engine,
+                    qtaim_engine=qtaim_engine,
                     recheck_allalpha_qtaim=recheck_allalpha_qtaim,
                     recheck_cp_labels=recheck_cp_labels,
                     enforce_poincare_hopf=enforce_poincare_hopf,
@@ -3077,6 +3133,7 @@ def gbw_analysis(
                         require_qtaim_provenance=require_qtaim_provenance,
                         recheck_fuzzy=recheck_fuzzy,
                         charge_engine=charge_engine,
+                        qtaim_engine=qtaim_engine,
                         recheck_allalpha_qtaim=recheck_allalpha_qtaim,
                         recheck_cp_labels=recheck_cp_labels,
                         enforce_poincare_hopf=enforce_poincare_hopf,
@@ -3114,6 +3171,7 @@ def gbw_analysis(
                             require_qtaim_provenance=require_qtaim_provenance,
                             recheck_fuzzy=recheck_fuzzy,
                             charge_engine=charge_engine,
+                            qtaim_engine=qtaim_engine,
                             recheck_allalpha_qtaim=recheck_allalpha_qtaim,
                             recheck_cp_labels=recheck_cp_labels,
                             enforce_poincare_hopf=enforce_poincare_hopf,
@@ -3177,6 +3235,7 @@ def gbw_analysis(
                         require_qtaim_provenance=require_qtaim_provenance,
                         recheck_fuzzy=recheck_fuzzy,
                         charge_engine=charge_engine,
+                        qtaim_engine=qtaim_engine,
                         recheck_allalpha_qtaim=recheck_allalpha_qtaim,
                         recheck_cp_labels=recheck_cp_labels,
                         enforce_poincare_hopf=enforce_poincare_hopf,
@@ -3237,12 +3296,15 @@ def gbw_analysis(
             check_bcp_count=check_bcp_count,
             bcp_tolerance=bcp_tolerance,
             require_qtaim_provenance=require_qtaim_provenance,
-            skip_routines=ENGINE_ROUTINES if charge_engine else None,
+            skip_routines=(frozenset(ENGINE_ROUTINES if charge_engine else ())
+                           | (frozenset({"qtaim"}) if qtaim_engine else frozenset())) or None,
             recheck_allalpha_qtaim=recheck_allalpha_qtaim,
             recheck_cp_labels=recheck_cp_labels,
             enforce_poincare_hopf=enforce_poincare_hopf,
         )
         # after run_jobs: its convert step is what produces orca.wfx
+        if qtaim_engine:
+            _run_qtaim_engine(folder, n_threads=n_threads, logger=logger, restart=restart)
         if charge_engine:
             _run_charge_engine(folder, n_threads=n_threads, logger=logger, restart=restart, full_set=full_set)
             _run_surface_engine(folder, n_threads=n_threads, logger=logger, restart=restart)
@@ -3283,6 +3345,7 @@ def gbw_analysis(
         require_qtaim_provenance=require_qtaim_provenance,
         recheck_fuzzy=recheck_fuzzy,
         charge_engine=charge_engine,
+        qtaim_engine=qtaim_engine,
         recheck_allalpha_qtaim=recheck_allalpha_qtaim,
         recheck_cp_labels=recheck_cp_labels,
         enforce_poincare_hopf=enforce_poincare_hopf,
@@ -3328,6 +3391,7 @@ def gbw_analysis(
                 recheck_cp_labels=recheck_cp_labels,
                 enforce_poincare_hopf=enforce_poincare_hopf,
                 charge_engine=charge_engine,
+                qtaim_engine=qtaim_engine,
             )
 
     logger.info("gbw_analysis completed in folder: {}".format(folder))

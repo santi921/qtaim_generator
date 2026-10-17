@@ -422,3 +422,34 @@ validation of the repair, critic2 adjudication of extra CPs.
 - The PH scan covers 54 files, mostly edge cases.
 - The internals of the STO fit, libreta and edflib were located, not read.
 - All effort figures are estimates.
+
+## 6e. P5 status (2026-10-16): wired into production
+
+Branch feat/qtaim-engine-wiring, on integration/nersc-actinide with feat/qtaim-cp-search merged.
+
+- **Turning it on.** `--qtaim_engine` on full-runner-parsl-alcf (and so on full-runner-engine),
+  or `gbw_analysis(qtaim_engine=True)`, runs the QTAIM step with `cp_search.analyze`:
+  superset seeds, reseeding on a failing kept-set Poincare-Hopf sum, engine bond paths,
+  exact Boys function. Multiwfn's QTAIM step is not run.
+- **Outputs.** CPprop.txt is written in Multiwfn's format; the unchanged production parser
+  and the CPprop integrity gates read it. qtaim.out carries:
+  - an engine banner (`QTAIM_ENGINE_MARKER`);
+  - one JSON metadata line;
+  - Multiwfn's count and export lines, so the run-status and bond-count gates work as
+    before.
+- **Record.** qtaim.json `_meta` gets `qtaim_search: "engine"` and `qtaim_engine`. That block
+  holds `version` (`QTAIM_ENGINE_VERSION` = 1), the settings, both Poincare-Hopf sums, the
+  full-set counts, the dropped count, weak CP numbers, near pairs, `nucleus_frame`,
+  `precision_limited`, the reseed rounds and the time.
+- **Validation.** A `qtaim_engine` timing stands in for `qtaim`, and `qtaim_engine=True`
+  requires it. Engine records are never escalated to Multiwfn's exhaustive search:
+  `poincare_hopf_needs_exhaustive` is False for them, and validation accepts their sum with
+  a warning.
+- **Checks.**
+  - The XeCl4 fixture gives the same CP keys as a parse of Multiwfn's CPprop.txt and
+    passes every QTAIM gate.
+  - 4 actinide jobs with both engines validate. The LRC UCl6 job (U 26 Bohr from the origin)
+    keeps its U NCP through the nucleus frame, which Multiwfn lost on the same wavefunction.
+  - MR_169236 and MOBH32_Pt2 (kept-set sum 2 by design, full set 1) validate under
+    `--enforce_poincare_hopf`, and two restarts neither rerun nor escalate them.
+- **Not wired.** full-runner and full-runner-parsl (they have no `--charge_engine` either).

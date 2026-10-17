@@ -496,7 +496,8 @@ def test_every_validation_in_gbw_analysis_forwards_the_mode_flags():
     tree = ast.parse(textwrap.dedent(inspect.getsource(gbw_analysis)))
     calls = [n for n in ast.walk(tree) if isinstance(n, ast.Call) and getattr(n.func, "id", None) == "validation_checks"]
     assert calls
-    required = {"charge_engine", "recheck_fuzzy", "recheck_allalpha_qtaim", "recheck_cp_labels", "enforce_poincare_hopf"}
+    required = {"charge_engine", "qtaim_engine", "recheck_fuzzy", "recheck_allalpha_qtaim", "recheck_cp_labels",
+                "enforce_poincare_hopf"}
     for call in calls:
         assert required <= {k.arg for k in call.keywords}, (call.lineno, required - {k.arg for k in call.keywords})
 
