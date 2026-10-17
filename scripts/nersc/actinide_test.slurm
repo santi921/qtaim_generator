@@ -5,6 +5,7 @@
 #
 #   sbatch -J mwfn   --export=ALL,LIST=$WORK/sample.txt,TREE=mwfn_l0         --array=0-9 actinide_test.slurm
 #   sbatch -J engine --export=ALL,LIST=$WORK/sample.txt,TREE=engine_l0,ENGINE=1 --array=0-9 actinide_test.slurm
+#   sbatch -J qeng   --export=ALL,LIST=$WORK/sample.txt,TREE=qengine_l0,ENGINE=1,QTAIM_ENGINE=1 --array=0-9 actinide_test.slurm
 # Optional: FULL_SET (default 0), N (lines per task, default 50), N_PAR (concurrent jobs per
 # node, default 16), THREADS (per job, default 8), SRC (input root the list is under).
 #SBATCH -A m3278
@@ -43,9 +44,12 @@ LIST=${LIST:?LIST is required}
 ID=${SLURM_ARRAY_TASK_ID}
 EXTRA=""
 [ "${ENGINE:-0}" = "1" ] && EXTRA="--charge_engine"
+[ "${QTAIM_ENGINE:-0}" = "1" ] && EXTRA="$EXTRA --qtaim_engine"
 
 python -c "import qtaim_gen, sys; print('qtaim_gen from', qtaim_gen.__file__); assert qtaim_gen.__file__.startswith('$CODE')"
-[ "${ENGINE:-0}" = "1" ] && python -c "import numba, threadpoolctl; print('numba', numba.__version__)"
+if [ "${ENGINE:-0}" = "1" ] || [ "${QTAIM_ENGINE:-0}" = "1" ]; then
+  python -c "import numba, threadpoolctl; print('numba', numba.__version__)"
+fi
 [ -x "$ORCA_2MKL" ] && [ -x "$MULTIWFN" ] || { echo "missing $ORCA_2MKL or $MULTIWFN"; exit 1; }
 echo "orca_2mkl: $ORCA_2MKL"
 echo "multiwfn:  $MULTIWFN"
