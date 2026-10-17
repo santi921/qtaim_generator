@@ -105,3 +105,72 @@ def test_timing_validation_and_patching_ignore_skipped_routines(tmp_path):
     assert patch_timings_from_log(str(tmp_path), full_set=1, spin_tf=False, move_results=False, logger=LOG) is not None
     patched = json.loads((tmp_path / "timings.json").read_text())
     assert not set(MBIS_FAMILY) & set(patched) - {TIMINGS_SKIPPED_KEY}
+
+
+def test_parsers_fill_missing_schemes_with_nan_and_flag():
+    import math
+
+    from qtaim_gen.source.utils.lmdbs import parse_charge_data, parse_fuzzy_data
+
+    rec = {"hirshfeld": {"charge": {"1_U": 1.2, "2_O": -0.6}, "dipole": {"mag": 0.3}}}
+    atoms, glob = parse_charge_data(rec, 2, charge_filter=["hirshfeld", "mbis"], fill_missing=float("nan"))
+    assert atoms[0]["charge_hirshfeld"] == 1.2 and math.isnan(atoms[1]["charge_mbis"])
+    assert glob["missing_charge_mbis"] == 1.0 and glob["missing_charge_hirshfeld"] == 0.0
+    assert "charge_mbis_dipole_mag" not in glob  # MBIS records carry no dipole
+    atoms, glob = parse_charge_data(rec, 2, charge_filter=["hirshfeld", "mbis"])
+    assert "charge_mbis" not in atoms[0] and "missing_charge_mbis" not in glob  # default: unchanged
+
+    fz = {"becke_fuzzy_density": {"1_U": 90.0, "2_O": 8.0, "sum": 98.0, "abs_sum": 98.0}}
+    atoms, glob = parse_fuzzy_data(fz, 2, fuzzy_filter=["becke_fuzzy_density", "mbis_fuzzy_density"],
+                                   fill_missing=float("nan"))
+    assert math.isnan(atoms[0]["fuzzy_mbis_fuzzy_density"]) and math.isnan(glob["fuzzy_mbis_fuzzy_density_sum"])
+    assert glob["missing_fuzzy_mbis_fuzzy_density"] == 1.0 and glob["missing_fuzzy_becke_fuzzy_density"] == 0.0
+
+
+def test_converter_keeps_a_molecule_whose_scheme_is_missing(tmp_path):
+    import math
+    import pickle
+    import shutil
+    from pathlib import Path
+
+    import lmdb
+
+    from qtaim_gen.source.core.converter import GeneralConverter
+    from qtaim_gen.source.utils.scaling import _deserialize_graph
+
+    base = Path(__file__).parent / "test_files" / "lmdb_tests" / "generator_lmdbs_merged"
+
+    def run(fill):
+        work = tmp_path / f"fill_{fill}"
+        work.mkdir()
+        shutil.copy(base / "merged_charge.lmdb", work / "charge.lmdb")
+        env = lmdb.open(str(work / "charge.lmdb"), subdir=False, map_size=1 << 30)
+        with env.begin(write=True) as txn:
+            rec = pickle.loads(txn.get(b"orca5_uks"))
+            rec.pop("mbis")
+            txn.put(b"orca5_uks", pickle.dumps(rec))
+        env.close()
+        cfg = {"chunk": -1, "filter_list": ["scaled", "length"], "restart": False,
+               "allowed_ring_size": [3, 4, 5, 6, 7, 8], "allowed_charges": None, "allowed_spins": None,
+               "keys_target": {"atom": [], "bond": [], "global": []},
+               "keys_data": {"atom": [], "bond": [], "global": ["n_atoms"]}, "lmdb_path": str(work), "lmdb_name": "g.lmdb",
+               "lmdb_locations": {"geom_lmdb": str(base / "merged_geom.lmdb"), "charge_lmdb": str(work / "charge.lmdb")},
+               "n_workers": 1, "batch_size": 100, "charge_filter": ["mbis", "hirshfeld"], "fill_missing_schemes": fill}
+        GeneralConverter(cfg).process()
+        out = lmdb.open(str(work / "g.lmdb"), subdir=False, readonly=True, lock=False)
+        with out.begin() as txn:
+            graphs = [_deserialize_graph(v) for k, v in txn.cursor() if k.isdigit()]
+            names = pickle.loads(txn.get(b"feature_names"))
+        out.close()
+        return graphs, names
+
+    dropped, _ = run(False)
+    graphs, names = run(True)
+    assert len(graphs) == len(dropped) + 1  # the molecule without MBIS is kept, not dropped
+    i_mbis = names["atom"].index("charge_mbis")
+    i_flag = names["global"].index("missing_charge_mbis")
+    flagged = [g for g in graphs if g["global"].feat[0, i_flag] == 1.0]
+    assert len(flagged) == 1
+    assert all(math.isnan(v) for v in flagged[0]["atom"].feat[:, i_mbis].tolist())
+    others = [g for g in graphs if g["global"].feat[0, i_flag] == 0.0]
+    assert others and all(not math.isnan(v) for g in others for v in g["atom"].feat[:, i_mbis].tolist())
