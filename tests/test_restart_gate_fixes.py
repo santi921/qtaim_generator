@@ -517,3 +517,102 @@ def test_patch_timings_leaves_engine_routines_alone(tmp_path):
     assert patch_timings_from_log(str(tmp_path), full_set=0, move_results=True)
     patched = json.loads((gen / "timings.json").read_text())["_timings_patched"]
     assert set(patched) == {"qtaim"}
+
+
+def test_partial_engine_run_is_not_stamped(tmp_path, monkeypatch):
+    # a routine the engine did not write would keep an older (e.g. Multiwfn) value under
+    # a charge_engine timing claiming the engine produced it; no timing means validation
+    # fails and the engine reruns
+    from qtaim_gen.source.core import charge_engine, omol
+
+    (tmp_path / "orca.wfx").write_text("wfx")
+    # a stamp from an earlier complete run: move_results merges timings.json, so it must go
+    (tmp_path / "generator").mkdir()
+    (tmp_path / "generator" / "timings.json").write_text(json.dumps({"charge_engine": 5.0, "qtaim": 3.0}))
+    monkeypatch.setattr(omol, "check_spin", lambda folder: False)
+    wanted = sorted(omol._engine_routines(0, False))
+    monkeypatch.setattr(charge_engine, "run", lambda path, full_set=0: {r: {"x": 1.0} for r in wanted[1:]})
+    assert omol._run_charge_engine(str(tmp_path), n_threads=1, logger=logging.getLogger("t")) is False
+    for timings in (tmp_path / "timings.json", tmp_path / "generator" / "timings.json"):
+        assert not timings.exists() or "charge_engine" not in json.loads(timings.read_text())
+    assert json.loads((tmp_path / "generator" / "timings.json").read_text()) == {"qtaim": 3.0}
+    monkeypatch.setattr(charge_engine, "run", lambda path, full_set=0: {r: {"x": 1.0} for r in wanted})
+    assert omol._run_charge_engine(str(tmp_path), n_threads=1, logger=logging.getLogger("t")) is True
+
+
+def test_every_parse_in_gbw_analysis_leaves_engine_routines_to_the_engine():
+    # the reparse fallback parsed leftover Multiwfn .out files into engine routines
+    import ast
+    import inspect
+    import textwrap
+
+    from qtaim_gen.source.core.omol import gbw_analysis
+
+    tree = ast.parse(textwrap.dedent(inspect.getsource(gbw_analysis)))
+    calls = [n for n in ast.walk(tree) if isinstance(n, ast.Call) and getattr(n.func, "id", None) == "parse_multiwfn"]
+    assert len(calls) >= 2
+    for call in calls:
+        assert "skip_routines" in {k.arg for k in call.keywords}, call.lineno
+
+
+def test_fuzzy_recheck_leaves_engine_routines_alone(tmp_path, monkeypatch):
+    # an archived Multiwfn fuzzy_bond.out must not replace the engine's values
+    from qtaim_gen.source.data.multiwfn import ENGINE_ROUTINES
+    from qtaim_gen.source.utils import fuzzy_recheck
+
+    plan = {"reparse": {"fuzzy_bond": {"1_O_to_2_H": 0.9}, "elf_fuzzy": {"x": 1.0}},
+            "rerun": ["becke_fuzzy_spin"], "derived": []}
+    monkeypatch.setattr(fuzzy_recheck, "plan_recheck", lambda folder, mult: plan)
+    monkeypatch.setattr(fuzzy_recheck, "_wavefunction_plan", lambda *a: (True, "wfx", []))
+    report = fuzzy_recheck.recheck_fuzzy(str(tmp_path), 2, dry_run=True, skip_routines=ENGINE_ROUTINES)
+    assert report["reparse"] == ["elf_fuzzy"] and report["rerun"] == []
+    report = fuzzy_recheck.recheck_fuzzy(str(tmp_path), 2, dry_run=True)
+    assert report["reparse"] == ["elf_fuzzy", "fuzzy_bond"] and report["rerun"] == ["becke_fuzzy_spin"]
+
+
+def test_validation_recheck_leaves_engine_routines_alone():
+    # validation_checks' own fuzzy recheck must use the same rule as gbw_analysis's,
+    # or engine folders never validate under --charge_engine --recheck_fuzzy
+    import ast
+    import inspect
+    import textwrap
+
+    from qtaim_gen.source.utils.validation import validation_checks
+
+    tree = ast.parse(textwrap.dedent(inspect.getsource(validation_checks)))
+    calls = [n for n in ast.walk(tree) if isinstance(n, ast.Call) and getattr(n.func, "id", None) == "_recheck"]
+    assert calls
+    for call in calls:
+        kw = {k.arg: k.value for k in call.keywords}
+        assert "skip_routines" in kw and isinstance(kw["skip_routines"], ast.IfExp), call.lineno
+
+
+def test_fuzzy_recheck_does_not_rewrite_engine_values(tmp_path, monkeypatch):
+    # the write path: an engine bond.json and its step files stay as they are
+    from qtaim_gen.source.data.multiwfn import ENGINE_ROUTINES
+    from qtaim_gen.source.utils import fuzzy_recheck
+
+    gen = tmp_path / "generator"
+    gen.mkdir()
+    engine_bond = {"fuzzy_bond": {"1_O_to_2_H": 0.95}}
+    (gen / "bond.json").write_text(json.dumps(engine_bond))
+    (tmp_path / "fuzzy_bond.json").write_text(json.dumps(engine_bond["fuzzy_bond"]))
+    plan = {"reparse": {"fuzzy_bond": {"1_O_to_2_H": 0.5}}, "rerun": ["becke_fuzzy_spin"], "derived": []}
+    monkeypatch.setattr(fuzzy_recheck, "plan_recheck", lambda folder, mult: plan)
+    monkeypatch.setattr(fuzzy_recheck, "_wavefunction_plan", lambda *a: (True, "wfx", []))
+    report = fuzzy_recheck.recheck_fuzzy(str(tmp_path), 2, skip_routines=ENGINE_ROUTINES)
+    assert report["reparse"] == [] and report["rerun"] == []
+    assert json.loads((gen / "bond.json").read_text()) == engine_bond
+    assert (tmp_path / "fuzzy_bond.json").exists()
+
+
+def test_recheck_helper_recognizes_engine_folders(tmp_path):
+    from qtaim_gen.source.data.multiwfn import ENGINE_ROUTINES
+    from qtaim_gen.source.scripts.helpers.recheck_fuzzy_folders import _engine_routines_of
+
+    assert _engine_routines_of(str(tmp_path)) is None
+    (tmp_path / "generator").mkdir()
+    (tmp_path / "generator" / "timings.json").write_text(json.dumps({"hirshfeld": 2.0}))
+    assert _engine_routines_of(str(tmp_path)) is None
+    (tmp_path / "generator" / "timings.json").write_text(json.dumps({"charge_engine": 4.0}))
+    assert _engine_routines_of(str(tmp_path)) == ENGINE_ROUTINES

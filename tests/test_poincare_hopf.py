@@ -83,8 +83,9 @@ class TestParseWritesMeta:
         parse_multiwfn(str(tmp_path), separate=False, logger=LOG)
         rec = json.loads((tmp_path / "qtaim.json").read_text())
         assert list(rec)[-1] == "_meta"
+        # far_heavy_nuclei is None: the folder has no .wfx to read nuclei from
         assert rec["_meta"] == {"poincare_hopf": 1, "cp_counts": {"NCP": 13, "BCP": 13, "RCP": 1, "CCP": 0},
-                                "qtaim_search": "standard"}
+                                "qtaim_search": "standard", "far_heavy_nuclei": None}
 
 
 class TestValidatorAndGate:

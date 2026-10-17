@@ -15,6 +15,7 @@ from qtaim_gen.source.utils.validation import (
     cpprop_integrity,
     qtaim_cpprop_problems,
     qtaim_topology_meta,
+    far_heavy_nuclei,
     qtaim_poincare_hopf,
     poincare_hopf_needs_exhaustive,
     QTAIM_META_KEY,
@@ -43,6 +44,9 @@ from qtaim_gen.source.data.multiwfn import (
     other_data,
     other_data_dict,
     qtaim_data,
+    CHELPG_INPUT_RADII_FILE,
+    CHELPG_RADII_FILE,
+    chelpg_radii_file,
 )
 from qtaim_gen.source.core.parse_multiwfn import (
     parse_charge_doc,
@@ -62,7 +66,7 @@ from qtaim_gen.source.core.parse_multiwfn import (
     parse_charge_chelpg,
     parse_fuzzy_real_space,
 )
-from qtaim_gen.source.core.parse_qtaim import get_qtaim_descs, only_atom_cps
+from qtaim_gen.source.core.parse_qtaim import dft_inp_to_dict, get_qtaim_descs, only_atom_cps
 
 from qtaim_gen.source.utils.io import (
     pull_ecp_dict,
@@ -368,6 +372,8 @@ def create_jobs(
             elif routine == "charge_separate":
                 charge_dict = charge_data_dict(full_set=full_set)
                 for key, value in charge_dict.items():
+                    if key == "chelpg":
+                        value = _chelpg_input(folder, value, logger)
                     job_dict[key] = os.path.join(folder, "{}.txt".format(key))
                     with open(os.path.join(folder, "{}.txt".format(key)), "w") as f:
                         f.write(value)
@@ -981,11 +987,17 @@ def parse_multiwfn(
                     continue
                 # record-level provenance, last so CP keys keep their order
                 meta = qtaim_topology_meta(_cpprop_data, read_qtaim_out(folder))
+                meta["far_heavy_nuclei"] = far_heavy_nuclei(_wavefunction_path(folder))
                 qtaim_dict[QTAIM_META_KEY] = meta
                 (logger.info if meta["poincare_hopf"] == 1 else logger.warning)(
                     f"QTAIM Poincare-Hopf sum {meta['poincare_hopf']} {meta['cp_counts']} "
                     f"({meta['qtaim_search']} search) in {folder}"
                 )
+                if meta["far_heavy_nuclei"]:
+                    logger.warning(
+                        "QTAIM: heavy all-electron nuclei far from the origin (Multiwfn may miss "
+                        f"their nuclear CP): {meta['far_heavy_nuclei']} in {folder}"
+                    )
 
                 atomic_json_write(json_file, qtaim_dict)
                 # if return_dicts:
@@ -1704,13 +1716,30 @@ def _run_charge_engine(
         atomic_json_write(os.path.join(folder, f"{routine}.json"), out[routine])
         written.append(routine)
 
+    if len(written) != len(wanted):
+        # no charge_engine timing for a partial run: validation then fails and the
+        # engine reruns, instead of a missing routine keeping an older (e.g. Multiwfn)
+        # value under a timing that says the engine produced it. A stamp from an
+        # earlier complete run is removed too: move_results merges timings.json, so
+        # it would otherwise survive this run.
+        logger.error("charge_engine: wrote %d of %d routines in %s; removing the charge_engine timing",
+                     len(written), len(wanted), folder)
+        for timings_path in (os.path.join(folder, "timings.json"), os.path.join(folder, "generator", "timings.json")):
+            try:
+                with open(timings_path) as f:
+                    timings = json.load(f)
+            except (OSError, json.JSONDecodeError):
+                continue
+            if isinstance(timings, dict) and timings.pop("charge_engine", None) is not None:
+                atomic_json_write(timings_path, timings)
+        return False
     _update_timing(folder, "charge_engine", elapsed, logger)
     logger.info(
         "charge_engine: %d routines in %.2f s (nelec grid %.4f of %.1f)",
         len(written), elapsed, meta.get("nelec_grid_becke", float("nan")),
         meta.get("nelec_wfx", float("nan")),
     )
-    return len(written) == len(wanted)
+    return True
 
 
 def _run_surface_engine(
@@ -1958,6 +1987,45 @@ def _is_substantive_step_out(path: str, order: str = None) -> bool:
                     return True
     except OSError:
         return False
+
+
+def _input_atomic_numbers(folder: str) -> Optional[list]:
+    """Atomic numbers of the molecule from the folder's ORCA input (orca.inp or
+    another *.inp), or None when no geometry can be read."""
+    from rdkit import Chem
+
+    names = sorted(f for f in os.listdir(folder) if f.endswith(".inp") and "property" not in f)
+    names.sort(key=lambda f: f != "orca.inp")
+    pt = Chem.GetPeriodicTable()
+    for name in names:
+        try:
+            atoms = dft_inp_to_dict(os.path.join(folder, name))
+            out = []
+            for a in atoms.values():
+                sym = "".join(c for c in a["element"] if c.isalpha())
+                out.append(pt.GetAtomicNumber(sym[:1].upper() + sym[1:].lower()))
+            return out
+        except Exception:
+            continue
+    return None
+
+
+def _chelpg_input(folder: str, stock: str, logger: logging.Logger) -> str:
+    """Multiwfn input for CHELPG: the stock one, or, for a molecule with an
+    actinide, one that loads CHELPG_RADII_FILE (written here) with the actinide
+    radii of data/multiwfn.py. Falls back to the stock input when the elements
+    cannot be read."""
+    atnums = _input_atomic_numbers(folder)
+    if atnums is None:
+        logger.warning("chelpg: no readable ORCA input in %s, using Multiwfn's default radii", folder)
+        return stock
+    radii = chelpg_radii_file(atnums)
+    if radii is None:
+        return stock
+    with open(os.path.join(folder, CHELPG_RADII_FILE), "w") as f:
+        f.write(radii)
+    logger.info("chelpg: actinide radii from %s in %s", CHELPG_RADII_FILE, folder)
+    return CHELPG_INPUT_RADII_FILE
 
 
 def _wavefunction_path(folder: str) -> Optional[str]:
@@ -2768,6 +2836,7 @@ def gbw_analysis(
             _report = _recheck(
                 folder, int(_dft["spin"]), logger=logger, wfx=wfx,
                 preprocess_compressed=preprocess_compressed,
+                skip_routines=ENGINE_ROUTINES if charge_engine else None,
             )
             if not _report["ok"]:
                 logger.error("recheck_fuzzy: %s - not running", _report["wavefunction"])
@@ -3086,6 +3155,8 @@ def gbw_analysis(
                         debug=debug,
                         logger=logger,
                         full_set=full_set,
+                        # leftover Multiwfn .out files must not fill engine routines
+                        skip_routines=ENGINE_ROUTINES if charge_engine else None,
                     )
 
                     # Also reparse ORCA output
