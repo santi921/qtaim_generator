@@ -60,6 +60,7 @@ def main():
         if meta:
             stats[f"{tag} PH==1"] += meta.get("poincare_hopf") == 1
             stats[f"{tag} far_heavy_nuclei flagged"] += bool(meta.get("far_heavy_nuclei"))
+            stats[f"{tag} QTAIM from the engine"] += meta.get("qtaim_search") == "engine"
         t = load(first(folder, "timings.json") or "") or {}
         stats[f"{tag} charge_engine stamp"] += bool(t.get("charge_engine"))
         tot = sum(v for v in t.values() if isinstance(v, (int, float)) and v > 0)

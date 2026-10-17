@@ -13,7 +13,12 @@ Per job:
   4. with --control, also run production QTAIM on the regenerated wfx and
      compare that fresh CPprop.txt with the stored one (conversion drift and
      CP-set reproducibility);
-  5. append one JSON record to --out and delete the temporary directory.
+  5. with --engine, run the engine's whole QTAIM step (cp_search.analyze) twice,
+     in its Multiwfn-compatible modes and with its defaults, and compare each
+     with the stored CP set and bond pairs, and its CPprop.txt (through
+     parse_qtaim) with the stored CPprop.txt through the same parser and with
+     the stored qtaim.json;
+  6. append one JSON record to --out and delete the temporary directory.
 
 Nothing in the job folders is modified. Jobs already recorded in --out are
 skipped, so a requeued Slurm task resumes its slice. Each Multiwfn or orca_2mkl
@@ -26,6 +31,9 @@ running job is abandoned unrecorded and its temporary directory removed.
 """
 
 import argparse
+import contextlib
+import glob
+import io
 import json
 import os
 import re
@@ -34,6 +42,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import tarfile
 import tempfile
 import time
 import zipfile
@@ -41,10 +50,12 @@ import zipfile
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from qtaim_compare_props import compare_cps  # noqa: E402
+from qtaim_compare_props import compare_cp_sets, compare_cps, compare_qtaim_json  # noqa: E402
 
 from qtaim_gen.source.core.charge_engine import prepare_basis, read_wfx  # noqa: E402
+from qtaim_gen.source.core.cp_search import analyze, write_cpprop  # noqa: E402
 from qtaim_gen.source.core.omol import create_jobs, write_settings_file  # noqa: E402
+from qtaim_gen.source.core.parse_multiwfn import parse_qtaim  # noqa: E402
 from qtaim_gen.source.core.parse_qtaim import load_cpprop_full, poincare_hopf  # noqa: E402
 from qtaim_gen.source.utils.validation import QTAIM_COUNT_PATTERN, cpprop_integrity  # noqa: E402
 
@@ -152,6 +163,90 @@ def control_run(workdir, stored_cps, timeout):
     return out
 
 
+ENGINE_MODES = {
+    "multiwfn": {"seeds": "multiwfn", "paths": "multiwfn", "boys_mode": "multiwfn"},
+    "engine": {"seeds": "superset", "paths": "engine", "boys_mode": "exact"},
+}
+
+
+def _quiet_parse(cpprop, inp):
+    with contextlib.redirect_stdout(io.StringIO()):
+        return parse_qtaim(cpprop, inp, orca_tf=inp.endswith(".inp"))
+
+
+def _orca_inp_from_tar(input_folder, workdir):
+    """orca.inp from the input folder's orca.tar.zst, streamed through unzstd
+    into workdir (LRC's tar has no --zstd); None if there is none."""
+    tar_path = os.path.join(input_folder, "orca.tar.zst")
+    if not os.path.isfile(tar_path):
+        return None
+    out = os.path.join(workdir, "orca.inp")
+    proc = subprocess.Popen(["unzstd", "-q", "-c", tar_path], stdout=subprocess.PIPE)
+    try:
+        with tarfile.open(fileobj=proc.stdout, mode="r|") as tar:
+            for member in tar:
+                if os.path.basename(member.name) == "orca.inp" and member.isfile():
+                    with open(out, "wb") as f:
+                        shutil.copyfileobj(tar.extractfile(member), f)
+                    break
+    finally:
+        proc.stdout.close()
+        proc.kill()
+        proc.wait()
+    return out if os.path.isfile(out) else None
+
+
+def engine_check(cps, stored_cpprop, wfx, basis, workdir, input_folder, results_folder):
+    """The engine's whole QTAIM step in each ENGINE_MODES entry against the
+    stored Multiwfn results (see the module docstring, step 5). A failure in
+    one part is recorded under an *_error key and the rest still runs, so the
+    job keeps its record and reaches the report's failing list."""
+    out = {}
+    inp = None
+    try:
+        inps = sorted(glob.glob(os.path.join(input_folder, "*.inp"))) or sorted(glob.glob(os.path.join(results_folder, "*.inp")))
+        inp = inps[0] if inps else _orca_inp_from_tar(input_folder, workdir)
+    except Exception as e:
+        out["inp_error"] = f"{type(e).__name__}: {e}"
+    stored_json = None
+    try:
+        with open(os.path.join(results_folder, "generator", "qtaim.json")) as f:
+            stored_json = json.load(f)
+    except (OSError, ValueError):
+        pass
+    ref_parsed = None
+    if inp:
+        try:
+            ref_parsed = _quiet_parse(stored_cpprop, inp)
+        except Exception as e:
+            out["ref_parse_error"] = f"{type(e).__name__}: {e}"
+    out.update(inp=inp is not None, stored_json=stored_json is not None)
+    for name, cfg in ENGINE_MODES.items():
+        r = {}
+        try:
+            t0 = time.perf_counter()
+            res = analyze(wfx, basis, **cfg)
+            r.update(s=round(time.perf_counter() - t0, 2), **compare_cp_sets(cps, res),
+                     poincare_hopf=res["poincare_hopf"], poincare_hopf_full_set=res["poincare_hopf_full_set"],
+                     weak=len(res["weak"]), dropped=res["dropped"], near_pairs=len(res["near_pairs"]),
+                     reseed_rounds=[st["stage"] for st in res["stats"] if st["stage"].startswith("sphere")])
+            path = os.path.join(workdir, f"CPprop_{name}.txt")
+            write_cpprop(path, res, wfx)
+            with open(path, "rb") as f:
+                r["integrity"] = cpprop_integrity(f.read())
+            if inp:
+                eng = _quiet_parse(path, inp)
+                if ref_parsed is not None:
+                    r["vs_stored_cpprop"] = compare_qtaim_json(ref_parsed, eng)
+                if stored_json is not None:
+                    r["vs_stored_json"] = compare_qtaim_json(stored_json, eng)
+        except Exception as e:
+            # keep what was computed before the failure
+            r["error"] = f"{type(e).__name__}: {e}"
+        out[name] = r
+    return out
+
+
 def verify(job, args):
     rel = os.path.relpath(job, args.root_omol_inputs)
     rec = {"job": rel}
@@ -175,9 +270,13 @@ def verify(job, args):
         rec["stored"] = summarize(cps)
         wfx = read_wfx(wfx_path)
         t0 = time.perf_counter()
-        res = compare_cps(cps, wfx, prepare_basis(wfx))
+        basis = prepare_basis(wfx)
+        res = compare_cps(cps, wfx, basis)
         rec["engine_s"] = round(time.perf_counter() - t0, 2)
         rec["diffs"] = {lab: {"n": n, **r} for lab, (n, r) in res.items()}
+        if args.engine:
+            rec["engine"] = engine_check(cps, cpprop, wfx, basis, workdir, job,
+                                         os.path.join(args.root_omol_results, rel))
         if args.control:
             t0 = time.perf_counter()
             rec["control"] = control_run(workdir, cps, args.timeout)
@@ -209,6 +308,7 @@ def main():
     p.add_argument("--multiwfn_cmd", required=True)
     p.add_argument("--n_threads", type=int, default=4)
     p.add_argument("--control", action="store_true", help="also run fresh production QTAIM on the regenerated wfx")
+    p.add_argument("--engine", action="store_true", help="also run the engine's whole QTAIM step (step 5)")
     p.add_argument("--tmp_dir", default=None, help="where temporary job copies go (default: system tmp)")
     p.add_argument("--timeout", type=float, default=3600, help="seconds per Multiwfn/orca_2mkl call")
     args = p.parse_args()

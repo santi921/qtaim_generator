@@ -14,9 +14,11 @@
 # Reads the job folders only. Each array task takes a disjoint slice of N lines
 # of LIST and writes $WORK/<job name>_<task>.jsonl; a requeued task skips the jobs
 # already in its file. CONTROL=1 adds --control (fresh Multiwfn QTAIM on the
-# regenerated wfx; slow on large jobs, use N=1).
+# regenerated wfx; slow on large jobs, use N=1). ENGINE=1 adds --engine (the engine's
+# whole QTAIM step in two modes against the stored CPs, pairs and qtaim.json).
 #   sbatch -J qverify  --export=ALL,LIST=$WORK/sample_all.txt,N=25 --array=0-59 lrc_qtaim_verify.slurm
 #   sbatch -J qcontrol --export=ALL,LIST=$WORK/control_all.txt,N=1,CONTROL=1 --array=0-14 lrc_qtaim_verify.slurm
+#   sbatch -J qengine  --export=ALL,LIST=$WORK/sample_all.txt,N=25,ENGINE=1 --array=0-59 lrc_qtaim_verify.slurm
 
 source ~/.bashrc
 module load gcc
@@ -44,6 +46,7 @@ fi
 
 EXTRA=""
 [ "${CONTROL:-0}" = 1 ] && EXTRA="--control"
+[ "${ENGINE:-0}" = 1 ] && EXTRA="$EXTRA --engine"
 python $Q/scripts/qtaim_verify_stored.py --job_file $SLICE --out $WORK/${SLURM_JOB_NAME}_${ID}.jsonl \
     --root_omol_inputs $SRC/ --root_omol_results $RES/ --orca_2mkl_cmd $ORCA_2MKL --multiwfn_cmd $MULTIWFN \
     --n_threads $SLURM_CPUS_PER_TASK --tmp_dir ${TMPDIR:-/tmp} $EXTRA
