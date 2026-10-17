@@ -81,7 +81,7 @@ showptprop (MW/sub.f90:2347-2510) writes about 30 quantities. The parser keeps 2
 | delta_g_promolecular | IGM over an STO-fit promolecule (3920-3990) | STO table (not ported) |
 | delta_g_hirsh | IGMH over interpolated proatoms (4043) | multiwfn_atmraddens tables (ported) + their derivative |
 | esp_nuc | sum Zeff/r; set to 1000 exactly at a nucleus (4250-4262) | coordinates |
-| esp_e | libreta eleesp2, no EDF (MW/libreta_hybrid/libreta.f90:29-46) | nuclear-attraction integrals |
+| esp_e | eleesp1 (MW/function.f90:4283-4420): every primitive pair, unscreened, Fmch Boys good to ~1e-8; libreta is never initialized on this path. No EDF | nuclear-attraction integrals |
 | esp_total | sum of the two | - |
 | grad_norm | gradient norm at the converged point, i.e. the convergence residual | - |
 | det_hessian, ellip_e_dens, eta | det H, l1/l2 - 1, \|l1\|/l3 | Hessian eigenvalues |
@@ -267,9 +267,139 @@ qtaim.out per folder (12.97 MB stored uncompressed for a 142-atom job; full read
 22.5 ms vs 0.34 ms reading the last 64 KB of a stored member) [V]; over millions of
 Lustre folders a tail read is worth it [I].
 
+### 6b. P2 status (2026-10-12)
+
+Code: `core/esp.py` (Boys functions, McMurchie-Davidson ESP), `qtaim_engine.delta_g_hirsh`,
+`point_properties(..., esp=True)`; tests in tests/test_esp.py and tests/test_qtaim_engine.py.
+delta_g_promolecular is dropped (decision 7). [V] unless marked.
+
+Method:
+- Boys: series + downward recursion below x = 30, erf + upward recursion above (reference);
+  the kernel uses an 8-term Taylor table (step 0.05) for F_N, then downward recursion.
+  `boys_mode="multiwfn"` ports Fmch line for line, for parity checks only.
+- ESP: primitives grouped by (centre, exponent) as prepare_basis does; per group pair the
+  density-matrix-weighted Hermite coefficients are built once; per point, Boys values and
+  the Hermite Coulomb recursion (flat operation list, indices packed by total order).
+  A pair is dropped when its contribution is provably below 1e-15 at every point
+  (bound pref sum|D_tuv| W_s (2p)^(s/2)); 54-63% of pairs dropped, at most 1.4e-14 absolute.
+- Points run in blocks on numba.get_num_threads() workers; output is byte-identical at 1
+  and 4 threads.
+
+Accuracy, at Multiwfn's printed CP positions:
+
+| check | jobs | result |
+|---|---|---|
+| Boys functions vs mpmath (40 digits), m <= 12, x up to 1e4 | - | reference 1.5e-15, table 1.7e-15; Fmch copy 3.7e-9 (x <= 10), 6.9e-8 (x > 10) relative |
+| integrals vs independent quadrature (1/r as a Gaussian transform), lmn up to h | 7 pairs, 3 points each | <= 1e-11 relative |
+| esp_e, Multiwfn mode, vs CPprop.txt | 88 local jobs (2-39 atoms) + 9 ladder jobs (12-342 atoms) | <= 4.9e-10 relative (print and position rounding) |
+| esp_e, exact Boys, vs CPprop.txt | same | 3.8e-9 to 7.4e-9 relative: the Fmch divergence (changelog) |
+| esp_e, exact Boys, vs gbasis electrostatic_potential (full precision, horton env) | 26 local jobs (2-27 atoms, 7 with EDF, primitives up to g), 18-30 points each: non-NCP CPs, random, 0.05 Bohr from nuclei | <= 8.9e-14 relative |
+| esp_total, non-NCP | same | <= 4.6e-10, except where nuc and ele cancel to ~1e-4 (abs error <= 5e-14 of the components) |
+| delta_g_hirsh, BCP/RCP/CCP | 30 local jobs | <= 4.5e-10 relative |
+
+Not comparable at NCPs: esp_nuc, esp_total and delta_g_hirsh are set by the CP's distance to its
+nucleus (1e-8 to 1e-5 Bohr, wherever Newton stopped). A 1e-12 Bohr jitter of the printed position
+moves delta_g_hirsh by up to 4% there, and esp_nuc is ~Z/d (1e6-1e9 a.u.). [I] These three are
+ill-conditioned features at NCPs in the released data as well; scripts/qtaim_compare_props.py
+skips them at NCPs.
+
+Speed, ESP only, this workstation, 4 pinned threads, same CPs as Multiwfn (engine times exclude
+Python start-up and the one-off numba compile; Multiwfn's from the P0 ladder, section 3):
+
+| atoms | primitives | CPs | Multiwfn ESP stage | engine (pairs + evaluation) | ratio |
+|---|---|---|---|---|---|
+| 12 | 700 | 25 | 0.40 s | 0.05 s | 8.5x |
+| 26 | 1178 | 57 | 2.55 s | 0.12 s | 21x |
+| 39 (Cs+, EDF) | 2384 | 129 | 30.5 s | 1.10 s | 28x |
+| 39 (K+) | 2529 | 111 | 25.0 s | 0.55 s | 45x |
+| 110 | 3161 | 279 | 87.0 s | 2.66 s | 33x |
+| 178 | 5134 | 471 | 421.9 s | 8.99 s | 47x |
+| 227 | 7411 | 699 | 2197.5 s | 20.2 s | 109x |
+| 274 | 7665 | 779 | 1798.7 s | 25.7 s | 70x |
+| 342 | 9673 | 931 | 3604.1 s | 40.6 s | 89x |
+
+Open: the density matrix is dense nprim^2 (750 MB at 9673 primitives); block it before
+1000+ atom jobs. Far-field multipoles for distant pairs are not needed at these sizes.
+
+### 6c. P3 status (2026-10-12)
+
+Code: `qtaim_engine.density_derivatives` (P3.0), `core/cp_search.py` (seeds, batched Newton,
+dedup, order, bond paths, atom mapping, `analyze`, `write_cpprop`); tests in
+tests/test_cp_search.py. [V] unless marked.
+
+- P3.0: one product for MO values and gradients plus the back-projection w = (n phi) C^T,
+  reduced per point inside 32-point blocks; EDF as a numba kernel; `hessian=False` gives rho
+  and its gradient only (1.6x cheaper, used by the path tracer). 274 atoms, 20k points:
+  1.27 -> 0.59 GB; sparse seeds 3.1-3.3x faster. Values equal the old path to ~1e-15 of scale.
+- Seeds: `multiwfn` (Multiwfn's 4 stages, its loop order), `delaunay`, `superset` (both).
+  Delaunay alone missed 4 weak ring/cage CPs (rho 8e-4 to 4e-3) on 88 jobs, so `superset` is
+  the engine default. A 0.5 Bohr trust radius was dropped: seeds that should leave into vacuum
+  and stop on det H crawled to the cycle limit (55% of all Newton steps).
+- Newton: findcp's iteration for all seeds of a stage at once; dedup by ascending |g| outside
+  Multiwfn mode, so the kept CP does not depend on seed order.
+- Bond paths: findpath batched over all BCPs; `mode="engine"` follows the same trajectories
+  until Multiwfn would stop, then only nuclear CPs end a path and a rho decrease halves the step.
+
+Validation on 88 local jobs (2-39 atoms) and 9 ladder jobs (12-342 atoms):
+
+| check | result |
+|---|---|
+| seed counts per stage vs Multiwfn's printed counts | equal on 88/88 |
+| CP set, Multiwfn seeds (criterion B) | identical on 97/97, positions <= 8.4e-13 Bohr |
+| CP set, superset seeds | contains Multiwfn's on 97/97; one extra CP (HCNKrF+ BCP that only the exhaustive search finds) |
+| BCP atom pairs (criterion C), Multiwfn paths | 1,485 / 1,486 equal; the last is unpaired by both |
+| BCP atom pairs, engine paths | all 1,485 kept; the remaining one paired (Kr-H, 2.55 A) |
+| qtaim.json through parse_qtaim, all-Multiwfn modes | 87/87 same keys; fields identical at print precision (esp_total 4.6e-10 where it cancels) |
+| qtaim.json, engine defaults | 2 new bond keys (above); esp_e <= 6.8e-9; 32 weak CPs flagged, none dropped |
+| determinism | identical at 1 and 2 threads (test) |
+| Poincare-Hopf | MOR39 Ru3Au3 still 2 (needs P4 reseeding) |
+
+Full QTAIM step, this workstation, 4 pinned threads; Multiwfn = search + paths + properties +
+ESP from the P0 ladder (section 3); engine = superset seeds, engine paths, properties with ESP:
+
+| atoms | Multiwfn | engine | ratio | engine search share |
+|---|---|---|---|---|
+| 12 | 0.67 s | 0.30 s | 2.2x | 57% |
+| 26 | 3.77 s | 0.80 s | 4.7x | 59% |
+| 39 (K+) | 32.2 s | 2.72 s | 11.8x | 60% |
+| 110 | 136.2 s | 13.0 s | 10.5x | 76% |
+| 178 | 590.3 s | 40.6 s | 14.6x | 75% |
+| 227 | 2973.6 s | 130.3 s | 22.8x | 74% |
+| 274 | 2309.5 s | 117.7 s | 19.6x | 72% |
+| 342 | 4607.2 s | 188.9 s | 24.4x | 74% |
+
+Multiwfn seeds instead of superset: 342 atoms 163 s (28x). The CP search, i.e. Newton steps
+on Multiwfn's triad and quad seeds, is now 72-76% of the engine's time above 100 atoms.
+
+Open in P3: exhaustive (sphere) seeds; the multi-thread Multiwfn first-come dedup is not
+reproduced (the engine uses its 1-thread order); paths may still end at a non-nuclear CP in
+Multiwfn mode by design.
+
+### 6d. P4 started: Poincare-Hopf repair (2026-10-12)
+
+Cases: the 4 Poincare-Hopf failures among the first 37 LRC tier 2 jobs (5A_elytes; stored
+Multiwfn 2025-Jun-26 sets, which the engine reproduces exactly), plus MOR39 Ru3Au3 locally. [V]
+
+| job (atoms) | stored sum | cause | Multiwfn exhaustive | engine |
+|---|---|---|---|---|
+| Fe/Cl, 2722_Cl-1 (8) | 2 | missing weak CCP (rho 4.5e-4, 5.1 Bohr from atoms) | finds it, 2.7 s | reseed, 512-point round, 1.0 s |
+| Na+, 2584 (28) | 0 | missing weak RCP (rho 3.6e-3, 2.7 Bohr) | finds it, 57.9 s | reseed, 1.3 s |
+| Rb+, 397 (49) | 2 | missing weak BCP (rho 4.2e-4, 4.0 Bohr; the pair is beyond the 1.5 x vdW seed cutoff) | finds it, 24.4 s | reseed, 1.0 s |
+| water shell, 1875 (186) | 2 | BCP 0.0115 Bohr from an RCP, dropped by the type-blind 0.03 Bohr dedup | does not fix it, 710 s | type-aware dedup keeps it; pair flagged |
+| MOR39 Ru3Au3 (12) | 2 | missing BCP with rho < 1e-5 | finds it | reseed 0.3 s; counted for Poincare-Hopf, then dropped (decision 10) |
+
+- `reseed()` runs only when Poincare-Hopf fails: rounds of 128, 512 and 1000 deterministic
+  Sobol points per atom within 3 Bohr (Multiwfn's toposphrad), stopping once it holds.
+- Engine modes merge only CPs of the same type within 0.03 Bohr; `analyze` reports CP pairs
+  closer than 0.1 Bohr as `near_pairs`. Multiwfn mode keeps Multiwfn's rules.
+- On the 88 local jobs nothing Multiwfn finds is lost and Poincare-Hopf holds on all 88.
+
+Still open in P4: non-nuclear attractors, the EDF policy, `_meta` flags in the output, LRC
+validation of the repair, critic2 adjudication of extra CPs.
+
 ## 7. Risks
 
-- The ESP must match libreta to about 1e-10, including high angular momentum and large Boys arguments. This is the largest piece of new numerics.
+- The ESP must match Multiwfn's eleesp1, whose Boys function (Fmch) is accurate only to about 1e-8 relative. The kernel is checked against a copy of Fmch at print precision and against gbasis at full precision; the exact Boys function is the default (decision 9). This is the largest piece of new numerics.
 - Properties at ECP nuclear CPs are extreme. One Tl NCP in tests/test_files/lmdb_tests/orca5_uks/qtaim.json has rho 9.6e6, Laplacian -1.9e15 and det -2.6e44 [V]. Tiny position differences get amplified, so criterion A is scored at Multiwfn's positions.
 - Near-degenerate topology (a BCP close to an RCP, flat vdW regions) is ill-posed. We flag these cases; we do not force a match.
 - A different CP set means different graph edges. The no-mixed-engine rule applies: new verticals or full regeneration only.
@@ -278,11 +408,11 @@ Lustre folders a tail read is worth it [I].
 ## 8. Open decisions
 
 - D1. RESOLVED 2026-10-08: robust superset. Every CP Multiwfn finds plus the ones it misses, flagged; divergences go in the release changelog (README.md).
-- D2. Drop delta_g_promolecular, or port Multiwfn 3.8's STO table?
+- D2. RESOLVED 2026-10-12: drop delta_g_promolecular.
 - D3. RESOLVED 2026-10-08 for ring and cage CPs: keep them, found mathematically, as a phase-two QTAIM task. Storage (qtaim.json or sidecar), NNAs and duplicate same-pair BCPs still open. The regeneration campaign is saving CPprop.txt now, so Multiwfn's RCP/CCP can be reparsed for validation.
-- D4. Keep the ESP fields (most of Multiwfn's cost) as features?
+- D4. RESOLVED 2026-10-12: keep the ESP fields.
 - D5. Pending: the user is asking Tian Lu whether Multiwfn's EDF tables may be redistributed. Until then, wfx files keep supplying the EDF.
-- D6. Weak-CP policy: keep everything, flag rho < 1e-3, or discard rho < 1e-5 as critic2 does?
+- D6. RESOLVED 2026-10-12: Poincare-Hopf on the full set, then drop rho < 1e-5 and flag rho < 1e-3 in `_meta` (README decision 10).
 - D7. Invest in GPU, and on which clusters?
 - D8. Is the `_meta` block enough provenance for --require_qtaim_provenance?
 
