@@ -27,6 +27,20 @@ faster per job (median, same hardware, full_set 1).
 | - | Density-based steric descriptors | Pinned: must be included (descriptor_engine_vision.md, shortlist) |
 | - | gbw availability | All gbw files are on the HPC systems, so gbw-based descriptors can be backfilled |
 
+## Decisions (2026-10-12, QTAIM P2)
+
+| # | Question | Decision |
+|---|---|---|
+| 7 | delta_g_promolecular (QTAIM plan D2): drop or port Multiwfn's STO table | Drop. Its values differ between Multiwfn builds |
+| 8 | Keep the ESP fields at CPs as features (QTAIM plan D4) | Keep |
+| 9 | Boys function for the ESP kernel | Exact by default. A copy of Multiwfn's `Fmch` (series cut at 1e-8, sqrt(pi)/2 truncated to 0.88622692) exists only for tests; the difference goes in the divergence changelog |
+| 10 | Weak CPs (QTAIM plan D6) | Revised 2026-10-12: Poincare-Hopf is checked (and reseeding triggered) on the CPs with rho >= 1e-5, because near-vacuum CPs below that are found or missed depending on where seeds land (LRC case 40_Li+: kept set sums to 1, full set to 0); both sums go in `_meta`. Originally: check Poincare-Hopf on the full CP set first, then drop CPs with rho < 1e-5 and flag rho < 1e-3 in `_meta` (list of CP keys; the per-CP schema is unchanged). Whether flagged CPs become graph edges is a converter setting. Local data (97 jobs, 6,563 CPs): none below 1e-5, 141 (2.1%) between 1e-5 and 1e-3 |
+| 11 | esp_nuc, esp_total, delta_g_hirsh at nuclear CPs | Keep, for parity, although they are set by where the search stopped near the nucleus |
+
+Production ESP at CPs comes from Multiwfn's old `eleesp1` routine, not libreta: the QTAIM
+stdin never initializes libreta, so `eleesp` falls back (MW/function.f90:4269-4280).
+Verified locally: iESPcode 1 and 2 give byte-identical CPprop.txt.
+
 Still open: see the "Open decisions" section of each plan; the resolved ones are marked there.
 
 ## Cross-cutting requirements
@@ -37,9 +51,27 @@ Each intentional difference from Multiwfn (a fixed bug, a different grid, extra 
 new convention) gets an entry: what Multiwfn does (source file:line), what the engine
 does, which descriptors change and by how much on the validation set, and the engine
 version that introduced it. The changelog ships with each dataset release and paper.
-Seed entries already known: bader spin integrated as Shannon/Fisher under ispecial=1
+Seed entries already known: ESP at CPs uses an exact Boys function, where Multiwfn's
+eleesp1 uses Fmch (series cut at 1e-8, sqrt(pi)/2 truncated to 0.88622692): esp_e differs by
+3.8e-9 to 7.4e-9 relative on 97 local jobs (qtaim_engine_plan.md section 6b); delta_g_promolecular
+is no longer produced; bader spin integrated as Shannon/Fisher under ispecial=1
 (verified in data/omol_test_spin_skip/orca6_uks/bader.out), IBSI on the 30x110 grid,
 QTAIM CPs Multiwfn misses (superset), ring/cage CPs (currently discarded by the parser).
+Heavy all-electron nuclei: Multiwfn relaxes findcp's gradient criterion to |g| < 1 for
+nuclear seeds (MW/topology.f90:1018, "for very heavy atoms"), but at an X2C uranium or
+thorium nucleus (Hessian about -3e15) Newton stops within 5e-15 Bohr with |g| about 16
+left by roundoff, so the seed runs out of cycles and the actinide NCP is lost: no atomic
+descriptors for it, every actinide-ligand BCP unpaired, Poincare-Hopf 0. The cause is the
+spacing of doubles at the nuclear coordinate: a nucleus within about 0.1 Bohr of the origin
+converges (every production nitrate has its actinide there), one 18-50 Bohr away does not.
+In the engine modes such a seed is rerun with its nucleus at the origin (the molecule
+translated; status 3, `nucleus_frame` in the nuclei stage stats), and its properties are
+evaluated in that frame. It converges there to |g| about 1e-13, with the density and
+Laplacian of the unshifted molecule to 4e-16 relative at shifts up to 100 Bohr. The earlier
+rescue (accept the seed when its last step was below dispconv and its Hessian is negative
+definite: status 2, `precision_limited`) stays as the last resort. Seeds that converge
+normally are unchanged. Local X2C jobs: 5 of 9 U/Th jobs had lost the NCP; all 9 now have
+it through the nucleus frame, with Poincare-Hopf 1 and every actinide BCP paired.
 MBIS (mbis_converged.md): converged to the fixed point instead of Multiwfn's 1e-4 e per-cycle
 stop (population.f90 MBIS loop; 3 of 27 local jobs moved by more than 0.03 e, actinides
 0.03-0.38 e); initial guess from a free-atom table fitted to the Hirshfeld proatoms instead of

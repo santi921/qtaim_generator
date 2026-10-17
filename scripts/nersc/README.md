@@ -44,6 +44,9 @@ sbatch -J mwfn   --export=ALL,LIST=$WORK/sample.txt,TREE=mwfn_l0          --arra
 sbatch -J engine --export=ALL,LIST=$WORK/sample.txt,TREE=engine_l0,ENGINE=1 --array=0-9 $S
 ```
 
+`QTAIM_ENGINE=1` (with `ENGINE=1`) also runs the QTAIM step with the QTAIM engine (`--qtaim_engine`).
+`summarize.py` then counts `_meta.qtaim_engine` records.
+
 Add `FULL_SET=1` (and another TREE) for level 1, which adds CHELPG with the actinide radii and MBIS.
 In Multiwfn mode, MBIS fails for Z > 86, so level-1 actinide folders do not validate there.
 

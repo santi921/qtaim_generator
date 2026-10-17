@@ -209,6 +209,7 @@ def get_folders_from_file(
     check_ecp: bool = False,
     checkpoint_path: Optional[str] = None,
     charge_engine: bool = False,
+    qtaim_engine: bool = False,
     stop_check: Optional[Callable[[], bool]] = None,
 ) -> List[str]:
     print(
@@ -259,6 +260,7 @@ def get_folders_from_file(
                     enforce_poincare_hopf=enforce_poincare_hopf,
                     recheck_fuzzy=recheck_fuzzy,
                     charge_engine=charge_engine,
+                    qtaim_engine=qtaim_engine,
                 )
                 if not tf_validation:
                     if logger:

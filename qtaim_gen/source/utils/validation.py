@@ -276,6 +276,7 @@ def validate_timing_dict(
     logger: any = None,
     n_atoms: int = None,
     charge_engine: bool = False,
+    qtaim_engine: bool = False,
 ):
     """
     Basic check that the timing json file has the expected structure.
@@ -316,6 +317,18 @@ def validate_timing_dict(
     skipped = skipped_routines(timing_dict)
     expected_keys = [k for k in expected_keys if k not in skipped]
     excepted_spin_keys = [k for k in excepted_spin_keys if k not in skipped]
+    # a positive qtaim_engine timing stands in for 'qtaim'; with qtaim_engine=True it is
+    # required, so a QTAIM record from Multiwfn is not counted as done
+    qtaim_done = isinstance(timing_dict.get("qtaim_engine"), (int, float)) and timing_dict["qtaim_engine"] > 0
+    if qtaim_engine and not qtaim_done:
+        msg = "No qtaim_engine timing: the QTAIM record is not from the QTAIM engine."
+        if logger:
+            logger.error(msg)
+        if verbose:
+            print(msg)
+        return False
+    if qtaim_done:
+        expected_keys = [k for k in expected_keys if k != "qtaim"]
 
     # Keys patched by patch_timings_from_log carry a TIMING_PLACEHOLDER (-1.0)
     # when log-scrape couldn't find them; accept those here so cleanup runs.
@@ -784,6 +797,27 @@ QTAIM_META_KEY = "_meta"
 # qtaim_data(exhaustive=True) adds
 QTAIM_SPHERE_SEARCH_MARKER = "Distribute starting points in sphere(s)"
 QTAIM_SEARCH_STANDARD, QTAIM_SEARCH_EXHAUSTIVE = "standard", "exhaustive"
+# qtaim.out written by the QTAIM engine (core/cp_search.py) instead of Multiwfn: a banner,
+# the engine's metadata as one JSON line, and the count and export lines the gates read
+QTAIM_ENGINE_MARKER = "QTAIM engine (qtaim_gen core/cp_search.py)"
+QTAIM_ENGINE_META_PREFIX = "engine metadata: "
+QTAIM_SEARCH_ENGINE = "engine"
+
+
+def qtaim_engine_meta(qtaim_out_text: Optional[str]) -> Optional[dict]:
+    """The engine metadata line of an engine qtaim.out, or None (Multiwfn output,
+    no qtaim.out, or an unreadable line)."""
+    if not qtaim_out_text or QTAIM_ENGINE_MARKER not in qtaim_out_text:
+        return None
+    for line in qtaim_out_text.splitlines():
+        line = line.strip()
+        if line.startswith(QTAIM_ENGINE_META_PREFIX):
+            try:
+                meta = json.loads(line[len(QTAIM_ENGINE_META_PREFIX):])
+            except ValueError:
+                return None
+            return meta if isinstance(meta, dict) else None
+    return None
 
 
 def cpprop_cp_counts(data) -> dict:
@@ -855,15 +889,20 @@ def qtaim_topology_meta(cpprop_data, qtaim_out_text: Optional[str]) -> dict:
     counts = cpprop_cp_counts(cpprop_data)
     if qtaim_out_text is None:
         search = None
+    elif QTAIM_ENGINE_MARKER in qtaim_out_text:
+        search = QTAIM_SEARCH_ENGINE
     elif QTAIM_SPHERE_SEARCH_MARKER in qtaim_out_text:
         search = QTAIM_SEARCH_EXHAUSTIVE
     else:
         search = QTAIM_SEARCH_STANDARD
-    return {
+    meta = {
         "poincare_hopf": counts["NCP"] - counts["BCP"] + counts["RCP"] - counts["CCP"],
         "cp_counts": counts,
         "qtaim_search": search,
     }
+    if search == QTAIM_SEARCH_ENGINE:
+        meta["qtaim_engine"] = qtaim_engine_meta(qtaim_out_text)
+    return meta
 
 
 def qtaim_poincare_hopf(record: Optional[dict], folder: Optional[str] = None) -> Optional[dict]:
@@ -885,11 +924,13 @@ def poincare_hopf_needs_exhaustive(topology: Optional[dict]) -> bool:
     """True when --enforce_poincare_hopf should rerun QTAIM with the exhaustive
     search: n - b + r - c != 1 from a search that was not already exhaustive.
     An exhaustive result is accepted whatever its sum (a rerun reproduces it),
-    so the escalation happens at most once and cannot loop."""
+    so the escalation happens at most once and cannot loop. An engine record is
+    never escalated: the engine already reseeds on a failing sum and records
+    both sums, and Multiwfn's exhaustive search would replace it."""
     return (
         topology is not None
         and topology["poincare_hopf"] != 1
-        and topology.get("qtaim_search") != QTAIM_SEARCH_EXHAUSTIVE
+        and topology.get("qtaim_search") not in (QTAIM_SEARCH_EXHAUSTIVE, QTAIM_SEARCH_ENGINE)
     )
 
 
@@ -1413,8 +1454,10 @@ def validate_qtaim_dict(
                 if logger:
                     logger.error(msg)
                 return False
-            msg = (f"Poincare-Hopf sum {topology['poincare_hopf']} != 1 {counts} after the "
-                   f"exhaustive search; accepted, a rerun reproduces it ({qtaim_json_loc})")
+            how = ("from the QTAIM engine (sums in _meta.qtaim_engine)"
+                   if topology.get("qtaim_search") == QTAIM_SEARCH_ENGINE else "after the exhaustive search")
+            msg = (f"Poincare-Hopf sum {topology['poincare_hopf']} != 1 {counts} {how}; accepted, "
+                   f"a rerun reproduces it ({qtaim_json_loc})")
             if verbose:
                 print(msg)
             if logger:
@@ -1560,6 +1603,7 @@ def validation_checks(
     recheck_fuzzy: bool = False,
     orca_min_parser_version: Optional[int] = ORCA_PARSER_VERSION,
     charge_engine: bool = False,
+    qtaim_engine: bool = False,
     recheck_allalpha_qtaim: bool = False,
     recheck_cp_labels: bool = False,
     enforce_poincare_hopf: bool = False,
@@ -1599,6 +1643,8 @@ def validation_checks(
             absent), so the runner reparses it. None or 0 disables the gate.
         charge_engine (bool): also fail unless timings.json records a
             charge_engine run (see validate_timing_dict).
+        qtaim_engine (bool): also fail unless timings.json records a
+            qtaim_engine run (see validate_timing_dict).
     Returns:
         bool: True if all validation checks pass, False otherwise.
     """
@@ -1666,7 +1712,7 @@ def validation_checks(
 
     if not validate_timing_dict(
         timing_json_loc, verbose=verbose, full_set=full_set, spin_tf=spin_tf,
-        charge_engine=charge_engine,
+        charge_engine=charge_engine, qtaim_engine=qtaim_engine,
     ):
         if logger:
             logger.error(f"Timing json validation failed in folder: {folder}")

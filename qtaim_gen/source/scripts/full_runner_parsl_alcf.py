@@ -267,6 +267,18 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
 
     parser.add_argument(
+        "--qtaim_engine",
+        action="store_true",
+        help=(
+            "run the QTAIM step with the in-process QTAIM engine (core/cp_search.py) instead of "
+            "Multiwfn: superset CP search with reseeding, CPprop.txt and qtaim.out in Multiwfn's "
+            "format, _meta.qtaim_engine in qtaim.json; needs .wfx wavefunctions. Prevalidation then "
+            "treats folders without a qtaim_engine timing as not done, and engine records are never "
+            "escalated by --enforce_poincare_hopf"
+        ),
+    )
+
+    parser.add_argument(
         "--charge_engine",
         action="store_true",
         help=(
@@ -380,6 +392,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     enforce_poincare_hopf = bool(getattr(args, "enforce_poincare_hopf", False))
     recheck_fuzzy = bool(getattr(args, "recheck_fuzzy", False))
     charge_engine = bool(getattr(args, "charge_engine", False))
+    qtaim_engine = bool(getattr(args, "qtaim_engine", False))
 
     # parsl args
     type_runner: str = str(getattr(args, "type_runner", "local"))
@@ -462,6 +475,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         recheck_fuzzy=recheck_fuzzy,
         check_ecp=check_ecp,
         charge_engine=charge_engine,
+        qtaim_engine=qtaim_engine,
     )
 
     if not folders_run:
@@ -511,6 +525,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             enforce_poincare_hopf=enforce_poincare_hopf,
             recheck_fuzzy=recheck_fuzzy,
             charge_engine=charge_engine,
+            qtaim_engine=qtaim_engine,
         )
         for f in folders_run
     ]
