@@ -2,6 +2,7 @@ from pathlib import Path
 import os, stat, json, time, logging, re
 from typing import Optional, Dict, Any, List
 import subprocess
+import sys
 
 import zipfile
 
@@ -1890,6 +1891,84 @@ def _run_surface_engine(
     return True
 
 
+def _run_engines(
+    folder: str,
+    n_threads: int,
+    logger: logging.Logger,
+    restart: bool = False,
+    full_set: int = 0,
+    qtaim_engine: bool = False,
+    charge_engine: bool = False,
+    engine_subprocess: bool = True,
+) -> None:
+    """The QTAIM engine, then the charge and surface engines. By default in a child
+    process (core/engine_worker.py): parsl's local runner runs folders as threads of
+    one process, where concurrent engine runs serialized on the GIL and shared the
+    process-wide BLAS limits. The child gets single-threaded BLAS and at most
+    n_threads numba threads (fewer if NUMBA_NUM_THREADS is lower), and imports the
+    same qtaim_gen as this process."""
+    if not (qtaim_engine or charge_engine):
+        return
+    if not engine_subprocess:
+        if qtaim_engine:
+            _run_qtaim_engine(folder, n_threads=n_threads, logger=logger, restart=restart)
+        if charge_engine:
+            _run_charge_engine(folder, n_threads=n_threads, logger=logger, restart=restart, full_set=full_set)
+            _run_surface_engine(folder, n_threads=n_threads, logger=logger, restart=restart)
+        return
+
+    import qtaim_gen
+    from qtaim_gen.source.core.engine_worker import STEP_FAILED
+
+    folder = os.path.abspath(folder)
+    root = os.path.dirname(os.path.dirname(os.path.abspath(qtaim_gen.__file__)))
+    numba_threads = max(1, n_threads)
+    try:
+        numba_threads = min(numba_threads, int(os.environ["NUMBA_NUM_THREADS"]))
+    except (KeyError, ValueError):
+        pass
+    # PYTHONSAFEPATH (3.11+) and cwd=folder keep the working directory off the child's
+    # sys.path: python -m puts it ahead of PYTHONPATH, so a checkout there would be imported
+    env = {**os.environ, "OPENBLAS_NUM_THREADS": "1", "MKL_NUM_THREADS": "1",
+           "NUMBA_NUM_THREADS": str(numba_threads), "PYTHONSAFEPATH": "1",
+           "PYTHONPATH": os.pathsep.join(p for p in (root, os.environ.get("PYTHONPATH")) if p)}
+    cmd = [sys.executable, "-m", "qtaim_gen.source.core.engine_worker", folder,
+           "--n_threads", str(n_threads), "--full_set", str(full_set)]
+    cmd += (["--qtaim"] if qtaim_engine else []) + (["--charge"] if charge_engine else [])
+    cmd += ["--restart"] if restart else []
+    logger.info("engine steps in a child process: %s", " ".join(cmd[3:]))
+    start = time.time()
+    try:
+        proc = subprocess.run(cmd, env=env, cwd=folder, capture_output=True, text=True)
+    except OSError as e:
+        logger.error("engine child process could not start: %s", e)
+        return
+    if proc.returncode == STEP_FAILED:
+        logger.error("engine child: a step failed (logged above) after %.1f s; stderr tail:\n%s",
+                     time.time() - start, proc.stderr[-3000:])
+    elif proc.returncode != 0:
+        # a crash, a kill (negative: the signal) or an uncaught exception. Drop the timings
+        # of every engine asked for, here and in generator/ (move_results merges the two):
+        # one from an earlier run would otherwise vouch for outputs the child half-wrote.
+        logger.error("engine child exited with status %d after %.1f s; stderr tail:\n%s",
+                     proc.returncode, time.time() - start, proc.stderr[-3000:])
+        keys = (["qtaim_engine"] if qtaim_engine else []) + (["charge_engine", "surface_engine"] if charge_engine else [])
+        for timings_path in (os.path.join(folder, "timings.json"), os.path.join(folder, "generator", "timings.json")):
+            try:
+                with open(timings_path) as f:
+                    timings = json.load(f)
+            except (OSError, json.JSONDecodeError):
+                continue
+            present = [k for k in keys if k in timings] if isinstance(timings, dict) else []
+            if present:
+                for k in present:
+                    del timings[k]
+                atomic_json_write(timings_path, timings)
+                logger.error("removed engine timings %s from %s", present, timings_path)
+    else:
+        logger.info("engine child finished in %.1f s", time.time() - start)
+
+
 def _run_orca_parse(
     folder: str,
     move_results: bool,
@@ -2856,6 +2935,7 @@ def gbw_analysis(
     recheck_allalpha_qtaim: bool = False,
     recheck_cp_labels: bool = False,
     enforce_poincare_hopf: bool = False,
+    engine_subprocess: bool = True,
 ) -> None:
     """
     Run a full analysis on a folder of gbw files
@@ -2894,6 +2974,8 @@ def gbw_analysis(
             spin, fuzzy_bond) with core/charge_engine.py instead of Multiwfn;
             validation then requires a charge_engine timing, so folders whose
             data came from Multiwfn are recomputed
+        engine_subprocess(bool): run the qtaim_engine / charge_engine steps in a child
+            process (core/engine_worker.py) instead of this one; no effect without them
         recheck_cp_labels(bool): treat a qtaim.json whose nuclear CP sits on another
             atom (parsed before the exact-index mapper fix) as incomplete and rerun
             the QTAIM step (implies restart)
@@ -3358,11 +3440,9 @@ def gbw_analysis(
             if multiwfn_skips:
                 _record_skipped(folder, multiwfn_skips, logger)
         # after run_jobs: its convert step is what produces orca.wfx
-        if qtaim_engine:
-            _run_qtaim_engine(folder, n_threads=n_threads, logger=logger, restart=restart)
-        if charge_engine:
-            _run_charge_engine(folder, n_threads=n_threads, logger=logger, restart=restart, full_set=full_set)
-            _run_surface_engine(folder, n_threads=n_threads, logger=logger, restart=restart)
+        _run_engines(folder, n_threads=n_threads, logger=logger, restart=restart, full_set=full_set,
+                     qtaim_engine=qtaim_engine, charge_engine=charge_engine,
+                     engine_subprocess=engine_subprocess)
 
     print("... Parsing multiwfn output")
     # parse those jobs to jsons for 5 categories
