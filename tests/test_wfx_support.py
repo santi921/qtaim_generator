@@ -258,6 +258,53 @@ class TestCreateJobsWfxMode:
         assert "orca5.wfn" not in content
 
 
+class TestCreateJobsMoldenOnly:
+    """Inputs shipped with orca.molden.input and no gbw (e.g. openac chalcogenides/TZVP)."""
+
+    def setup_method(self):
+        self.tmpdir = tempfile.mkdtemp()
+        with open(os.path.join(self.tmpdir, "orca.inp"), "w") as f:
+            f.write("! B3LYP def2-SVP\n\n*xyz 0 1\nC 0.0 0.0 0.0\nH 1.0 0.0 0.0\n*\n")
+
+    def teardown_method(self):
+        shutil.rmtree(self.tmpdir)
+
+    def _create(self):
+        from qtaim_gen.source.core.omol import create_jobs
+
+        create_jobs(folder=self.tmpdir, multiwfn_cmd="/usr/bin/Multiwfn", orca_2mkl_cmd="/usr/bin/orca_2mkl",
+                    separate=True, debug=False, wfx=True)
+
+    def test_molden_is_converted_without_orca_2mkl(self):
+        with open(os.path.join(self.tmpdir, "orca.molden.input"), "w") as f:
+            f.write("[Molden Format]\n")
+        self._create()
+        with open(os.path.join(self.tmpdir, "convert.in")) as f:
+            assert "orca_2mkl" not in f.read()
+        with open(os.path.join(self.tmpdir, "props_convert.mfwn")) as f:
+            script = f.read()
+        assert "'orca.molden.input'" in script and "convert.txt" in script
+        with open(os.path.join(self.tmpdir, "convert.txt")) as f:
+            assert "orca.wfx" in f.read()
+        # the analysis steps read the wavefunction convert writes
+        with open(os.path.join(self.tmpdir, "props_qtaim.mfwn")) as f:
+            assert "'orca.wfx'" in f.read()
+
+    def test_empty_molden_is_not_a_source(self):
+        open(os.path.join(self.tmpdir, "orca.molden.input"), "w").close()
+        self._create()
+        assert not os.path.exists(os.path.join(self.tmpdir, "convert.in"))
+        assert not os.path.exists(os.path.join(self.tmpdir, "props_convert.mfwn"))
+
+    def test_existing_wavefunction_skips_conversion(self):
+        with open(os.path.join(self.tmpdir, "orca.molden.input"), "w") as f:
+            f.write("[Molden Format]\n")
+        with open(os.path.join(self.tmpdir, "orca.wfx"), "w") as f:
+            f.write("wfx\n")
+        self._create()
+        assert not os.path.exists(os.path.join(self.tmpdir, "convert.in"))
+
+
 class TestCleanJobsWfx:
     """Tests for clean_jobs() handling both .wfn and .wfx."""
 

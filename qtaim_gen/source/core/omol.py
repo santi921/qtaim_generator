@@ -310,6 +310,7 @@ def create_jobs(
                 folder, file.replace(".gbw", ".molden.input")
             )
 
+    molden_path = os.path.join(folder, "orca.molden.input")
     if not wf_present and bool_gbw:
         # Conversion writes the canonical name whatever the .gbw is called, so
         # a legacy orca5.gbw cannot seed another orca5.wfn.
@@ -328,6 +329,18 @@ def create_jobs(
             routine_list = ["convert"] + routine_list
 
         except Exception as e:
+            logger.error(f"Error writing conversion script: {e}")
+    elif not wf_present and os.path.isfile(molden_path) and os.path.getsize(molden_path) > 0:
+        # Inputs shipped with orca.molden.input and no gbw: nothing for orca_2mkl to
+        # do, so convert.in is a no-op and Multiwfn's convert step reads the molden.
+        file_molden = molden_path
+        file_read = os.path.join(folder, "orca" + wf_ext)
+        logger.info("no gbw in %s - converting %s", folder, molden_path)
+        try:
+            with open(os.path.join(folder, "convert.in"), "w") as f:
+                f.write("#!/bin/bash\n# no gbw: orca.molden.input is the source\n")
+            routine_list = ["convert"] + routine_list
+        except OSError as e:
             logger.error(f"Error writing conversion script: {e}")
 
     job_dict = {}
