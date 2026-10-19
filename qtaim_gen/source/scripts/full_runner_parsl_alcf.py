@@ -279,6 +279,17 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
 
     parser.add_argument(
+        "--engine_in_process",
+        action="store_true",
+        help=(
+            "local mode: run the --qtaim_engine / --charge_engine steps in the worker itself instead of "
+            "one child process per folder (core/engine_worker.py). Local mode runs the folders as threads "
+            "of one process, where in-process engine runs share the GIL; hpc and flux workers are "
+            "processes already and always run the engines in-process"
+        ),
+    )
+
+    parser.add_argument(
         "--charge_engine",
         action="store_true",
         help=(
@@ -396,6 +407,8 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     # parsl args
     type_runner: str = str(getattr(args, "type_runner", "local"))
+    # a child process per folder only where folders are threads of one process
+    engine_subprocess = type_runner == "local" and not bool(getattr(args, "engine_in_process", False))
     queue: str = str(getattr(args, "queue", "debug"))
     timeout_hr: float = float(getattr(args, "timeout_hr", 0.5))
     safety_factor: float = float(getattr(args, "safety_factor", 1.0))
@@ -431,9 +444,10 @@ def main(argv: Optional[List[str]] = None) -> int:
             monitoring=False,
         )
 
-    # local mode runs the engines as threads of this process: load their libraries and
-    # pin BLAS to one thread here, before parsl starts any thread (core/charge_engine.py)
-    if type_runner == "local" and (charge_engine or qtaim_engine):
+    # --engine_in_process in local mode runs the engines as threads of this process: load
+    # their libraries and pin BLAS to one thread here, before parsl starts any thread
+    # (core/charge_engine.py)
+    if type_runner == "local" and not engine_subprocess and (charge_engine or qtaim_engine):
         import scipy.stats  # noqa: F401  (cp_search.sphere_seeds imports it lazily)
         from qtaim_gen.source.core import cp_search, surface_engine  # noqa: F401
         from qtaim_gen.source.core.charge_engine import pin_blas_single_thread
@@ -535,6 +549,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             recheck_fuzzy=recheck_fuzzy,
             charge_engine=charge_engine,
             qtaim_engine=qtaim_engine,
+            engine_subprocess=engine_subprocess,
         )
         for f in folders_run
     ]
