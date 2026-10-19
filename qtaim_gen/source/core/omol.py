@@ -1905,7 +1905,8 @@ def _run_engines(
     process (core/engine_worker.py): parsl's local runner runs folders as threads of
     one process, where concurrent engine runs serialized on the GIL and shared the
     process-wide BLAS limits. The child gets single-threaded BLAS and at most
-    n_threads numba threads, and imports the same qtaim_gen as this process."""
+    n_threads numba threads (fewer if NUMBA_NUM_THREADS is lower), and imports the
+    same qtaim_gen as this process."""
     if not (qtaim_engine or charge_engine):
         return
     if not engine_subprocess:
@@ -1919,9 +1920,17 @@ def _run_engines(
     import qtaim_gen
     from qtaim_gen.source.core.engine_worker import STEP_FAILED
 
+    folder = os.path.abspath(folder)
     root = os.path.dirname(os.path.dirname(os.path.abspath(qtaim_gen.__file__)))
+    numba_threads = max(1, n_threads)
+    try:
+        numba_threads = min(numba_threads, int(os.environ["NUMBA_NUM_THREADS"]))
+    except (KeyError, ValueError):
+        pass
+    # PYTHONSAFEPATH (3.11+) and cwd=folder keep the working directory off the child's
+    # sys.path: python -m puts it ahead of PYTHONPATH, so a checkout there would be imported
     env = {**os.environ, "OPENBLAS_NUM_THREADS": "1", "MKL_NUM_THREADS": "1",
-           "NUMBA_NUM_THREADS": str(max(1, n_threads)),
+           "NUMBA_NUM_THREADS": str(numba_threads), "PYTHONSAFEPATH": "1",
            "PYTHONPATH": os.pathsep.join(p for p in (root, os.environ.get("PYTHONPATH")) if p)}
     cmd = [sys.executable, "-m", "qtaim_gen.source.core.engine_worker", folder,
            "--n_threads", str(n_threads), "--full_set", str(full_set)]
@@ -1930,17 +1939,32 @@ def _run_engines(
     logger.info("engine steps in a child process: %s", " ".join(cmd[3:]))
     start = time.time()
     try:
-        proc = subprocess.run(cmd, env=env, capture_output=True, text=True)
+        proc = subprocess.run(cmd, env=env, cwd=folder, capture_output=True, text=True)
     except OSError as e:
         logger.error("engine child process could not start: %s", e)
         return
     if proc.returncode == STEP_FAILED:
-        logger.error("engine child: a step failed (logged above) after %.1f s", time.time() - start)
+        logger.error("engine child: a step failed (logged above) after %.1f s; stderr tail:\n%s",
+                     time.time() - start, proc.stderr[-3000:])
     elif proc.returncode != 0:
-        # a crash, a kill (negative: the signal) or an uncaught exception; no timing was
-        # written for the step that died, so validation fails and a restart reruns it
+        # a crash, a kill (negative: the signal) or an uncaught exception. Drop the timings
+        # of every engine asked for, here and in generator/ (move_results merges the two):
+        # one from an earlier run would otherwise vouch for outputs the child half-wrote.
         logger.error("engine child exited with status %d after %.1f s; stderr tail:\n%s",
                      proc.returncode, time.time() - start, proc.stderr[-3000:])
+        keys = (["qtaim_engine"] if qtaim_engine else []) + (["charge_engine", "surface_engine"] if charge_engine else [])
+        for timings_path in (os.path.join(folder, "timings.json"), os.path.join(folder, "generator", "timings.json")):
+            try:
+                with open(timings_path) as f:
+                    timings = json.load(f)
+            except (OSError, json.JSONDecodeError):
+                continue
+            present = [k for k in keys if k in timings] if isinstance(timings, dict) else []
+            if present:
+                for k in present:
+                    del timings[k]
+                atomic_json_write(timings_path, timings)
+                logger.error("removed engine timings %s from %s", present, timings_path)
     else:
         logger.info("engine child finished in %.1f s", time.time() - start)
 
