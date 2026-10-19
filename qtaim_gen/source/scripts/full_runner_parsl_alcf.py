@@ -431,6 +431,15 @@ def main(argv: Optional[List[str]] = None) -> int:
             monitoring=False,
         )
 
+    # local mode runs the engines as threads of this process: load their libraries and
+    # pin BLAS to one thread here, before parsl starts any thread (core/charge_engine.py)
+    if type_runner == "local" and (charge_engine or qtaim_engine):
+        import scipy.stats  # noqa: F401  (cp_search.sphere_seeds imports it lazily)
+        from qtaim_gen.source.core import cp_search, surface_engine  # noqa: F401
+        from qtaim_gen.source.core.charge_engine import pin_blas_single_thread
+
+        pin_blas_single_thread()
+
     ##################### Gather Configs for Parsl
     parsl.clear()
     parsl.load(parsl_config)
