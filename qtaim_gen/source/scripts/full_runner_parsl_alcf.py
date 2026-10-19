@@ -279,6 +279,16 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
 
     parser.add_argument(
+        "--engine_in_process",
+        action="store_true",
+        help=(
+            "run the --qtaim_engine / --charge_engine steps in the worker itself instead of one child "
+            "process per folder (core/engine_worker.py). In local mode the folders are threads of one "
+            "process, where in-process engine runs share the GIL"
+        ),
+    )
+
+    parser.add_argument(
         "--charge_engine",
         action="store_true",
         help=(
@@ -393,6 +403,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     recheck_fuzzy = bool(getattr(args, "recheck_fuzzy", False))
     charge_engine = bool(getattr(args, "charge_engine", False))
     qtaim_engine = bool(getattr(args, "qtaim_engine", False))
+    engine_subprocess = not bool(getattr(args, "engine_in_process", False))
 
     # parsl args
     type_runner: str = str(getattr(args, "type_runner", "local"))
@@ -535,6 +546,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             recheck_fuzzy=recheck_fuzzy,
             charge_engine=charge_engine,
             qtaim_engine=qtaim_engine,
+            engine_subprocess=engine_subprocess,
         )
         for f in folders_run
     ]

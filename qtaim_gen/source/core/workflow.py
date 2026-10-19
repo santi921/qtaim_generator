@@ -230,6 +230,7 @@ def process_folder(
     recheck_fuzzy: bool = False,
     charge_engine: bool = False,
     qtaim_engine: bool = False,
+    engine_subprocess: bool = True,
 ) -> Dict[str, Any]:
     """Process a single folder and return a small status dict.
 
@@ -352,6 +353,7 @@ def process_folder(
             recheck_fuzzy=recheck_fuzzy,
             charge_engine=charge_engine,
             qtaim_engine=qtaim_engine,
+            engine_subprocess=engine_subprocess,
         )
         t1: float = time.time()
         rerun_ok = bool(tf_validation)
@@ -441,6 +443,7 @@ def process_folder_alcf(
     recheck_fuzzy: bool = False,
     charge_engine: bool = False,
     qtaim_engine: bool = False,
+    engine_subprocess: bool = True,
 ) -> Dict[str, Any]:
     """Process a single folder and return a small status dict.
 
@@ -651,6 +654,7 @@ def process_folder_alcf(
             recheck_fuzzy=recheck_fuzzy,
             charge_engine=charge_engine,
             qtaim_engine=qtaim_engine,
+            engine_subprocess=engine_subprocess,
         )
         t1: float = time.time()
         rerun_ok = bool(tf_validation)
