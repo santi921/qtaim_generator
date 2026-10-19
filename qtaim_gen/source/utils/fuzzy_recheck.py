@@ -5,11 +5,10 @@ three classes of wrong-but-complete data are never rerun:
 
 - `hirsh_fuzzy_density` all zeros (a Multiwfn input integrated rho twice and
   the parser kept the second, empty block);
-- fuzzy spin integrations that do not sum to (multiplicity - 1), except a
-  shortfall the density integral shares (grid loss of a diffuse alpha
-  electron, see _grid_alpha_loss): open-shell
+- fuzzy spin integrations that do not sum to (multiplicity - 1): open-shell
   jobs run from a .wfn, which Multiwfn reads as all-alpha, and every
-  `hirsh_fuzzy_spin` (its input integrated rho, not spin density);
+  `hirsh_fuzzy_spin` (its input integrated rho, not spin density). A shortfall
+  the density integral shares is grid loss, not a defect (_grid_alpha_loss);
 - `fuzzy_bond` of any unrestricted wavefunction, open shell or UKS singlet:
   from a .wfn (read as all-alpha; 2x the delocalization index for a singlet) or
   parsed before the parser read the Total column (alpha only, 0.5x for a
@@ -47,15 +46,16 @@ from qtaim_gen.source.core.parse_multiwfn import (
 from rdkit import Chem
 
 from qtaim_gen.source.utils.atomic_write import atomic_json_write
-from qtaim_gen.source.utils.validation import geometry_input_candidates, read_multiwfn_out
+from qtaim_gen.source.utils.validation import (
+    geometry_input_candidates,
+    get_charge_spin_n_atoms_from_folder,
+    read_multiwfn_out,
+)
 
 DENSITY_KEYS = ("becke_fuzzy_density", "hirsh_fuzzy_density", "mbis_fuzzy_density")
 SPIN_KEYS = ("becke_fuzzy_spin", "hirsh_fuzzy_spin", "mbis_fuzzy_spin")
-SPIN_TOL = 0.1  # integrated spin density = N_alpha - N_beta exactly; grid error is ~1e-4
-# The integration grid can miss part of a diffuse unpaired alpha electron: on LRC tm_react (2026-10-19)
-# 179 open-shell folders, 178 of them dianions with def2-TZVPD, fall 0.10-0.33 e short in both the spin
-# and the density integral by the same amount, on every rerun. That loss is the data, not a defect.
-GRID_LOSS_MAX = 0.5
+SPIN_TOL = 0.1  # integrated spin density = N_alpha - N_beta exactly; grid error ~1e-4, except _grid_alpha_loss
+GRID_LOSS_MAX = 0.5  # diffuse alpha electron of open-shell dianions: 0.10-0.33 e measured
 GRID_LOSS_MATCH = 0.02
 _SUMMARY = ("sum", "abs_sum")
 SPIN_SENSITIVE = frozenset(SPIN_KEYS) | {"fuzzy_bond"}
@@ -74,41 +74,58 @@ def _atom_values(entry) -> Optional[List[float]]:
     return vals
 
 
-def fuzzy_value_failures(fuzzy_dict: dict, mult: int) -> List[str]:
-    """Steps present in `fuzzy_dict` whose values are physically impossible."""
+def fuzzy_value_failures(fuzzy_dict: dict, mult: int, n_electrons: Optional[int] = None) -> List[str]:
+    """Steps present in `fuzzy_dict` whose values are physically impossible.
+
+    n_electrons (sum of Z minus charge) pins the grid-loss match to the real count; without it
+    the nearest integer is used."""
     bad = []
+    density_sums = []
     for key in DENSITY_KEYS:
         if key in fuzzy_dict:
             vals = _atom_values(fuzzy_dict[key])
             if vals is None or all(abs(v) < 1e-12 for v in vals):
                 bad.append(key)
+            if vals is not None:
+                density_sums.append(sum(vals))
     if mult > 1:
-        density_sums = [sum(v) for k in DENSITY_KEYS if k in fuzzy_dict
-                        for v in [_atom_values(fuzzy_dict[k])] if v is not None]
         for key in SPIN_KEYS:
             if key in fuzzy_dict:
                 vals = _atom_values(fuzzy_dict[key])
                 if vals is None:
                     bad.append(key)
                 elif abs(sum(vals) - (mult - 1)) > SPIN_TOL and not _grid_alpha_loss(
-                        (mult - 1) - sum(vals), density_sums):
+                        (mult - 1) - sum(vals), density_sums, n_electrons):
                     bad.append(key)
     return bad
 
 
-def _grid_alpha_loss(shortfall: float, density_sums: List[float]) -> bool:
-    """Whether a spin integral `shortfall` below mult - 1 is integration-grid loss of alpha density.
-
-    Density = alpha + beta and spin = alpha - beta, so alpha density the grid misses lowers both
-    integrals by the same amount: the density integral then falls `shortfall` short of an integer
-    electron count (ECP cores included, as Multiwfn adds them back). Any partition's density will do:
-    the integral over all space is the same for every partition, and a Hirshfeld density rebuilt from
-    charges is no integral and simply never matches. Too much spin, a larger loss, or a loss the
-    density does not share stays a defect.
-    """
+def _grid_alpha_loss(shortfall: float, density_sums: List[float], n_electrons: Optional[int]) -> bool:
+    """Alpha density the grid missed lowers spin (alpha - beta) and density (alpha + beta) alike,
+    so the density integral of some partition falls `shortfall` short of the electron count
+    (ECP cores included: Multiwfn adds them back). A Hirshfeld density rebuilt from charges never matches."""
     if not 0 < shortfall <= GRID_LOSS_MAX:
         return False
-    return any(abs((d + shortfall) - round(d + shortfall)) < GRID_LOSS_MATCH for d in density_sums)
+    return any(abs(d + shortfall - (round(d + shortfall) if n_electrons is None else n_electrons))
+               < GRID_LOSS_MATCH for d in density_sums)
+
+
+def _spin_off(fuzzy_dict: dict, mult: int) -> bool:
+    """Whether any spin step misses mult - 1 by more than SPIN_TOL."""
+    for key in SPIN_KEYS:
+        vals = _atom_values(fuzzy_dict.get(key))
+        if vals is not None and abs(sum(vals) - (mult - 1)) > SPIN_TOL:
+            return True
+    return False
+
+
+def _electron_count(folder: str) -> Optional[int]:
+    """Sum of Z minus charge from the folder's ORCA input, or None when it cannot be read."""
+    d = get_charge_spin_n_atoms_from_folder(folder)
+    try:
+        return sum(_PERIODIC_TABLE.GetAtomicNumber(a["element"]) for a in d["mol"].values()) - int(d["charge"])
+    except (TypeError, KeyError, ValueError, RuntimeError):
+        return None
 
 
 def hirsh_density_from_charges(folder: str) -> Optional[dict]:
@@ -254,19 +271,26 @@ def plan_recheck(folder: str, mult: int) -> Dict[str, object]:
     derived: List[str] = []
 
     fuzzy = _preferred(folder, _compiled(folder, "fuzzy_full.json"))
-    for step in fuzzy_value_failures(fuzzy, mult):
+    # the input is read only when a spin step is off, which keeps it out of the common path
+    n_e = _electron_count(folder) if mult > 1 and _spin_off(fuzzy, mult) else None
+
+    def payload_ok(step, payload):
+        # checked within the record, so a spin payload is compared with the stored densities
+        return step not in fuzzy_value_failures({**fuzzy, step: payload}, mult, n_e)
+
+    for step in fuzzy_value_failures(fuzzy, mult, n_e):
         text = read_multiwfn_out(folder, f"{step}.out")
         if text is not None:
             try:
                 payload = _parse_text(step, text, parse_fuzzy_real_space).get(step)
             except Exception:
                 payload = None
-            if payload is not None and not fuzzy_value_failures({step: payload}, mult):
+            if payload is not None and payload_ok(step, payload):
                 reparse[step] = payload
                 continue
         if step == "hirsh_fuzzy_density":
             payload = hirsh_density_from_charges(folder)
-            if payload is not None and not fuzzy_value_failures({step: payload}, mult):
+            if payload is not None and payload_ok(step, payload):
                 reparse[step] = payload
                 derived.append(step)
                 continue
