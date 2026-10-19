@@ -77,6 +77,65 @@ class TestValueChecks:
         assert out_electron_counts("no banner") is None
 
 
+def _summing_to(total, rest=1.0):
+    """A 12-atom table whose atom values sum to `total`."""
+    return _table([total - 11 * rest] + [rest] * 11)
+
+
+class TestGridAlphaLoss:
+    """Spin falling short of mult - 1 by the same amount as the density misses its integer: grid loss of
+    a diffuse alpha electron (LRC tm_react dianions, 2026-10-19), accepted; everything else still flagged."""
+
+    # measured: MOR21_Au3 mult 3 (spin 1.733, density 357.733 of 358), MOR21_Fe3 mult 6 (4.76, 238.76 of 239)
+    AU3 = (3, 1.733, 357.733)
+    FE3 = (6, 4.760, 238.760)
+
+    def test_measured_dianions_accepted(self):
+        for mult, spin, dens in (self.AU3, self.FE3):
+            fz = {"becke_fuzzy_density": _summing_to(dens), "hirsh_fuzzy_density": _summing_to(dens),
+                  "becke_fuzzy_spin": _summing_to(spin, 0.01), "hirsh_fuzzy_spin": _summing_to(spin, 0.01)}
+            assert fuzzy_value_failures(fz, mult=mult) == []
+
+    def test_any_partition_density_counts(self):
+        # a hirsh density rebuilt from charges is an exact integer; the becke integral shows the loss
+        mult, spin, dens = self.AU3
+        fz = {"becke_fuzzy_density": _summing_to(dens), "hirsh_fuzzy_density": _summing_to(358.0),
+              "hirsh_fuzzy_spin": _summing_to(spin, 0.01)}
+        assert fuzzy_value_failures(fz, mult=mult) == []
+
+    def test_spin_equal_to_density_still_flagged(self):
+        # the #28 defect (Cu2 / Cr2 pattern): spin integrates to the whole density
+        fz = {"becke_fuzzy_density": _summing_to(357.0), "becke_fuzzy_spin": _summing_to(357.0)}
+        assert fuzzy_value_failures(fz, mult=2) == ["becke_fuzzy_spin"]
+
+    def test_shortfall_without_density_loss_flagged(self):
+        fz = {"becke_fuzzy_density": _summing_to(358.0), "becke_fuzzy_spin": _summing_to(1.733, 0.01)}
+        assert fuzzy_value_failures(fz, mult=3) == ["becke_fuzzy_spin"]
+
+    def test_shortfall_beyond_limit_flagged(self):
+        fz = {"becke_fuzzy_density": _summing_to(357.3), "becke_fuzzy_spin": _summing_to(1.3, 0.01)}
+        assert fuzzy_value_failures(fz, mult=3) == ["becke_fuzzy_spin"]
+
+    def test_excess_spin_flagged(self):
+        fz = {"becke_fuzzy_density": _summing_to(358.267), "becke_fuzzy_spin": _summing_to(2.267, 0.01)}
+        assert fuzzy_value_failures(fz, mult=3) == ["becke_fuzzy_spin"]
+
+    def test_spin_alone_flagged(self):
+        # a reparsed step is checked on its own: no density to compare with, so no exemption
+        assert fuzzy_value_failures({"becke_fuzzy_spin": _summing_to(1.733, 0.01)}, mult=3) == ["becke_fuzzy_spin"]
+
+    def test_zero_density_cannot_vouch(self):
+        fz = {"hirsh_fuzzy_density": ZEROS, "becke_fuzzy_spin": _summing_to(1.733, 0.01)}
+        assert sorted(fuzzy_value_failures(fz, mult=3)) == ["becke_fuzzy_spin", "hirsh_fuzzy_density"]
+
+    def test_recheck_leaves_grid_loss_folder_alone(self, tmp_path):
+        mult, spin, dens = self.FE3
+        job = _job(tmp_path, {"becke_fuzzy_density": _summing_to(dens), "hirsh_fuzzy_density": _summing_to(dens),
+                              "becke_fuzzy_spin": _summing_to(spin, 0.01), "hirsh_fuzzy_spin": _summing_to(spin, 0.01)})
+        rep = recheck_fuzzy(str(job), mult=mult, dry_run=True)
+        assert rep["reparse"] == [] and rep["rerun"] == []
+
+
 class TestRecheck:
     def test_zero_density_reparsed_from_zip(self, tmp_path):
         job = _job(tmp_path, {"becke_fuzzy_density": GOOD_DENSITY, "hirsh_fuzzy_density": ZEROS},

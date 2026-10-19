@@ -5,7 +5,9 @@ three classes of wrong-but-complete data are never rerun:
 
 - `hirsh_fuzzy_density` all zeros (a Multiwfn input integrated rho twice and
   the parser kept the second, empty block);
-- fuzzy spin integrations that do not sum to (multiplicity - 1): open-shell
+- fuzzy spin integrations that do not sum to (multiplicity - 1), except a
+  shortfall the density integral shares (grid loss of a diffuse alpha
+  electron, see _grid_alpha_loss): open-shell
   jobs run from a .wfn, which Multiwfn reads as all-alpha, and every
   `hirsh_fuzzy_spin` (its input integrated rho, not spin density);
 - `fuzzy_bond` of any unrestricted wavefunction, open shell or UKS singlet:
@@ -50,6 +52,11 @@ from qtaim_gen.source.utils.validation import geometry_input_candidates, read_mu
 DENSITY_KEYS = ("becke_fuzzy_density", "hirsh_fuzzy_density", "mbis_fuzzy_density")
 SPIN_KEYS = ("becke_fuzzy_spin", "hirsh_fuzzy_spin", "mbis_fuzzy_spin")
 SPIN_TOL = 0.1  # integrated spin density = N_alpha - N_beta exactly; grid error is ~1e-4
+# The integration grid can miss part of a diffuse unpaired alpha electron: on LRC tm_react (2026-10-19)
+# 179 open-shell folders, 178 of them dianions with def2-TZVPD, fall 0.10-0.33 e short in both the spin
+# and the density integral by the same amount, on every rerun. That loss is the data, not a defect.
+GRID_LOSS_MAX = 0.5
+GRID_LOSS_MATCH = 0.02
 _SUMMARY = ("sum", "abs_sum")
 SPIN_SENSITIVE = frozenset(SPIN_KEYS) | {"fuzzy_bond"}
 _PERIODIC_TABLE = Chem.GetPeriodicTable()
@@ -76,12 +83,32 @@ def fuzzy_value_failures(fuzzy_dict: dict, mult: int) -> List[str]:
             if vals is None or all(abs(v) < 1e-12 for v in vals):
                 bad.append(key)
     if mult > 1:
+        density_sums = [sum(v) for k in DENSITY_KEYS if k in fuzzy_dict
+                        for v in [_atom_values(fuzzy_dict[k])] if v is not None]
         for key in SPIN_KEYS:
             if key in fuzzy_dict:
                 vals = _atom_values(fuzzy_dict[key])
-                if vals is None or abs(sum(vals) - (mult - 1)) > SPIN_TOL:
+                if vals is None:
+                    bad.append(key)
+                elif abs(sum(vals) - (mult - 1)) > SPIN_TOL and not _grid_alpha_loss(
+                        (mult - 1) - sum(vals), density_sums):
                     bad.append(key)
     return bad
+
+
+def _grid_alpha_loss(shortfall: float, density_sums: List[float]) -> bool:
+    """Whether a spin integral `shortfall` below mult - 1 is integration-grid loss of alpha density.
+
+    Density = alpha + beta and spin = alpha - beta, so alpha density the grid misses lowers both
+    integrals by the same amount: the density integral then falls `shortfall` short of an integer
+    electron count (ECP cores included, as Multiwfn adds them back). Any partition's density will do:
+    the integral over all space is the same for every partition, and a Hirshfeld density rebuilt from
+    charges is no integral and simply never matches. Too much spin, a larger loss, or a loss the
+    density does not share stays a defect.
+    """
+    if not 0 < shortfall <= GRID_LOSS_MAX:
+        return False
+    return any(abs((d + shortfall) - round(d + shortfall)) < GRID_LOSS_MATCH for d in density_sums)
 
 
 def hirsh_density_from_charges(folder: str) -> Optional[dict]:
