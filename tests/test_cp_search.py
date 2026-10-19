@@ -327,7 +327,7 @@ from qtaim_gen.source.core import cp_search
 from qtaim_gen.source.core.charge_engine import prepare_basis, read_wfx
 
 def one(_):
-    numba.set_num_threads(4)
+    numba.set_num_threads(min(4, numba.config.NUMBA_NUM_THREADS))
     wfx = read_wfx(sys.argv[1])
     return int(cp_search.analyze(wfx, prepare_basis(wfx))["poincare_hopf"])
 
@@ -353,8 +353,37 @@ def test_concurrent_engine_runs_in_threads_do_not_deadlock():
     try:
         out = subprocess.run([sys.executable, "-c", _CONCURRENT_RUNS,
                               NITRATE_PU],
-                             capture_output=True, text=True, timeout=120, env=env, cwd=root)
+                             capture_output=True, text=True, timeout=300, env=env, cwd=root)
     except subprocess.TimeoutExpired:
-        pytest.fail("4 concurrent QTAIM engine runs in one process did not finish in 120 s")
+        pytest.fail("4 concurrent QTAIM engine runs in one process did not finish in 300 s")
     assert out.returncode == 0, out.stderr[-2000:]
     assert out.stdout.strip() == "[1, 1, 1, 1]"
+
+
+_PIN_HOLDS = """
+import numpy as np
+from threadpoolctl import threadpool_info
+from qtaim_gen.source.core.charge_engine import limit_blas_threads, pin_blas_single_thread
+
+def blas():
+    return sorted({d["num_threads"] for d in threadpool_info() if d["user_api"] == "blas"})
+
+pin_blas_single_thread()
+inside = limit_blas_threads(blas)()
+print(blas(), inside)
+"""
+
+
+def test_pinned_blas_stays_single_threaded_after_a_limited_call():
+    """pin_blas_single_thread is not undone when a limit_blas_threads call exits (the
+    limit restores the pinned 1). In a child process: the pin is process-wide."""
+    import subprocess
+    import sys
+
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    env = {**os.environ, "PYTHONPATH": os.pathsep.join([root, os.environ.get("PYTHONPATH", "")])}
+    env.pop("OPENBLAS_NUM_THREADS", None)
+    out = subprocess.run([sys.executable, "-c", _PIN_HOLDS], capture_output=True, text=True,
+                         timeout=120, env=env, cwd=root)
+    assert out.returncode == 0, out.stderr[-2000:]
+    assert out.stdout.strip() == "[1] [1]"

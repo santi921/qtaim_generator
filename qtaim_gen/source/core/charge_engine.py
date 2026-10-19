@@ -346,6 +346,14 @@ def _threadpools():
     return _THREADPOOLS
 
 
+def pin_blas_single_thread():
+    """Single-threaded BLAS for the rest of the process, not restored. Called once from
+    the main thread before engine runs start as threads, so the library scan has no
+    other threads to deadlock against, and the per-call limits below save and restore
+    1: one run leaving its limit cannot turn BLAS threading back on under another."""
+    _threadpools().limit(limits=1, user_api="blas")
+
+
 def limit_blas_threads(fn):
     """Run fn with single-threaded BLAS. orbital_values parallelizes over blocks
     itself; a multithreaded BLAS inside those workers, or next to numba's
