@@ -26,13 +26,14 @@ import os
 import re
 import sys
 import tempfile
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 
 import numba
 import numpy as np
 from numba import njit, prange
-from threadpoolctl import threadpool_limits
+from threadpoolctl import ThreadpoolController
 
 from qtaim_gen.source.data import multiwfn_tables as T
 
@@ -329,6 +330,22 @@ def _primitive_block_derivs(pts, atcoords, groups, g_center, g_alpha, g_start, g
     return out
 
 
+_THREADPOOLS = None
+_THREADPOOLS_LOCK = threading.Lock()
+
+
+def _threadpools():
+    """One ThreadpoolController per process. threadpool_limits() builds a new one on
+    every call, which rescans the loaded libraries (dl_iterate_phdr); with several
+    engine runs in threads of one process (parsl's local ThreadPoolExecutor) that
+    rescan deadlocked against the other runs' thread starts."""
+    global _THREADPOOLS
+    with _THREADPOOLS_LOCK:
+        if _THREADPOOLS is None:
+            _THREADPOOLS = ThreadpoolController()
+    return _THREADPOOLS
+
+
 def limit_blas_threads(fn):
     """Run fn with single-threaded BLAS. orbital_values parallelizes over blocks
     itself; a multithreaded BLAS inside those workers, or next to numba's
@@ -337,7 +354,7 @@ def limit_blas_threads(fn):
 
     @functools.wraps(fn)
     def wrapper(*args, **kwargs):
-        with threadpool_limits(1):
+        with _threadpools().limit(limits=1):
             return fn(*args, **kwargs)
 
     return wrapper

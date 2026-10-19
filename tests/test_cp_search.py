@@ -317,3 +317,44 @@ def test_heavy_nucleus_cp_is_translation_invariant():
         assert abs(props["rho"] - out[0.0][1]["rho"]) <= 1e-12 * abs(out[0.0][1]["rho"])
         assert abs(props["laplacian"] - out[0.0][1]["laplacian"]) <= 1e-12 * abs(out[0.0][1]["laplacian"])
         assert np.linalg.norm(off) < 1e-12
+
+
+_CONCURRENT_RUNS = """
+import sys
+from concurrent.futures import ThreadPoolExecutor
+import numba
+from qtaim_gen.source.core import cp_search
+from qtaim_gen.source.core.charge_engine import prepare_basis, read_wfx
+
+def one(_):
+    numba.set_num_threads(4)
+    wfx = read_wfx(sys.argv[1])
+    return int(cp_search.analyze(wfx, prepare_basis(wfx))["poincare_hopf"])
+
+with ThreadPoolExecutor(4) as pool:
+    print(list(pool.map(one, range(4))))
+"""
+
+
+NITRATE_PU = ("/home/santiagovargas/dev/qtaim_generator/data/actinide_dev/work/multiwfn/SVP/"
+              "x2c_PuNO5Cl3_spin_1_PBE0_X2C-SVPall/orca.wfx")
+
+
+@pytest.mark.skipif(not os.path.exists(NITRATE_PU), reason="local X2C nitrate wavefunction")
+def test_concurrent_engine_runs_in_threads_do_not_deadlock():
+    """parsl's local runner runs jobs as threads of one process. A threadpoolctl library
+    rescan per Newton step deadlocked there (on this job, not on the small fixtures);
+    in a child process so a hang fails."""
+    import subprocess
+    import sys
+
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    env = {**os.environ, "PYTHONPATH": os.pathsep.join([root, os.environ.get("PYTHONPATH", "")])}
+    try:
+        out = subprocess.run([sys.executable, "-c", _CONCURRENT_RUNS,
+                              NITRATE_PU],
+                             capture_output=True, text=True, timeout=120, env=env, cwd=root)
+    except subprocess.TimeoutExpired:
+        pytest.fail("4 concurrent QTAIM engine runs in one process did not finish in 120 s")
+    assert out.returncode == 0, out.stderr[-2000:]
+    assert out.stdout.strip() == "[1, 1, 1, 1]"

@@ -31,6 +31,8 @@ export PYTHONUNBUFFERED=1
 export PYTHONNOUSERSITE=1
 export OMP_STACKSIZE=4G
 export KMP_STACKSIZE=200M
+# the engines run 16 jobs as threads of one process: one BLAS thread each (Multiwfn does not use OpenBLAS)
+export OPENBLAS_NUM_THREADS=1
 ulimit -s unlimited
 
 ORCA_2MKL=${ORCA_2MKL:-/pscratch/sd/s/santiago/orca_6_1_1_linux_x86-64_shared_openmpi418_nodmrg/orca_2mkl}
