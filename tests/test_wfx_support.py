@@ -305,6 +305,46 @@ class TestCreateJobsMoldenOnly:
         assert not os.path.exists(os.path.join(self.tmpdir, "convert.in"))
 
 
+class TestCreateJobsAtomGuessGbw:
+    """ORCA leaves per-element atomic-guess files (orca_atom95.gbw) next to orca.gbw;
+    converting one gave a one-atom wavefunction (openac cp/OMOL_SVP AmC27H39)."""
+
+    def setup_method(self):
+        self.tmpdir = tempfile.mkdtemp()
+        with open(os.path.join(self.tmpdir, "orca.inp"), "w") as f:
+            f.write("! B3LYP def2-SVP\n\n*xyz 0 1\nC 0.0 0.0 0.0\nH 1.0 0.0 0.0\n*\n")
+
+    def teardown_method(self):
+        shutil.rmtree(self.tmpdir)
+
+    def _create(self, monkeypatch):
+        from qtaim_gen.source.core import omol
+
+        real = os.listdir
+        # the old pick was the last .gbw in listing order: put the atomic file last
+        monkeypatch.setattr(omol.os, "listdir", lambda p=".": sorted(real(p), key=lambda n: "_atom" in n))
+        omol.create_jobs(folder=self.tmpdir, multiwfn_cmd="/usr/bin/Multiwfn", orca_2mkl_cmd="/usr/bin/orca_2mkl",
+                         separate=True, debug=False, wfx=True)
+
+    def test_molecule_gbw_wins_over_atomic_guess(self, monkeypatch):
+        for name in ("orca.gbw", "orca_atom95.gbw"):
+            open(os.path.join(self.tmpdir, name), "w").close()
+        self._create(monkeypatch)
+        with open(os.path.join(self.tmpdir, "convert.in")) as f:
+            script = f.read()
+        assert "orca_atom95" not in script and "/orca' -molden" in script
+        with open(os.path.join(self.tmpdir, "props_convert.mfwn")) as f:
+            assert "'orca.molden.input'" in f.read()
+
+    def test_atomic_guess_alone_is_not_converted(self, monkeypatch):
+        open(os.path.join(self.tmpdir, "orca_atom95.gbw"), "w").close()
+        with open(os.path.join(self.tmpdir, "orca.molden.input"), "w") as f:
+            f.write("[Molden Format]\n")
+        self._create(monkeypatch)
+        with open(os.path.join(self.tmpdir, "convert.in")) as f:
+            assert "orca_2mkl" not in f.read()
+
+
 class TestCleanJobsWfx:
     """Tests for clean_jobs() handling both .wfn and .wfx."""
 

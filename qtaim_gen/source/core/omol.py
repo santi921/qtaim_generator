@@ -17,6 +17,7 @@ from qtaim_gen.source.utils.validation import (
     qtaim_cpprop_problems,
     qtaim_topology_meta,
     far_heavy_nuclei,
+    wfx_nuclei,
     qtaim_poincare_hopf,
     poincare_hopf_needs_exhaustive,
     QTAIM_META_KEY,
@@ -302,13 +303,10 @@ def create_jobs(
     file_gbw = None
     file_molden = None
 
-    for file in os.listdir(folder):
-        if file.endswith(".gbw"):
-            bool_gbw = True
-            file_gbw = os.path.join(folder, file)
-            file_molden = os.path.join(
-                folder, file.replace(".gbw", ".molden.input")
-            )
+    file_gbw = _molecule_gbw(folder)
+    if file_gbw is not None:
+        bool_gbw = True
+        file_molden = file_gbw[: -len(".gbw")] + ".molden.input"
 
     molden_path = os.path.join(folder, "orca.molden.input")
     if not wf_present and bool_gbw:
@@ -2361,17 +2359,34 @@ def _discard_wavefunction_derived_outputs(folder: str, logger: logging.Logger) -
     for path in targets:
         try:
             os.remove(path)
-            logger.info("Removed %s: derived from a wavefunction with the wrong electron count", path)
+            logger.info("Removed %s: derived from a wrong wavefunction", path)
         except OSError as e:
             logger.warning("Could not remove %s: %s", path, e)
+
+
+# ORCA's per-element atomic-guess files (orca_atom95.gbw next to orca.gbw): one atom,
+# never the molecule's wavefunction
+_ATOM_GUESS_GBW = re.compile(r"_atom\d+\.gbw(\.zstd0)?$")
+
+
+def _molecule_gbw(folder: str) -> Optional[str]:
+    """The .gbw to convert: orca.gbw when present, else the first other .gbw in name
+    order (a legacy orca5.gbw), never an atomic-guess file. None if there is none."""
+    names = sorted(n for n in os.listdir(folder) if n.endswith(".gbw") and not _ATOM_GUESS_GBW.search(n))
+    if not names:
+        return None
+    return os.path.join(folder, "orca.gbw" if "orca.gbw" in names else names[0])
 
 
 def _gbw_source_present(folder: str, preprocess_compressed: bool = False) -> bool:
     """Whether the folder can regenerate a wavefunction: a non-empty .gbw, or a
     .gbw.zstd0 when preprocess_compressed is set (otherwise nothing extracts it).
-    orca.tar.zst does not count: it holds orca.inp/orca.out, not the gbw."""
+    orca.tar.zst does not count: it holds orca.inp/orca.out, not the gbw, and
+    neither do atomic-guess files (_ATOM_GUESS_GBW)."""
     for name in os.listdir(folder):
         path = os.path.join(folder, name)
+        if _ATOM_GUESS_GBW.search(name):
+            continue
         if name.endswith(".gbw") or (preprocess_compressed and name.endswith(".gbw.zstd0")):
             try:
                 if os.path.getsize(path) > 0:
@@ -2384,10 +2399,11 @@ def _gbw_source_present(folder: str, preprocess_compressed: bool = False) -> boo
 def _reject_wavefunction_with_wrong_electron_count(
     folder: str, logger: logging.Logger, preprocess_compressed: bool = False
 ) -> bool:
-    """Before any restart decision: if the wavefunction on disk declares a
-    different electron count than the input implies, discard it and every
-    output derived from it. Returns True when that happened, so the caller
-    runs every step fresh.
+    """Before anything else runs: if the wavefunction on disk holds a different
+    number of nuclei than the input geometry (e.g. converted from an atomic-guess
+    gbw), or declares a different electron count than the input implies (not
+    judged with ECPs), discard it and every output derived from it. Returns True
+    when that happened, so the caller runs every step fresh.
 
     Must run before compressed-input preprocessing and create_jobs: with the
     wfx gone, preprocessing extracts the .gbw again and create_jobs writes the
@@ -2404,21 +2420,25 @@ def _reject_wavefunction_with_wrong_electron_count(
         return False
     if not dft_dict or not dft_dict.get("mol"):
         return False
+    problems = []
+    nuclei = wfx_nuclei(wf_path) if wf_path.endswith(".wfx") else None
+    if nuclei is not None and len(nuclei[0]) != len(dft_dict["mol"]):
+        problems.append(f"{len(nuclei[0])} nuclei but the input has {len(dft_dict['mol'])} atoms")
     expected = _expected_electrons(dft_dict)
     observed = _wavefunction_electrons(wf_path)
-    if expected is None or observed is None or abs(observed - expected) <= 0.5:
+    if expected is not None and observed is not None and abs(observed - expected) > 0.5:
+        problems.append(f"{observed:.1f} electrons but the input implies {expected}")
+    if not problems:
         return False
     if not _gbw_source_present(folder, preprocess_compressed):
         logger.error(
-            "%s declares %.1f electrons but the input implies %d, and no .gbw "
-            "is available to reconvert from; leaving the folder as is",
-            wf_path, observed, expected,
+            "%s has %s, and no .gbw is available to reconvert from; leaving the folder as is",
+            wf_path, "; ".join(problems),
         )
         return False
     logger.error(
-        "%s declares %.1f electrons but the input implies %d; discarding it "
-        "and every output derived from it, rerunning all steps",
-        wf_path, observed, expected,
+        "%s has %s; discarding it and every output derived from it, rerunning all steps",
+        wf_path, "; ".join(problems),
     )
     _discard_wavefunction_derived_outputs(folder, logger)
     return True
@@ -3020,7 +3040,9 @@ def gbw_analysis(
         logger.error("Folder does not exist: {}".format(folder))
         return False
 
-    if restart and not parse_only:
+    # on every pass: a wrong wavefunction (wrong molecule or electron count) is
+    # reused by a plain rerun too, since conversion only runs without one
+    if not parse_only:
         if _reject_wavefunction_with_wrong_electron_count(
             folder, logger, preprocess_compressed=preprocess_compressed
         ):
