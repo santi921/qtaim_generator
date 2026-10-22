@@ -16,6 +16,8 @@ import os
 import subprocess
 import shutil
 import zipfile
+
+import pytest
 from pathlib import Path
 
 from qtaim_gen.source.core.omol import (
@@ -277,6 +279,72 @@ class TestRejectBadWavefunction:
         folder = self._folder(tmp_path, electrons=4, with_gbw=False)
         assert not _reject_wavefunction_with_wrong_electron_count(folder, logging.getLogger("t"))
         assert os.path.exists(os.path.join(folder, "orca.wfx"))
+
+
+def _write_wfx_nuclei(path, atnums, electrons, core=0):
+    """A .wfx header with nuclei, as wfx_nuclei reads it."""
+    n = len(atnums)
+    lines = ["<Number of Nuclei>", f"   {n}", "</Number of Nuclei>",
+             "<Number of Electrons>", f"   {electrons}", "</Number of Electrons>",
+             "<Number of Core Electrons>", f"   {core}", "</Number of Core Electrons>",
+             "<Atomic Numbers>", " ".join(str(z) for z in atnums), "</Atomic Numbers>",
+             "<Nuclear Charges>", " ".join(f"{z - (core if i == 0 else 0)}.0" for i, z in enumerate(atnums)), "</Nuclear Charges>",
+             "<Nuclear Cartesian Coordinates>"] + [f"0.0 0.0 {1.5 * i:.1f}" for i in range(n)] + [
+             "</Nuclear Cartesian Coordinates>", "<Primitive Centers>"]
+    Path(path).write_text("\n".join(lines) + "\n")
+
+
+class TestRejectWrongNucleusCount:
+    """A wavefunction of the wrong molecule (here: one atom, as from orca_atom53.gbw)
+    is caught by its nucleus count, also with an ECP, where electrons are not judged."""
+
+    HI_INP = "! B3LYP def2-SVP\n*xyz 0 1\nI 0.0 0.0 0.0\nH 0.0 0.0 1.6\n*\n"
+
+    def _folder(self, tmp_path, atnums, gbw_names=("orca.gbw",)):
+        (tmp_path / "orca.inp").write_text(self.HI_INP)
+        _write_wfx_nuclei(tmp_path / "orca.wfx", atnums, electrons=sum(atnums) - 28, core=28)
+        for name in gbw_names:
+            (tmp_path / name).write_bytes(b"gbw")
+        gen = tmp_path / "generator"
+        gen.mkdir()
+        (gen / "qtaim.json").write_text("{}")
+        return str(tmp_path)
+
+    def test_one_nucleus_for_two_atoms_is_discarded(self, tmp_path):
+        folder = self._folder(tmp_path, [53])
+        assert _reject_wavefunction_with_wrong_electron_count(folder, logging.getLogger("t"))
+        assert not os.path.exists(os.path.join(folder, "orca.wfx"))
+        assert not os.path.exists(os.path.join(folder, "generator", "qtaim.json"))
+        assert os.path.exists(os.path.join(folder, "orca.gbw"))
+
+    def test_matching_nucleus_count_is_left_alone(self, tmp_path):
+        folder = self._folder(tmp_path, [53, 1])
+        assert not _reject_wavefunction_with_wrong_electron_count(folder, logging.getLogger("t"))
+        assert os.path.exists(os.path.join(folder, "orca.wfx"))
+
+    def test_atomic_guess_gbw_is_not_a_source_to_reconvert_from(self, tmp_path):
+        folder = self._folder(tmp_path, [53], gbw_names=("orca_atom53.gbw",))
+        assert not _reject_wavefunction_with_wrong_electron_count(folder, logging.getLogger("t"))
+        assert os.path.exists(os.path.join(folder, "orca.wfx"))
+
+
+def test_gbw_analysis_checks_the_wavefunction_without_restart(tmp_path, monkeypatch):
+    # a plain rerun reuses the wavefunction on disk, so the check runs on every pass
+    from qtaim_gen.source.core import omol
+
+    calls = []
+
+    class Stop(Exception):
+        pass
+
+    def fake(folder, logger, preprocess_compressed=False):
+        calls.append(folder)
+        raise Stop
+
+    monkeypatch.setattr(omol, "_reject_wavefunction_with_wrong_electron_count", fake)
+    with pytest.raises(Stop):
+        omol.gbw_analysis(str(tmp_path), multiwfn_cmd="Multiwfn", orca_2mkl_cmd="orca_2mkl", restart=False)
+    assert calls == [str(tmp_path)]
 
 
 class TestCompiledChargeSum:
