@@ -67,3 +67,24 @@ The summary gives, for actinide and other folders separately:
 - timings;
 - failed Multiwfn steps by exit status;
 - listed folders that produced no output.
+
+## 5. Audit an engine tree against Multiwfn
+
+```bash
+PYTHONPATH=$CODE python $CODE/scripts/nersc/audit_prod.py $WORK/prod_l1 --ref $WORK/mwfn_l0 --tsv $WORK/prod_l1_audit.tsv
+```
+
+Reads both trees only. Per folder:
+- charges summing to the net charge (hirshfeld, adch, cm5, becke; 0.02 e);
+- fuzzy spin summing to mult - 1;
+- fuzzy densities and the charge engine's grid summing to the all-electron count (1e-3 relative);
+- Poincare-Hopf (kept and full set);
+- an NCP on every actinide, plus the nucleus-frame and precision-limited counts;
+- routines recorded as permanently skipped.
+
+With `--ref`, for folders validated in both trees, it also reports:
+- the largest per-atom difference per charge and fuzzy scheme and for fuzzy_bond, against the 0.03 e acceptance;
+- the ALIE values;
+- QTAIM atom and bond key sets, including actinide NCPs found by only one side.
+
+The TSV has one row per folder with its flags.
