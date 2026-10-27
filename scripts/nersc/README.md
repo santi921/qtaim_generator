@@ -88,3 +88,21 @@ With `--ref`, for folders validated in both trees, it also reports:
 - QTAIM atom and bond key sets, including actinide NCPs found by only one side.
 
 The TSV has one row per folder with its flags.
+
+## 6. Santiago's benchmark runs (santi_benchmarks)
+
+`stage_benchmarks.py` selects the finished jobs and stages ORCA-opt outputs; it reads the sources only.
+- **multi_spin:** each job's latest `multi_spin_jobs.sqlite3` row must have status 1.
+- **wave_2:** only `CfK3C22H36OCl4-ZORA_PBE0`, the one job that isn't in multi_spin.
+- **gbw:** a non-empty `orca.gbw` is required.
+- **ORCA-opt outputs:** the newest `flux-*.out` is copied to `<results>/<rel>/orca.out`.
+
+Results go to their own tree (`prod_l1_santi`), never merged into `prod_l1`.
+
+```bash
+SB=/pscratch/sd/s/santiago/santi_benchmarks
+python $CODE/scripts/nersc/stage_benchmarks.py --raw $SB/raw --db $SB/raw/multi_spin/multi_spin/multi_spin_jobs.sqlite3 \
+  --results $WORK/prod_l1_santi --out_dir $WORK [--dry_run]
+sbatch -J santi --export=ALL,CODE=$CODE,SRC=$SB/raw,LIST=$WORK/santi_jobs.txt,TREE=prod_l1_santi,ENGINE=1,QTAIM_ENGINE=1,FULL_SET=0,N=50 \
+  --array=0-$(( ($(wc -l < $WORK/santi_jobs.txt) + 49) / 50 - 1 )) $CODE/scripts/nersc/actinide_test.slurm
+```
