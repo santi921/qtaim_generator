@@ -32,6 +32,9 @@ FIXTURE_DUPLICATE = str(TEST_FILES / "minimal_duplicate_energy.out")
 FIXTURE_UKS = str(TEST_FILES / "minimal_uks.out")
 FIXTURE_ROKS_UNSORTED = str(TEST_FILES / "minimal_roks_unsorted.out")
 FIXTURE_TWO_ORBITAL_SECTIONS = str(TEST_FILES / "minimal_two_orbital_sections.out")
+# minimal_duplicate_energy.out with its last SCF CONVERGENCE block garbled as in
+# openac semiquinone x2c_CfC84N3H114O9 (two processes' output interleaved in one line)
+FIXTURE_GARBLED_SCF = str(TEST_FILES / "minimal_garbled_scf_convergence.out")
 
 
 # ── Fixtures ──────────────────────────────────────────────────────────
@@ -159,6 +162,19 @@ class TestTruncatedFile:
         """Parsing truncated file should not raise."""
         result = parse_orca_output(FIXTURE_TRUNCATED)
         assert isinstance(result, dict)
+
+
+class TestGarbledScfConvergence:
+
+    def test_garbled_lines_do_not_abort_the_parse(self):
+        result = parse_orca_output(FIXTURE_GARBLED_SCF)
+        assert result["final_energy_eh"] == pytest.approx(-200.987654321099, rel=1e-12)
+        sc = result["scf_convergence"]
+        # no value after "..." on the garbled energy line: left out, not taken from the line
+        assert "energy_change" not in sc
+        assert sc["diis_error"] == pytest.approx(6.6666e-07, rel=1e-3)
+        assert sc["max_density_change"] == pytest.approx(8.8888e-04, rel=1e-3)
+        assert sc["rms_density_change"] == pytest.approx(7.7777e-06, rel=1e-3)
 
 
 # ── Duplicate section handling (last occurrence wins) ────────────────

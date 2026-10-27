@@ -60,6 +60,26 @@ def parse_orca_float(value_str: str) -> Optional[float]:
         return None
 
 
+# SCF CONVERGENCE lines: "  Last Energy change   ...   5.5e-09  Tolerance :   1.0e-08"
+_SCF_CONVERGENCE_LINES = (
+    ("MAX-Density change", "max_density_change"),
+    ("RMS-Density change", "rms_density_change"),
+    ("Energy change", "energy_change"),
+    ("DIIS Error", "diis_error"),
+)
+
+
+def _value_after_dots(line: str) -> Optional[float]:
+    """The number after "..." on an ORCA "label ... value" line; None when the line
+    lacks "..." or the token is not a number. Long parallel runs can interleave two
+    processes' output into one line ("Last Energy change   -06  Tolerance :")."""
+    parts = line.split("...", 1)
+    if len(parts) < 2:
+        return None
+    tokens = parts[1].split()
+    return parse_orca_float(tokens[0]) if tokens else None
+
+
 def _atom_key(index_0based: int, element: str) -> str:
     """Format atom key as '{1-indexed}_{Element}'."""
     return f"{index_0based + 1}_{element.strip()}"
@@ -487,14 +507,12 @@ def parse_orca_output(orca_out_path: str) -> dict:
                         result["scf_convergence"] = scf_convergence
                         state = OrcaParseState.IDLE
                         continue
-                    if "Energy change" in line:
-                        scf_convergence["energy_change"] = parse_orca_float(line.split("...")[1].split()[0])
-                    elif "MAX-Density change" in line:
-                        scf_convergence["max_density_change"] = parse_orca_float(line.split("...")[1].split()[0])
-                    elif "RMS-Density change" in line:
-                        scf_convergence["rms_density_change"] = parse_orca_float(line.split("...")[1].split()[0])
-                    elif "DIIS Error" in line:
-                        scf_convergence["diis_error"] = parse_orca_float(line.split("...")[1].split()[0])
+                    for label, key in _SCF_CONVERGENCE_LINES:
+                        if label in line:
+                            value = _value_after_dots(line)
+                            if value is not None:
+                                scf_convergence[key] = value
+                            break
 
                 # ── ORBITAL ENERGIES ──────────────────────────────
                 elif state == OrcaParseState.ORBITAL_ENERGIES:
