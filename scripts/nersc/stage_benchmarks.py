@@ -71,7 +71,11 @@ def newest_flux(folder):
 def latest_db_rows(db):
     """(lot, category, name, spin) -> (status, note, run_type) of its most recent check."""
     rows = {}
-    with sqlite3.connect(db) as c:
+    # read-only: a plain connect on a wrong path silently creates an empty database
+    with sqlite3.connect(f"file:{os.path.abspath(db)}?mode=ro", uri=True) as c:
+        tables = {r[0] for r in c.execute("select name from sqlite_master where type='table'")}
+        if "jobs" not in tables:
+            raise SystemExit(f"{db}: no 'jobs' table (tables: {sorted(tables)}); is this check_multi_spin.py's database?")
         for lot, cat, name, spin, status, note, run_type, checked in c.execute(
                 "select lot, category, name, spin, status, note, run_type, checked_at from jobs"):
             key = (lot, cat, name, spin)
