@@ -82,6 +82,13 @@ Planarity (other_geometry, surface_engine.planarity): a molecule with no heavy a
 mpp_heavy = sdp_heavy = 0; Multiwfn fits a plane to an empty selection and prints MPP NaN
 and SDP 0 (otherfunc.f90 calcMPP). Values otherwise match Multiwfn at print precision
 (validation_ledger.md section 3).
+Wavefunction conversion (`--native_convert`, core/wavefunction.py): ORCA normalizes the
+h(+3,-3,+4,-4) functions to -1, so their coefficients change sign. Multiwfn's readmolden does
+this for alpha orbitals only (fileIO.f90:4613-4615; the f and g branches flip both spins);
+the converter flips both spins, which ORCA's orca_plot confirms. It changes open-shell jobs
+with h functions in the basis (the X2C-*all actinide bases): charges up to 6e-5 e,
+actinide-ligand BCP density 3e-4 relative (validation_ledger.md section 4b). `multiwfn_h`
+mode reproduces Multiwfn for parity checks.
 
 ### Parity across levels of theory
 

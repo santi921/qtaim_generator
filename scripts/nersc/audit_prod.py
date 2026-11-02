@@ -7,7 +7,10 @@ the all-electron count; Poincare-Hopf (kept and full set); an NCP on every actin
 the nucleus-frame and precision-limited counts; far-from-origin heavy nuclei; routines
 recorded as permanently skipped. With --ref, for folders validated in both trees: the
 largest per-atom difference per charge and fuzzy scheme, fuzzy_bond and the ALIE values,
-and whether the QTAIM atom and bond sets are the same.
+whether the QTAIM atom and bond sets are the same, and on the shared CPs the largest
+change in density, Laplacian (relative), spin density and position (all CPs, and the CPs
+on or bonded to an actinide). The reference is any tree of the same jobs: Multiwfn, or a
+run with another wavefunction conversion.
 
     python scripts/nersc/audit_prod.py WORK/prod_l1 [--ref WORK/mwfn_l0] [--tsv audit.tsv]
 """
@@ -31,6 +34,7 @@ NELEC = re.compile(r"nelec grid ([0-9.]+) of")
 MAX_DIFF_E = 0.03
 SUM_TOL_E = 0.02
 NELEC_TOL_REL = 1e-3
+QTAIM_REL = ("density_all", "lap_e_density")
 
 
 def load(path):
@@ -127,7 +131,7 @@ def audit(folder):
     return rec
 
 
-def compare(new_folder, ref_folder):
+def compare(new_folder, ref_folder, actinide_atoms=()):
     """Largest per-atom (per-pair) difference of each scheme present in both trees,
     relative differences of the ALIE values, and QTAIM key-set agreement."""
     out = {}
@@ -150,6 +154,21 @@ def compare(new_folder, ref_folder):
     kb = {k for k in qb if not k.startswith("_")}
     out["qtaim_only_new"] = sorted(ka - kb)
     out["qtaim_only_ref"] = sorted(kb - ka)
+    act = set(actinide_atoms)
+    for k in ka & kb:
+        tags = ("all", "act") if act & set(k.split("_")) else ("all",)
+        x, y = qa[k], qb[k]
+        diffs = {}
+        for f in QTAIM_REL:
+            if isinstance(x.get(f), (int, float)) and isinstance(y.get(f), (int, float)):
+                diffs[f"rel_qt_{f}"] = abs(x[f] - y[f]) / max(abs(y[f]), 1e-12)
+        if isinstance(x.get("spin_density"), (int, float)) and isinstance(y.get("spin_density"), (int, float)):
+            diffs["abs_qt_spin_density"] = abs(x["spin_density"] - y["spin_density"])
+        if x.get("pos_ang") and y.get("pos_ang"):
+            diffs["qt_pos_ang"] = float(np.linalg.norm(np.subtract(x["pos_ang"], y["pos_ang"])))
+        for t in tags:
+            for key, v in diffs.items():
+                out[f"{key}_{t}"] = max(out.get(f"{key}_{t}", 0.0), v)
     out["ph_ref"] = (qb.get("_meta") or {}).get("poincare_hopf")
     return out
 
@@ -161,7 +180,7 @@ def pct(x, q):
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("tree")
-    p.add_argument("--ref", help="Multiwfn tree of the same jobs (same relative paths)")
+    p.add_argument("--ref", help="reference tree of the same jobs (same relative paths), e.g. Multiwfn")
     p.add_argument("--tsv", help="write one row per folder here")
     args = p.parse_args()
     logs = glob.glob(os.path.join(args.tree, "**", "gbw_analysis.log"), recursive=True)
@@ -177,7 +196,7 @@ def main():
             ok_ref, _ = validated(ref)
             rec["ref_validated"] = ok_ref
             if ok_ref:
-                rec.update(compare(folder, ref))
+                rec.update(compare(folder, ref, rec["actinide_atoms"]))
         rows.append(rec)
 
     done = [r for r in rows if r["validated"]]
@@ -228,6 +247,14 @@ def main():
         print(f"actinide NCP only in the engine output (Multiwfn lost it): {len(gained)} folders; "
               f"only in Multiwfn's: {len(lost)}")
         print(f"Multiwfn Poincare-Hopf != 1 in {sum(r.get('ph_ref') != 1 for r in both)}/{len(both)}")
+        print("\nQTAIM properties on shared CPs (per-folder max; act = CPs on or bonded to an actinide)")
+        print("| quantity | n | median | p99 | max |")
+        print("| --- | --- | --- | --- | --- |")
+        for key in [f"{q}_{t}" for t in ("all", "act") for q in
+                    [f"rel_qt_{f}" for f in QTAIM_REL] + ["abs_qt_spin_density", "qt_pos_ang"]]:
+            x = np.array([r[key] for r in both if key in r])
+            if len(x):
+                print(f"| {key} | {len(x)} | {pct(x, 50):.1e} | {pct(x, 99):.1e} | {x.max():.1e} |")
 
     if args.tsv:
         cols = sorted({k for r in rows for k in r} - {"job"})
