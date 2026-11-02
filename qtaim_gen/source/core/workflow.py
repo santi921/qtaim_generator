@@ -231,6 +231,7 @@ def process_folder(
     charge_engine: bool = False,
     qtaim_engine: bool = False,
     engine_subprocess: bool = True,
+    native_convert: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Process a single folder and return a small status dict.
 
@@ -354,6 +355,7 @@ def process_folder(
             charge_engine=charge_engine,
             qtaim_engine=qtaim_engine,
             engine_subprocess=engine_subprocess,
+            native_convert=native_convert,
         )
         t1: float = time.time()
         rerun_ok = bool(tf_validation)
@@ -444,6 +446,7 @@ def process_folder_alcf(
     charge_engine: bool = False,
     qtaim_engine: bool = False,
     engine_subprocess: bool = True,
+    native_convert: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Process a single folder and return a small status dict.
 
@@ -655,6 +658,7 @@ def process_folder_alcf(
             charge_engine=charge_engine,
             qtaim_engine=qtaim_engine,
             engine_subprocess=engine_subprocess,
+            native_convert=native_convert,
         )
         t1: float = time.time()
         rerun_ok = bool(tf_validation)

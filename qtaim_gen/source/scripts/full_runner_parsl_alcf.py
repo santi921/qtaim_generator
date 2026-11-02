@@ -290,6 +290,20 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
 
     parser.add_argument(
+        "--native_convert",
+        nargs="?",
+        const="fixed",
+        default=None,
+        choices=["fixed", "multiwfn_h"],
+        help=(
+            "write orca.wfx from orca_2mkl's molden with core/wavefunction.py instead of Multiwfn's "
+            "convert step (needs --wfx, the default). 'fixed' (the value when the flag is given alone) "
+            "gives ORCA's h functions their sign on both spins; 'multiwfn_h' reproduces Multiwfn's "
+            "alpha-only flip, for parity checks. orca_2mkl still runs"
+        ),
+    )
+
+    parser.add_argument(
         "--charge_engine",
         action="store_true",
         help=(
@@ -404,6 +418,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     recheck_fuzzy = bool(getattr(args, "recheck_fuzzy", False))
     charge_engine = bool(getattr(args, "charge_engine", False))
     qtaim_engine = bool(getattr(args, "qtaim_engine", False))
+    native_convert = getattr(args, "native_convert", None)
 
     # parsl args
     type_runner: str = str(getattr(args, "type_runner", "local"))
@@ -550,6 +565,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             charge_engine=charge_engine,
             qtaim_engine=qtaim_engine,
             engine_subprocess=engine_subprocess,
+            native_convert=native_convert,
         )
         for f in folders_run
     ]
