@@ -1,0 +1,160 @@
+# Engine validation ledger
+
+Every validation run of the native engines (charge, surface, QTAIM) against Multiwfn, HORTON,
+gbasis, critic2, extended precision or physical invariants. One row per run, with the
+reference, the data, the result and where the raw output lives.
+
+State as of 2026-11-02, branch `feat/charge-engine` (098e2ab). Companion documents:
+`README.md` (decisions, divergence changelog), `qtaim_verification_campaign.md` (QTAIM
+tiers 1-3), `mbis_converged.md` (MBIS).
+
+## How to read this
+
+- **Reference kinds.**
+  - *Multiwfn parity*: the engine reproduces Multiwfn 3.8 on the same wavefunction. The
+    bar is Multiwfn's print precision, since Multiwfn's output is text.
+  - *Independent code*: HORTON 3 (gbasis, horton-part), critic2. Checks the kernels or
+    the method, not the parity.
+  - *Extended precision*: an 80-bit long-double evaluation, used to decide which code is
+    right where two disagree.
+  - *Invariants*: physical checks that need no reference (charge and spin sums, electron
+    count on the grid, Poincare-Hopf, an NCP on every nucleus).
+- **Engine version.** Results are only as current as the code they ran on. The column
+  "code" gives the branch or commit where it was recorded. Section 7 lists which current
+  behaviours have no validation on current code.
+- **Numbers** are the largest per-atom (or per-point) absolute difference unless marked
+  relative ("rel"). Charges and populations are in e, positions in Bohr, planarity in
+  Angstrom.
+- "Same as Multiwfn" in this document always means "within the precision Multiwfn
+  prints".
+
+## 1. Summary
+
+- **Charge and fuzzy routines** (full_set 0 and 1) match Multiwfn at print precision on
+  every set run so far: 6 to 419 jobs per set, up to 342 atoms, ECP with EDF, lanthanides,
+  actinides (X2C and ECP), open shells up to multiplicity 11. The largest charge
+  difference seen anywhere is 1.12e-6 e (ADC-Becke, LRC full_set 1).
+- **QTAIM kernels** agree with gbasis to a median 7.5e-14 rel (rho) on 100
+  wavefunctions; where they differ more, 80-bit evaluation sides with the engine. The CP
+  search reproduces Multiwfn's CP sets exactly in its Multiwfn-compatible mode. In engine
+  mode it finds every CP Multiwfn finds (0 missing on 1498 LRC jobs and 419 actinide
+  jobs) plus CPs Multiwfn misses.
+- **Gaps:** converged MBIS (the current default) has no independent reference; the ALIE
+  difference on the NERSC actinides (3.4e-5 rel) is unexplained; engine-only CPs are not
+  yet confirmed by critic2; no run covers double hybrids, HF, Cartesian basis sets or a
+  systematic ORCA 5 vs 6 comparison.
+
+## 2. Charge engine (`core/charge_engine.py`)
+
+Routines: hirshfeld, adch, cm5, becke (Multiwfn's ADC-corrected Becke), hirsh and becke
+fuzzy density and spin, fuzzy_bond (full_set 0); vdd, mbis, mbis fuzzy density and spin
+(full_set 1).
+
+| date | reference | data | result | code | raw output |
+|---|---|---|---|---|---|
+| 2026-10-04 | Multiwfn parity, local | 6 jobs, 12-178 atoms (ECP, lanthanide, open shell) | all 8 full_set 0 schemes within 5.8e-9 e | first engine (one-pass) | `tests/test_files/charge_engine/` fixtures |
+| 2026-10-04 | Multiwfn parity, local | 87 wfx_pull jobs (`data/cross_validation_wfns/wfx_pull`): 7 OMol verticals, 61 elements, 25 ECP, 43 open shell, mult 1-11, charge -5 to +4, ORCA 6.0.0 | all 9 schemes pass; charges within 7.9e-8 e, fuzzy_bond within 5e-7 | fuzzy_bond added | session scratchpad (not kept) |
+| 2026-10-06 | Multiwfn parity, local | 18 references (vdd, mbis, mbis fuzzy; ECP+EDF, lanthanides, mult up to 11) | print precision | 0ae37d9..df2db4e | `tests/test_files/charge_engine/` |
+| 2026-10-06 | Multiwfn parity, LRC | tm_react, 194 jobs, engine from scratch vs fresh Multiwfn on the same node | all 9 schemes pass; charges within 1.1e-6 e, fuzzy_bond 5e-7 | feat/charge-engine | LRC `engine_test` tree (runbook `data/engine_test_2026-10/`) |
+| 2026-10-06 | stored Multiwfn data, LRC | tm_react, 1853 folders merged into stored results | all 9 schemes pass on clean records; non-engine data changed in 5 | feat/charge-engine | same |
+| 2026-10-12 | Multiwfn parity, LRC, full_set 1 | tm_react, 191 of 200 jobs (113 open shell; 9 lost to preemption stale locks) | 13 schemes + 8 ALIE fields pass; max 5.03e-9 e except adch 4.73e-7, becke 1.12e-6, fuzzy_bond 5e-7; non-engine data changed in 0 | 568d6ad | LRC trees `ref_l1`, `scratch_l1c` |
+| 2026-10-13 | Multiwfn parity, local | 156 actinide nitrates (`data/actinide_dev/nitrates_dev`): Th, U, Np, Pu; 8 functionals x X2C-SVP/TZVP/TZVPPall + wB97M-V def2-SVP/TZVPD (ECP); ORCA 6.1 | charges within 1.3e-8 e (Pu ADCH/Becke), fuzzy_bond 5e-7, full_set 1 | fix/engine-mixed-records | `data/actinide_dev/work/{multiwfn,engine}` |
+| 2026-10-25 | Multiwfn parity, NERSC | openac: the 419 jobs with a Multiwfn-mode run (`mwfn_l0`, 440-job sample) | all charge and fuzzy schemes within 7.4e-8 e (median 5e-9), fuzzy_bond 5e-7 | feat/charge-engine, PRs #63-#68 | NERSC `actinide_test/prod_l1_audit.tsv` (`audit_prod.py --ref`) |
+
+**MBIS** (`mbis_converged.md`, 2026-10-15). The default (`MBIS_MODE = "converged"`)
+deliberately diverges from Multiwfn, which stops when no charge moves by 1e-4 e in a cycle.
+`--mbis_mode multiwfn` keeps the parity mode, which the rows above test.
+
+| check | data | result |
+|---|---|---|
+| converged fit vs plain iteration far past Multiwfn's rule | 35 molecules (27 cross-validation, 5 nitrates, 3 clusters) | within 2.5e-6 e on jobs that do not stall |
+| Multiwfn's rule vs converged, Z <= 86 | 27 jobs | 3 off by more than 0.03 e, 7 by more than 0.005 e |
+| Multiwfn's rule vs converged, actinides | 5 jobs | 0.03-0.38 e |
+| fitted guess vs Multiwfn's guess | 35 jobs | 32 within 0.005 e; the 3 that differ have the better objective |
+
+## 3. Surface engine (`core/surface_engine.py`, other_alie)
+
+| date | reference | data | result | code | raw output |
+|---|---|---|---|---|---|
+| 2026-10-06 | Multiwfn parity, local | 16 references (incl. ECP+EDF, lanthanides) | identical mesh (vertex, edge and face counts) and all ALIE statistics at print precision | 0ae37d9..df2db4e | `tests/test_files/charge_engine/` |
+| 2026-10-12 | Multiwfn parity, LRC | tm_react 191 jobs (full_set 1 run above) | all 8 ALIE fields pass | 568d6ad | LRC `ref_l1`, `scratch_l1c` |
+| 2026-10-13 | Multiwfn parity, local | 156 actinide nitrates | pass | fix/engine-mixed-records | `data/actinide_dev/work` |
+| 2026-10-25 | Multiwfn parity, NERSC | openac 419 | ALIE values median 1.2e-5, max 3.4e-5 rel | PRs #63-#68 | `prod_l1_audit.tsv` |
+
+The NERSC difference is larger than the local and LRC runs. Its cause (print rounding of
+the statistics, the mesh, or the Multiwfn build) has not been checked.
+
+## 4. QTAIM engine (`core/qtaim_engine.py`, `cp_search.py`, `esp.py`)
+
+### 4a. Point properties and kernels
+
+| date | reference | data | result | raw output |
+|---|---|---|---|---|
+| 2026-10-08 | Multiwfn parity at Multiwfn's CP positions | 5 jobs, all four CP types | every property within 4.8e-10 rel (ellipticity, eta 5e-7) | `scripts/qtaim_reference.py` |
+| 2026-10-09 | gbasis (HORTON), full precision | 93 local wavefunctions, 2-274 atoms, 25 with EDF, about 140,000 points | median rel: rho 7.5e-14, gradient 3.4e-13, Hessian 1.7e-12, Laplacian 2.8e-12, G 4.0e-13 | `scripts/qtaim_horton_check.py` |
+| 2026-10-09 | finite differences | EDF terms | gradient and Hessian within 2.7e-7 (step-size limit) | same |
+| 2026-10-09 | 80-bit extended precision | the one outlier (17-atom Hf ECP, rho at 0.07-0.16 Bohr from Hf) | engine within 7.5e-14 to 1e-12 of 80-bit; gbasis off by 1.2e-7 to 3.2e-7 | same |
+| 2026-10-10/12 | gbasis + 80-bit | 7 jobs, 147-342 atoms | worst point rel: rho 1.8e-12, Laplacian 6.3e-11; 80-bit shows the excess is gbasis roundoff (near-zero Laplacian) or the shared exp(-40) screening (far field) | same |
+| 2026-10-12 | gbasis | 5 wavefunction types: ROKS, closed shell, UKS, closed shell + EDF, UKS + EDF | ELF 1.9e-12, LOL 9.5e-13, ALIE 5.6e-13, spin 8.3e-10 rel; ROKS alpha/beta 1.8e-15 | same |
+| 2026-10-09/12 | stored Multiwfn CPprop.txt, LRC tier 2 | 1500 sampled jobs (5A_elytes, rgd_uks, tm_react) | 1498 ok, 2 corrupt references; 3 BCP Laplacians at 3.2e-8 to 1.5e-7 rel (position rounding suspected, unconfirmed); 15-job control with fresh Multiwfn: identical | `data/engine_test_2026-10/qverify_results` (qverify_v2) |
+| 2026-10-12 | Multiwfn parity (ESP at CPs, Multiwfn's Fmch Boys function) | 97 jobs | esp_e within 4.9e-10 | feat/qtaim-esp |
+| 2026-10-12 | gbasis (ESP, exact Boys) | 26 jobs | within 8.9e-14 | same |
+| 2026-10-12 | Multiwfn (ESP, exact Boys = production default) | 97 jobs | 3.8e-9 to 7.4e-9 rel: Multiwfn's Fmch, a recorded divergence | same |
+
+### 4b. CP search, bond paths, topology
+
+| date | reference | data | result | raw output |
+|---|---|---|---|---|
+| 2026-10-12 | Multiwfn parity (Multiwfn-compatible seeds) | 88 local jobs + 9 cost-ladder jobs (12-342 atoms) | identical CP sets, positions within 8.4e-13 Bohr, equal seed counts | feat/qtaim-cp-search |
+| 2026-10-12 | Multiwfn parity (all-Multiwfn modes through `parse_qtaim`) | 87 jobs | identical qtaim.json | same |
+| 2026-10-12 | Multiwfn parity (bond paths) | Multiwfn mode | 1485 of 1486 pairs equal | same |
+| 2026-10-12 | Poincare-Hopf repair (reseeding, type-aware dedup) | 5 Multiwfn failures (`data/engine_test_2026-10/ph_fail`) + 88 local jobs | all 5 repaired; nothing Multiwfn finds is lost; Poincare-Hopf 1 on all 88 | qtaim_engine_plan.md 6d |
+| 2026-10-13/16 | heavy nuclei far from the origin (nucleus frame) | 9 local X2C U/Th jobs; LRC UCl6 (U 26 Bohr from origin) | NCP found in all (Multiwfn lost it in 5 of 9 and in UCl6); density and Laplacian unchanged to 4e-16 rel at shifts up to 100 Bohr | README.md divergence changelog |
+| 2026-10-13 | Multiwfn parity | 156 actinide nitrates (actinide at the origin) | identical CP sets, Poincare-Hopf 1, properties at print precision | `data/actinide_dev/work` |
+| 2026-10-22 | stored Multiwfn data, LRC (qeng2) | 1498 jobs | Poincare-Hopf (kept set) 1 in 1494 vs 1455 for stored Multiwfn; 0 missing non-weak CPs; every CP-set difference is an extra engine CP on a job where stored Multiwfn fails Poincare-Hopf; properties within 2e-9 rel except esp_total (4.6e-2 rel, likely cancellation, unchecked) | `data/engine_test_2026-10/qverify_results/qeng2_*.jsonl` |
+| 2026-10-25 | Multiwfn parity, NERSC | openac 419 | identical atom and bond sets in 327; engine-only bonds in 92, Multiwfn-only in 0; 74 of the 92 involve the actinide, 68 of them far from the origin with Multiwfn Poincare-Hopf failing | `prod_l1_audit.tsv` |
+
+## 5. Invariant audits (no reference)
+
+`scripts/nersc/audit_prod.py`: charge sums, spin sums, fuzzy populations and grid electron
+count against the all-electron count, an NCP on every actinide, Poincare-Hopf.
+
+| date | data | result | raw output |
+|---|---|---|---|
+| 2026-10-25/27 | openac `prod_l1`, 4235 jobs (8 functionals x 3 X2C bases + 2 OMol levels) | no folder flagged; electron count within 3.9e-5 rel (median 1.1e-6, on the first 3602); Poincare-Hopf (kept set) 1 everywhere; nucleus frame used in 454 | NERSC `actinide_test/prod_l1_audit.tsv` |
+| 2026-10-27 | multi-spin benchmarks `prod_l1_santi`, 179 jobs | no folder flagged | NERSC `actinide_test/prod_l1_santi_audit.tsv` |
+
+## 6. Reference cross-checks (Multiwfn itself)
+
+These test Multiwfn and the conventions, not the engine. They decide which conventions
+the engine copies.
+
+| date | comparison | data | result | raw output |
+|---|---|---|---|---|
+| 2026-07-28 | HORTON Hirshfeld vs Multiwfn hirshfeld | 87 wfx_pull (62 all-electron for Hirshfeld) | r = 0.9993, median 0.004 e over 1030 atoms | `data/cross_validation_wfns/horton_comparison.csv` |
+| 2026-07-28 | HORTON Becke with Multiwfn's radii vs raw Multiwfn Becke | 87 jobs | r = 0.994, median 0.005 e; the shipped `becke` is ADC-corrected, not raw | same |
+| 2026-07-27 | HORTON MBIS vs Multiwfn MBIS | 1 molecule (aniBB, 12 atoms) | max 0.0028 e | session scratchpad |
+| 2026-07-28 | critic2 vs Multiwfn QTAIM | 1438 shared BCPs | median difference 0, r = 1.0000 for rho, Laplacian, energy densities; ELF/LOL differ by convention (r about 0.98); BCP sets identical in 89% of jobs | `data/cross_validation_wfns/critic2_comparison*.csv` |
+
+## 7. Gaps
+
+Current behaviours without a validation on current code, and checks not yet done:
+
+| gap | why it matters | suggested check |
+|---|---|---|
+| converged MBIS has no independent reference | it is the production default and moves actinide charges by up to 0.38 e from Multiwfn's rule | HORTON MBIS (horton-part) on the 87 wfx_pull + nitrates |
+| engine-only CPs not confirmed by critic2 | 92 openac jobs and the qeng2 extras rest on Poincare-Hopf alone | critic2 on the engine's CP positions (QTAIM P4) |
+| NERSC ALIE 3.4e-5 rel | larger than every other ALIE comparison | rerun Multiwfn and the engine on a few openac jobs locally |
+| qeng2 esp_total 4.6e-2 rel | unchecked | 80-bit or gbasis ESP at those CPs |
+| tier 2 3 BCP Laplacians (up to 1.5e-7 rel) | unconfirmed as position rounding | evaluate at perturbed positions |
+| determinism across thread counts (QTAIM criterion E) | not recorded | run 1, 4, 8 threads on the ladder |
+| level-of-theory matrix | double hybrids, HF, Cartesian basis sets, ROKS beyond one radical, ORCA 5 vs ORCA 6 not covered | tier 3 supplementary set |
+| results recorded on older code | the 87-job, 18-reference and 16-reference local sets predate the threading fixes (#63-#65) and the converged MBIS default | rerun the local sets on current code; they take minutes |
+| full_set 2 routines | still Multiwfn (bader, laplacian_bond, other_esp, grad_norm and laplacian fuzzy) | when engines exist |
+
+## 8. Adding a row
+
+For every new engine routine or validation run, add one row with: date, reference kind,
+data (where it lives, how many jobs, which elements and levels of theory), the worst
+difference with units, the code (commit or PR), and the raw-output location. A divergence
+from Multiwfn by design also goes in the changelog in `README.md`.

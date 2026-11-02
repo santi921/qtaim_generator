@@ -13,6 +13,7 @@ faster per job (median, same hardware, full_set 1).
 | qtaim_engine_plan.md | QTAIM engine: CP search, properties, bond paths, ESP, validation, phases |
 | remaining_routines_plan.md | every other Multiwfn / orca_2mkl step, by cost; wavefunction reader; EDF tables |
 | descriptor_engine_vision.md | descriptors Multiwfn has that we do not use, descriptors beyond Multiwfn, standalone engine sketch, shortlist |
+| validation_ledger.md | every engine validation run: reference, data, worst difference, code, raw output; known gaps |
 
 ## Decisions (2026-10-08)
 
