@@ -138,6 +138,34 @@ def test_orca5_effective_charges_replace_a_missing_pseudo_block(tmp_path):
         assert np.array_equal(override[k], with_pseudo[k]), k
 
 
+@pytest.mark.parametrize("name,compat", [("iodide_droplet", False), ("no_cc_pv5z", True)])
+def test_written_wfx_matches_multiwfn_file(tmp_path, name, compat):
+    """Every section but the title is Multiwfn's text; MO coefficients may differ in
+    the last printed digit (operation order in the spherical -> Cartesian products)."""
+    import re
+
+    from qtaim_gen.source.core.charge_engine import read_wfx
+    from qtaim_gen.source.core.wavefunction import read_orca_molden, write_wfx
+
+    molden, wfx = _paths(name)
+    out = tmp_path / "orca.wfx"
+    write_wfx(read_orca_molden(molden, mwfn_h_compat=compat), str(out))
+
+    def sections(text):
+        return dict(re.findall(r"<([^/>][^>]*)>\n(.*?)\n</\1>", text, re.S))
+
+    with open(wfx) as fh:
+        ref = sections(fh.read())
+    mine = sections(out.read_text())
+    assert set(ref) == set(mine)
+    coeff = "Molecular Orbital Primitive Coefficients"
+    for k in set(ref) - {"Title", coeff}:
+        assert ref[k] == mine[k], k
+    a, b = ref[coeff].split(), mine[coeff].split()
+    assert len(a) == len(b) and sum(x == y for x, y in zip(a, b)) / len(a) > 0.999
+    assert np.allclose(read_wfx(str(out))["coeffs"], read_wfx(wfx)["coeffs"], rtol=1e-10, atol=1e-300)
+
+
 @pytest.mark.parametrize("edit,message", [
     (lambda t: t.replace("orca", "other code").replace("ORCA", "other code"), "not an ORCA molden"),
     (lambda t: t.replace("\nf ", "\ni ", 1), "shells are not supported"),
