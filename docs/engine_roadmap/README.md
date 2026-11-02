@@ -13,6 +13,7 @@ faster per job (median, same hardware, full_set 1).
 | qtaim_engine_plan.md | QTAIM engine: CP search, properties, bond paths, ESP, validation, phases |
 | remaining_routines_plan.md | every other Multiwfn / orca_2mkl step, by cost; wavefunction reader; EDF tables |
 | descriptor_engine_vision.md | descriptors Multiwfn has that we do not use, descriptors beyond Multiwfn, standalone engine sketch, shortlist |
+| validation_ledger.md | every engine validation run: reference, data, worst difference, code, raw output; known gaps |
 
 ## Decisions (2026-10-08)
 
@@ -77,6 +78,10 @@ stop (population.f90 MBIS loop; 3 of 27 local jobs moved by more than 0.03 e, ac
 0.03-0.38 e); initial guess from a free-atom table fitted to the Hirshfeld proatoms instead of
 Multiwfn's shell rule; of several fixed points, the one with the smallest KL divergence over
 three guesses; Z 87-118 supported (6 shells), where Multiwfn refuses beyond Rn.
+Planarity (other_geometry, surface_engine.planarity): a molecule with no heavy atoms gets
+mpp_heavy = sdp_heavy = 0; Multiwfn fits a plane to an empty selection and prints MPP NaN
+and SDP 0 (otherfunc.f90 calcMPP). Values otherwise match Multiwfn at print precision
+(validation_ledger.md section 3).
 
 ### Parity across levels of theory
 
