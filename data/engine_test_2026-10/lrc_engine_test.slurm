@@ -1,7 +1,7 @@
 #!/bin/bash
-#SBATCH --account=ac_blau
+#SBATCH --account=pc_aditik
 #SBATCH --partition=lr7
-#SBATCH --qos=lr_lowprio
+#SBATCH --qos=lr_normal
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=8G
@@ -24,6 +24,8 @@
 #   sbatch -J ref1 --export=ALL,MODE=ref,FULL_SET=1,TREE=ref_l1 --array=0-3 lrc_engine_test.slurm
 #   sbatch -J scr1 --export=ALL,MODE=scratch,FULL_SET=1,TREE=scratch_l1,LIST=$WORK/jobs_ref.txt --array=0-3 lrc_engine_test.slurm
 
+# never on a blau recharge account, whatever the header or command line says
+case "${SLURM_JOB_ACCOUNT:-}" in *blau*) echo "refusing to run on account $SLURM_JOB_ACCOUNT"; exit 1 ;; esac
 source ~/.bashrc
 module load gcc
 conda activate ${CONDA_ENV:-qtaim_engine}   # separate env + checkout, see README
