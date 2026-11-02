@@ -72,7 +72,23 @@ deliberately diverges from Multiwfn, which stops when no charge moves by 1e-4 e 
 | Multiwfn's rule vs converged, actinides | 5 jobs | 0.03-0.38 e |
 | fitted guess vs Multiwfn's guess | 35 jobs | 32 within 0.005 e; the 3 that differ have the better objective |
 
-## 3. Surface engine (`core/surface_engine.py`, other_alie)
+## 3. Surface engine (`core/surface_engine.py`, other_alie and other_geometry)
+
+**Planarity** (other_geometry: MPP and SDP for all atoms and for heavy atoms, Angstrom).
+
+| date | reference | data | result | code | raw output |
+|---|---|---|---|---|---|
+| 2026-11-02 | Multiwfn parity, local, wfx nuclei | 353 production `other_geometry.out` with their orca.wfx (mostly actinide nitrates, joe_collab, edge cases) | all four values within 5.0e-7 (Multiwfn prints f12.6) | feat/engine-planarity | scratchpad `mpp_validate.py` |
+| 2026-11-02 | stored Multiwfn data, local, orca.inp geometry | 2673 `other.json` (OMol rmechdb, tm_react audit folders, edge cases) | MPP within 5.1e-7 everywhere; SDP over 5.1e-7 in 26 (full) and 18 (heavy) of 2673, max 3.7e-6 on two jobs whose two smallest singular values differ by 5e-5 relative: orca.inp carries fewer digits than the wfx Multiwfn read, and near a tie that moves the plane | same | same |
+| 2026-11-02 | local Multiwfn on test geometries | H2, H2O, CH4, SF6 | match, including CH4 and SF6, whose tied singular values make the plane arbitrary; H2 heavy-atom MPP is 0 where Multiwfn prints NaN (divergence) | same | `tests/test_files/charge_engine/planarity_reference.json` |
+
+Tied singular values: the engine takes numpy's SVD vector (LAPACK gesdd), Multiwfn calls
+dgesvd; both gave Multiwfn's SDP on every local case. The choice is reproducible for the
+same input and LAPACK build, but not unique: rotating CH4 or adding 1e-10 Angstrom of
+noise moves its SDP between 1.26 and 1.78 Angstrom (SF6 1.86-3.12). MPP is unaffected.
+No local molecule outside these test geometries has a non-trivial exact tie.
+
+**ALIE** (other_alie).
 
 | date | reference | data | result | code | raw output |
 |---|---|---|---|---|---|

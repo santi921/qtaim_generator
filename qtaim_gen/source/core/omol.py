@@ -1861,16 +1861,18 @@ def _run_surface_engine(
     logger: logging.Logger,
     restart: bool = False,
 ) -> bool:
-    """other_alie with core/surface_engine.py: writes other_alie.json (the flat
-    ALIE_* payload parse_other_doc_esp produces, compiled into other.json by
-    parse_multiwfn) and a 'surface_engine' timing."""
+    """other_geometry and other_alie with core/surface_engine.py: writes
+    other_geometry.json and other_alie.json (the flat payloads
+    parse_other_doc_geometry and parse_other_doc_esp produce, compiled into
+    other.json by parse_multiwfn) and a 'surface_engine' timing."""
     gen = os.path.join(folder, "generator")
     if restart:
         try:
             with open(os.path.join(gen, "timings.json")) as f:
                 done = json.load(f).get("surface_engine", 0) > 0
             with open(os.path.join(gen, "other.json")) as f:
-                done = done and json.load(f).get(_OTHER_MARKER_KEYS["other_alie"]) is not None
+                other = json.load(f)
+            done = done and all(other.get(_OTHER_MARKER_KEYS[r]) is not None for r in SURFACE_ENGINE_ROUTINES)
         except (OSError, json.JSONDecodeError, TypeError, AttributeError):
             done = False
         if done:
@@ -1887,12 +1889,18 @@ def _run_surface_engine(
 
     numba.set_num_threads(max(1, min(n_threads, numba.config.NUMBA_NUM_THREADS)))
     start = time.time()
+    nuclei = wfx_nuclei(wf_path)
+    if nuclei is None:
+        logger.error("surface_engine: no nuclei in %s", wf_path)
+        return False
     try:
+        geometry = surface_engine.planarity(nuclei[2], nuclei[0])
         out, meta = surface_engine.alie_surface(wf_path)
     except Exception as e:
         logger.error("surface_engine failed on %s: %s", wf_path, e)
         return False
     elapsed = time.time() - start
+    atomic_json_write(os.path.join(folder, "other_geometry.json"), geometry)
     atomic_json_write(os.path.join(folder, "other_alie.json"), out)
     _update_timing(folder, "surface_engine", elapsed, logger)
     logger.info(

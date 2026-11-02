@@ -442,6 +442,36 @@ def _d20_13(v):
     return float(f"{v:.12E}")
 
 
+def planarity(coords, atnums):
+    """Molecular planarity parameter (MPP) and span of deviation from plane (SDP),
+    as the production other_geometry step runs them (main function 26-3, calcMPP;
+    Lu, J. Mol. Model. 27, 263 (2021)), for all atoms and for the non-H atoms.
+    coords in Bohr, results in Angstrom, keyed as parse_other_doc_geometry keys them.
+
+    The plane passes through the centroid; its normal is the left singular vector
+    of the centred coordinates with the smallest singular value (ptsfitplane), with
+    0 for the singular values missing below 3 atoms. MPP is the RMS and SDP the span
+    max(d, 0) - min(d, 0) of the signed distances d to the plane. When the two
+    smallest singular values tie (spherical and symmetric tops) the plane is not
+    unique: MPP is the same for every choice, SDP is whatever numpy's SVD returns.
+    No heavy atoms gives 0 for both, where Multiwfn prints MPP NaN and SDP 0.
+    """
+    atnums = np.asarray(atnums)
+    out = {}
+    for tag, sel in (("full", np.ones(len(atnums), bool)), ("heavy", atnums != 1)):
+        mpp = sdp = 0.0
+        if sel.any():
+            x = coords[sel] - coords[sel].mean(axis=0)
+            u, s, _ = np.linalg.svd(x.T)
+            s = np.concatenate([s, np.zeros(3 - len(s))])
+            d = x @ u[:, np.argmin(s)]
+            mpp = float(np.sqrt(np.mean(d**2)) * B2A)
+            sdp = float((max(d.max(), 0.0) - min(d.min(), 0.0)) * B2A)
+        out[f"mpp_{tag}"] = mpp
+        out[f"sdp_{tag}"] = sdp
+    return out
+
+
 @limit_blas_threads
 def alie_surface(wfx_path, chunk_points=262144):
     t = {}
