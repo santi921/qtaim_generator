@@ -680,12 +680,17 @@ def test_fuzzy_recheck_does_not_rewrite_engine_values(tmp_path, monkeypatch):
 
 
 def test_recheck_helper_recognizes_engine_folders(tmp_path):
-    from qtaim_gen.source.data.multiwfn import ENGINE_ROUTINES
+    from qtaim_gen.source.data.multiwfn import CHARGE_ENGINE_VERSION, ENGINE_ROUTINES, engine_routines_at
     from qtaim_gen.source.scripts.helpers.recheck_fuzzy_folders import _engine_routines_of
 
     assert _engine_routines_of(str(tmp_path)) is None
     (tmp_path / "generator").mkdir()
     (tmp_path / "generator" / "timings.json").write_text(json.dumps({"hirshfeld": 2.0}))
     assert _engine_routines_of(str(tmp_path)) is None
+    # no version stamp: a version-1 engine, which left elf_fuzzy to Multiwfn
     (tmp_path / "generator" / "timings.json").write_text(json.dumps({"charge_engine": 4.0}))
+    assert _engine_routines_of(str(tmp_path)) == engine_routines_at(1)
+    assert "elf_fuzzy" not in _engine_routines_of(str(tmp_path))
+    (tmp_path / "generator" / "timings.json").write_text(
+        json.dumps({"charge_engine": 4.0, "_engine_versions": {"charge_engine": CHARGE_ENGINE_VERSION}}))
     assert _engine_routines_of(str(tmp_path)) == ENGINE_ROUTINES

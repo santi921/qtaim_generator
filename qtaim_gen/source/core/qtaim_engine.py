@@ -28,6 +28,7 @@ from qtaim_gen.source.core.charge_engine import (
     EXP_CUTOFF,
     _morton_order,
     _primitive_block_derivs,
+    ecp_atoms_without_edf,  # noqa: F401 (re-exported; callers import it from here)
     limit_blas_threads,
     mwfn_proatom_tables,
 )
@@ -107,11 +108,14 @@ _HESS_PAIRS = np.array([(0, 0), (1, 1), (2, 2), (0, 1), (0, 2), (1, 2)])
 
 
 @limit_blas_threads
-def density_derivatives(pts, wfx, basis, block=DERIV_BLOCK, hessian=True):
+def density_derivatives(pts, wfx, basis, block=DERIV_BLOCK, hessian=True, elf_only=False):
     """rho, its gradient and Hessian (MOs + EDF) at every point, and the MO-only
     parts point_properties needs. hessian=False returns only rho and its gradient
     (grad rho = 2 w . grad chi), which needs MO values but no MO gradients (rho_mo, grad_mo, spin, alpha/beta
-    densities and gradients, G components, K, the ALIE numerator).
+    densities and gradients, G components, K, the ALIE numerator). elf_only=True
+    returns rho, its gradient and the MO-only parts elf_lol needs, from first
+    derivatives only: no Hessian, K or ALIE numerator; the values it shares with
+    the full call are the same.
 
     Per block of spatially compact points: primitive values and derivatives for
     the groups whose exp-cutoff sphere reaches the block; MO values and gradients
@@ -125,14 +129,16 @@ def density_derivatives(pts, wfx, basis, block=DERIV_BLOCK, hessian=True):
     dspin = basis["occ_a"] - basis["occ_b"]
     open_shell = wavefunction_type(wfx) not in (0, 3)
     out = {"rho": np.zeros(n), "gradient": np.zeros((n, 3)), "h6": np.zeros((n, 6))}
-    extras = () if not hessian else (
-        ("rho_mo", ()), ("spin", ()), ("K", ()), ("alie_num", ()), ("grad_mo", (3,)),
-        ("G_xyz", (3,)), ("rho_a", ()), ("rho_b", ()), ("grad_a", (3,)), ("grad_b", (3,)))
+    second = hessian and not elf_only
+    extras = () if not (hessian or elf_only) else (
+        ("rho_mo", ()), ("spin", ()), ("grad_mo", (3,)), ("G_xyz", (3,)),
+        ("rho_a", ()), ("rho_b", ()), ("grad_a", (3,)), ("grad_b", (3,))
+    ) + ((("K", ()), ("alie_num", ())) if second else ())
     for key, shape in extras:
         out[key] = np.zeros((n,) + shape)
     if not n:
         out.pop("h6")
-        if hessian:
+        if second:
             out["hessian"] = np.zeros((0, 3, 3))
         return out
     order = _morton_order(pts)
@@ -150,9 +156,10 @@ def density_derivatives(pts, wfx, basis, block=DERIV_BLOCK, hessian=True):
         groups = np.flatnonzero(ga * d2[gc] <= EXP_CUTOFF)
         nc = glen[groups]
         cols = np.arange(nc.sum()) + np.repeat(gs[groups] - (np.cumsum(nc) - nc), nc)
-        prim = _primitive_block_derivs(blk, coords, groups, gc, ga, gs, ge, basis["lmn"], len(cols))
+        prim = _primitive_block_derivs(blk, coords, groups, gc, ga, gs, ge, basis["lmn"], len(cols),
+                                       2 if second else 1)
         C = ct[cols]
-        if not hessian:
+        if not (hessian or elf_only):
             phi = prim[0] @ C
             w = (phi * occ) @ C.T
             out["rho"][idx] = (phi * phi) @ occ
@@ -161,23 +168,24 @@ def density_derivatives(pts, wfx, basis, block=DERIV_BLOCK, hessian=True):
         m4 = (prim[:4].reshape(4 * nb, len(cols)) @ C).reshape(4, nb, C.shape[1])
         phi, dphi = m4[0], m4[1:]
         nphi = phi * occ
-        w = nphi @ C.T
         rho_mo = (phi * nphi).sum(axis=1)
         grad_mo = 2.0 * np.einsum("kpi,pi->pk", dphi, nphi)
-        h6 = np.empty((nb, 6))
-        for q, (i, j) in enumerate(_HESS_PAIRS):
-            h6[:, q] = 2.0 * ((dphi[i] * dphi[j]) @ occ + (w * prim[4 + q]).sum(axis=1))
         out["rho"][idx] = rho_mo
         out["gradient"][idx] = grad_mo
-        out["h6"][idx] = h6
         phi2 = phi * phi
         out["rho_mo"][idx] = rho_mo
         out["grad_mo"][idx] = grad_mo
         out["spin"][idx] = phi2 @ dspin
         out["G_xyz"][idx] = 0.5 * np.einsum("kpi,i->pk", dphi * dphi, occ)
-        out["K"][idx] = -0.5 * (w * (prim[4] + prim[5] + prim[6])).sum(axis=1)
-        if alie_w is not None:
-            out["alie_num"][idx] = phi2 @ alie_w
+        if second:
+            w = nphi @ C.T
+            h6 = np.empty((nb, 6))
+            for q, (i, j) in enumerate(_HESS_PAIRS):
+                h6[:, q] = 2.0 * ((dphi[i] * dphi[j]) @ occ + (w * prim[4 + q]).sum(axis=1))
+            out["h6"][idx] = h6
+            out["K"][idx] = -0.5 * (w * (prim[4] + prim[5] + prim[6])).sum(axis=1)
+            if alie_w is not None:
+                out["alie_num"][idx] = phi2 @ alie_w
         if open_shell:
             out["rho_a"][idx] = phi2 @ basis["occ_a"]
             out["rho_b"][idx] = phi2 @ basis["occ_b"]
@@ -196,7 +204,7 @@ def density_derivatives(pts, wfx, basis, block=DERIV_BLOCK, hessian=True):
         _edf_kernel(pts, coords, wfx["edf_center"], wfx["edf_exp"], wfx["edf_coef"],
                     out["rho"], out["gradient"], out["h6"])
     h6 = out.pop("h6")
-    if hessian:
+    if second:
         out["hessian"] = _hess_from6(h6)
     return out
 
@@ -305,14 +313,6 @@ def delta_g_hirsh(pts, rho, grad, wfx):
     atnums, radpos, table, npts_of, cut_of = tables
     return _delta_g_hirsh(np.ascontiguousarray(pts, dtype=float), rho, np.ascontiguousarray(grad),
                           wfx["coords"], atnums, radpos, table, npts_of, cut_of)
-
-
-def ecp_atoms_without_edf(wfx):
-    """Indices of ECP atoms (zeff < Z) with no EDF primitive: their core density
-    is missing, so rho, its Laplacian and the nuclear CPs there are wrong (a
-    uranium ECP job without EDF lost a nuclear CP and had every bond unpaired)."""
-    ecp = np.flatnonzero(wfx["zeff"] != wfx["atnums"])
-    return [int(i) for i in ecp if not np.any(wfx["edf_center"] == i)]
 
 
 def elf_lol(d, wfx):

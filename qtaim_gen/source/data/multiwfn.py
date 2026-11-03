@@ -19,6 +19,20 @@ ENGINE_ROUTINES = frozenset({
     "fuzzy_bond",
 }) | ENGINE_LEVEL1_ROUTINES | ENGINE_LEVEL2_ROUTINES | SURFACE_ENGINE_ROUTINES
 
+# charge-engine version, stamped into timings.json (TIMINGS_ENGINE_VERSIONS_KEY in
+# utils/validation.py) by every complete engine run. Bump it when a change alters
+# stored values or the routine set, and list the routines a version adds below, so a
+# folder from an older engine is not taken to hold engine values for them. A folder
+# with a charge_engine timing and no stamp ran version 1.
+CHARGE_ENGINE_VERSION = 2
+CHARGE_ENGINE_ROUTINES_ADDED = {2: ENGINE_LEVEL2_ROUTINES | {"elf_fuzzy"}}
+
+
+def engine_routines_at(version: int) -> frozenset:
+    """The ENGINE_ROUTINES a charge engine of this version computed."""
+    later = [r for v, r in CHARGE_ENGINE_ROUTINES_ADDED.items() if v > version]
+    return ENGINE_ROUTINES.difference(*later)
+
 
 def charge_data() -> str:
     """

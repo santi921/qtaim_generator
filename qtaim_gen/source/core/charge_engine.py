@@ -269,13 +269,14 @@ def orbital_values(pts, coords, basis, block=512):
 
 
 @njit(nogil=True, cache=True)
-def _primitive_block_derivs(pts, atcoords, groups, g_center, g_alpha, g_start, g_end, lmn, ncols):
+def _primitive_block_derivs(pts, atcoords, groups, g_center, g_alpha, g_start, g_end, lmn, ncols, nderiv=2):
     """_primitive_block plus first and second derivatives: out[q, point, column]
     with q = value, d/dx, d/dy, d/dz, d2/dx2, d2/dy2, d2/dz2, d2/dxdy, d2/dxdz,
     d2/dydz. For x^l exp(-a r^2) the 1D factors are f0 = x^l,
-    f1 = l x^(l-1) - 2a x^(l+1), f2 = l(l-1) x^(l-2) - 2a(2l+1) x^l + 4a^2 x^(l+2)."""
+    f1 = l x^(l-1) - 2a x^(l+1), f2 = l(l-1) x^(l-2) - 2a(2l+1) x^l + 4a^2 x^(l+2).
+    nderiv=1 returns only the first four rows (same values)."""
     n = pts.shape[0]
-    out = np.zeros((10, n, ncols))
+    out = np.zeros((4 if nderiv == 1 else 10, n, ncols))
     f = np.empty((3, 3))
     d = np.zeros(3)
     for ip in range(n):
@@ -310,18 +311,23 @@ def _primitive_block_derivs(pts, atcoords, groups, g_center, g_alpha, g_start, g
                         pkm1 = 1.0
                         for _ in range(lk - 1):
                             pkm1 *= u
+                    f[k, 0] = pk
+                    f[k, 1] = lk * pkm1 - 2.0 * alpha * pk * u
+                    if nderiv == 1:
+                        continue
                     pkm2 = 0.0
                     if lk >= 2:
                         pkm2 = 1.0
                         for _ in range(lk - 2):
                             pkm2 *= u
-                    f[k, 0] = pk
-                    f[k, 1] = lk * pkm1 - 2.0 * alpha * pk * u
                     f[k, 2] = lk * (lk - 1) * pkm2 - 2.0 * alpha * (2 * lk + 1) * pk + 4.0 * alpha * alpha * pk * u * u
                 out[0, ip, col] = f[0, 0] * f[1, 0] * f[2, 0] * e
                 out[1, ip, col] = f[0, 1] * f[1, 0] * f[2, 0] * e
                 out[2, ip, col] = f[0, 0] * f[1, 1] * f[2, 0] * e
                 out[3, ip, col] = f[0, 0] * f[1, 0] * f[2, 1] * e
+                if nderiv == 1:
+                    col += 1
+                    continue
                 out[4, ip, col] = f[0, 2] * f[1, 0] * f[2, 0] * e
                 out[5, ip, col] = f[0, 0] * f[1, 2] * f[2, 0] * e
                 out[6, ip, col] = f[0, 0] * f[1, 0] * f[2, 2] * e
@@ -1059,6 +1065,14 @@ def normalize(charge, zeff, nelec):
 # ---------------------------------------------------------------- driver
 
 
+def ecp_atoms_without_edf(wfx):
+    """Indices of ECP atoms (zeff < Z) with no EDF primitive: their core density
+    is missing, so rho, its Laplacian and the nuclear CPs there are wrong (a
+    uranium ECP job without EDF lost a nuclear CP and had every bond unpaired)."""
+    ecp = np.flatnonzero(wfx["zeff"] != wfx["atnums"])
+    return [int(i) for i in ecp if not np.any(wfx["edf_center"] == i)]
+
+
 @limit_blas_threads
 def run(wfx_path, nrad=75, nang=434, radcut=10.0, bond_nrad=45, bond_nang=170, full_set=0, mbis_mode=None,
         mbis_ecp=True):
@@ -1077,6 +1091,8 @@ def run(wfx_path, nrad=75, nang=434, radcut=10.0, bond_nrad=45, bond_nang=170, f
     open_shell = wfx["mult"] != 1
     has_ecp = bool((zeff != atnums).any())
     has_edf = len(wfx["edf_center"]) > 0
+    # an ECP atom without its EDF core density, even when other atoms have one
+    edf_missing = bool(ecp_atoms_without_edf(wfx))
     grid_pts, grid_wts = multiwfn_atom_grid(nrad, nang, radcut)
     rinv, aij = becke_pair_tables(atnums, coords)
 
@@ -1085,7 +1101,7 @@ def run(wfx_path, nrad=75, nang=434, radcut=10.0, bond_nrad=45, bond_nang=170, f
     if missing:
         skipped.append({"schemes": "hirshfeld family", "reason": "no_builtin_proatom", "elements": missing,
                         "routines": list(HIRSHFELD_FAMILY)})
-    if has_ecp and not has_edf:
+    if edf_missing:
         # valence-only density against all-electron proatoms would be inconsistent
         pro = None
         skipped.append({"schemes": "hirshfeld family", "reason": "ecp_without_edf", "routines": list(HIRSHFELD_FAMILY)})
@@ -1093,18 +1109,18 @@ def run(wfx_path, nrad=75, nang=434, radcut=10.0, bond_nrad=45, bond_nang=170, f
     # full_set >= 2 the gradient-norm and Laplacian fuzzy integrals
     level1 = full_set >= 1
     level2 = full_set >= 2
-    deriv_fuzzy = level2 and not (has_ecp and not has_edf)
+    deriv_fuzzy = level2 and not edf_missing
     if level2 and not deriv_fuzzy:
         # both include the EDF core density, as Multiwfn's fgrad / flapl
         skipped.append({"schemes": "derivative fuzzy", "reason": "ecp_without_edf",
                         "routines": list(DERIV_FUZZY_FAMILY)})
     # MBIS is defined for all-electron densities; with an ECP the EDF core density stands in
     # for the replaced electrons, and mbis_ecp=False skips MBIS for such records instead
-    mbis_ok = (level1 and int(atnums.max()) <= MBIS_MAX_Z and not (has_ecp and not has_edf)
+    mbis_ok = (level1 and int(atnums.max()) <= MBIS_MAX_Z and not edf_missing
                and not (has_ecp and not mbis_ecp))
     if level1 and not mbis_ok:
         reason = (f"z_above_{MBIS_MAX_Z}" if int(atnums.max()) > MBIS_MAX_Z
-                  else "ecp_without_edf" if not has_edf else "ecp_disabled")
+                  else "ecp_without_edf" if edf_missing else "ecp_disabled")
         skipped.append({"schemes": "mbis family", "reason": reason, "routines": list(MBIS_FAMILY)})
     if mbis_ok:
         td_rho = np.zeros((nat, len(grid_wts)))
@@ -1152,7 +1168,7 @@ def run(wfx_path, nrad=75, nang=434, radcut=10.0, bond_nrad=45, bond_nang=170, f
             # fuzzyana isel=1 with functions 9 (ELF), 2 (|grad rho|) and 3 (Laplacian):
             # the same Becke-weighted molecular grid as becke_fuzzy_density
             t0 = time.perf_counter()
-            d = density_derivatives(pts, wfx, basis)
+            d = density_derivatives(pts, wfx, basis, elf_only=not deriv_fuzzy)
             fz["elf"] += w.T @ (wb * elf_lol(d, wfx)[0])
             if deriv_fuzzy:
                 fz["grad"] += w.T @ (wb * np.sqrt((d["gradient"] ** 2).sum(axis=1)))

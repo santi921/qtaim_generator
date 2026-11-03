@@ -26,6 +26,9 @@ HAS_NUMBA = importlib.util.find_spec("numba") is not None
 # bond orders with 6, so agreement is bounded by that rounding
 CHARGE_TOL = 1e-7
 BOND_TOL = 1e-6
+# Laplacian fuzzy integrals on ECP heavy atoms reach 1e4 and differ from Multiwfn by
+# roundoff relative to the value (worst seen 2.2e-9 rel, In; 1.1e-6 abs, Hf at 25712.9)
+LAPL_REL_TOL = 5e-9
 
 
 def _load(name, folder=DATA):
@@ -184,8 +187,9 @@ def test_worker_reproduces_multiwfn_level2(tmp_path, name):
 
     assert set(ref) <= set(eng), f"engine lacks {set(ref) - set(eng)}"
     for step, ref_d in ref.items():
+        rel = LAPL_REL_TOL if step == "laplacian_rho_fuzzy" else None
         for k, v in ref_d[step].items():
-            assert eng[step][step][k] == pytest.approx(v, abs=CHARGE_TOL), (step, k)
+            assert eng[step][step][k] == pytest.approx(v, abs=CHARGE_TOL, rel=rel), (step, k)
 
 
 def test_engine_routines_by_level():
@@ -216,6 +220,30 @@ def test_derivative_fuzzy_skipped_without_edf(tmp_path):
     assert not {"grad_norm_rho_fuzzy", "laplacian_rho_fuzzy"} & set(out)
     skipped = [s for s in out["_meta"]["skipped"] if s["schemes"] == "derivative fuzzy"]
     assert skipped and skipped[0]["reason"] == "ecp_without_edf"
+
+
+@pytest.mark.skipif(not HAS_NUMBA, reason="numba not installed")
+def test_ecp_atom_without_edf_skips_even_when_others_have_one(monkeypatch):
+    """The EDF rule is per ECP atom: Xe keeps its EDF, a Cl made to look like an
+    ECP atom has none, so every EDF-dependent family is skipped."""
+    from qtaim_gen.source.core import charge_engine
+
+    read = charge_engine.read_wfx
+
+    def read_with_bare_ecp(path):
+        wfx = read(path)
+        cl = int(next(i for i, z in enumerate(wfx["atnums"]) if z == 17))
+        wfx["zeff"] = wfx["zeff"].copy()
+        wfx["zeff"][cl] -= 10
+        return wfx
+
+    monkeypatch.setattr(charge_engine, "read_wfx", read_with_bare_ecp)
+    out = charge_engine.run(os.path.join(FIXTURES, "XeCl4_step2_0_1", "orca.wfx"), full_set=2)
+    reasons = {s["schemes"]: s["reason"] for s in out["_meta"]["skipped"]}
+    assert reasons == {"hirshfeld family": "ecp_without_edf", "mbis family": "ecp_without_edf",
+                       "derivative fuzzy": "ecp_without_edf"}
+    assert not {"hirshfeld", "mbis", "grad_norm_rho_fuzzy"} & set(out)
+    assert "elf_fuzzy" in out and "becke" in out
 
 
 class TestTimingValidation:
@@ -257,9 +285,9 @@ class TestTimingValidation:
     def test_engine_timing_covers_level1_routines(self, tmp_path):
         from qtaim_gen.source.utils.validation import validate_timing_dict
 
-        # elf_fuzzy comes from the engine
+        # elf_fuzzy comes from the engine (version 2; tests/test_engine_version.py has version 1)
         timings = {**self.BASE, "charge_engine": 2.0, "surface_engine": 1.0,
-                   "chelpg": 1.0, "ibsi_bond": 1.0}
+                   "chelpg": 1.0, "ibsi_bond": 1.0, "_engine_versions": {"charge_engine": 2}}
         path = self._write(tmp_path, timings)
         assert validate_timing_dict(path, full_set=1, charge_engine=True)
         # chelpg and ibsi_bond still come from Multiwfn
@@ -352,6 +380,9 @@ def test_engine_jsons_compile_like_multiwfn_level1_and_alie(tmp_path, name, monk
     timings = json.loads((tmp_path / "timings.json").read_text())
 
     assert timings["charge_engine"] > 0 and timings["surface_engine"] > 0
+    from qtaim_gen.source.data.multiwfn import CHARGE_ENGINE_VERSION
+
+    assert timings["_engine_versions"]["charge_engine"] == CHARGE_ENGINE_VERSION
     for step in ("vdd", "mbis"):
         for k, v in ref[step]["charge"].items():
             assert charge[step]["charge"][k] == pytest.approx(v, abs=CHARGE_TOL), (step, k)

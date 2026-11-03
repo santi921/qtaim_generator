@@ -11,7 +11,7 @@ import zlib
 from typing import Optional
 from qtaim_gen.source.core.parse_qtaim import dft_inp_to_dict, fortran_float
 from qtaim_gen.source.core.parse_orca import ORCA_PARSER_VERSION
-from qtaim_gen.source.data.multiwfn import ENGINE_ROUTINES
+from qtaim_gen.source.data.multiwfn import engine_routines_at
 import numpy as np
 from datetime import datetime
 
@@ -34,6 +34,38 @@ def skipped_routines(timing_dict) -> set:
     """Routine names recorded under TIMINGS_SKIPPED_KEY of a timings dict."""
     rec = (timing_dict or {}).get(TIMINGS_SKIPPED_KEY) if isinstance(timing_dict, dict) else None
     return set(rec) if isinstance(rec, dict) else set()
+
+
+# timings.json key recording which engine versions wrote the folder's values
+# ({"charge_engine": CHARGE_ENGINE_VERSION}); see engine_routines_at in data/multiwfn.py
+TIMINGS_ENGINE_VERSIONS_KEY = "_engine_versions"
+
+
+def charge_engine_version(timing_dict) -> Optional[int]:
+    """The charge-engine version of a timings dict: its stamp, 1 for a positive
+    charge_engine timing without one (runs before the stamp existed), None when
+    the charge engine did not run."""
+    if not isinstance(timing_dict, dict):
+        return None
+    t = timing_dict.get("charge_engine")
+    if not (isinstance(t, (int, float)) and t > 0):
+        return None
+    rec = timing_dict.get(TIMINGS_ENGINE_VERSIONS_KEY)
+    v = rec.get("charge_engine") if isinstance(rec, dict) else None
+    return v if isinstance(v, int) else 1
+
+
+def engine_routines_of(timing_dict) -> frozenset:
+    """The routines a timings dict says the charge engine computed (empty when it
+    did not run): ENGINE_ROUTINES as of the version that ran."""
+    v = charge_engine_version(timing_dict)
+    return frozenset() if v is None else engine_routines_at(v)
+
+
+def timing_total(timing_dict) -> float:
+    """Sum of the step timings, leaving out the metadata entries (dicts under the
+    _-prefixed keys)."""
+    return float(sum(v for v in timing_dict.values() if isinstance(v, (int, float)) and not isinstance(v, bool)))
 TIMING_PLACEHOLDER = -1.0
 
 
@@ -161,7 +193,7 @@ def get_val_breakdown_from_folder(
     if os.path.exists(timings_file) and os.path.getsize(timings_file) > 0:
         with open(timings_file, "r") as f:
             timings = json.load(f)
-        total_time = np.array(list(timings.values())).sum()
+        total_time = timing_total(timings)
         info["total_time"] = total_time
 
         for col in timings.keys():
@@ -288,7 +320,7 @@ def validate_timing_dict(
     Check that it has the keys 'total', 'qtaim', 'charge', 'bond', and 'fuzzy_full'.
 
     A positive 'charge_engine' timing stands in for the per-routine timings of
-    ENGINE_ROUTINES (core/charge_engine.py computed them in one pass), and a
+    the routines that engine version computed (engine_routines_of), and a
     positive 'surface_engine' timing for 'other' (core/surface_engine.py computed
     other_alie). With charge_engine=True both are required, so folders whose
     charge/fuzzy/bond or ALIE data came from Multiwfn are not counted as done.
@@ -328,8 +360,10 @@ def validate_timing_dict(
             print(msg)
         return False
     if engine_done:
-        expected_keys = [k for k in expected_keys if k not in ENGINE_ROUTINES]
-        excepted_spin_keys = [k for k in excepted_spin_keys if k not in ENGINE_ROUTINES]
+        # only the routines the engine version that ran computed
+        engine = engine_routines_of(timing_dict)
+        expected_keys = [k for k in expected_keys if k not in engine]
+        excepted_spin_keys = [k for k in excepted_spin_keys if k not in engine]
     skipped = skipped_routines(timing_dict)
     expected_keys = [k for k in expected_keys if k not in skipped]
     excepted_spin_keys = [k for k in excepted_spin_keys if k not in skipped]
@@ -1725,7 +1759,8 @@ def validation_checks(
     # bonding_json_loc = os.path.join(folder, "bonding.json")
     tf_cond = True
 
-    skipped = skipped_routines(_safe_json_load(timing_json_loc, logger=logger))
+    timings_dict = _safe_json_load(timing_json_loc, logger=logger)
+    skipped = skipped_routines(timings_dict)
     if skipped and logger:
         logger.info(f"Routines recorded as permanently skipped in {folder}: {sorted(skipped)}")
 
@@ -1840,7 +1875,7 @@ def validation_checks(
         from qtaim_gen.source.utils.fuzzy_recheck import recheck_fuzzy as _recheck
 
         report = _recheck(folder, int(spin), logger=logger, dry_run=True,
-                          skip_routines=(frozenset(ENGINE_ROUTINES) | skipped) if charge_engine
+                          skip_routines=(engine_routines_of(timings_dict) | skipped) if charge_engine
                           else (frozenset(skipped) or None))
         if report["reparse"] or report["rerun"]:
             if logger:
@@ -1912,7 +1947,7 @@ def get_information_from_job_folder(folder: str, full_set: int) -> dict:
         if os.path.exists(timings_file) and os.path.getsize(timings_file) > 0:
             with open(timings_file, "r") as f:
                 timings = json.load(f)
-            total_time = float(np.array(list(timings.values())).sum())
+            total_time = timing_total(timings)
             info["total_time"] = total_time
 
             for col in timings.keys():
@@ -1976,7 +2011,7 @@ def get_information_from_job_folder(folder: str, full_set: int) -> dict:
         if os.path.exists(timings_file):
             with open(timings_file, "r") as f:
                 timings = json.load(f)
-            total_time = float(np.array(list(timings.values())).sum())
+            total_time = timing_total(timings)
             info["total_time"] = total_time
 
             for col in timings.keys():
