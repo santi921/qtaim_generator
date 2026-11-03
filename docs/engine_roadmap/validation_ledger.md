@@ -66,6 +66,13 @@ elf_fuzzy (full_set 1); grad_norm_rho_fuzzy, laplacian_rho_fuzzy (full_set 2).
 | 2026-11-02 | Multiwfn parity, local, fresh Multiwfn | 2 fixtures (open shell; Xe ECP + EDF): elf_fuzzy, grad_norm_rho_fuzzy, laplacian_rho_fuzzy | ELF 4.8e-9, gradient norm 4.8e-9, Laplacian 2.2e-8 (Xe, value -114.9) | feat/engine-fuzzy-elf | `tests/test_files/charge_engine/*/multiwfn_reference_level{1,2}.json` |
 | 2026-11-02 | stored Multiwfn data (production `elf_fuzzy.out`), local | 156 actinide nitrates (as the 2026-10-13 row; open shells spin-polarized) | elf_fuzzy within 5.0e-9 on every atom of all 156 (Multiwfn prints 8 decimals); engine derivative pass median 14.4 s (4 threads) vs stored Multiwfn elf_fuzzy median 39.0 s | same | `data/engine_test_2026-11/fuzzy_elf/nitrates_elf.jsonl` |
 | 2026-11-02 | Multiwfn parity, local, fresh Multiwfn | 87 wfx_pull jobs (as the 2026-10-04 row) | elf_fuzzy within 5.0e-9 and grad_norm_rho_fuzzy within 5.3e-9 on all 87. laplacian_rho_fuzzy: 63 jobs within 1e-8; 24 jobs exceed it, every one on an ECP + EDF heavy atom (Xe, I, Te, Sb, Hf, Tl, Au, Ir, In, lanthanides; max 1.08e-6 on Hf, value 25712.9, 4.2e-11 rel). All 24 are within 2.3e-11 of the atom's integral of abs(integrand); summation order alone moves the result by about 1e-11. Read as per-point roundoff of the Laplacian near the core [I], not checked against 80-bit | same | `data/engine_test_2026-11/fuzzy_elf/` (`wfx_pull_fuzzy.txt`, `lapl_rel.py`, `refs_wfx_pull/`) |
+| 2026-11-03 | internal consistency | 2 fixtures, 400 random points each | `density_derivatives(elf_only=True)` (the full_set 1 ELF pass) gives values identical bit for bit to the full call, and `hessian=False` agrees within 1e-12 rel; elf_only takes 0.34 s vs 0.59 s per atom grid on MOR22 (tm_react) and 0.73 s vs 1.05 s on a TZVPPall Np nitrate (4 threads), so the 14.4 s nitrate median above is now lower | feat/engine-fuzzy-elf (review fixes) | `tests/test_qtaim_engine.py` |
+| 2026-11-03 | invariant scan | 552 local orca.wfx (85 with ECP) | the per-ECP-atom EDF rule (charge engine version 2) decides every skip as the molecule-wide rule did | same | `data/engine_test_2026-11/fuzzy_elf/edf_scan.py` |
+
+`scripts/compare_engine_merge.py` takes the routines a tree's engine covers from its
+version stamp. From charge engine version 2 its Multiwfn baseline time
+(`mwfn_engine_routines_s`) includes elf_fuzzy and the level-2 fuzzy timings, so speedups
+from it are not comparable with the 2026-10 rows above.
 
 **MBIS** (`mbis_converged.md`, 2026-10-15). The default (`MBIS_MODE = "converged"`)
 deliberately diverges from Multiwfn, which stops when no charge moves by 1e-4 e in a cycle.
