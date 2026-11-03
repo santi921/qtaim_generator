@@ -84,8 +84,8 @@ it through the nucleus frame, with Poincare-Hopf 1 and every actinide BCP paired
 MBIS (mbis_converged.md): converged to the fixed point instead of Multiwfn's 1e-4 e per-cycle
 stop (population.f90 MBIS loop; 3 of 27 local jobs moved by more than 0.03 e, actinides
 0.03-0.38 e); initial guess from a free-atom table fitted to the Hirshfeld proatoms instead of
-Multiwfn's shell rule; of several fixed points, the one with the smallest KL divergence over
-three guesses; Z 87-118 supported (6 shells), where Multiwfn refuses beyond Rn.
+Multiwfn's shell rule; of several fixed points, the one with the smallest KL divergence among
+the converged, non-degenerate fits from three guesses; Z 87-118 supported (6 shells), where Multiwfn refuses beyond Rn.
 Planarity (other_geometry, surface_engine.planarity): a molecule with no heavy atoms gets
 mpp_heavy = sdp_heavy = 0; Multiwfn fits a plane to an empty selection and prints MPP NaN
 and SDP 0 (otherfunc.f90 calcMPP). Values otherwise match Multiwfn at print precision

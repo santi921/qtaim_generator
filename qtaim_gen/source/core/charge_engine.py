@@ -520,7 +520,7 @@ MBIS_GUESS = "fitted"  # converged mode's initial guess: free-atom fits, or "mul
 MBIS_TOL = 1e-8  # converged mode: largest population change (e) and relative width change per step
 MBIS_MAXCYC = 20000
 MBIS_ANDERSON = 6  # Anderson history length
-MBIS_ANDERSON_MAXCYC = 1000  # map evaluations before an accelerated fit is redone by plain iteration
+MBIS_ANDERSON_MAXCYC = 1000  # map evaluations before an accelerated fit is redone by plain iteration (see mbis_select)
 MBIS_ANDERSON_TRUST = 2.0  # largest factor an extrapolated parameter may differ from the plain step
 MBIS_MERGE_TOL = 1e-3  # shells of one atom whose widths agree this closely (relative) have merged
 MBIS_EMPTY_POP = 1e-6  # e: a shell below this has emptied
@@ -741,13 +741,7 @@ def mbis_fit(grel, coords, tmpden, atnums, qbase, crit=1e-4, maxcyc=500, mode=No
     cut2, cand_ptr, cand = _mbis_setup(grel, coords, atnums)
     if mode == "converged":
         step = lambda pp, ss: _mbis_step(grel, coords, tmpden, cut2, cand_ptr, cand, mshell, pp, ss)  # noqa: E731
-        res = _mbis_converged(step, mshell, pop, sig, qbase, maxcyc=MBIS_ANDERSON_MAXCYC)
-        if res[4] >= MBIS_ANDERSON_MAXCYC or mbis_degenerate(res[1], res[2], res[3]):
-            # acceleration can stall, or settle on a merged/emptied-shell fixed point
-            # plain iteration leaves: redo the fit by plain iteration
-            plain = _mbis_converged(step, mshell, pop, sig, qbase, history=0)
-            res = plain[:4] + (res[4] + plain[4],)
-        return res
+        return _mbis_fit_converged(step, mshell, pop, sig, qbase)[0]
     if mode != "multiwfn":
         raise ValueError(f"unknown MBIS mode {mode!r}")
     last = np.zeros(len(atnums))
@@ -782,6 +776,20 @@ def _mbis_step(grel, coords, tmpden, cut2, cand_ptr, cand, mshell, pop, sig):
     pos = popnew > 0
     signew[pos] /= 3 * popnew[pos]
     return popnew, signew
+
+
+def _mbis_fit_converged(step, mshell, pop, sig, qbase, fallback=True):
+    """Accelerated fit; with fallback, redone by plain iteration when acceleration
+    stalls (MBIS_ANDERSON_MAXCYC evaluations) or settles on a merged/emptied-shell
+    fixed point plain iteration leaves. Returns (charge, mshell, pop, sig,
+    evaluations) and whether the returned fit met the stopping rule."""
+    res = _mbis_converged(step, mshell, pop, sig, qbase, maxcyc=MBIS_ANDERSON_MAXCYC)
+    converged = res[4] < MBIS_ANDERSON_MAXCYC
+    if fallback and (not converged or mbis_degenerate(res[1], res[2], res[3])):
+        plain = _mbis_converged(step, mshell, pop, sig, qbase, history=0)
+        res = plain[:4] + (res[4] + plain[4],)
+        converged = plain[4] < MBIS_MAXCYC
+    return res, converged
 
 
 def _mbis_converged(step, mshell, pop, sig, qbase, tol=None, maxcyc=None, history=None):
@@ -928,24 +936,37 @@ def mbis_select(grel, coords, tmpden, atnums, qbase):
     Fit from the default guess and from it with every width scaled by each of
     MBIS_CHECK_SIGMAS, keep the fit with the largest mbis_objective (smallest
     divergence), non-degenerate fits first, ties to the earlier guess. Returns
-    charge, mshell, pop, sig, the total cycles, and a record of the choice."""
+    charge, mshell, pop, sig, the total cycles, and a record of the choice.
+
+    The check guesses fall back to plain iteration only when the default fit
+    did not converge or ended degenerate; otherwise a check guess whose
+    accelerated fit stalls or ends degenerate is left out of the selection (on
+    Sm3Ir3, tm_react, the two check fallbacks took 515 of 539 s and found
+    nothing; on rmechdb_750, whose default fit fails, the x1.5 fallback gives
+    the only converged, non-degenerate fit). spread and solutions count only
+    converged, non-degenerate fits."""
+    cut2, cand_ptr, cand = _mbis_setup(grel, coords, atnums)
     fits = []
-    for name, g in mbis_guesses(atnums):
-        q, m, p, s, n = mbis_fit(grel, coords, tmpden, atnums, qbase, mode="converged", guess=g)
+    for i, (name, (m0, p0, s0)) in enumerate(mbis_guesses(atnums)):
+        step = lambda pp, ss, m0=m0: _mbis_step(grel, coords, tmpden, cut2, cand_ptr, cand, m0, pp, ss)  # noqa: E731
+        fallback = i == 0 or not fits[0][8] or fits[0][7]
+        (q, m, p, s, n), conv = _mbis_fit_converged(step, m0, p0, s0, qbase, fallback=fallback)
         fits.append((name, q, m, p, s, n, mbis_objective(grel, coords, tmpden, atnums, m, p, s),
-                     mbis_degenerate(m, p, s)))
+                     mbis_degenerate(m, p, s), conv))
+    good = [f for f in fits if f[8] and not f[7]]
     tol = 1e-12 * max(abs(f[6]) for f in fits)
     best = fits[0]
-    for f in fits[1:]:
+    for f in good:
         if (best[7] and not f[7]) or (f[7] == best[7] and f[6] > best[6] + tol):
             best = f
+    kept = [best] + [f for f in good if f is not best]
     distinct = []
-    for f in fits:
+    for f in kept:
         if all(np.abs(f[1] - d).max() > MBIS_UNIQUE_TOL for d in distinct):
             distinct.append(f[1])
     info = {"selected": best[0], "objective": {f[0]: f[6] for f in fits},
-            "degenerate": {f[0]: bool(f[7]) for f in fits},
-            "spread": float(max(np.abs(f[1] - best[1]).max() for f in fits)), "solutions": len(distinct)}
+            "degenerate": {f[0]: bool(f[7]) for f in fits}, "converged": {f[0]: bool(f[8]) for f in fits},
+            "spread": float(max(np.abs(f[1] - best[1]).max() for f in kept)), "solutions": len(distinct)}
     return best[1], best[2], best[3], best[4], sum(f[5] for f in fits), info
 
 

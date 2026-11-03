@@ -359,6 +359,77 @@ def test_mbis_degenerate_detects_merged_and_empty_shells():
     assert mbis_degenerate(mshell, empty, sig)
 
 
+def test_mbis_fallback_only_when_asked(monkeypatch):
+    """A stalled accelerated fit is redone by plain iteration only with fallback;
+    either way a fit that never meets the stopping rule reports converged False."""
+    import numpy as np
+
+    from qtaim_gen.source.core import charge_engine as CE
+
+    monkeypatch.setattr(CE, "MBIS_ANDERSON_MAXCYC", 5)
+    monkeypatch.setattr(CE, "MBIS_MAXCYC", 7)
+    calls = []
+
+    def drifting(p, s):
+        calls.append(1)
+        return p * 1.01, s
+
+    mshell, pop, sig = np.array([1]), np.array([[1.0]]), np.array([[0.5]])
+    (_, _, _, _, n), conv = CE._mbis_fit_converged(drifting, mshell, pop, sig, np.array([1.0]), fallback=False)
+    assert (len(calls), n, conv) == (5, 5, False)
+    calls.clear()
+    (_, _, _, _, n), conv = CE._mbis_fit_converged(drifting, mshell, pop, sig, np.array([1.0]))
+    assert (len(calls), n, conv) == (12, 12, False)
+    calls.clear()
+    (_, _, _, _, n), conv = CE._mbis_fit_converged(lambda p, s: (p, s), mshell, pop, sig, np.array([1.0]))
+    assert (n, conv) == (1, True)
+
+
+def test_mbis_select_drops_failed_check_guesses(monkeypatch):
+    """A check guess that stalls or ends degenerate cannot be selected, even
+    with a better objective, and does not count as another solution."""
+    import numpy as np
+
+    from qtaim_gen.source.core import charge_engine as CE
+
+    m = np.array([1, 1])
+    p = np.array([[1.0], [1.0]])
+    s = np.array([[0.5], [0.5]])
+    guesses = [("default", (m, p, s)), ("sigma_x0.6", (m, p, s * 0.6)), ("sigma_x1.5", (m, p, s * 1.5))]
+    results = {  # default: converged; x0.6: stalled; x1.5: converged but degenerate
+        0.5: ((np.array([0.1, -0.1]), m, p, s, 40), True, 1.0, False),
+        0.3: ((np.array([0.6, -0.6]), m, p, s * 0.6, 5), False, 9.0, False),
+        0.75: ((np.array([0.4, -0.4]), m, p, s * 1.5, 30), True, 5.0, True),
+    }
+    seen = []
+
+    def fake_fit(step, mshell, pop, sig, qbase, fallback=True):
+        seen.append(fallback)
+        return results[round(float(sig[0, 0]), 2)][:2]
+
+    monkeypatch.setattr(CE, "mbis_guesses", lambda atnums: guesses)
+    monkeypatch.setattr(CE, "_mbis_setup", lambda *a: (None, None, None))
+    monkeypatch.setattr(CE, "_mbis_fit_converged", fake_fit)
+    monkeypatch.setattr(CE, "mbis_objective", lambda g, c, t, a, mm, pp, ss: results[round(float(ss[0, 0]), 2)][2])
+    monkeypatch.setattr(CE, "mbis_degenerate", lambda mm, pp, ss: results[round(float(ss[0, 0]), 2)][3])
+    q, *_, ncyc, info = CE.mbis_select(None, None, None, np.array([1, 1]), np.array([1.0, 1.0]))
+    assert seen == [True, False, False]
+    assert info["selected"] == "default" and np.allclose(q, [0.1, -0.1])
+    assert info["converged"] == {"default": True, "sigma_x0.6": False, "sigma_x1.5": True}
+    assert info["solutions"] == 1 and info["spread"] == 0.0
+    assert ncyc == 75
+
+    # default fit degenerate: the check guesses get the fallback, and a converged,
+    # non-degenerate check fit wins over it
+    seen.clear()
+    results[0.5] = ((np.array([0.1, -0.1]), m, p, s, 21000), False, 1.0, True)
+    results[0.75] = ((np.array([0.4, -0.4]), m, p, s * 1.5, 1519), True, 5.0, False)
+    q, *_, info = CE.mbis_select(None, None, None, np.array([1, 1]), np.array([1.0, 1.0]))
+    assert seen == [True, True, True]
+    assert info["selected"] == "sigma_x1.5" and np.allclose(q, [0.4, -0.4])
+    assert info["solutions"] == 1
+
+
 def test_mbis_guess_beyond_rn_keeps_six_shells():
     """Period 7 uses Multiwfn's Rn rule: 6 shells, valence Z - 54."""
     import numpy as np
@@ -383,6 +454,7 @@ def test_run_records_mbis_mode_and_uniqueness():
     assert meta["mbis_mode"] == "converged"
     assert meta["mbis_selection"]["selected"] == "default"
     assert set(meta["mbis_selection"]["objective"]) == {"default", "sigma_x0.6", "sigma_x1.5"}
+    assert meta["mbis_selection"]["converged"] == {"default": True, "sigma_x0.6": True, "sigma_x1.5": True}
     assert meta["mbis_unique"] is True
     assert meta["mbis_degenerate"] == {"charge": False, "fuzzy": False}
     assert meta["mbis_beyond_multiwfn"] is False

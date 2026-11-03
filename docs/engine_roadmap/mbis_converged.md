@@ -31,20 +31,24 @@ Date: 2026-10-15. Branch feat/mbis-heavy-elements. Code: `core/charge_engine.py`
    populations and log widths, with a trust factor of 2 against the plain step.
    - Converged: no population moves by 1e-8 e and no width by 1e-8 relative in one plain
      step.
-   - Fallback to plain iteration from the same guess when acceleration does not converge
-     in 1000 evaluations, or ends on a degenerate point (`mbis_degenerate`: two shells of
-     an atom within 0.1% in width, or a shell below 1e-6 e). Unguarded acceleration
-     reached such points that plain iteration leaves (Li 1s emptied, two shells merged).
+   - Fallback to plain iteration (up to 20000 cycles) from the same guess when
+     acceleration does not converge in 1000 evaluations, or ends on a degenerate point
+     (`mbis_degenerate`: two shells of an atom within 0.1% in width, or a shell below
+     1e-6 e). Unguarded acceleration reached such points that plain iteration leaves
+     (Li 1s emptied, two shells merged). Since 2026-11-03 the two check guesses get the
+     fallback only when the default fit failed (see below).
 3. **Selection** (`mbis_select`, on the MBIS charge grid). Fits from the fitted guess and
-   from it with every width scaled by 0.6 and 1.5. It keeps a non-degenerate fit with the
-   largest `mbis_objective`: the sum of w ln rho0 over the grid, which is the part of
-   int rho ln(rho / rho0) that differs between fixed points. Ties within 1e-12 relative go
-   to the earlier guess. The fuzzy refit on the main grid is a single fit from the
-   winning guess.
+   from it with every width scaled by 0.6 and 1.5. Among the converged, non-degenerate
+   fits it keeps the one with the largest `mbis_objective`: the sum of w ln rho0 over the
+   grid, which is the part of int rho ln(rho / rho0) that differs between fixed points.
+   Ties within 1e-12 relative go to the earlier guess. When no fit is both converged and
+   non-degenerate, the default fit is returned. The fuzzy refit on the main grid is a
+   single fit from the winning guess.
 4. **`_meta` fields.**
    - `mbis_mode`, `mbis_cycles`;
-   - `mbis_selection`: the selected guess, its objective, degenerate flags, the spread
-     and the number of distinct solutions;
+   - `mbis_selection`: the selected guess, objectives, degenerate and converged flags per
+     guess, the spread and the number of distinct solutions (both over the selected fit
+     and the converged, non-degenerate fits only);
    - `mbis_unique`: one solution within 0.005 e;
    - `mbis_degenerate`;
    - `mbis_beyond_multiwfn`: Z > 86;
@@ -78,6 +82,38 @@ Cost per molecule (charge-grid selection, fitted guess):
 
 The cycle count depends on the elements, not the molecule size. The cost per cycle
 grows about linearly with the number of atoms.
+
+## Selection revision (2026-11-03, branch perf/mbis-converged)
+
+**Change.** Before, every guess that stalled under acceleration was redone by up to
+20000 plain cycles, and an unconverged check fit could win the selection. On a
+Sm3Ir3 cluster (wfx_pull) the x0.6 and x1.5 checks both stalled and took 1270 of the
+1366 s. Now:
+
+- the check guesses skip the plain fallback when the default fit converged and is not
+  degenerate, and an unconverged check fit is not a candidate;
+- when the default fit failed (unconverged or degenerate), the checks get the fallback
+  as before, so a check fit that converges after it can still win (rmechdb_750 needs
+  this);
+- `solutions` and `spread` count only the selected fit and the converged,
+  non-degenerate fits; `converged` records the stopping rule per guess.
+
+**Validation** (old selection reconstructed in a script on the same charge-grid
+density; 112 jobs: 87 wfx_pull, 20 actinide nitrates, 5 edge cases; 2-274 atoms, Z up
+to 94; 16 threads over 4 workers):
+
+| check | result |
+|---|---|
+| jobs where every fit converged and none is degenerate | 42; identical by construction (same candidates, no fallback in either version) |
+| jobs compared | 70; 58 select the same fit, max \|dq\| 0 e |
+| selection changed | 12; in all 12 the old pick was an unconverged x1.5 fit; max \|dq\| 3.6e-4 e (MOR39_Er3Ce3, the only one where the default converged; old pick had a 1.4e-6 rel better objective), then 1.8e-5 e, the rest 1.6e-6 e or less |
+| `solutions` changed | 14 jobs from 2 to 1; the second solution was a degenerate or unconverged check fit |
+| time, the 70 compared jobs | old 15312 s, new 9556 s |
+| Sm3Ir3 | 1366 s to 93 s, \|dq\| 0 |
+| 11 compared nitrates | 1023 s to 312 s, \|dq\| 0 |
+
+**Remaining cost.** The default fit fails on 15 of the 112 jobs, and those take 8218 of
+the 9759 s total.
 
 ## ECP atoms
 

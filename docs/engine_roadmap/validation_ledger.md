@@ -71,6 +71,7 @@ deliberately diverges from Multiwfn, which stops when no charge moves by 1e-4 e 
 | Multiwfn's rule vs converged, Z <= 86 | 27 jobs | 3 off by more than 0.03 e, 7 by more than 0.005 e |
 | Multiwfn's rule vs converged, actinides | 5 jobs | 0.03-0.38 e |
 | fitted guess vs Multiwfn's guess | 35 jobs | 32 within 0.005 e; the 3 that differ have the better objective |
+| selection revision (2026-11-03, perf/mbis-converged): check guesses skip the fallback when the default converged, unconverged check fits excluded; old selection reconstructed on the same grid | 112 jobs (87 wfx_pull, 20 nitrates, 5 edge cases), scratchpad `mbis/old_vs_new.py` | 100 the same (42 by construction), max 0 e; 12 change selection, all from an unconverged x1.5 fit, max 3.6e-4 e (MOR39_Er3Ce3), rest 1.8e-5 e or less; 70 compared jobs 15312 s to 9556 s, Sm3Ir3 1366 s to 93 s |
 
 ## 3. Surface engine (`core/surface_engine.py`, other_alie and other_geometry)
 
