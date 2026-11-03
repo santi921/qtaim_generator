@@ -376,6 +376,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     args = parser.parse_args(argv)
     if args.clean_first and not args.move_results:
         parser.error("--clean_first requires --move_results (without it the results sit in the job folder and would be deleted)")
+    if args.native_convert and not args.wfx:
+        parser.error("--native_convert writes orca.wfx; it cannot be combined with --wfn")
     # print(args)
     for key, value in vars(args).items():
         print(f"{key}: {value}")
@@ -514,6 +516,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         check_ecp=check_ecp,
         charge_engine=charge_engine,
         qtaim_engine=qtaim_engine,
+        native_convert=native_convert,
     )
 
     if not folders_run:

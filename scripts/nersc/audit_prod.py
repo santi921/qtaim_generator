@@ -8,8 +8,9 @@ the nucleus-frame and precision-limited counts; far-from-origin heavy nuclei; ro
 recorded as permanently skipped. With --ref, for folders validated in both trees: the
 largest per-atom difference per charge and fuzzy scheme, fuzzy_bond and the ALIE values,
 whether the QTAIM atom and bond sets are the same, and on the shared CPs the largest
-change in density, Laplacian (relative), spin density and position (all CPs, and the CPs
-on or bonded to an actinide). The reference is any tree of the same jobs: Multiwfn, or a
+change in density and Laplacian (relative), Laplacian and spin density (absolute) and
+position (all CPs, and the CPs on or bonded to an actinide). A NaN on either side counts
+as an infinite difference. The reference is any tree of the same jobs: Multiwfn, or a
 run with another wavefunction conversion.
 
     python scripts/nersc/audit_prod.py WORK/prod_l1 [--ref WORK/mwfn_l0] [--tsv audit.tsv]
@@ -34,7 +35,10 @@ NELEC = re.compile(r"nelec grid ([0-9.]+) of")
 MAX_DIFF_E = 0.03
 SUM_TOL_E = 0.02
 NELEC_TOL_REL = 1e-3
-QTAIM_REL = ("density_all", "lap_e_density")
+# relative change on shared CPs, |x - y| / max(|y|, floor): CPs are kept down to rho = 1e-5,
+# but a Laplacian can be near zero at any CP, so its relative change gets a 1e-2 a.u. floor
+# (abs_qt_lap_e_density reports the absolute change)
+QTAIM_REL = {"density_all": 1e-12, "lap_e_density": 1e-2}
 
 
 def load(path):
@@ -131,6 +135,14 @@ def audit(folder):
     return rec
 
 
+def diff(x, y, floor=None):
+    """|x - y| (relative to max(|y|, floor) when floor is given); inf when either is not
+    finite, so a NaN on one side is reported, never dropped by max()."""
+    if not (np.isfinite(x) and np.isfinite(y)):
+        return float("inf")
+    return abs(x - y) / max(abs(y), floor) if floor is not None else abs(x - y)
+
+
 def compare(new_folder, ref_folder, actinide_atoms=()):
     """Largest per-atom (per-pair) difference of each scheme present in both trees,
     relative differences of the ALIE values, and QTAIM key-set agreement."""
@@ -143,9 +155,9 @@ def compare(new_folder, ref_folder, actinide_atoms=()):
             y = per_atom((b.get(s) or {}).get(sub) if sub else b.get(s))
             keys = set(x) & set(y)
             if keys:
-                out[f"d_{s}"] = max(abs(x[k] - y[k]) for k in keys)
+                out[f"d_{s}"] = max(diff(x[k], y[k]) for k in keys)
     a, b = load(gen(new_folder, "other.json")) or {}, load(gen(ref_folder, "other.json")) or {}
-    alie = [abs(a[k] - b[k]) / max(abs(b[k]), 1e-12) for k in a if k.startswith("ALIE_") and isinstance(b.get(k), (int, float))
+    alie = [diff(a[k], b[k], 1e-12) for k in a if k.startswith("ALIE_") and isinstance(b.get(k), (int, float))
             and isinstance(a[k], (int, float))]
     if alie:
         out["rel_alie"] = max(alie)
@@ -159,13 +171,15 @@ def compare(new_folder, ref_folder, actinide_atoms=()):
         tags = ("all", "act") if act & set(k.split("_")) else ("all",)
         x, y = qa[k], qb[k]
         diffs = {}
-        for f in QTAIM_REL:
+        for f, floor in QTAIM_REL.items():
             if isinstance(x.get(f), (int, float)) and isinstance(y.get(f), (int, float)):
-                diffs[f"rel_qt_{f}"] = abs(x[f] - y[f]) / max(abs(y[f]), 1e-12)
-        if isinstance(x.get("spin_density"), (int, float)) and isinstance(y.get("spin_density"), (int, float)):
-            diffs["abs_qt_spin_density"] = abs(x["spin_density"] - y["spin_density"])
+                diffs[f"rel_qt_{f}"] = diff(x[f], y[f], floor)
+        for f in ("lap_e_density", "spin_density"):
+            if isinstance(x.get(f), (int, float)) and isinstance(y.get(f), (int, float)):
+                diffs[f"abs_qt_{f}"] = diff(x[f], y[f])
         if x.get("pos_ang") and y.get("pos_ang"):
-            diffs["qt_pos_ang"] = float(np.linalg.norm(np.subtract(x["pos_ang"], y["pos_ang"])))
+            d = float(np.linalg.norm(np.subtract(x["pos_ang"], y["pos_ang"])))
+            diffs["qt_pos_ang"] = d if np.isfinite(d) else float("inf")
         for t in tags:
             for key, v in diffs.items():
                 out[f"{key}_{t}"] = max(out.get(f"{key}_{t}", 0.0), v)
@@ -251,7 +265,7 @@ def main():
         print("| quantity | n | median | p99 | max |")
         print("| --- | --- | --- | --- | --- |")
         for key in [f"{q}_{t}" for t in ("all", "act") for q in
-                    [f"rel_qt_{f}" for f in QTAIM_REL] + ["abs_qt_spin_density", "qt_pos_ang"]]:
+                    [f"rel_qt_{f}" for f in QTAIM_REL] + ["abs_qt_lap_e_density", "abs_qt_spin_density", "qt_pos_ang"]]:
             x = np.array([r[key] for r in both if key in r])
             if len(x):
                 print(f"| {key} | {len(x)} | {pct(x, 50):.1e} | {pct(x, 99):.1e} | {x.max():.1e} |")

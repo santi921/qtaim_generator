@@ -299,6 +299,7 @@ def process_folder(
                     recheck_fuzzy=recheck_fuzzy,
                     charge_engine=charge_engine,
                     qtaim_engine=qtaim_engine,
+                    native_convert=native_convert,
                     recheck_allalpha_qtaim=recheck_allalpha_qtaim,
                     recheck_cp_labels=recheck_cp_labels,
                     enforce_poincare_hopf=enforce_poincare_hopf,
@@ -572,6 +573,7 @@ def process_folder_alcf(
                 recheck_fuzzy=recheck_fuzzy,
                 charge_engine=charge_engine,
                 qtaim_engine=qtaim_engine,
+                native_convert=native_convert,
             )
 
             if not overwrite and tf_validation:

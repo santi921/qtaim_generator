@@ -24,6 +24,10 @@ TIMINGS_PATCHED_KEY = "_timings_patched"
 # wavefunction ({routine: {"reason": ..., "by": "charge_engine" | "multiwfn"}}):
 # validation stops expecting them, so the folder is complete without them
 TIMINGS_SKIPPED_KEY = "_skipped_routines"
+# timings.json key recording which tool wrote the wavefunction: "multiwfn", or
+# "native:<mode>" for core/wavefunction.py (omol.NATIVE_CONVERT_MODES). Kept in
+# timings.json because cleanup removes the wfx itself from finished folders.
+CONVERTER_KEY = "_converter"
 
 
 def skipped_routines(timing_dict) -> set:
@@ -277,6 +281,7 @@ def validate_timing_dict(
     n_atoms: int = None,
     charge_engine: bool = False,
     qtaim_engine: bool = False,
+    native_convert: Optional[str] = None,
 ):
     """
     Basic check that the timing json file has the expected structure.
@@ -287,9 +292,20 @@ def validate_timing_dict(
     positive 'surface_engine' timing for 'other' (core/surface_engine.py computed
     other_alie). With charge_engine=True both are required, so folders whose
     charge/fuzzy/bond or ALIE data came from Multiwfn are not counted as done.
+    With native_convert (a mode of omol.NATIVE_CONVERT_MODES), CONVERTER_KEY must
+    record core/wavefunction.py in that mode, so a wavefunction from Multiwfn's
+    convert step or the other mode is not counted as done either.
     """
     timing_dict = _safe_json_load(timing_json_loc, logger=logger)
     if timing_dict is None:
+        return False
+    if native_convert and timing_dict.get(CONVERTER_KEY) != f"native:{native_convert}":
+        msg = (f"Wavefunction converter {timing_dict.get(CONVERTER_KEY)!r}, not native:{native_convert}: "
+               "the data is not from core/wavefunction.py in this mode.")
+        if logger:
+            logger.error(msg)
+        if verbose:
+            print(msg)
         return False
 
     expected_keys, excepted_spin_keys = get_expected_timing_keys(
@@ -1607,6 +1623,7 @@ def validation_checks(
     recheck_allalpha_qtaim: bool = False,
     recheck_cp_labels: bool = False,
     enforce_poincare_hopf: bool = False,
+    native_convert: Optional[str] = None,
 ):
     """
     Run all validation checks on the json files in the given folder.
@@ -1645,6 +1662,8 @@ def validation_checks(
             charge_engine run (see validate_timing_dict).
         qtaim_engine (bool): also fail unless timings.json records a
             qtaim_engine run (see validate_timing_dict).
+        native_convert (str): also fail unless timings.json records the
+            wavefunction as written by core/wavefunction.py in this mode.
     Returns:
         bool: True if all validation checks pass, False otherwise.
     """
@@ -1712,7 +1731,7 @@ def validation_checks(
 
     if not validate_timing_dict(
         timing_json_loc, verbose=verbose, full_set=full_set, spin_tf=spin_tf,
-        charge_engine=charge_engine, qtaim_engine=qtaim_engine,
+        charge_engine=charge_engine, qtaim_engine=qtaim_engine, native_convert=native_convert,
     ):
         if logger:
             logger.error(f"Timing json validation failed in folder: {folder}")

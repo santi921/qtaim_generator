@@ -211,6 +211,7 @@ def get_folders_from_file(
     charge_engine: bool = False,
     qtaim_engine: bool = False,
     stop_check: Optional[Callable[[], bool]] = None,
+    native_convert: Optional[str] = None,
 ) -> List[str]:
     print(
         f"collecting {num_folders} folders from {job_file} with pre_validate={pre_validate} (parallelized)"
@@ -261,6 +262,7 @@ def get_folders_from_file(
                     recheck_fuzzy=recheck_fuzzy,
                     charge_engine=charge_engine,
                     qtaim_engine=qtaim_engine,
+                    native_convert=native_convert,
                 )
                 if not tf_validation:
                     if logger:
