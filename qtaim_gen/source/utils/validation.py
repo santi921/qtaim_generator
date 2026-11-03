@@ -295,7 +295,9 @@ def get_expected_timing_keys(full_set: int = 0, spin_tf: bool = False) -> tuple:
             "laplacian_bond",
             "grad_norm_rho_fuzzy",
             "laplacian_rho_fuzzy",
-            "ESP_Volume",
+            # the step name run_jobs times (was "ESP_Volume", an other.json field no
+            # timings.json holds, so no full_set 2 folder validated)
+            "other_esp",
         ]
 
     if spin_tf:
