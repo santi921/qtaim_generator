@@ -45,7 +45,9 @@ from qtaim_gen.source.data.multiwfn import (
     ENGINE_LEVEL1_ROUTINES,
     ENGINE_LEVEL2_ROUTINES,
     ENGINE_ROUTINES,
+    SURFACE_ENGINE_LEVEL2_ROUTINES,
     SURFACE_ENGINE_ROUTINES,
+    engine_routines_at,
     charge_data,
     charge_data_dict,
     bond_order_data,
@@ -1932,24 +1934,36 @@ def _run_qtaim_engine(folder: str, n_threads: int, logger: logging.Logger, resta
     return True
 
 
+def _surface_engine_routines(full_set: int) -> frozenset:
+    """The surface-engine routines a folder gets at this full_set level."""
+    return SURFACE_ENGINE_ROUTINES if full_set >= 2 else SURFACE_ENGINE_ROUTINES - SURFACE_ENGINE_LEVEL2_ROUTINES
+
+
 def _run_surface_engine(
     folder: str,
     n_threads: int,
     logger: logging.Logger,
     restart: bool = False,
+    full_set: int = 0,
 ) -> bool:
-    """other_geometry and other_alie with core/surface_engine.py: writes
-    other_geometry.json and other_alie.json (the flat payloads
-    parse_other_doc_geometry and parse_other_doc_esp produce, compiled into
-    other.json by parse_multiwfn) and a 'surface_engine' timing."""
+    """other_geometry, other_alie and, at full_set >= 2, other_esp with
+    core/surface_engine.py: writes other_geometry.json, other_alie.json and
+    other_esp.json (the flat payloads parse_other_doc_geometry and
+    parse_other_doc_esp produce, compiled into other.json by parse_multiwfn) and a
+    'surface_engine' timing."""
+    wanted = _surface_engine_routines(full_set)
     gen = os.path.join(folder, "generator")
     if restart:
         try:
             with open(os.path.join(gen, "timings.json")) as f:
-                done = json.load(f).get("surface_engine", 0) > 0
+                timings = json.load(f)
+            # a surface engine that left a wanted routine to Multiwfn (no stamp: version 1)
+            # is not a completed run
+            version = (timings.get(TIMINGS_ENGINE_VERSIONS_KEY) or {}).get("surface_engine", 1)
+            done = timings.get("surface_engine", 0) > 0 and wanted <= engine_routines_at(version)
             with open(os.path.join(gen, "other.json")) as f:
                 other = json.load(f)
-            done = done and all(other.get(_OTHER_MARKER_KEYS[r]) is not None for r in SURFACE_ENGINE_ROUTINES)
+            done = done and all(other.get(_OTHER_MARKER_KEYS[r]) is not None for r in wanted)
         except (OSError, json.JSONDecodeError, TypeError, AttributeError):
             done = False
         if done:
@@ -1973,16 +1987,22 @@ def _run_surface_engine(
     try:
         geometry = surface_engine.planarity(nuclei[2], nuclei[0])
         out, meta = surface_engine.alie_surface(wf_path)
+        esp = surface_engine.esp_surface(wf_path) if "other_esp" in wanted else None
     except Exception as e:
         logger.error("surface_engine failed on %s: %s", wf_path, e)
         return False
     elapsed = time.time() - start
     atomic_json_write(os.path.join(folder, "other_geometry.json"), geometry)
     atomic_json_write(os.path.join(folder, "other_alie.json"), out)
+    if esp is not None:
+        atomic_json_write(os.path.join(folder, "other_esp.json"), esp[0])
     _update_timing(folder, "surface_engine", elapsed, logger)
+    _stamp_engine_version(folder, "surface_engine", CHARGE_ENGINE_VERSION)
     logger.info(
-        "surface_engine: other_alie in %.2f s (grid %s, V/E/F %s)",
+        "surface_engine: other_alie in %.2f s (grid %s, V/E/F %s)%s",
         elapsed, meta.get("grid"), meta.get("vef_after"),
+        "" if esp is None else f"; other_esp grid {esp[1]['grid']}, V/E/F {esp[1]['vef_after']}, "
+                               f"ESP {esp[1]['timings_s'].get('esp')} s",
     )
     return True
 
@@ -2010,7 +2030,7 @@ def _run_engines(
             _run_qtaim_engine(folder, n_threads=n_threads, logger=logger, restart=restart)
         if charge_engine:
             _run_charge_engine(folder, n_threads=n_threads, logger=logger, restart=restart, full_set=full_set)
-            _run_surface_engine(folder, n_threads=n_threads, logger=logger, restart=restart)
+            _run_surface_engine(folder, n_threads=n_threads, logger=logger, restart=restart, full_set=full_set)
         return
 
     import qtaim_gen
