@@ -4,7 +4,7 @@ Every validation run of the native engines (charge, surface, QTAIM) against Mult
 gbasis, critic2, extended precision or physical invariants. One row per run, with the
 reference, the data, the result and where the raw output lives.
 
-State as of 2026-11-02, branch `feat/charge-engine` (098e2ab). Companion documents:
+State as of 2026-11-02, branch `feat/charge-engine` (098e2ab), plus `feat/engine-fuzzy-elf`. Companion documents:
 `README.md` (decisions, divergence changelog), `qtaim_verification_campaign.md` (QTAIM
 tiers 1-3), `mbis_converged.md` (MBIS).
 
@@ -33,7 +33,10 @@ tiers 1-3), `mbis_converged.md` (MBIS).
 - **Charge and fuzzy routines** (full_set 0 and 1) match Multiwfn at print precision on
   every set run so far: 6 to 419 jobs per set, up to 342 atoms, ECP with EDF, lanthanides,
   actinides (X2C and ECP), open shells up to multiplicity 11. The largest charge
-  difference seen anywhere is 1.12e-6 e (ADC-Becke, LRC full_set 1).
+  difference seen anywhere is 1.12e-6 e (ADC-Becke, LRC full_set 1). The ELF, gradient
+  norm and Laplacian fuzzy integrals (full_set 1 and 2) match at print precision too, apart
+  from Laplacian values on ECP heavy atoms, which agree to 2.3e-11 of their integrand scale
+  (local sets only; no cluster run yet).
 - **QTAIM kernels** agree with gbasis to a median 7.5e-14 rel (rho) on 100
   wavefunctions; where they differ more, 80-bit evaluation sides with the engine. The CP
   search reproduces Multiwfn's CP sets exactly in its Multiwfn-compatible mode. In engine
@@ -47,8 +50,8 @@ tiers 1-3), `mbis_converged.md` (MBIS).
 ## 2. Charge engine (`core/charge_engine.py`)
 
 Routines: hirshfeld, adch, cm5, becke (Multiwfn's ADC-corrected Becke), hirsh and becke
-fuzzy density and spin, fuzzy_bond (full_set 0); vdd, mbis, mbis fuzzy density and spin
-(full_set 1).
+fuzzy density and spin, fuzzy_bond (full_set 0); vdd, mbis, mbis fuzzy density and spin,
+elf_fuzzy (full_set 1); grad_norm_rho_fuzzy, laplacian_rho_fuzzy (full_set 2).
 
 | date | reference | data | result | code | raw output |
 |---|---|---|---|---|---|
@@ -60,6 +63,9 @@ fuzzy density and spin, fuzzy_bond (full_set 0); vdd, mbis, mbis fuzzy density a
 | 2026-10-12 | Multiwfn parity, LRC, full_set 1 | tm_react, 191 of 200 jobs (113 open shell; 9 lost to preemption stale locks) | 13 schemes + 8 ALIE fields pass; max 5.03e-9 e except adch 4.73e-7, becke 1.12e-6, fuzzy_bond 5e-7; non-engine data changed in 0 | 568d6ad | LRC trees `ref_l1`, `scratch_l1c` |
 | 2026-10-13 | Multiwfn parity, local | 156 actinide nitrates (`data/actinide_dev/nitrates_dev`): Th, U, Np, Pu; 8 functionals x X2C-SVP/TZVP/TZVPPall + wB97M-V def2-SVP/TZVPD (ECP); ORCA 6.1 | charges within 1.3e-8 e (Pu ADCH/Becke), fuzzy_bond 5e-7, full_set 1 | fix/engine-mixed-records | `data/actinide_dev/work/{multiwfn,engine}` |
 | 2026-10-25 | Multiwfn parity, NERSC | openac: the 419 jobs with a Multiwfn-mode run (`mwfn_l0`, 440-job sample) | all charge and fuzzy schemes within 7.4e-8 e (median 5e-9), fuzzy_bond 5e-7 | feat/charge-engine, PRs #63-#68 | NERSC `actinide_test/prod_l1_audit.tsv` (`audit_prod.py --ref`) |
+| 2026-11-02 | Multiwfn parity, local, fresh Multiwfn | 2 fixtures (open shell; Xe ECP + EDF): elf_fuzzy, grad_norm_rho_fuzzy, laplacian_rho_fuzzy | ELF 4.8e-9, gradient norm 4.8e-9, Laplacian 2.2e-8 (Xe, value -114.9) | feat/engine-fuzzy-elf | `tests/test_files/charge_engine/*/multiwfn_reference_level{1,2}.json` |
+| 2026-11-02 | stored Multiwfn data (production `elf_fuzzy.out`), local | 156 actinide nitrates (as the 2026-10-13 row; open shells spin-polarized) | elf_fuzzy within 5.0e-9 on every atom of all 156 (Multiwfn prints 8 decimals); engine derivative pass median 14.4 s (4 threads) vs stored Multiwfn elf_fuzzy median 39.0 s | same | `data/engine_test_2026-11/fuzzy_elf/nitrates_elf.jsonl` |
+| 2026-11-02 | Multiwfn parity, local, fresh Multiwfn | 87 wfx_pull jobs (as the 2026-10-04 row) | elf_fuzzy within 5.0e-9 and grad_norm_rho_fuzzy within 5.3e-9 on all 87. laplacian_rho_fuzzy: 63 jobs within 1e-8; 24 jobs exceed it, every one on an ECP + EDF heavy atom (Xe, I, Te, Sb, Hf, Tl, Au, Ir, In, lanthanides; max 1.08e-6 on Hf, value 25712.9, 4.2e-11 rel). All 24 are within 2.3e-11 of the atom's integral of abs(integrand); summation order alone moves the result by about 1e-11. Read as per-point roundoff of the Laplacian near the core [I], not checked against 80-bit | same | `data/engine_test_2026-11/fuzzy_elf/` (`wfx_pull_fuzzy.txt`, `lapl_rel.py`, `refs_wfx_pull/`) |
 
 **MBIS** (`mbis_converged.md`, 2026-10-15). The default (`MBIS_MODE = "converged"`)
 deliberately diverges from Multiwfn, which stops when no charge moves by 1e-4 e in a cycle.
@@ -189,7 +195,8 @@ Current behaviours without a validation on current code, and checks not yet done
 | determinism across thread counts (QTAIM criterion E) | not recorded | run 1, 4, 8 threads on the ladder |
 | level-of-theory matrix | double hybrids, HF, Cartesian basis sets, ROKS beyond one radical, ORCA 5 vs ORCA 6 not covered | tier 3 supplementary set |
 | results recorded on older code | the 87-job, 18-reference and 16-reference local sets predate the threading fixes (#63-#65) and the converged MBIS default | rerun the local sets on current code; they take minutes |
-| full_set 2 routines | still Multiwfn (bader, laplacian_bond, other_esp, grad_norm and laplacian fuzzy) | when engines exist |
+| full_set 2 routines | still Multiwfn (bader, laplacian_bond, other_esp) | when engines exist |
+| fuzzy ELF / gradient / Laplacian on a cluster | only local sets so far; the Laplacian ECP-core differences are read as roundoff, not proven | LRC tm_react `nc_ref_l1` (elf_fuzzy); 80-bit Laplacian on one Hf or Tl job |
 
 ## 8. Adding a row
 
