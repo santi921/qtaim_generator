@@ -11,7 +11,9 @@ fuzzy-bond quantity from that pass (plus one coarser grid for bond orders):
     fuzzy_bond                                                 bond schema
 
 With full_set >= 1 it adds vdd (same grid pass), mbis (its own 30-60 x 302 grid,
-as MBIS_wrapper) and mbis_fuzzy_density/spin (MBIS refit on the main grid).
+as MBIS_wrapper), mbis_fuzzy_density/spin (MBIS refit on the main grid) and
+elf_fuzzy (Becke fuzzy integral of ELF, same grid pass); full_set >= 2 adds the
+grad_norm_rho_fuzzy and laplacian_rho_fuzzy integrals from that pass.
 
     charge-engine --wfx orca.wfx --out engine.json [--full_set 1]
 
@@ -510,7 +512,7 @@ def _voronoi_mask(pts, atcoords, center):
 
 # routines a skip removes; every skip recorded in _meta["skipped"] is permanent for the
 # wavefunction (it depends only on its elements, ECP/EDF and the run options)
-from qtaim_gen.source.data.multiwfn import HIRSHFELD_FAMILY, MBIS_FAMILY  # noqa: E402
+from qtaim_gen.source.data.multiwfn import DERIV_FUZZY_FAMILY, HIRSHFELD_FAMILY, MBIS_FAMILY  # noqa: E402
 MBIS_DENCUT = 1e-10  # MBIS dencut: shell densities below this are zeroed
 MBIS_MAXSHELL = 6  # shells of the initial guess (period 6 rule, also used for period 7)
 MBIS_MAX_Z = 118
@@ -1087,8 +1089,15 @@ def run(wfx_path, nrad=75, nang=434, radcut=10.0, bond_nrad=45, bond_nang=170, f
         # valence-only density against all-electron proatoms would be inconsistent
         pro = None
         skipped.append({"schemes": "hirshfeld family", "reason": "ecp_without_edf", "routines": list(HIRSHFELD_FAMILY)})
-    # full_set >= 1 adds vdd, mbis and the MBIS fuzzy integrals
+    # full_set >= 1 adds vdd, mbis, the MBIS fuzzy integrals and elf_fuzzy;
+    # full_set >= 2 the gradient-norm and Laplacian fuzzy integrals
     level1 = full_set >= 1
+    level2 = full_set >= 2
+    deriv_fuzzy = level2 and not (has_ecp and not has_edf)
+    if level2 and not deriv_fuzzy:
+        # both include the EDF core density, as Multiwfn's fgrad / flapl
+        skipped.append({"schemes": "derivative fuzzy", "reason": "ecp_without_edf",
+                        "routines": list(DERIV_FUZZY_FAMILY)})
     # MBIS is defined for all-electron densities; with an ECP the EDF core density stands in
     # for the replaced electrons, and mbis_ecp=False skips MBIS for such records instead
     mbis_ok = (level1 and int(atnums.max()) <= MBIS_MAX_Z and not (has_ecp and not has_edf)
@@ -1106,8 +1115,13 @@ def run(wfx_path, nrad=75, nang=434, radcut=10.0, bond_nrad=45, bond_nang=170, f
     pop_h = np.zeros(nat)
     dip_b = np.zeros((nat, 3))
     dip_h = np.zeros((nat, 3))
-    fz = {k: np.zeros(nat) for k in ("bd", "bs", "hd", "hs")}
+    fz = {k: np.zeros(nat) for k in ("bd", "bs", "hd", "hs", "elf", "grad", "lapl")}
     t.update({"density": 0.0, "becke": 0.0, "hirshfeld": 0.0, "accumulate": 0.0})
+    if level1:
+        # qtaim_engine imports this module
+        from qtaim_gen.source.core.qtaim_engine import density_derivatives, elf_lol
+
+        t["derivatives"] = 0.0
     nelec_grid = 0.0
 
     for b in range(nat):
@@ -1133,6 +1147,17 @@ def run(wfx_path, nrad=75, nang=434, radcut=10.0, bond_nrad=45, bond_nang=170, f
             if open_shell:
                 td_spin[b] = wb * spin
         t["accumulate"] += time.perf_counter() - t0
+
+        if level1:
+            # fuzzyana isel=1 with functions 9 (ELF), 2 (|grad rho|) and 3 (Laplacian):
+            # the same Becke-weighted molecular grid as becke_fuzzy_density
+            t0 = time.perf_counter()
+            d = density_derivatives(pts, wfx, basis)
+            fz["elf"] += w.T @ (wb * elf_lol(d, wfx)[0])
+            if deriv_fuzzy:
+                fz["grad"] += w.T @ (wb * np.sqrt((d["gradient"] ** 2).sum(axis=1)))
+                fz["lapl"] += w.T @ (wb * np.trace(d["hessian"], axis1=1, axis2=2))
+            t["derivatives"] += time.perf_counter() - t0
 
         if pro is not None:
             t0 = time.perf_counter()
@@ -1252,6 +1277,11 @@ def run(wfx_path, nrad=75, nang=434, radcut=10.0, bond_nrad=45, bond_nang=170, f
         out["mbis_fuzzy_density"] = fuzzy("mbis_fuzzy_density", fz["md"])
         if open_shell:
             out["mbis_fuzzy_spin"] = fuzzy("mbis_fuzzy_spin", fz["ms"])
+    if level1:
+        out["elf_fuzzy"] = fuzzy("elf_fuzzy", fz["elf"])
+    if deriv_fuzzy:
+        out["grad_norm_rho_fuzzy"] = fuzzy("grad_norm_rho_fuzzy", fz["grad"])
+        out["laplacian_rho_fuzzy"] = fuzzy("laplacian_rho_fuzzy", fz["lapl"])
     t["corrections"] = time.perf_counter() - t0
 
     t0 = time.perf_counter()
@@ -1304,7 +1334,7 @@ def main(argv=None):
     p.add_argument("--bond_nrad", type=int, default=45, help="fuzzy_bond radial points (Multiwfn: 45)")
     p.add_argument("--bond_nang", type=int, default=170, help="fuzzy_bond Lebedev points (Multiwfn: 170)")
     p.add_argument("--nthreads", type=int, default=None)
-    p.add_argument("--full_set", type=int, default=0, help="1 adds vdd, mbis, mbis_fuzzy_density/spin")
+    p.add_argument("--full_set", type=int, default=0, help="1 adds vdd, mbis, mbis_fuzzy_density/spin, elf_fuzzy; 2 adds grad_norm/laplacian_rho_fuzzy")
     p.add_argument("--mbis_mode", choices=("converged", "multiwfn"), default=None,
                    help="MBIS stopping: converged fixed point (default) or Multiwfn's rule (parity checks)")
     p.add_argument("--no_mbis_ecp", action="store_true",

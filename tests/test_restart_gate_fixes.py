@@ -633,7 +633,11 @@ def test_fuzzy_recheck_leaves_engine_routines_alone(tmp_path, monkeypatch):
             "rerun": ["becke_fuzzy_spin"], "derived": []}
     monkeypatch.setattr(fuzzy_recheck, "plan_recheck", lambda folder, mult: plan)
     monkeypatch.setattr(fuzzy_recheck, "_wavefunction_plan", lambda *a: (True, "wfx", []))
+    # every fuzzy routine, elf_fuzzy included, is an engine routine
     report = fuzzy_recheck.recheck_fuzzy(str(tmp_path), 2, dry_run=True, skip_routines=ENGINE_ROUTINES)
+    assert report["reparse"] == [] and report["rerun"] == []
+    # a routine outside skip_routines is still reparsed
+    report = fuzzy_recheck.recheck_fuzzy(str(tmp_path), 2, dry_run=True, skip_routines=ENGINE_ROUTINES - {"elf_fuzzy"})
     assert report["reparse"] == ["elf_fuzzy"] and report["rerun"] == []
     report = fuzzy_recheck.recheck_fuzzy(str(tmp_path), 2, dry_run=True)
     assert report["reparse"] == ["elf_fuzzy", "fuzzy_bond"] and report["rerun"] == ["becke_fuzzy_spin"]

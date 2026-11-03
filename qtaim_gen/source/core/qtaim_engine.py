@@ -315,25 +315,12 @@ def ecp_atoms_without_edf(wfx):
     return [int(i) for i in ecp if not np.any(wfx["edf_center"] == i)]
 
 
-@limit_blas_threads
-def point_properties(pts, wfx, basis, allow_missing_edf=False, esp=False, esp_pairs=None, boys_mode="exact"):
-    """Every P1/P2 property at each point, as arrays keyed like the CPprop.txt
-    labels' meaning (see module docstring). Raises when an ECP atom has no EDF
-    core density, unless allow_missing_edf (an MO-only comparison on purpose).
-    esp=True adds esp_nuc, esp_e, esp_total; pass esp_pairs (esp.esp_pairs) to
-    reuse the point-independent setup across calls."""
-    missing = ecp_atoms_without_edf(wfx)
-    if missing and not allow_missing_edf:
-        raise ValueError(f"ECP atoms without EDF core density (0-based): {missing[:10]}")
-    d = density_derivatives(pts, wfx, basis)
-    rho, grad, hess = d["rho"], d["gradient"], d["hessian"]
-    rho_mo, grad_mo, spin = d["rho_mo"], d["grad_mo"], d["spin"]
-    g_xyz = d["G_xyz"]
-    G = g_xyz.sum(axis=1)
-    K = d["K"]
-
-    # ELF / LOL (MOs only)
-    tau = G
+def elf_lol(d, wfx):
+    """ELF and LOL (ELF_LOL, MW/function.f90:3109) from density_derivatives output:
+    MOs only, restricted or spin-polarized by Multiwfn's wfntype rule,
+    ELF_addminimal=1; both 0 where the MO density is 0."""
+    rho_mo, grad_mo = d["rho_mo"], d["grad_mo"]
+    tau = d["G_xyz"].sum(axis=1)
     if wavefunction_type(wfx) in (0, 3):
         with np.errstate(divide="ignore", invalid="ignore"):
             pauli = tau - np.where(rho_mo != 0, (grad_mo**2).sum(axis=1) / rho_mo / 8, 0.0)
@@ -348,6 +335,26 @@ def point_properties(pts, wfx, basis, allow_missing_edf=False, esp=False, esp_pa
         elf = 1 / (1 + ((pauli + ELF_ADDMINIMAL) / dh) ** 2)
         t = np.where(tau != 0, dh / tau, 0.0)
         lol = 1 / (1 / t + 1)
+    return elf, lol
+
+
+@limit_blas_threads
+def point_properties(pts, wfx, basis, allow_missing_edf=False, esp=False, esp_pairs=None, boys_mode="exact"):
+    """Every P1/P2 property at each point, as arrays keyed like the CPprop.txt
+    labels' meaning (see module docstring). Raises when an ECP atom has no EDF
+    core density, unless allow_missing_edf (an MO-only comparison on purpose).
+    esp=True adds esp_nuc, esp_e, esp_total; pass esp_pairs (esp.esp_pairs) to
+    reuse the point-independent setup across calls."""
+    missing = ecp_atoms_without_edf(wfx)
+    if missing and not allow_missing_edf:
+        raise ValueError(f"ECP atoms without EDF core density (0-based): {missing[:10]}")
+    d = density_derivatives(pts, wfx, basis)
+    rho, grad, hess = d["rho"], d["gradient"], d["hessian"]
+    rho_mo, spin = d["rho_mo"], d["spin"]
+    g_xyz = d["G_xyz"]
+    G = g_xyz.sum(axis=1)
+    K = d["K"]
+    elf, lol = elf_lol(d, wfx)
 
     with np.errstate(divide="ignore", invalid="ignore"):
         alie = np.where(rho_mo != 0, d["alie_num"] / rho_mo, 0.0)

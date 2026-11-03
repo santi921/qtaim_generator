@@ -40,6 +40,7 @@ from qtaim_gen.source.core.horton import run_horton_analysis
 
 from qtaim_gen.source.data.multiwfn import (
     ENGINE_LEVEL1_ROUTINES,
+    ENGINE_LEVEL2_ROUTINES,
     ENGINE_ROUTINES,
     SURFACE_ENGINE_ROUTINES,
     charge_data,
@@ -1698,6 +1699,8 @@ def _engine_routines(full_set: int, spin_tf: bool) -> set:
     routines = set(ENGINE_ROUTINES - SURFACE_ENGINE_ROUTINES)
     if full_set < 1:
         routines -= ENGINE_LEVEL1_ROUTINES
+    if full_set < 2:
+        routines -= ENGINE_LEVEL2_ROUTINES
     if not spin_tf:
         routines -= {"becke_fuzzy_spin", "hirsh_fuzzy_spin", "mbis_fuzzy_spin"}
     return routines

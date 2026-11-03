@@ -115,7 +115,8 @@ def test_worker_reproduces_multiwfn(tmp_path, name):
         ref = json.load(f)
 
     assert set(ref) <= set(eng), f"engine lacks {set(ref) - set(eng)}"
-    assert not {"vdd", "mbis", "mbis_fuzzy_density", "mbis_fuzzy_spin"} & set(eng), "full_set 0 ran level-1 schemes"
+    assert not {"vdd", "mbis", "mbis_fuzzy_density", "mbis_fuzzy_spin", "elf_fuzzy"} & set(eng), \
+        "full_set 0 ran level-1 schemes"
     for step, ref_d in ref.items():
         if step == "fuzzy_bond":
             assert set(eng[step]) == set(ref_d)
@@ -159,6 +160,62 @@ def test_worker_reproduces_multiwfn_level1(tmp_path, name):
         else:
             for k, v in ref_d[step].items():
                 assert eng[step][step][k] == pytest.approx(v, abs=CHARGE_TOL), (step, k)
+    assert not {"grad_norm_rho_fuzzy", "laplacian_rho_fuzzy"} & set(eng), "full_set 1 ran level-2 schemes"
+
+
+@pytest.mark.skipif(not HAS_NUMBA, reason="numba not installed")
+@pytest.mark.parametrize("name", _fixture_names())
+def test_worker_reproduces_multiwfn_level2(tmp_path, name):
+    """full_set 2 adds the gradient-norm and Laplacian fuzzy integrals (fuzzyana
+    functions 2 and 3, EDF included) from the elf_fuzzy pass."""
+    folder = os.path.join(FIXTURES, name)
+    out = tmp_path / "engine.json"
+    subprocess.run(
+        [sys.executable, "-m", "qtaim_gen.source.core.charge_engine",
+         "--wfx", os.path.join(folder, "orca.wfx"), "--out", str(out), "--nthreads", "2",
+         "--full_set", "2", "--mbis_mode", "multiwfn"],
+        check=True,
+        capture_output=True,
+    )
+    with open(out) as f:
+        eng = json.load(f)
+    with open(os.path.join(folder, "multiwfn_reference_level2.json")) as f:
+        ref = json.load(f)
+
+    assert set(ref) <= set(eng), f"engine lacks {set(ref) - set(eng)}"
+    for step, ref_d in ref.items():
+        for k, v in ref_d[step].items():
+            assert eng[step][step][k] == pytest.approx(v, abs=CHARGE_TOL), (step, k)
+
+
+def test_engine_routines_by_level():
+    from qtaim_gen.source.core.omol import _engine_routines
+
+    deriv = {"grad_norm_rho_fuzzy", "laplacian_rho_fuzzy"}
+    assert "elf_fuzzy" not in _engine_routines(0, spin_tf=True)
+    assert "elf_fuzzy" in _engine_routines(1, spin_tf=False)
+    assert not deriv & _engine_routines(1, spin_tf=True)
+    assert deriv <= _engine_routines(2, spin_tf=False)
+
+
+@pytest.mark.skipif(not HAS_NUMBA, reason="numba not installed")
+def test_derivative_fuzzy_skipped_without_edf(tmp_path):
+    """An ECP wavefunction without EDF: elf_fuzzy (MOs only) is kept, the
+    EDF-dependent gradient and Laplacian integrals are recorded as skipped."""
+    from qtaim_gen.source.core import charge_engine
+
+    src = os.path.join(FIXTURES, "XeCl4_step2_0_1", "orca.wfx")
+    text = open(src).read()
+    tag = "Additional Electron Density Function (EDF)>"
+    start = text.index("<" + tag)
+    end = text.index("</" + tag) + len(tag) + 2
+    wfx = tmp_path / "orca.wfx"
+    wfx.write_text(text[:start] + text[end:])
+    out = charge_engine.run(str(wfx), full_set=2)
+    assert "elf_fuzzy" in out
+    assert not {"grad_norm_rho_fuzzy", "laplacian_rho_fuzzy"} & set(out)
+    skipped = [s for s in out["_meta"]["skipped"] if s["schemes"] == "derivative fuzzy"]
+    assert skipped and skipped[0]["reason"] == "ecp_without_edf"
 
 
 class TestTimingValidation:
@@ -200,11 +257,12 @@ class TestTimingValidation:
     def test_engine_timing_covers_level1_routines(self, tmp_path):
         from qtaim_gen.source.utils.validation import validate_timing_dict
 
+        # elf_fuzzy comes from the engine
         timings = {**self.BASE, "charge_engine": 2.0, "surface_engine": 1.0,
-                   "chelpg": 1.0, "ibsi_bond": 1.0, "elf_fuzzy": 1.0}
+                   "chelpg": 1.0, "ibsi_bond": 1.0}
         path = self._write(tmp_path, timings)
         assert validate_timing_dict(path, full_set=1, charge_engine=True)
-        # chelpg, ibsi_bond and elf_fuzzy still come from Multiwfn
+        # chelpg and ibsi_bond still come from Multiwfn
         del timings["chelpg"]
         assert not validate_timing_dict(self._write(tmp_path, timings), full_set=1, charge_engine=True)
 
