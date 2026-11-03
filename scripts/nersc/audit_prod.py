@@ -6,7 +6,8 @@ fuzzy spin summing to mult - 1; fuzzy density and the charge engine's grid summi
 the all-electron count; Poincare-Hopf (kept and full set); an NCP on every actinide;
 the nucleus-frame and precision-limited counts; far-from-origin heavy nuclei; routines
 recorded as permanently skipped. With --ref, for folders validated in both trees: the
-largest per-atom difference per charge and fuzzy scheme, fuzzy_bond and the ALIE values,
+largest per-atom difference per charge and fuzzy scheme (elf_fuzzy and the level-2
+fuzzy integrals included), fuzzy_bond and the ALIE values, the charge-engine version,
 whether the QTAIM atom and bond sets are the same, and on the shared CPs the largest
 change in density and Laplacian (relative), Laplacian and spin density (absolute) and
 position (all CPs, and the CPs on or bonded to an actinide). A NaN on either side counts
@@ -24,12 +25,16 @@ import re
 
 import numpy as np
 
-from qtaim_gen.source.utils.validation import all_electron_count, get_charge_spin_n_atoms_from_folder
+from qtaim_gen.source.utils.validation import (
+    all_electron_count, charge_engine_version, get_charge_spin_n_atoms_from_folder,
+)
 
 ACT = {"Ac", "Th", "Pa", "U", "Np", "Pu", "Am", "Cm", "Bk", "Cf", "Es", "Fm", "Md", "No", "Lr"}
 CHARGES = ("hirshfeld", "adch", "cm5", "becke")
 FUZZY_DENSITY = ("hirsh_fuzzy_density", "becke_fuzzy_density")
 FUZZY_SPIN = ("hirsh_fuzzy_spin", "becke_fuzzy_spin")
+# charge-engine version 2 (full_set 1: elf_fuzzy; full_set 2: the gradient-norm and Laplacian integrals)
+FUZZY_FIELD = ("elf_fuzzy", "grad_norm_rho_fuzzy", "laplacian_rho_fuzzy")
 NELEC = re.compile(r"nelec grid ([0-9.]+) of")
 # acceptance for engine vs Multiwfn (docs/plans/2026-10-04-feat-one-pass-charge-engine-plan.md)
 MAX_DIFF_E = 0.03
@@ -147,7 +152,7 @@ def compare(new_folder, ref_folder, actinide_atoms=()):
     """Largest per-atom (per-pair) difference of each scheme present in both trees,
     relative differences of the ALIE values, and QTAIM key-set agreement."""
     out = {}
-    for name, schemes, sub in (("charge.json", CHARGES, "charge"), ("fuzzy_full.json", FUZZY_DENSITY + FUZZY_SPIN, None),
+    for name, schemes, sub in (("charge.json", CHARGES, "charge"), ("fuzzy_full.json", FUZZY_DENSITY + FUZZY_SPIN + FUZZY_FIELD, None),
                                ("bond.json", ("fuzzy_bond",), None)):
         a, b = load(gen(new_folder, name)) or {}, load(gen(ref_folder, name)) or {}
         for s in schemes:
@@ -184,6 +189,7 @@ def compare(new_folder, ref_folder, actinide_atoms=()):
             for key, v in diffs.items():
                 out[f"{key}_{t}"] = max(out.get(f"{key}_{t}", 0.0), v)
     out["ph_ref"] = (qb.get("_meta") or {}).get("poincare_hopf")
+    out["charge_engine_version"] = charge_engine_version(load(gen(new_folder, "timings.json")))
     return out
 
 
@@ -246,9 +252,11 @@ def main():
     if args.ref:
         both = [r for r in done if r.get("ref_validated")]
         print(f"\nvs {args.ref}: {len(both)} folders validated in both (max per-atom |diff|, e; acceptance max {MAX_DIFF_E})")
+        print(f"charge-engine versions in this tree: {dict(collections.Counter(r.get('charge_engine_version') for r in both))}; "
+              f"elf_fuzzy and the level-2 fuzzy rows are in their own units (ELF, a.u.)")
         print("| scheme | n | median | p99 | max | over max |")
         print("| --- | --- | --- | --- | --- | --- |")
-        for key in [f"d_{s}" for s in CHARGES + FUZZY_DENSITY + FUZZY_SPIN + ("fuzzy_bond",)] + ["rel_alie"]:
+        for key in [f"d_{s}" for s in CHARGES + FUZZY_DENSITY + FUZZY_SPIN + FUZZY_FIELD + ("fuzzy_bond",)] + ["rel_alie"]:
             x = np.array([r[key] for r in both if key in r])
             if len(x):
                 over = int((x > MAX_DIFF_E).sum()) if key != "rel_alie" else "-"
