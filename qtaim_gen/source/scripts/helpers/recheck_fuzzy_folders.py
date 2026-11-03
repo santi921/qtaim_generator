@@ -69,19 +69,19 @@ def _multiplicity(folder: str, entry: str) -> Optional[int]:
 
 
 def _engine_routines_of(folder: str) -> Optional[frozenset]:
-    """ENGINE_ROUTINES when the folder's results came from the charge engine (a
-    positive charge_engine timing): the recheck must not put archived Multiwfn
-    values back over them."""
-    from qtaim_gen.source.data.multiwfn import ENGINE_ROUTINES
+    """The routines the charge engine computed when the folder's results came from
+    it (a positive charge_engine timing; the set depends on its version): the
+    recheck must not put archived Multiwfn values back over them."""
+    from qtaim_gen.source.utils.validation import engine_routines_of
 
     for path in (os.path.join(folder, "generator", "timings.json"), os.path.join(folder, "timings.json")):
         try:
             with open(path) as f:
-                value = json.load(f).get("charge_engine")
+                routines = engine_routines_of(json.load(f))
         except (OSError, ValueError, AttributeError):
             continue
-        if isinstance(value, (int, float)) and value > 0:
-            return ENGINE_ROUTINES
+        if routines:
+            return routines
     return None
 
 

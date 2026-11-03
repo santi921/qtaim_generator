@@ -6,16 +6,32 @@ from typing import Optional, List
 
 # routines the charge-engine mode of gbw_analysis computes itself instead of
 # sending them to Multiwfn: charges, fuzzy integrals and fuzzy_bond in one pass
-# (core/charge_engine.py; vdd, mbis and mbis_fuzzy_* exist only at full_set >= 1)
+# (core/charge_engine.py; vdd, mbis, mbis_fuzzy_* and elf_fuzzy exist only at
+# full_set >= 1, the gradient-norm and Laplacian fuzzy integrals at full_set >= 2)
 # and the ALIE surface analysis and planarity (core/surface_engine.py)
-ENGINE_LEVEL1_ROUTINES = frozenset({"vdd", "mbis", "mbis_fuzzy_density", "mbis_fuzzy_spin"})
+ENGINE_LEVEL1_ROUTINES = frozenset({"vdd", "mbis", "mbis_fuzzy_density", "mbis_fuzzy_spin", "elf_fuzzy"})
+ENGINE_LEVEL2_ROUTINES = frozenset({"grad_norm_rho_fuzzy", "laplacian_rho_fuzzy"})
 SURFACE_ENGINE_ROUTINES = frozenset({"other_alie", "other_geometry"})
 ENGINE_ROUTINES = frozenset({
     "hirshfeld", "adch", "cm5", "becke",
     "becke_fuzzy_density", "hirsh_fuzzy_density",
     "becke_fuzzy_spin", "hirsh_fuzzy_spin",
     "fuzzy_bond",
-}) | ENGINE_LEVEL1_ROUTINES | SURFACE_ENGINE_ROUTINES
+}) | ENGINE_LEVEL1_ROUTINES | ENGINE_LEVEL2_ROUTINES | SURFACE_ENGINE_ROUTINES
+
+# charge-engine version, stamped into timings.json (TIMINGS_ENGINE_VERSIONS_KEY in
+# utils/validation.py) by every complete engine run. Bump it when a change alters
+# stored values or the routine set, and list the routines a version adds below, so a
+# folder from an older engine is not taken to hold engine values for them. A folder
+# with a charge_engine timing and no stamp ran version 1.
+CHARGE_ENGINE_VERSION = 2
+CHARGE_ENGINE_ROUTINES_ADDED = {2: ENGINE_LEVEL2_ROUTINES | {"elf_fuzzy"}}
+
+
+def engine_routines_at(version: int) -> frozenset:
+    """The ENGINE_ROUTINES a charge engine of this version computed."""
+    later = [r for v, r in CHARGE_ENGINE_ROUTINES_ADDED.items() if v > version]
+    return ENGINE_ROUTINES.difference(*later)
 
 
 def charge_data() -> str:
@@ -72,10 +88,12 @@ def chelpg_radii_file(atnums) -> "str | None":
 
 # routines a permanent skip removes (see TIMINGS_SKIPPED_KEY in utils/validation.py):
 # the charge engine skips the Hirshfeld family without free-atom densities or with an
-# ECP atom but no EDF, and the MBIS family per its own limits; Multiwfn refuses MBIS
+# ECP atom but no EDF, the MBIS family per its own limits, and the EDF-dependent
+# derivative fuzzy integrals with an ECP atom but no EDF; Multiwfn refuses MBIS
 # beyond MULTIWFN_MBIS_MAX_Z (it exits 64 for mbis and segfaults for the fuzzy steps)
 HIRSHFELD_FAMILY = ("hirshfeld", "adch", "cm5", "vdd", "hirsh_fuzzy_density", "hirsh_fuzzy_spin")
 MBIS_FAMILY = ("mbis", "mbis_fuzzy_density", "mbis_fuzzy_spin")
+DERIV_FUZZY_FAMILY = ("grad_norm_rho_fuzzy", "laplacian_rho_fuzzy")
 MULTIWFN_MBIS_MAX_Z = 86
 
 
