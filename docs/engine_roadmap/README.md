@@ -69,6 +69,7 @@ version (`QTAIM_ENGINE_VERSION`, in `qtaim.json` `_meta`); the surface engine ha
 |---|---|
 | 1 | all runs before the stamp: charges, fuzzy density and spin, fuzzy_bond (full_set 0); vdd, mbis, mbis fuzzy (full_set 1) |
 | 2 | adds elf_fuzzy (full_set 1), grad_norm_rho_fuzzy and laplacian_rho_fuzzy (full_set 2); EDF-dependent schemes skipped when any ECP atom lacks EDF (was: when the wavefunction has no EDF at all; no local wavefunction differs, 552 checked) |
+| 3 | adds other_esp (full_set 2, surface engine, exact ESP kernel); the surface engine stamps its own entry (`surface_engine`) |
 
 ## Cross-cutting requirements
 
@@ -116,6 +117,19 @@ with h functions in the basis (the X2C-*all actinide bases). On the 440-job open
 charges up to 9.8e-4 e (in four structures; every other job 5e-5 e or less), CP density up to
 6.4e-3 relative, Laplacian up to 1.9e-2 a.u. at actinide CPs (validation_ledger.md section
 4b). `multiwfn_h` mode reproduces Multiwfn for parity checks.
+ESP surface (other_esp, full_set 2, surface_engine.esp_surface; engine version 3): production
+Multiwfn evaluates the ESP at the surface vertices with libreta (iESPcode=2 in settings.ini),
+whose pair screening and single-precision 2 pi constant were measured on 2026-10-12 to cost up
+to 4.8e-5 relative in esp_e (branch feat/qtaim-libreta-esp, docs/LIBRETA_ESP.md). The engine
+evaluates it exactly (core/esp.py, decision 9). The surface mesh is identical (vertex, edge and
+facet counts on 99 of 99 local jobs) and the geometry fields (volume, total area, density) agree
+at print precision. The ESP fields move: on 99 local jobs (87 OMol wfx_pull, 12 nitrates) the
+surface extremes by a median 2.2e-3 / 3.8e-3 kcal/mol and at most 0.49 kcal/mol, the average by
+at most 7.4e-4 a.u., the positive and negative areas by at most 3.7 Bohr^2 (facets near ESP = 0
+change sign), the polarity index by 2.0e-2 eV and the skewness by 4.0e-2. With Multiwfn's exact
+code (iESPcode=1, eleesp1) and the engine on Multiwfn's Boys function, both fixtures agree on
+every field at print precision; the attribution of the larger set's differences to libreta rests
+on those two and the earlier measurement [I] (validation_ledger.md section 3).
 
 ### Parity across levels of theory
 

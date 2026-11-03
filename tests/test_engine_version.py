@@ -21,12 +21,15 @@ from qtaim_gen.source.utils.validation import (
 )
 
 V2_ROUTINES = {"elf_fuzzy", "grad_norm_rho_fuzzy", "laplacian_rho_fuzzy"}
+V3_ROUTINES = {"other_esp"}
 
 
 def test_routines_by_version():
     assert engine_routines_at(CHARGE_ENGINE_VERSION) == ENGINE_ROUTINES
-    assert engine_routines_at(1) == ENGINE_ROUTINES - V2_ROUTINES
+    assert engine_routines_at(1) == ENGINE_ROUTINES - V2_ROUTINES - V3_ROUTINES
+    assert engine_routines_at(2) == ENGINE_ROUTINES - V3_ROUTINES
     assert CHARGE_ENGINE_ROUTINES_ADDED[2] == V2_ROUTINES
+    assert CHARGE_ENGINE_ROUTINES_ADDED[3] == V3_ROUTINES
 
 
 def test_version_of_timings():
@@ -34,10 +37,10 @@ def test_version_of_timings():
     assert charge_engine_version({"charge_engine": 0.0}) is None
     # a charge_engine timing without a stamp predates it
     assert charge_engine_version({"charge_engine": 2.0}) == 1
-    stamped = {"charge_engine": 2.0, TIMINGS_ENGINE_VERSIONS_KEY: {"charge_engine": 2}}
-    assert charge_engine_version(stamped) == 2
+    stamped = {"charge_engine": 2.0, TIMINGS_ENGINE_VERSIONS_KEY: {"charge_engine": CHARGE_ENGINE_VERSION}}
+    assert charge_engine_version(stamped) == CHARGE_ENGINE_VERSION
     assert engine_routines_of(stamped) == ENGINE_ROUTINES
-    assert engine_routines_of({"charge_engine": 2.0}) == ENGINE_ROUTINES - V2_ROUTINES
+    assert engine_routines_of({"charge_engine": 2.0}) == ENGINE_ROUTINES - V2_ROUTINES - V3_ROUTINES
     assert engine_routines_of({"qtaim": 1.0}) == frozenset()
 
 

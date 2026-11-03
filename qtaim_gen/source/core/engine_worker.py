@@ -38,7 +38,8 @@ def main(argv=None) -> int:
     if args.charge:
         ok = _run_charge_engine(args.folder, n_threads=args.n_threads, logger=logger, restart=args.restart,
                                 full_set=args.full_set) and ok
-        ok = _run_surface_engine(args.folder, n_threads=args.n_threads, logger=logger, restart=args.restart) and ok
+        ok = _run_surface_engine(args.folder, n_threads=args.n_threads, logger=logger, restart=args.restart,
+                                 full_set=args.full_set) and ok
     return 0 if ok else STEP_FAILED
 
 
