@@ -6,6 +6,14 @@ engine (`core/surface_engine.py`, other_alie) are done on `feat/charge-engine`. 
 reproduce Multiwfn 3.8 to print precision on 191 fresh LRC tm_react jobs and run 11.3x
 faster per job (median, same hardware, full_set 1).
 
+Since 2026-11-03 the wavefunction conversion is native as well: `full-runner-parsl-alcf`
+writes orca.wfx with `core/wavefunction.py` by default (`--native_convert fixed`). orca_2mkl
+still writes the molden. `--native_convert off` runs Multiwfn's convert step, and is needed
+to continue a tree Multiwfn converted (prod_l1, existing OMol trees): with a native mode,
+validation requires a native record (`_converter` in timings.json), and folders converted
+another way are discarded and recomputed when a gbw is there. With `--wfn` the default is
+`off`. With the charge and QTAIM engines, a full_set 0 run makes no Multiwfn call.
+
 ## Documents
 
 | File | Scope |
@@ -86,9 +94,10 @@ Wavefunction conversion (`--native_convert`, core/wavefunction.py): ORCA normali
 h(+3,-3,+4,-4) functions to -1, so their coefficients change sign. Multiwfn's readmolden does
 this for alpha orbitals only (fileIO.f90:4613-4615; the f and g branches flip both spins);
 the converter flips both spins, which ORCA's orca_plot confirms. It changes open-shell jobs
-with h functions in the basis (the X2C-*all actinide bases): charges up to 6e-5 e,
-actinide-ligand BCP density 3e-4 relative (validation_ledger.md section 4b). `multiwfn_h`
-mode reproduces Multiwfn for parity checks.
+with h functions in the basis (the X2C-*all actinide bases). On the 440-job openac sample:
+charges up to 9.8e-4 e (in four structures; every other job 5e-5 e or less), CP density up to
+6.4e-3 relative, Laplacian up to 1.9e-2 a.u. at actinide CPs (validation_ledger.md section
+4b). `multiwfn_h` mode reproduces Multiwfn for parity checks.
 
 ### Parity across levels of theory
 

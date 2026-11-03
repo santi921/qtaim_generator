@@ -133,8 +133,9 @@ the statistics, the mesh, or the Multiwfn build) has not been checked.
 ## 4b. Wavefunction converter (`core/wavefunction.py`, `--native_convert`)
 
 Reads the molden orca_2mkl writes and writes orca.wfx without Multiwfn. `multiwfn_h` mode
-reproduces Multiwfn's alpha-only sign flip of ORCA h functions; `fixed` (the default)
-flips both spins, as ORCA's own orca_plot requires (README.md divergence changelog).
+reproduces Multiwfn's alpha-only sign flip of ORCA h functions; `fixed` flips both spins, as
+ORCA's own orca_plot requires (README.md divergence changelog). Since 2026-11-03 `fixed` is
+the runner's default; `--native_convert off` runs Multiwfn's convert step instead.
 
 | date | reference | data | result | raw output |
 |---|---|---|---|---|

@@ -43,9 +43,9 @@ N=${N:-50}
 LIST_OVERRIDE=${LIST:-}
 ID=${SLURM_ARRAY_TASK_ID}
 case $MODE in
-  merge)   RUNNER=full_runner_engine;     LIST=$WORK/jobs.txt;     EXTRA="--restart" ;;
+  merge)   RUNNER=full_runner_engine;     LIST=$WORK/jobs.txt;     EXTRA="--restart --native_convert off" ;;
   scratch) RUNNER=full_runner_engine;     LIST=$WORK/jobs.txt;     EXTRA="" ;;
-  ref)     RUNNER=full_runner_parsl_alcf; LIST=$WORK/jobs_ref.txt; EXTRA="" ;;
+  ref)     RUNNER=full_runner_parsl_alcf; LIST=$WORK/jobs_ref.txt; EXTRA="--native_convert off" ;;
   *) echo "MODE must be merge, scratch or ref"; exit 1 ;;
 esac
 LIST=${LIST_OVERRIDE:-$LIST}

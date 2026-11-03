@@ -8,8 +8,9 @@
 #   sbatch -J qeng   --export=ALL,LIST=$WORK/sample.txt,TREE=qengine_l0,ENGINE=1,QTAIM_ENGINE=1 --array=0-9 actinide_test.slurm
 # Optional: FULL_SET (default 0), N (lines per task, default 50), N_PAR (concurrent jobs per
 # node, default 16), THREADS (per job, default 8), SRC (input root the list is under),
-# MULTIWFN and ORCA_2MKL (tool paths, defaults below), NATIVE_CONVERT (fixed or multiwfn_h:
-# write orca.wfx with core/wavefunction.py instead of Multiwfn's convert step).
+# MULTIWFN and ORCA_2MKL (tool paths, defaults below), NATIVE_CONVERT (the runner's default is
+# fixed, core/wavefunction.py; multiwfn_h for parity checks; off runs Multiwfn's convert step,
+# needed to continue a tree Multiwfn converted, e.g. prod_l1).
 #SBATCH -A m3278
 #SBATCH -C cpu
 #SBATCH -q regular

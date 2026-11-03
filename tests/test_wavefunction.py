@@ -315,3 +315,31 @@ def test_runner_refuses_native_convert_with_wfn(tmp_path):
 
     with pytest.raises(SystemExit):
         main(["--native_convert", "--wfn", "--job_file", str(tmp_path / "jobs.txt")])
+
+
+@pytest.mark.parametrize("args,expected", [
+    ([], "fixed"),
+    (["--native_convert"], "fixed"),
+    (["--native_convert", "multiwfn_h"], "multiwfn_h"),
+    (["--native_convert", "off"], None),
+    (["--wfn"], None),
+])
+def test_runner_converts_natively_by_default(tmp_path, monkeypatch, args, expected):
+    """full-runner-parsl-alcf: native conversion unless --native_convert off or --wfn."""
+    from qtaim_gen.source.scripts import full_runner_parsl_alcf as runner
+
+    seen = {}
+
+    def fake_folders(*a, **kw):
+        seen["native_convert"] = kw.get("native_convert")
+        return []
+
+    monkeypatch.setattr(runner.parsl, "load", lambda *a, **k: None)
+    monkeypatch.setattr(runner.parsl, "clear", lambda *a, **k: None)
+    monkeypatch.setattr(runner.signal, "signal", lambda *a, **k: None)
+    monkeypatch.setattr(runner, "get_folders_from_file", fake_folders)
+    jobs = tmp_path / "jobs.txt"
+    jobs.write_text("")
+    runner.main(args + ["--job_file", str(jobs), "--root_omol_results", str(tmp_path / "res"),
+                        "--root_omol_inputs", str(tmp_path)])
+    assert seen["native_convert"] == expected
