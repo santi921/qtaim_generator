@@ -4,6 +4,11 @@ Multiwfn mode and charge-engine mode from one checkout of this branch, first at
 full_set 0. The production env is not modified: the checkout is put ahead of
 whatever `qtaim_gen` the env has installed, via PYTHONPATH.
 
+Wavefunction conversion: the runner writes orca.wfx with `core/wavefunction.py` by default
+(since 2026-11-03). To continue a tree Multiwfn converted, such as `prod_l1`, submit with
+`NATIVE_CONVERT=off`; otherwise every folder in it is treated as converted by another tool and
+recomputed. `NATIVE_CONVERT=multiwfn_h` reproduces Multiwfn's conversion for parity checks.
+
 Tools pinned by `actinide_test.slurm`:
 - ORCA 6.1.1 `orca_2mkl`. The 6.0.1 one cannot read ORCA 6.1 gbw files: it prints
   "I/O OPERATION FAILED" and still exits 0.

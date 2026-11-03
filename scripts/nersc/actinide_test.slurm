@@ -8,7 +8,9 @@
 #   sbatch -J qeng   --export=ALL,LIST=$WORK/sample.txt,TREE=qengine_l0,ENGINE=1,QTAIM_ENGINE=1 --array=0-9 actinide_test.slurm
 # Optional: FULL_SET (default 0), N (lines per task, default 50), N_PAR (concurrent jobs per
 # node, default 16), THREADS (per job, default 8), SRC (input root the list is under),
-# MULTIWFN and ORCA_2MKL (tool paths, defaults below).
+# MULTIWFN and ORCA_2MKL (tool paths, defaults below), NATIVE_CONVERT (the runner's default is
+# fixed, core/wavefunction.py; multiwfn_h for parity checks; off runs Multiwfn's convert step,
+# needed to continue a tree Multiwfn converted, e.g. prod_l1).
 #SBATCH -A m3278
 #SBATCH -C cpu
 #SBATCH -q regular
@@ -48,6 +50,7 @@ ID=${SLURM_ARRAY_TASK_ID}
 EXTRA=""
 [ "${ENGINE:-0}" = "1" ] && EXTRA="--charge_engine"
 [ "${QTAIM_ENGINE:-0}" = "1" ] && EXTRA="$EXTRA --qtaim_engine"
+[ -n "${NATIVE_CONVERT:-}" ] && EXTRA="$EXTRA --native_convert $NATIVE_CONVERT"
 
 python -c "import qtaim_gen, sys; print('qtaim_gen from', qtaim_gen.__file__); assert qtaim_gen.__file__.startswith('$CODE')"
 if [ "${ENGINE:-0}" = "1" ] || [ "${QTAIM_ENGINE:-0}" = "1" ]; then

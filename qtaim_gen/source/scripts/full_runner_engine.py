@@ -5,7 +5,9 @@ becke), fuzzy density/spin and fuzzy_bond come from core/charge_engine.py;
 conversion, QTAIM, "other" and the ORCA parse run as usual. Prevalidation and
 restarts treat a folder as done only when its timings.json records a
 charge_engine run, so pointing it at folders Multiwfn already completed (with
---restart) recomputes just the engine routines and merges them into generator/.
+--restart --native_convert off) recomputes just the engine routines and merges them
+into generator/. Without --native_convert off, the default native conversion treats
+those folders as converted by another tool and recomputes them in full.
 """
 
 import sys

@@ -6,6 +6,7 @@ Labels: [V] verified in code, a file or a local run; [I] inference; [E] effort e
 
 ## Summary
 
+- Update 2026-11-03: convert (P2) is done, `core/wavefunction.py`, the default; other_geometry (P1) moved to the surface engine; elf_fuzzy, grad_norm and laplacian fuzzy (P3) are on branch feat/engine-fuzzy-elf.
 - After the charge/surface engines, Multiwfn still runs for: convert (every level), qtaim (every level), other_geometry (level 0); elf_fuzzy, chelpg, ibsi_bond (level 1); bader, laplacian_bond, laplacian_rho_fuzzy, grad_norm_rho_fuzzy, other_esp (level 2). orca_2mkl runs in convert. Three new building blocks cover all of it except bader: (1) primitive gradients/Hessians (shared with QTAIM), (2) a native wavefunction reader with our own EDF tables, (3) nuclear-attraction (ESP) integrals on point sets.
 - By local timings, bader is 60% of full_set 2 time; elf_fuzzy (9%), chelpg (6%) and ibsi_bond (5%) lead full_set 1. Convert is cheap (median 0.56 s) and other_geometry trivial (0.07 s), so those two are removed for dependency reasons, not speed. other_geometry plus a native reader would leave QTAIM as the only Multiwfn call at full_set 0.
 - Two verified quirks change what "parity" means: with ispecial=1 (settings.ini:115) the bader "spin" field holds the Shannon-entropy column, not spin; IBSI runs on a 30x110 grid that Multiwfn itself flags as too coarse for IGMH. ORCA 6.0.1 tools cannot read our ORCA 5 gbw files; ORCA 5's own orca_2mkl/orca_2json can.

@@ -290,6 +290,22 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
 
     parser.add_argument(
+        "--native_convert",
+        nargs="?",
+        const="fixed",
+        default=None,
+        choices=["fixed", "multiwfn_h", "off"],
+        help=(
+            "how orca.wfx is written from orca_2mkl's molden. Default 'fixed' (also the value when the "
+            "flag is given alone): core/wavefunction.py, with ORCA's h functions signed on both spins. "
+            "'multiwfn_h' reproduces Multiwfn's alpha-only flip, for parity checks. 'off' runs Multiwfn's "
+            "convert step: use it to continue a tree converted by Multiwfn, since with a native mode "
+            "every folder converted another way is discarded and recomputed. With --wfn the default is "
+            "'off'; a native mode needs .wfx. orca_2mkl runs in every mode"
+        ),
+    )
+
+    parser.add_argument(
         "--charge_engine",
         action="store_true",
         help=(
@@ -362,6 +378,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     args = parser.parse_args(argv)
     if args.clean_first and not args.move_results:
         parser.error("--clean_first requires --move_results (without it the results sit in the job folder and would be deleted)")
+    if args.native_convert in ("fixed", "multiwfn_h") and not args.wfx:
+        parser.error("--native_convert writes orca.wfx; it cannot be combined with --wfn (use --native_convert off)")
+    if args.native_convert is None:
+        args.native_convert = "fixed" if args.wfx else "off"
+    if args.native_convert == "off":
+        args.native_convert = None
     # print(args)
     for key, value in vars(args).items():
         print(f"{key}: {value}")
@@ -404,6 +426,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     recheck_fuzzy = bool(getattr(args, "recheck_fuzzy", False))
     charge_engine = bool(getattr(args, "charge_engine", False))
     qtaim_engine = bool(getattr(args, "qtaim_engine", False))
+    native_convert = getattr(args, "native_convert", None)
 
     # parsl args
     type_runner: str = str(getattr(args, "type_runner", "local"))
@@ -499,6 +522,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         check_ecp=check_ecp,
         charge_engine=charge_engine,
         qtaim_engine=qtaim_engine,
+        native_convert=native_convert,
     )
 
     if not folders_run:
@@ -550,6 +574,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             charge_engine=charge_engine,
             qtaim_engine=qtaim_engine,
             engine_subprocess=engine_subprocess,
+            native_convert=native_convert,
         )
         for f in folders_run
     ]

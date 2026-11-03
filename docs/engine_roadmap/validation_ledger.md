@@ -130,6 +130,29 @@ the statistics, the mesh, or the Multiwfn build) has not been checked.
 | 2026-10-22 | stored Multiwfn data, LRC (qeng2) | 1498 jobs | Poincare-Hopf (kept set) 1 in 1494 vs 1455 for stored Multiwfn; 0 missing non-weak CPs; every CP-set difference is an extra engine CP on a job where stored Multiwfn fails Poincare-Hopf; properties within 2e-9 rel except esp_total (4.6e-2 rel, likely cancellation, unchecked) | `data/engine_test_2026-10/qverify_results/qeng2_*.jsonl` |
 | 2026-10-25 | Multiwfn parity, NERSC | openac 419 | identical atom and bond sets in 327; engine-only bonds in 92, Multiwfn-only in 0; 74 of the 92 involve the actinide, 68 of them far from the origin with Multiwfn Poincare-Hopf failing | `prod_l1_audit.tsv` |
 
+## 4b. Wavefunction converter (`core/wavefunction.py`, `--native_convert`)
+
+Reads the molden orca_2mkl writes and writes orca.wfx without Multiwfn. `multiwfn_h` mode
+reproduces Multiwfn's alpha-only sign flip of ORCA h functions; `fixed` flips both spins, as
+ORCA's own orca_plot requires (README.md divergence changelog). Since 2026-11-03 `fixed` is
+the runner's default; `--native_convert off` runs Multiwfn's convert step instead.
+
+| date | reference | data | result | raw output |
+|---|---|---|---|---|
+| 2026-11-02 | Multiwfn's orca.wfx (read_wfx dict) | 87 wfx_pull (7 OMol verticals, ORCA 6.0.0, 25 ECP) | all fields equal; coefficients within 4.9e-12 of the largest per MO, density within 2.9e-11 rel (E20.12 floor) | scratchpad `conv/val_reader.py` |
+| 2026-11-02 | same, compat mode | 156 actinide nitrates (ORCA 6.1, X2C and ECP) | coefficients 5.0e-12, density 5.7e-12 rel | same |
+| 2026-11-02 | same, ORCA 5 raw moldens + orca.out charges | 3 omol_tests jobs (Y and Sb ECP) | coefficients 4.7e-12, density 5.4e-12 rel | same |
+| 2026-11-02 | same | 312-atom job, 1.95 GB molden | coefficients 4.7e-12, density 5.3e-12 rel; 13 s and 265 MB to read (Multiwfn convert 70 s, 4.6 GB) | same |
+| 2026-11-02 | Multiwfn's orca.wfx text (write_wfx) | all of the above | every section but the title identical token for token; 99.983-99.998% of MO coefficient tokens identical, the rest differ in the last digit (worst 2.5e-10 rel) | scratchpad `conv/val_writer.py` |
+| 2026-11-02 | ORCA orca_plot cubes (ORCA 6.0.1) | NO UKS PBE0/cc-pV5Z, virtual MOs dominated by f, g, h | fixed mode within 6.3e-6 (cube print precision); Multiwfn's convention off by 1.1 on the h-dominated beta MO | `tests/test_files/wavefunction/no_cc_pv5z` |
+| 2026-11-02 | effect of the h fix (fixed vs multiwfn_h, current engines) | 72 open-shell X2C nitrates | charges up to 5.8e-5 e, fuzzy 8.9e-5 e, fuzzy_bond 2.2e-5; ALIE unchanged; CP sets identical; actinide NCP unchanged; actinide-ligand BCPs rho 3.3e-4 rel, Laplacian 1.3e-3 rel, position 5.8e-4 Bohr; other CPs unchanged except esp_total 4.6e-5 rel | scratchpad `hbug/` |
+| 2026-11-02 | Multiwfn's orca.wfx, ORCA 5 | 93 Pt4Hx clusters (ORCA 5, all-electron SARC-DKH, s-f shells, 53 open shell; `data/cross_validation_wfns/ptcluster_*`), molden from ORCA 5 orca_2mkl, reference wfx from local Multiwfn | reader: coefficients 5.0e-12, density 3.3e-12 rel; writer: every section identical, 99.997% of coefficient tokens identical (worst 5.5e-11 rel). The 94th folder has no gbw | scratchpad `conv/pt_reader.log`, `pt_writer.log` |
+| 2026-11-02 | programs that read orca.wfx, run on Multiwfn's file and on ours | 6 OMol jobs (ECP open and closed shell, open-shell organics, HXeOH) + 2 open-shell X2C nitrates (multiwfn_h mode) | Multiwfn QTAIM CPprop.txt: identical token for token on the 6 OMol jobs; nitrates differ only at values near 1e-11 and by at most 8.5e-7 rel elsewhere. Multiwfn other_esp, laplacian_bond, grad_norm_rho_fuzzy: identical. critic2: same bond CPs; values identical single-threaded (multithreaded critic2 varies run to run by itself). HORTON: identical charges on the 6 OMol jobs; it fails on Np and Pu with either file (no tables for Z 93-94) | scratchpad `conv/consumers/` |
+| 2026-11-02 | NERSC openac sample, full runner, `--native_convert multiwfn_h` vs `prod_l1` | 440 jobs (all families, bases, functionals; ORCA 6.1; molden-only families included) | charges and fuzzy within 2.6e-12 e; QTAIM sets identical 440/440, density, Laplacian and positions identical; spin density 8.6e-6 a.u. at heavy nuclei (1e-11 of rho) | NERSC `actinide_test/nc_compat_audit.tsv` |
+| 2026-11-02 | NERSC openac sample, `--native_convert fixed` vs `prod_l1` | 440 jobs | only open-shell X2C jobs change: charges median 3.7e-6, max 9.8e-4 e; CP density max 6.4e-3 rel, Laplacian 0.10 rel (with a 1e-2 a.u. floor) and 1.9e-2 a.u. absolute at actinide CPs, positions 8.5e-3 Angstrom; CP sets identical; ALIE unchanged. Concentrated in 4 structures (PuN3O11 t, NpC15H13N4O6 t, PuC6H14O8 t, UC32H47ClN d); every other job 5e-5 e or less | NERSC `actinide_test/nc_fixed_audit.tsv` |
+| 2026-11-03 | LRC OMol, full runner at full_set 1, Multiwfn convert vs `--native_convert fixed` | first 18 tm_react jobs validated in both trees (run continuing) | charges, fuzzy, fuzzy_bond, VDD and ALIE within 1.9e-12; MBIS within 3.0e-7 e (iteration noise of the converged fit); QTAIM sets and properties identical; Multiwfn's CHELPG on our wfx within 2e-10 e (its last printed digit) | LRC `engine_test/nc_ref_l1`, `nc_fixed_l1` |
+| 2026-11-02 | full runner, three trees (Multiwfn convert, multiwfn_h, fixed), engines on | 12 nitrates (open and closed shell, X2C and def2 ECP) | multiwfn_h vs Multiwfn convert: charges and fuzzy within 8.5e-14 e, QTAIM sets and properties identical; fixed vs Multiwfn: changes only on open-shell X2C (charges 5.8e-5 e, BCP rho 2.9e-4 rel); 12/12 validate in each, no Multiwfn convert in the native trees | scratchpad `rehearse/` |
+
 ## 5. Invariant audits (no reference)
 
 `scripts/nersc/audit_prod.py`: charge sums, spin sums, fuzzy populations and grid electron

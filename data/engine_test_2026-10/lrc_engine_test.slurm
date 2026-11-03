@@ -1,7 +1,7 @@
 #!/bin/bash
-#SBATCH --account=ac_blau
+#SBATCH --account=pc_aditik
 #SBATCH --partition=lr7
-#SBATCH --qos=lr_lowprio
+#SBATCH --qos=lr_normal
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=8G
@@ -18,10 +18,14 @@
 #   sbatch -J scratch --export=ALL,MODE=scratch --array=0-199%50 lrc_engine_test.slurm
 #   sbatch -J ref     --export=ALL,MODE=ref     --array=0-3      lrc_engine_test.slurm
 # Optional: FULL_SET (default 0), TREE (output tree under $WORK, default $MODE),
-# LIST (job list, default per mode), e.g. the full_set 1 check on the ref subset:
+# LIST (job list, default per mode), FLAGS (extra runner flags, e.g. "--native_convert
+# --qtaim_engine"), CODE (a checkout imported ahead of the env's qtaim_gen), e.g. the
+# full_set 1 check on the ref subset:
 #   sbatch -J ref1 --export=ALL,MODE=ref,FULL_SET=1,TREE=ref_l1 --array=0-3 lrc_engine_test.slurm
 #   sbatch -J scr1 --export=ALL,MODE=scratch,FULL_SET=1,TREE=scratch_l1,LIST=$WORK/jobs_ref.txt --array=0-3 lrc_engine_test.slurm
 
+# never on a blau recharge account, whatever the header or command line says
+case "${SLURM_JOB_ACCOUNT:-}" in *blau*) echo "refusing to run on account $SLURM_JOB_ACCOUNT"; exit 1 ;; esac
 source ~/.bashrc
 module load gcc
 conda activate ${CONDA_ENV:-qtaim_engine}   # separate env + checkout, see README
@@ -30,6 +34,8 @@ export PYTHONNOUSERSITE=1   # ignore ~/.local site-packages; only the env decide
 export OMP_STACKSIZE=4G
 export KMP_STACKSIZE=200M
 ulimit -s unlimited
+[ -n "${CODE:-}" ] && export PYTHONPATH=$CODE
+python -c "import qtaim_gen; print('qtaim_gen from', qtaim_gen.__file__)"
 
 SRC=/global/scratch/users/santiagovargas/OMol4M_raw
 WORK=/global/scratch/users/santiagovargas/engine_test
@@ -37,12 +43,13 @@ N=${N:-50}
 LIST_OVERRIDE=${LIST:-}
 ID=${SLURM_ARRAY_TASK_ID}
 case $MODE in
-  merge)   RUNNER=full-runner-engine;     LIST=$WORK/jobs.txt;     EXTRA="--restart" ;;
-  scratch) RUNNER=full-runner-engine;     LIST=$WORK/jobs.txt;     EXTRA="" ;;
-  ref)     RUNNER=full-runner-parsl-alcf; LIST=$WORK/jobs_ref.txt; EXTRA="" ;;
+  merge)   RUNNER=full_runner_engine;     LIST=$WORK/jobs.txt;     EXTRA="--restart --native_convert off" ;;
+  scratch) RUNNER=full_runner_engine;     LIST=$WORK/jobs.txt;     EXTRA="" ;;
+  ref)     RUNNER=full_runner_parsl_alcf; LIST=$WORK/jobs_ref.txt; EXTRA="--native_convert off" ;;
   *) echo "MODE must be merge, scratch or ref"; exit 1 ;;
 esac
 LIST=${LIST_OVERRIDE:-$LIST}
+EXTRA="$EXTRA ${FLAGS:-}"
 TREE=${TREE:-$MODE}
 SLICE=$WORK/slices/${TREE}_${ID}.txt
 sed -n "$(( ID * N + 1 )),$(( (ID + 1) * N ))p" $LIST > $SLICE
@@ -51,7 +58,9 @@ if [ ! -s $SLICE ]; then
   exit 0
 fi
 
-$RUNNER \
+# python -m, not the console scripts: an env need not have them installed, and the
+# module form always runs the qtaim_gen that CODE / the env resolves
+python -m qtaim_gen.source.scripts.$RUNNER \
   --num_folders $N \
   --orca_2mkl_cmd /global/scratch/users/santiagovargas/orca_6_0_1_linux_x86-64_shared_openmpi416/orca_2mkl \
   --multiwfn_cmd /global/scratch/users/santiagovargas/Multiwfn/Multiwfn_3.8_dev_bin_Linux/Multiwfn \

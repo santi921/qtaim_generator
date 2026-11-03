@@ -6,6 +6,10 @@ Plan: docs/plans/2026-10-04-feat-one-pass-charge-engine-plan.md
 - B `scratch`: full-runner-engine from the raw inputs, same 10k
 - `ref`: stock Multiwfn runner, first 200 of the 10k, same node type and threads (timing baseline)
 
+`merge` and `ref` pass `--native_convert off`, so they keep Multiwfn's convert step (the
+runner's default became the native converter on 2026-11-03). `scratch` uses the default; add
+`FLAGS="--native_convert off"` to make a Multiwfn-converted tree with it.
+
 Originals in `$RES` are only read. Everything is written under `$WORK`.
 
 ```bash
