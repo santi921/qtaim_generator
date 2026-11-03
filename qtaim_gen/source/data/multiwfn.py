@@ -8,10 +8,12 @@ from typing import Optional, List
 # sending them to Multiwfn: charges, fuzzy integrals and fuzzy_bond in one pass
 # (core/charge_engine.py; vdd, mbis, mbis_fuzzy_* and elf_fuzzy exist only at
 # full_set >= 1, the gradient-norm and Laplacian fuzzy integrals at full_set >= 2)
-# and the ALIE surface analysis and planarity (core/surface_engine.py)
+# and the ALIE surface analysis, planarity and, at full_set >= 2, the ESP surface
+# analysis (core/surface_engine.py)
 ENGINE_LEVEL1_ROUTINES = frozenset({"vdd", "mbis", "mbis_fuzzy_density", "mbis_fuzzy_spin", "elf_fuzzy"})
 ENGINE_LEVEL2_ROUTINES = frozenset({"grad_norm_rho_fuzzy", "laplacian_rho_fuzzy"})
-SURFACE_ENGINE_ROUTINES = frozenset({"other_alie", "other_geometry"})
+SURFACE_ENGINE_LEVEL2_ROUTINES = frozenset({"other_esp"})
+SURFACE_ENGINE_ROUTINES = frozenset({"other_alie", "other_geometry"}) | SURFACE_ENGINE_LEVEL2_ROUTINES
 ENGINE_ROUTINES = frozenset({
     "hirshfeld", "adch", "cm5", "becke",
     "becke_fuzzy_density", "hirsh_fuzzy_density",
@@ -23,9 +25,10 @@ ENGINE_ROUTINES = frozenset({
 # utils/validation.py) by every complete engine run. Bump it when a change alters
 # stored values or the routine set, and list the routines a version adds below, so a
 # folder from an older engine is not taken to hold engine values for them. A folder
-# with a charge_engine timing and no stamp ran version 1.
-CHARGE_ENGINE_VERSION = 2
-CHARGE_ENGINE_ROUTINES_ADDED = {2: ENGINE_LEVEL2_ROUTINES | {"elf_fuzzy"}}
+# with a charge_engine timing and no stamp ran version 1. The stamp also covers the
+# surface engine, which runs with the charge engine (one engine version is planned).
+CHARGE_ENGINE_VERSION = 3
+CHARGE_ENGINE_ROUTINES_ADDED = {2: ENGINE_LEVEL2_ROUTINES | {"elf_fuzzy"}, 3: SURFACE_ENGINE_LEVEL2_ROUTINES}
 
 
 def engine_routines_at(version: int) -> frozenset:
