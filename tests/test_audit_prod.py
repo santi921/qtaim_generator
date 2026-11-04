@@ -39,7 +39,7 @@ def test_audit_reads_level1_schemes_and_mbis_meta(tmp_path, monkeypatch, capsys)
     meta = {"mbis_selection": {"selected": "sigma_x1.5", "converged": {"default": True, "sigma_x0.6": False,
                                                                       "sigma_x1.5": True},
                                "solutions": 2, "spread": 0.02},
-            "mbis_merged": {"charge": [[0, 6, 5]], "fuzzy": [[0, 6, 5]]}, "mbis_cycles": {"charge": 2400, "fuzzy": 900},
+            "mbis_merged": {"charge": [{"atom": 1, "z": 90, "shells_guess": 6, "shells_fit": 5}], "fuzzy": []}, "mbis_cycles": {"charge": 2400, "fuzzy": 900},
             "mbis_degenerate": {"charge": False, "fuzzy": False}}
     new = _folder(tmp_path / "new" / "job", mbis_shift=1e-4, meta=meta)
     rec = A.audit(new)

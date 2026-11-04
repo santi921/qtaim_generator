@@ -545,7 +545,7 @@ def test_mbis_select_drops_failed_check_guesses(monkeypatch):
     results[0.5] = ((np.array([0.1, -0.1]), np.array([1, 1]), p, s, 2010), True, 1.0, False, True)
     q, *_, info = CE.mbis_select(None, None, None, np.array([1, 1]), np.array([1.0, 1.0]))
     assert seen == [True, True, True]
-    assert info["merged"]["default"] == [[0, 2, 1]] and info["selected"] == "sigma_x1.5"
+    assert info["merged"]["default"] == [{"atom": 1, "z": 1, "shells_guess": 2, "shells_fit": 1}] and info["selected"] == "sigma_x1.5"
 
 
 def test_mbis_guess_beyond_rn_keeps_six_shells():

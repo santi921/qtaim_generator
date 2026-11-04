@@ -1008,6 +1008,14 @@ def mbis_guesses(atnums):
     return [("default", (m0, p0, s0))] + [(f"sigma_x{f:g}", (m0, p0, s0 * f)) for f in MBIS_CHECK_SIGMAS]
 
 
+def mbis_merged_record(atnums, mshell_guess, mshell_fit):
+    """Atoms whose fit has fewer shells than its guess, as {"atom": 1-based
+    index, "z": Z, "shells_guess": n, "shells_fit": m} (the far_heavy_nuclei
+    convention, matching the 1-based charge keys)."""
+    return [{"atom": int(a) + 1, "z": int(atnums[a]), "shells_guess": int(mshell_guess[a]),
+             "shells_fit": int(mshell_fit[a])} for a in np.flatnonzero(mshell_fit < mshell_guess)]
+
+
 def mbis_select(grel, coords, tmpden, atnums, qbase):
     """MBIS can have several fixed points (on 27 local jobs below Rn, 8 had
     another more than 0.005 e away; every actinide tested did, up to 0.9 e).
@@ -1027,8 +1035,8 @@ def mbis_select(grel, coords, tmpden, atnums, qbase):
     actinide jobs a stalled x1.5 fit was better than the selection by up to
     5e-3 relative, and whether it converged in MBIS_ANDERSON_MAXCYC evaluations
     flipped the stored charges by up to 0.3 e between runs). spread and
-    solutions count only converged, non-degenerate fits; merged lists [atom,
-    shells in the guess, shells in the fit] per guess."""
+    solutions count only converged, non-degenerate fits; merged lists, per
+    guess, the atoms whose shells merged (mbis_merged_record)."""
     pairs = mbis_pairs(grel, coords, tmpden, atnums)
     step = lambda mm, pp, ss: _mbis_step(tmpden, pairs, mm, pp, ss)  # noqa: E731
     objective = lambda mm, pp, ss: mbis_objective(grel, coords, tmpden, atnums, mm, pp, ss)  # noqa: E731
@@ -1039,7 +1047,7 @@ def mbis_select(grel, coords, tmpden, atnums, qbase):
         above = max(good_so_far) + 1e-12 * abs(max(good_so_far)) if good_so_far else None
         (q, m, p, s, n), conv, fell_back = _mbis_fit_converged(step, m0, p0, s0, qbase, fallback=fallback,
                                                                objective=objective, fallback_above=above)
-        merged = [[int(a), int(m0[a]), int(m[a])] for a in np.flatnonzero(m < m0)]
+        merged = mbis_merged_record(atnums, m0, m)
         fits.append((name, q, m, p, s, n, objective(m, p, s), mbis_degenerate(m, p, s), conv, fell_back, merged))
     good = [f for f in fits if f[8] and not f[7]]
     tol = 1e-12 * max(abs(f[6]) for f in fits)
@@ -1298,7 +1306,7 @@ def run(wfx_path, nrad=75, nang=434, radcut=10.0, bond_nrad=45, bond_nang=170, f
             _, mshell, spop, ssig, ncyc_fuzzy = mbis_fit(grid_pts, coords, td_rho, atnums, qbase, mode=mbis_mode)
         degenerate["fuzzy"] = mbis_degenerate(mshell, spop, ssig)
         merged = {"charge": selection["charge"]["merged"][selection["charge"]["selected"]] if selection else [],
-                  "fuzzy": [[int(a), int(guess[0][a]), int(mshell[a])] for a in np.flatnonzero(mshell < guess[0])]}
+                  "fuzzy": mbis_merged_record(atnums, guess[0], mshell)}
         mtab = mbis_radial_tables(mshell, spop, ssig)
         fz["md"] = np.zeros(nat)
         fz["ms"] = np.zeros(nat)
@@ -1393,7 +1401,7 @@ def run(wfx_path, nrad=75, nang=434, radcut=10.0, bond_nrad=45, bond_nang=170, f
                         else None) if mbis_ok and selection else None,
         # a merged or emptied shell in the stored fit (see mbis_degenerate)
         "mbis_degenerate": degenerate if mbis_ok else None,
-        # shells the plain fallback merged, as [atom, shells in the guess, shells in the fit]
+        # shells the plain fallback merged (mbis_merged_record)
         "mbis_merged": merged if mbis_ok else None,
         # Multiwfn has no MBIS beyond Rn: these values come from the period-7 guess and grid
         "mbis_beyond_multiwfn": bool(mbis_ok and int(atnums.max()) > 86),
