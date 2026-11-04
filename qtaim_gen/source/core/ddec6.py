@@ -13,6 +13,8 @@ Implemented so far (docs/engine_roadmap/ddec6_port_plan.md, P2 map):
                                          parallelpiped
   K2 primitive density matrices          Step 2
   K3-K5 pair screening, data, sort       Steps 3-6
+  K6-K7 point loop (serial), coarse-grid Step 7
+        interpolation
 """
 
 import math
@@ -616,6 +618,264 @@ def pair_data(prep, grid):
             "nsingleblocks": len(prep["blocks"]), "check_included_electrons": check,
             "included_electrons": prep["included_electrons"], "pair_block_data": pbd,
             "included_primitive_data": data, "occupancy_correction": occ, "core_electrons": core}
+
+
+# ---------------------------------------------------------------------------------
+# K6-K7: point loop and coarse-grid interpolation (Step 7)
+# ---------------------------------------------------------------------------------
+
+COARSE = (2, 3, 4, 6, 8, 12)
+
+
+@numba.njit(cache=True)
+def _coarse_slot(gs):
+    for k in range(6):
+        if COARSE[k] == gs:
+            return k
+    return -1
+
+
+@numba.njit(cache=True)
+def _axis_points(dn, nc, gs, totn):
+    """Pixel indices (1-based) for offsets -dn..dn around centre pixel nc, and the first
+    and last offset that lands on the grid (and on the coarse grid when gs > 1)."""
+    pts = np.empty(2 * dn + 1, dtype=np.int64)
+    lo = dn
+    hi = -dn
+    for n in range(-dn, dn + 1):
+        k = n + nc + 1
+        pts[dn + n] = k
+        if k < 1 or k > totn:
+            continue
+        if gs > 1 and k % gs != gs - 1:
+            continue
+        lo = min(lo, n)
+        hi = max(hi, n)
+    return pts, lo, hi
+
+
+@numba.njit(cache=True)
+def _point_loop(data, pbd, center, atom_of_center, boundary, na_tot, nb_tot, nc_tot, pv, spin, occ,
+                val, spn, core, cval, cspn):
+    """Step 7 point loop over pair blocks, serial and in Chargemol's order. data columns
+    31 (renormalization), 38 and 39 (numeric overlap sums) are updated in place."""
+    mults = (8.0, 27.0, 64.0, 216.0, 512.0, 1728.0)
+    max_corr = 0.0
+    for b in range(pbd.shape[0]):
+        start = int(pbd[b, 0]) - 1
+        stop = int(pbd[b, 1]) - 1
+        x1, y1, z1 = data[start, 9], data[start, 10], data[start, 11]
+        x2, y2, z2 = data[start, 16], data[start, 17], data[start, 18]
+        asum = data[start, 5] + data[start, 12]
+        xd, yd, zd = data[start, 22], data[start, 23], data[start, 24]
+        t1 = data[start, 22] - data[start, 28]
+        t2 = data[start, 23] - data[start, 29]
+        t3 = data[start, 24] - data[start, 30]
+        r2cut = data[start, 33]
+        common = data[start, 34]
+        gs = nint(data[start, 35])
+        wi = data[start, 36]
+        wj = data[start, 37]
+        ai = atom_of_center[center[nint(data[start, 0]) - 1]]
+        aj = atom_of_center[center[nint(data[start, 1]) - 1]]
+        ap, lo_a, hi_a = _axis_points(nint(data[start, 19]), nint(data[start, 25]), gs, na_tot)
+        bp, lo_b, hi_b = _axis_points(nint(data[start, 20]), nint(data[start, 26]), gs, nb_tot)
+        cp, lo_c, hi_c = _axis_points(nint(data[start, 21]), nint(data[start, 27]), gs, nc_tot)
+        dna, dnb, dnc = nint(data[start, 19]), nint(data[start, 20]), nint(data[start, 21])
+        if lo_a > hi_a or lo_b > hi_b or lo_c > hi_c:
+            continue
+        stride = gs if gs > 1 else 1
+        slot = _coarse_slot(gs)
+        for step in range(1, 3):
+            if step == 2 and gs == 0:
+                continue
+            for nc in range(lo_c, hi_c + 1, stride):
+                kc = cp[dnc + nc]
+                for nb in range(lo_b, hi_b + 1, stride):
+                    kb = bp[dnb + nb]
+                    for na in range(lo_a, hi_a + 1, stride):
+                        ka = ap[dna + na]
+                        X = na * boundary[0, 0] + nb * boundary[1, 0] + nc * boundary[2, 0] + t1
+                        Y = na * boundary[0, 1] + nb * boundary[1, 1] + nc * boundary[2, 1] + t2
+                        Z = na * boundary[0, 2] + nb * boundary[1, 2] + nc * boundary[2, 2] + t3
+                        d2 = (X - xd) ** 2 + (Y - yd) ** 2 + (Z - zd) ** 2
+                        if d2 > r2cut:
+                            continue
+                        dx1 = X - x1
+                        dy1 = Y - y1
+                        dz1 = Z - z1
+                        dx2 = X - x2
+                        dy2 = Y - y2
+                        dz2 = Z - z2
+                        t4 = math.exp(-asum * d2) * common
+                        t5 = t4 * pv
+                        if slot >= 0:
+                            t5 = t5 * mults[slot]
+                        t7 = 0.0
+                        t8 = 0.0
+                        for p in range(start, stop + 1):
+                            if d2 > data[p, 33]:
+                                break
+                            if gs != 0 and data[p, 31] == 0.0:
+                                continue
+                            t6 = (powi(dx1, nint(data[p, 6])) * powi(dy1, nint(data[p, 7])) * powi(dz1, nint(data[p, 8]))
+                                  * powi(dx2, nint(data[p, 13])) * powi(dy2, nint(data[p, 14]))
+                                  * powi(dz2, nint(data[p, 15])))
+                            if gs != 0:
+                                if step == 1:
+                                    data[p, 38] = data[p, 38] + t5 * t6
+                                    data[p, 39] = data[p, 39] + t5 * abs(t6)
+                                else:
+                                    t6 = abs(t6)
+                            t7 = t7 + t6 * data[p, 31] * data[p, 2]
+                            if spin:
+                                t8 = t8 + t6 * data[p, 31] * data[p, 3]
+                        if gs == 0:
+                            core[ka - 1, kb - 1, kc - 1] = core[ka - 1, kb - 1, kc - 1] + t7 * t4
+                            if spin:
+                                sc = t8 * t4
+                                spn[ka - 1, kb - 1, kc - 1] = spn[ka - 1, kb - 1, kc - 1] + sc
+                                if ai >= 0:
+                                    occ[1, ai] = occ[1, ai] - sc * pv * wi
+                                if aj >= 0:
+                                    occ[1, aj] = occ[1, aj] - sc * pv * wj
+                        elif gs == 1:
+                            val[ka - 1, kb - 1, kc - 1] = val[ka - 1, kb - 1, kc - 1] + t7 * t4
+                            if spin:
+                                spn[ka - 1, kb - 1, kc - 1] = spn[ka - 1, kb - 1, kc - 1] + t8 * t4
+                        else:
+                            ia = nint((ka + 1) / float(gs)) - 1
+                            ib = nint((kb + 1) / float(gs)) - 1
+                            ic = nint((kc + 1) / float(gs)) - 1
+                            g = cval[slot]
+                            g[ia, ib, ic] = g[ia, ib, ic] + t7 * t4
+                            if spin:
+                                h = cspn[slot]
+                                h[ia, ib, ic] = h[ia, ib, ic] + t8 * t4
+            if gs > 0 and step == 1:
+                for p in range(start, stop + 1):
+                    max_coeff = abs((data[p, 2] + data[p, 3]) / 2.0) + abs((data[p, 2] - data[p, 3]) / 2.0)
+                    ov = data[p, 4]
+                    s = data[p, 38]
+                    abs_s = data[p, 39]
+                    if max_coeff * abs_s > GAUSSIAN_OVERLAP_TOLERANCE:
+                        data[p, 31] = max(min(((ov - s) / abs_s), 0.05), -0.05)
+                        max_corr = max(abs((ov - s) / abs_s), max_corr)
+                    else:
+                        data[p, 31] = 0.0
+    return max_corr
+
+
+@numba.njit(parallel=True, cache=True)
+def _halve(fine, coarse):
+    """fine(k) += 1/8 * sum of the 8 coarse cells at nint((k -+ 0.5)/2) (12->6, 8->4,
+    6->3, 4->2 in Step 7)."""
+    n0, n1, n2 = fine.shape
+    m0, m1, m2 = coarse.shape
+    for c in numba.prange(1, n2 + 1):
+        cl = (nint((c - 0.5) / 2.0) - 1) % m2
+        cu = (nint((c + 0.5) / 2.0) - 1) % m2
+        for b in range(1, n1 + 1):
+            bl = (nint((b - 0.5) / 2.0) - 1) % m1
+            bu = (nint((b + 0.5) / 2.0) - 1) % m1
+            for a in range(1, n0 + 1):
+                al = (nint((a - 0.5) / 2.0) - 1) % m0
+                au = (nint((a + 0.5) / 2.0) - 1) % m0
+                fine[a - 1, b - 1, c - 1] = fine[a - 1, b - 1, c - 1] + (1.0 / 8.0) * (
+                    coarse[al, bl, cl] + coarse[au, bl, cl] + coarse[al, bu, cl] + coarse[al, bl, cu]
+                    + coarse[au, bu, cl] + coarse[au, bl, cu] + coarse[al, bu, cu] + coarse[au, bu, cu])
+
+
+@numba.njit(parallel=True, cache=True)
+def _from_grid2(fine, g2):
+    n0, n1, n2 = fine.shape
+    m0, m1, m2 = g2.shape
+    for c in numba.prange(1, n2 + 1):
+        cl = (nint((c + 0.5) / 2.0) - 1) % m2
+        cu = (nint((c + 1.5) / 2.0) - 1) % m2
+        for b in range(1, n1 + 1):
+            bl = (nint((b + 0.5) / 2.0) - 1) % m1
+            bu = (nint((b + 1.5) / 2.0) - 1) % m1
+            for a in range(1, n0 + 1):
+                al = (nint((a + 0.5) / 2.0) - 1) % m0
+                au = (nint((a + 1.5) / 2.0) - 1) % m0
+                fine[a - 1, b - 1, c - 1] = fine[a - 1, b - 1, c - 1] + (1.0 / 8.0) * (
+                    g2[al, bl, cl] + g2[au, bl, cl] + g2[al, bu, cl] + g2[al, bl, cu]
+                    + g2[au, bu, cl] + g2[au, bl, cu] + g2[al, bu, cu] + g2[au, bu, cu])
+
+
+@numba.njit(parallel=True, cache=True)
+def _from_grid3(fine, g3):
+    n0, n1, n2 = fine.shape
+    m0, m1, m2 = g3.shape
+    for c in numba.prange(1, n2 + 1):
+        cl = (nint(c / 3.0) - 1) % m2
+        cu = (nint((c + 2.0) / 3.0) - 1) % m2
+        fc = ((c + 1) % 3) / 3.0
+        for b in range(1, n1 + 1):
+            bl = (nint(b / 3.0) - 1) % m1
+            bu = (nint((b + 2.0) / 3.0) - 1) % m1
+            fb = ((b + 1) % 3) / 3.0
+            for a in range(1, n0 + 1):
+                al = (nint(a / 3.0) - 1) % m0
+                au = (nint((a + 2.0) / 3.0) - 1) % m0
+                fa = ((a + 1) % 3) / 3.0
+                fine[a - 1, b - 1, c - 1] = (fine[a - 1, b - 1, c - 1]
+                                             + ((1.0 - fa) * (1.0 - fb) * (1.0 - fc)) * g3[al, bl, cl]
+                                             + (fa * (1.0 - fb) * (1.0 - fc)) * g3[au, bl, cl]
+                                             + ((1.0 - fa) * fb * (1.0 - fc)) * g3[al, bu, cl]
+                                             + ((1.0 - fa) * (1.0 - fb) * fc) * g3[al, bl, cu]
+                                             + (fa * fb * (1.0 - fc)) * g3[au, bu, cl]
+                                             + (fa * (1.0 - fb) * fc) * g3[au, bl, cu]
+                                             + ((1.0 - fa) * fb * fc) * g3[al, bu, cu]
+                                             + (fa * fb * fc) * g3[au, bu, cu])
+
+
+def _interpolate(fine, coarse, max_gs):
+    """Coarse grids back onto the fine grid, in Chargemol's order."""
+    g2, g3, g4, g6, g8, g12 = coarse
+    if max_gs > 8:
+        _halve(g6, g12)
+    if max_gs > 6:
+        _halve(g4, g8)
+    if max_gs > 4:
+        _halve(g3, g6)
+    if max_gs > 3:
+        _halve(g2, g4)
+    if max_gs > 2:
+        _from_grid3(fine, g3)
+    if max_gs > 1:
+        _from_grid2(fine, g2)
+
+
+def density_grids(prep, grid, pairs):
+    """Step 7: valence, spin and analytic-pair core grids before the EDF/core step."""
+    na, nb, nc = grid["totnum"]
+    spin = prep["spin_available"]
+    data = pairs["included_primitive_data"].copy()
+    occ = pairs["occupancy_correction"].copy()
+    val = np.zeros((na, nb, nc), order="F")
+    core = np.zeros((na, nb, nc), order="F")
+    spn = np.zeros((na, nb, nc) if spin else (1, 1, 1), order="F")
+    numeric = data[:, 32] == 0.0
+    max_gs = int(data[numeric, 35].max()) if numeric.any() else 0
+    cval = numba.typed.List()
+    cspn = numba.typed.List()
+    for s in COARSE:
+        # unused grids get a (2, 2, 2) placeholder: a (1, 1, 1) array is also C-contiguous,
+        # which numba types as a different layout than the F-ordered grids
+        shape = (na // s, nb // s, nc // s) if max_gs >= s else (2, 2, 2)
+        cval.append(np.zeros(shape, order="F"))
+        cspn.append(np.zeros(shape if spin else (2, 2, 2), order="F"))
+    max_corr = _point_loop(data, pairs["pair_block_data"], prep["center"], prep["atom_of_center"],
+                           grid["boundary"], na, nb, nc, grid["pixelvolume"], spin, occ, val, spn, core, cval, cspn)
+    _interpolate(val, list(cval), max_gs)
+    if spin:
+        _interpolate(spn, list(cspn), max_gs)
+    return {"valence_density": val, "spin_density": spn if spin else None, "core_density": core,
+            "included_primitive_data": data, "occupancy_correction": occ,
+            "core_electrons": pairs["core_electrons"], "max_pair_correction": max_corr,
+            "max_grid_spacing": max_gs}
 
 
 def load(wfx_path):

@@ -17,6 +17,15 @@ FIXTURES = os.path.join(os.path.dirname(__file__), "test_files", "charge_engine"
 DUMPS = os.environ.get("DDEC6_DUMPS", os.path.expanduser("~/dev/qtaim_generator/data/ddec6_ref/dumps"))
 
 
+def _read_dumps():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "read_dumps", os.path.join(os.path.dirname(__file__), "..", "scripts", "ddec6_reference", "read_dumps.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def test_nint_rounds_half_away_from_zero():
     assert [ddec6.nint(x) for x in (0.5, 1.5, 2.5, -0.5, -1.5, 2.49)] == [1, 2, 3, -1, -2, 2]
 
@@ -65,11 +74,7 @@ def test_pair_data_matches_chargemol_bitwise(name):
     dump_dir = os.path.join(DUMPS, name)
     if not os.path.exists(os.path.join(dump_dir, "dump_pairs.bin")):
         pytest.skip("Chargemol validation dumps not available")
-    import importlib.util
-    spec = importlib.util.spec_from_file_location(
-        "read_dumps", os.path.join(os.path.dirname(__file__), "..", "scripts", "ddec6_reference", "read_dumps.py"))
-    R = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(R)
+    R = _read_dumps()
     ref = R.read_pairs(os.path.join(dump_dir, "dump_pairs.bin"))
     s7 = R.read_step7(os.path.join(dump_dir, "dump_step7.bin"), ref["n_pairs"], ref["natoms"])
 
@@ -86,3 +91,23 @@ def test_pair_data_matches_chargemol_bitwise(name):
     assert np.array_equal(pairs["included_primitive_data"][:, :38], ref["included_primitive_data"][:, :38])
     assert np.array_equal(pairs["occupancy_correction"], ref["occupancy_correction"])
     assert np.array_equal(pairs["core_electrons"], ref["core_electrons"])
+
+
+@pytest.mark.skipif(not os.environ.get("DDEC6_SLOW"), reason="several minutes per fixture; set DDEC6_SLOW=1")
+@pytest.mark.parametrize("name", ["rmechdb_652_step10_0_2", "XeCl4_step2_0_1"])
+def test_density_grids_match_chargemol_bitwise(name):
+    dump_dir = os.path.join(DUMPS, name)
+    if not os.path.exists(os.path.join(dump_dir, "dump_step7.bin")):
+        pytest.skip("Chargemol validation dumps not available")
+    R = _read_dumps()
+    ref = R.read_pairs(os.path.join(dump_dir, "dump_pairs.bin"))
+    s7 = R.read_step7(os.path.join(dump_dir, "dump_step7.bin"), ref["n_pairs"], ref["natoms"])
+    prep = ddec6.load(os.path.join(FIXTURES, name, "orca.wfx"))
+    grid = ddec6.grid_setup(prep["atom_xyz"])
+    g = ddec6.density_grids(prep, grid, ddec6.pair_data(prep, grid))
+    assert g["max_pair_correction"] == s7["max_pair_correction"]
+    assert np.array_equal(g["included_primitive_data"], s7["included_primitive_data"])
+    assert np.array_equal(g["occupancy_correction"], s7["occupancy_correction"])
+    for k in ("valence_density", "core_density", "spin_density"):
+        if k in s7:
+            assert np.array_equal(g[k], s7[k]), k
