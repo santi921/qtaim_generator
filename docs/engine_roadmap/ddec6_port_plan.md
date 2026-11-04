@@ -35,6 +35,7 @@ confidence. Chargemol paths are relative to
 | 8 | Tolerance for the pair-renormalization step chosen when P2 gets there, if bit-level parity is impractical (D2) | user, 2026-11-03 |
 | 9 | Chargemol binary allowed on LRC and NERSC for reference runs only | user, 2026-11-03 |
 | 10 | Durable source copy in ~/dev/chargemol_src (D5) | user, 2026-11-03 |
+| 12 | No large DDEC6 batches on the workstation: local work is code plus the fixture tests; scale validation runs on NERSC at a stopping point. The local nitrates reference (62/156) and the wfx_pull port comparison (1/87) were stopped and resume where they left off | user, 2026-11-05 |
 | 11 | Size cap 120 atoms (skip above it, recorded like other skipped routines); DDEC6 need not cover the full OMol or OpenActinides sets. At 120 atoms a dense primitive 1PDM is about 1 GB per spin, so K2 still uses tiles | user, 2026-11-04 |
 
 ## 2. What Chargemol does on a nonperiodic wfx
@@ -222,7 +223,10 @@ Arithmetic that had to follow gfortran:
 - The constant x**10 uses GCC's powi tree (x^5 * x^5).
 
 Not covered by a real fixture:
-- 6x and 8x grids (the rmechdb_750 dump is pending).
+- 6x and 8x grids: RESOLVED 2026-11-05. rmechdb_750_step1_2_1 (wfx_pull, 22 atoms, 720
+  primitives, 13.4M points, max spacing 8) is bit-identical in K0-K8; parallel Step 7
+  took 275 s.
+- 12x grid: synthetic diffuse_h2 only.
 - The missing-core path (no local ECP job lacks an EDF block).
 
 Notes for P3:
@@ -270,6 +274,54 @@ Two findings:
 
 Radial moments (r^2, r^3, r^4) read corrected_total_density from the bond-order prep,
 so they move to P7.
+
+### P5 plan: runner wiring (proposed 2026-11-05, not started)
+
+Modelled on the existing engine steps (omol._run_charge_engine, _run_engines,
+core/engine_worker.py) and on _run_orca_parse's additive merge into charge.json.
+
+1. **Opt-in flag.** gbw_analysis(ddec6=False), plus `--ddec6` on full-runner,
+   full-runner-parsl and full-runner-parsl-alcf. It is independent of full_set, because
+   DDEC6 is costly and capped at 120 atoms (D4).
+2. **Engine child process.** The engine_worker gets a `--ddec6` step and `_run_engines`
+   passes it, so DDEC6 gets the same thread isolation as the other engines. It runs
+   after the charge engine.
+3. **`omol._run_ddec6(folder, n_threads, logger, restart)`:**
+   - needs orca.wfx;
+   - natoms > 120: records a permanent skip in timings.json `_skipped_routines` as
+     `{"ddec6": {"reason": "natoms_above_120", "by": "ddec6"}}`, and validation stops
+     expecting it;
+   - a Chargemol-equivalent stop (valence electrons not accounted for on the grid,
+     failed grid-spacing check) is recorded as a permanent skip with its reason (D6);
+   - restart: skipped when timings has `ddec6` > 0 and charge.json has a `ddec6`
+     entry with every atom.
+4. **Output (option B, decision 3):**
+   - charge.json: `ddec6: {charge, spin (open shell), dipole {mag, xyz} (sum q r about
+     the origin, as charge_engine's other schemes), atomic_dipole, atomic_quadrupole,
+     atomic_quadrupole_eigenvalues}`;
+   - fuzzy_full.json: `ddec6_atomic_dipole_mag`, `ddec6_quadrupole_mag` (Frobenius
+     norm of the traceless tensor from its eigenvalues) and `ddec6_tail_decay` (the
+     fitted b of the cloud-penetration fit), each `{atom: value, sum, abs_sum}`; r2/r3/r4
+     follow in P7;
+   - both merged additively with atomic_json_write into the generator/ or root copy,
+     whichever exists (as _run_orca_parse does);
+   - timings.json: `ddec6` seconds and `_engine_versions.ddec6 = DDEC6_VERSION`.
+5. **Validation (utils/validation.py).** When ddec6 is requested, `ddec6` must be in
+   charge.json with a charge for every atom unless it is in `_skipped_routines`.
+6. **Downstream.** json-to-lmdb stores charge.json verbatim, so nothing changes.
+   GeneralConverter takes `ddec6` through charge_filter and the fuzzy names through
+   fuzzy_filter. Example converter config: deferred to P6.
+7. **Tests.**
+   - Fast: merge and skip logic on a fake folder (stubbed ddec6.run), the 120-atom cap,
+     restart, validation.
+   - Slow (DDEC6_SLOW): end-to-end on the rmechdb fixture folder through gbw_analysis.
+
+Open decisions:
+- D4 RESOLVED 2026-11-05: opt-in `--ddec6` flag, independent of full_set.
+- D6 RESOLVED 2026-11-05: a Chargemol-equivalent stop is a permanent skip, with the
+  reason recorded in `_skipped_routines`.
+- D7 RESOLVED 2026-11-05: start with ddec6_atomic_dipole_mag, ddec6_quadrupole_mag and
+  ddec6_tail_decay.
 
 ## 5. Validation
 
