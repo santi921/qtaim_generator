@@ -35,6 +35,7 @@ confidence. Chargemol paths are relative to
 | 8 | Tolerance for the pair-renormalization step chosen when P2 gets there, if bit-level parity is impractical (D2) | user, 2026-11-03 |
 | 9 | Chargemol binary allowed on LRC and NERSC for reference runs only | user, 2026-11-03 |
 | 10 | Durable source copy in ~/dev/chargemol_src (D5) | user, 2026-11-03 |
+| 11 | Size cap 120 atoms (skip above it, recorded like other skipped routines); DDEC6 need not cover the full OMol or OpenActinides sets. At 120 atoms a dense primitive 1PDM is about 1 GB per spin, so K2 still uses tiles | user, 2026-11-04 |
 
 ## 2. What Chargemol does on a nonperiodic wfx
 
@@ -180,6 +181,28 @@ Harness: `scripts/ddec6_reference/` (`build_chargemol.sh`, `chargemol_build_fix.
     6.8e-5 at most.
   - Cause not established. Possibly the spin density is not renormalized the way the
     electron count is. To trace in P4; the port reproduces Chargemol either way.
+
+### P2 map: module_gen_dens_grids_from_gaussian_basis_set_coeff.f08 (nonperiodic path)
+
+Read 2026-11-04. Line numbers are in the unmodified source.
+
+| Kernel | Source | What it does | Port notes |
+|---|---|---|---|
+| K0 primitive order | read_wfx 730-819 | Selection sort with swaps: primitives by centre, then by exponent within the centre; MO coefficients move with them. A single block is a run of equal centre and exponent (1e-10). Blocks then span shells: def2 jobs up to 10 primitives, X2C-TZVPPall actinides up to 60 (pair block 3600 values). rmechdb_652: 111 blocks, as Chargemol reports | Port the swap sequence literally; it fixes pair order and so summation order |
+| K1 grid | Step 1, 61-185; charge_center_positions, parallelpiped | Cubic 0.14 Bohr pixels; origin and totnumA/B/C from atom extents plus delta_na (cutoff 500 pm) plus 11 buffer pixels, rounded up to a multiple of 24 by a mixed integer/real expression | Port literally; the rounding expression must match bit for bit |
+| K2 density matrices | Step 2, 232-262 | Dense nprim x nprim alpha and beta primitive 1PDMs from occupations and MO coefficients | Build per pair block from C (BLAS); the full matrix is about 7 GB at 30k primitives |
+| K3 pair screening | Step 3, 326-457; single blocks from read_wfx | For each (block_i <= block_j, i <= j): (\|P_a\| + \|P_b\|) times the overlap with powers rounded to even numbers, against gaussian_overlap_tolerance. Included pairs are "analytic" (alpha1 min(Z1, 1) + alpha2 min(Z2, 1) > analytic_alpha_cutoff) or "numeric" | Keep the even-rounding rules: down when alpha_sum > 1, else up; same-centre and two-centre cases differ |
+| K4 pair data | Steps 4-5, 460-835 | Electron check over all pairs (STOP if off by > 0.001). Per pair: 1PDM sum and difference (x2 off-diagonal), analytic overlap, cutoff radius, product centre and its pixel, renormalization factor = 1, grid spacing 1/2/3/4/6/8/12 by alpha_sum (numeric pairs only). Analytic pairs: alpha^10 weights split their electrons, spin, dipole and quadrupole onto atoms (core_electrons, occupancy_correction rows 2-11) | Needs gaussian_overlap_integral with moment shifts (module_gaussian_functions) |
+| K5 sort | Step 6, 837-875 | Within each pair block, selection sort by cutoff radius, descending | Port as written; the point loop EXITs on the first pair whose radius is exceeded |
+| K6 point loop | Step 7, 876-1530 (spin) and 1775-2309 (no spin) | Per block, per pixel inside the block cutoff: exp(-alpha_sum d^2) times the common factor times the sum over pairs of polynomial x renormalization factor x 1PDM. Spacing 0 (analytic) pairs go to core_density, with their spin subtracted from occupancy_correction. Numeric pairs go to the fine grid or coarse grids 2-12 (index nint((k+1)/s)) | Two passes. Pass 1 accumulates signed and absolute numeric overlaps (columns 39, 40). Then factor = clip((analytic - signed)/abs, +-0.05), or 0 below tolerance. Pass 2 adds factor x \|polynomial\|. numba kernel; threads need a deterministic reduction |
+| K7 interpolation | 1530-1775, 2309-2490 | Coarse grids cascade back to the fine grid by 1/8 sums of the 8 neighbours | Port literally |
+| K8 core grid and checks | Step 8, 2496-2620; add_missing_core_density; check_grid_spacing; run_valence_core_densities | EDF/core density on the grid, missing-core fill from core_*.txt, initialize_atomic_densities, electron-count checks | Last P2 piece |
+
+Validation for P2: `chargemol_dump.patch` (chargemol_serial_dump; reader
+`scripts/ddec6_reference/read_dumps.py`), a third build-time patch (dump only) writes valence_density,
+spin_density, core_density, occupancy_correction, core_electrons and the pair counts to
+stream-access binary files after Step 8. The port compares arrays element by element
+(about 56 MB per grid for a 7M-point fixture).
 
 ## 5. Validation
 

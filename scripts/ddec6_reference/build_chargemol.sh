@@ -12,6 +12,10 @@
 #       which only widens the per-atom output formats (charges, multipoles, spin
 #       moments, radial moments, tail fits, bond orders) to es25.16 so the port can
 #       be compared beyond 1e-6.
+#   chargemol_serial_dump  precise + chargemol_dump.patch, which writes the pair data,
+#       the grids after Step 7 and the final grids of the density module to
+#       dump_pairs.bin, dump_step7.bin and dump_final.bin (stream access, column-major)
+#       for checking the density-grid port kernel by kernel.
 # The Chargemol license allows distributing patch files for build-time changes; the
 # source itself is not redistributed here.
 #
@@ -32,8 +36,11 @@ build() {
     tmp="$(mktemp -d)"
     cp "$SRC"/*.f08 "$tmp"
     (cd "$tmp" && patch -p1 -s < "$HERE/chargemol_build_fix.patch")
-    if [ "$precise" = 1 ]; then
+    if [ "$precise" -ge 1 ]; then
         (cd "$tmp" && patch -p1 -s < "$HERE/chargemol_precision.patch")
+    fi
+    if [ "$precise" = 2 ]; then
+        (cd "$tmp" && patch -p1 -s < "$HERE/chargemol_dump.patch")
     fi
     # shellcheck disable=SC2086
     (cd "$tmp" && gfortran $FFLAGS $omp -static-libgfortran -o "$OUT/$name" "${FILES[@]}")
@@ -45,3 +52,4 @@ build chargemol_serial 0 ""
 build chargemol_omp 0 "-fopenmp"
 build chargemol_serial_precise 1 ""
 build chargemol_omp_precise 1 "-fopenmp"
+build chargemol_serial_dump 2 ""
