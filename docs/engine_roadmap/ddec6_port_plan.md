@@ -231,6 +231,23 @@ Notes for P3:
   1074 e). core_iterator first caps each pixel at 30 e and then renormalizes the
   grid to the core electron counts.
 
+### P3 status (2026-11-05)
+
+core/ddec6.py run(wfx) returns DDEC6 net atomic charges (commit 2a75f16). The charges
+and the iteration count (7) equal Chargemol's precise build exactly on rmechdb_652 and
+XeCl4. Port wall time on the loaded workstation: 86 s and 64 s. Chargemol serial took
+161 s and 301 s; Chargemol at 16 threads on an idle machine took about 15 s for
+rmechdb_652.
+
+Running (scripts/ddec6_reference/compare_charges.py, results in
+data/ddec6_ref/port_vs_chargemol_wfx_pull.tsv): the 87 wfx_pull jobs against the
+OpenMP references. OpenMP adds are unordered, so agreement is expected near 1e-12 e,
+not bit for bit.
+
+Not ported yet (P4): spin moments, atomic multipoles, radial moments, cloud
+penetration, bond orders (P7). local_multipole_moment_analysis and compute_CM5 are
+called inside step 1; they produce output only and do not feed the charges.
+
 ## 5. Validation
 
 Reference tiers, as in the ledger:
