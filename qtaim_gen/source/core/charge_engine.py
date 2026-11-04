@@ -531,14 +531,59 @@ MBIS_CHECK_SIGMAS = (0.6, 1.5)  # width scales of the extra guesses mbis_select 
 MBIS_UNIQUE_TOL = 0.005  # e: larger guess spreads mark the MBIS record as not unique
 
 
-@njit(nogil=True, cache=True)
-def _mbis_gather(grel, atcoords, tmpden, cut2, mshell, sig, dmax, dmax_atom2, cand_ptr, cand, p0, p1, cap):
-    """MBIS terms (atom, shell, distance, -d/sigma) of the flat points p0..p1
-    (centre * len(grel) + point) that can reach MBIS_DENCUT; ptr[q] is where
-    point q's terms start. Skipped: points with tmpden <= 1e-14, atoms beyond
-    atmrhocut (ignorefar=1) or beyond every shell's dencut radius, and shells
-    beyond their own (dmax, padded so a skipped term is certainly below it)."""
+@njit(parallel=True, cache=True)
+def _mbis_pair_scan(grel, atcoords, tmpden, cut2, cand_ptr, cand, pptr, pj, pd, fill):
+    """Per flat point (centre * len(grel) + point) with tmpden > 1e-14, the
+    atoms within atmrhocut (ignorefar=1) and their distance. fill False counts
+    them into pptr[1:]; fill True writes them from pptr."""
     m = grel.shape[0]
+    for c in prange(atcoords.shape[0]):
+        for i in range(m):
+            ip = c * m + i
+            if not tmpden[c, i] > 1e-14:
+                continue
+            x = grel[i, 0] + atcoords[c, 0]
+            y = grel[i, 1] + atcoords[c, 1]
+            z = grel[i, 2] + atcoords[c, 2]
+            s = pptr[ip] if fill else 0
+            for r in range(cand_ptr[c], cand_ptr[c + 1]):
+                j = cand[r]
+                dx = x - atcoords[j, 0]
+                dy = y - atcoords[j, 1]
+                dz = z - atcoords[j, 2]
+                d2 = dx * dx + dy * dy + dz * dz
+                if d2 > cut2[j]:
+                    continue
+                if fill:
+                    pj[s] = j
+                    pd[s] = np.sqrt(d2)
+                s += 1
+            if not fill:
+                pptr[ip + 1] = s
+
+
+def mbis_pairs(grel, coords, tmpden, atnums):
+    """The (atom, distance) pairs every MBIS map evaluation on this grid reads,
+    built once: point ip's pairs are pj/pd[pptr[ip]:pptr[ip + 1]], atoms in the
+    order of _mbis_setup's candidate lists. About 12 bytes per pair (0.12 GB
+    for 48 atoms, 0.54 GB for 274 atoms on the MBIS charge grid)."""
+    cut2, cand_ptr, cand = _mbis_setup(grel, coords, atnums)
+    pptr = np.zeros(len(coords) * grel.shape[0] + 1, dtype=np.int64)
+    dummy_j, dummy_d = np.empty(0, dtype=np.int32), np.empty(0)
+    _mbis_pair_scan(grel, coords, tmpden, cut2, cand_ptr, cand, pptr, dummy_j, dummy_d, False)
+    pptr = np.cumsum(pptr)
+    pj, pd = np.empty(pptr[-1], dtype=np.int32), np.empty(pptr[-1])
+    _mbis_pair_scan(grel, coords, tmpden, cut2, cand_ptr, cand, pptr, pj, pd, True)
+    return pptr, pj, pd
+
+
+@njit(nogil=True, cache=True)
+def _mbis_gather(pptr, pj, pd, mshell, sig, dmax, dmax_atom, p0, p1, cap):
+    """MBIS terms (atom, shell, distance, -d/sigma) of the flat points p0..p1
+    that can reach MBIS_DENCUT, from the mbis_pairs cache; ptr[q] is where
+    point q's terms start. Skipped: atoms beyond every shell's dencut radius
+    and shells beyond their own (dmax, padded so a skipped term is certainly
+    below it)."""
     n = p1 - p0
     tj = np.empty(cap, dtype=np.int64)
     tk = np.empty(cap, dtype=np.int64)
@@ -547,30 +592,19 @@ def _mbis_gather(grel, atcoords, tmpden, cut2, mshell, sig, dmax, dmax_atom2, ca
     ptr = np.zeros(n + 1, dtype=np.int64)
     nt = 0
     for q in range(n):
-        ip = p0 + q
-        c = ip // m
-        i = ip - c * m
-        if tmpden[c, i] > 1e-14:
-            x = grel[i, 0] + atcoords[c, 0]
-            y = grel[i, 1] + atcoords[c, 1]
-            z = grel[i, 2] + atcoords[c, 2]
-            for r in range(cand_ptr[c], cand_ptr[c + 1]):
-                j = cand[r]
-                dx = x - atcoords[j, 0]
-                dy = y - atcoords[j, 1]
-                dz = z - atcoords[j, 2]
-                d2 = dx * dx + dy * dy + dz * dz
-                if d2 > cut2[j] or d2 > dmax_atom2[j]:
+        for s in range(pptr[p0 + q], pptr[p0 + q + 1]):
+            j = pj[s]
+            d = pd[s]
+            if d > dmax_atom[j]:
+                continue
+            for k in range(mshell[j]):
+                if d > dmax[j, k]:
                     continue
-                d = np.sqrt(d2)
-                for k in range(mshell[j]):
-                    if d > dmax[j, k]:
-                        continue
-                    tj[nt] = j
-                    tk[nt] = k
-                    td[nt] = d
-                    targ[nt] = -d / sig[j, k]
-                    nt += 1
+                tj[nt] = j
+                tk[nt] = k
+                td[nt] = d
+                targ[nt] = -d / sig[j, k]
+                nt += 1
         ptr[q + 1] = nt
     return tj[:nt], tk[:nt], td[:nt], targ[:nt], ptr
 
@@ -604,12 +638,12 @@ def _mbis_accumulate(tmpden, m, p0, amp, tj, tk, td, ex, ptr, nat):
     return ppop, psig
 
 
-def _mbis_cycle(grel, coords, tmpden, cut2, cand_ptr, cand, mshell, pop, sig, block=4096):
+def _mbis_cycle(tmpden, pairs, mshell, pop, sig, block=4096):
     """One MBIS iteration (MBIS, imode 0). Points are processed in blocks on
-    numba.get_num_threads() worker threads: gather the terms that can matter,
-    one vectorized numpy exp, accumulate."""
-    nat = len(coords)
-    m = grel.shape[0]
+    numba.get_num_threads() worker threads: gather the terms that can matter
+    from the mbis_pairs cache, one vectorized numpy exp, accumulate."""
+    pptr, pj, pd = pairs
+    nat, m = tmpden.shape
     npts = nat * m
     amp = np.zeros_like(pop)
     dmax = np.full(pop.shape, -1.0)
@@ -624,15 +658,11 @@ def _mbis_cycle(grel, coords, tmpden, cut2, cand_ptr, cand, mshell, pop, sig, bl
             if amp[j, k] > MBIS_DENCUT:
                 dmax[j, k] = sv * np.log(amp[j, k] / MBIS_DENCUT) * (1 + 1e-9) + 1e-12
     dmax_atom = dmax.max(axis=1)
-    dmax_atom2 = np.where(dmax_atom < 0, -1.0, dmax_atom**2)
-    ncand = np.diff(cand_ptr)
 
     def one_block(p0):
         p1 = min(npts, p0 + block)
-        cap = (p1 - p0) * MBIS_MAXSHELL * int(ncand[p0 // m : (p1 - 1) // m + 1].max())
-        tj, tk, td, targ, ptr = _mbis_gather(
-            grel, coords, tmpden, cut2, mshell, sig, dmax, dmax_atom2, cand_ptr, cand, p0, p1, cap
-        )
+        cap = int(pptr[p1] - pptr[p0]) * MBIS_MAXSHELL
+        tj, tk, td, targ, ptr = _mbis_gather(pptr, pj, pd, mshell, sig, dmax, dmax_atom, p0, p1, cap)
         return _mbis_accumulate(tmpden, m, p0, amp, tj, tk, td, np.exp(targ), ptr, nat)
 
     starts = range(0, npts, block)
@@ -741,16 +771,16 @@ def mbis_fit(grel, coords, tmpden, atnums, qbase, crit=1e-4, maxcyc=500, mode=No
         mshell, pop, sig = mbis_guesses(atnums)[0][1]
     else:
         mshell, pop, sig = mbis_initial_shells(atnums)
-    cut2, cand_ptr, cand = _mbis_setup(grel, coords, atnums)
-    if mode == "converged":
-        step = lambda mm, pp, ss: _mbis_step(grel, coords, tmpden, cut2, cand_ptr, cand, mm, pp, ss)  # noqa: E731
-        objective = lambda mm, pp, ss: mbis_objective(grel, coords, tmpden, atnums, mm, pp, ss)  # noqa: E731
-        return _mbis_fit_converged(step, mshell, pop, sig, qbase, objective=objective)[0]
-    if mode != "multiwfn":
+    if mode not in ("converged", "multiwfn"):
         raise ValueError(f"unknown MBIS mode {mode!r}")
+    pairs = mbis_pairs(grel, coords, tmpden, atnums)
+    if mode == "converged":
+        step = lambda mm, pp, ss: _mbis_step(tmpden, pairs, mm, pp, ss)  # noqa: E731
+        objective = lambda mm, pp, ss: mbis_objective(grel, coords, tmpden, atnums, mm, pp, ss, pairs=pairs)  # noqa: E731
+        return _mbis_fit_converged(step, mshell, pop, sig, qbase, objective=objective)[0]
     last = np.zeros(len(atnums))
     for icyc in range(1, maxcyc + 1):
-        popnew, signew = _mbis_cycle(grel, coords, tmpden, cut2, cand_ptr, cand, mshell, pop, sig)
+        popnew, signew = _mbis_cycle(tmpden, pairs, mshell, pop, sig)
         pos = popnew > 0
         signew[pos] /= 3 * popnew[pos]
         charge = qbase - popnew.sum(axis=1)
@@ -774,9 +804,9 @@ def _mbis_setup(grel, coords, atnums):
     return cut2, cand_ptr, np.concatenate(cand_lists).astype(np.int64)
 
 
-def _mbis_step(grel, coords, tmpden, cut2, cand_ptr, cand, mshell, pop, sig):
+def _mbis_step(tmpden, pairs, mshell, pop, sig):
     """The MBIS map: new populations and widths from the current ones."""
-    popnew, signew = _mbis_cycle(grel, coords, tmpden, cut2, cand_ptr, cand, mshell, pop, sig)
+    popnew, signew = _mbis_cycle(tmpden, pairs, mshell, pop, sig)
     pos = popnew > 0
     signew[pos] /= 3 * popnew[pos]
     return popnew, signew
@@ -931,12 +961,12 @@ def _mbis_logsum(tmpden, m, p0, amp, tj, tk, ex, ptr):
     return tot
 
 
-def mbis_objective(grel, coords, tmpden, atnums, mshell, pop, sig, block=4096):
+def mbis_objective(grel, coords, tmpden, atnums, mshell, pop, sig, block=4096, pairs=None):
     """sum_i w_i ln rho0(r_i) on the fit's grid: the part of the MBIS
     Kullback-Leibler divergence int rho ln(rho / rho0) that differs between
     fixed points (their total populations all equal the grid's electron count).
-    Larger is a better fit."""
-    cut2, cand_ptr, cand = _mbis_setup(grel, coords, atnums)
+    Larger is a better fit. pairs: the grid's mbis_pairs, built when not given."""
+    pptr, pj, pd = pairs if pairs is not None else mbis_pairs(grel, coords, tmpden, atnums)
     nat, m = len(coords), grel.shape[0]
     amp = np.zeros_like(pop)
     dmax = np.full(pop.shape, -1.0)
@@ -948,14 +978,11 @@ def mbis_objective(grel, coords, tmpden, atnums, mshell, pop, sig, block=4096):
                 if amp[j, k] > MBIS_DENCUT:
                     dmax[j, k] = sv * np.log(amp[j, k] / MBIS_DENCUT) * (1 + 1e-9) + 1e-12
     dmax_atom = dmax.max(axis=1)
-    dmax_atom2 = np.where(dmax_atom < 0, -1.0, dmax_atom**2)
-    ncand = np.diff(cand_ptr)
     tot = 0.0
     for p0 in range(0, nat * m, block):
         p1 = min(nat * m, p0 + block)
-        cap = (p1 - p0) * MBIS_MAXSHELL * int(ncand[p0 // m : (p1 - 1) // m + 1].max())
-        tj, tk, td, targ, ptr = _mbis_gather(
-            grel, coords, tmpden, cut2, mshell, sig, dmax, dmax_atom2, cand_ptr, cand, p0, p1, cap)
+        cap = int(pptr[p1] - pptr[p0]) * MBIS_MAXSHELL
+        tj, tk, td, targ, ptr = _mbis_gather(pptr, pj, pd, mshell, sig, dmax, dmax_atom, p0, p1, cap)
         tot += _mbis_logsum(tmpden, m, p0, amp, tj, tk, np.exp(targ), ptr)
     return tot
 
@@ -1008,9 +1035,9 @@ def mbis_select(grel, coords, tmpden, atnums, qbase):
     flipped the stored charges by up to 0.3 e between runs). spread and
     solutions count only converged, non-degenerate fits; merged lists [atom,
     shells in the guess, shells in the fit] per guess."""
-    cut2, cand_ptr, cand = _mbis_setup(grel, coords, atnums)
-    step = lambda mm, pp, ss: _mbis_step(grel, coords, tmpden, cut2, cand_ptr, cand, mm, pp, ss)  # noqa: E731
-    objective = lambda mm, pp, ss: mbis_objective(grel, coords, tmpden, atnums, mm, pp, ss)  # noqa: E731
+    pairs = mbis_pairs(grel, coords, tmpden, atnums)
+    step = lambda mm, pp, ss: _mbis_step(tmpden, pairs, mm, pp, ss)  # noqa: E731
+    objective = lambda mm, pp, ss: mbis_objective(grel, coords, tmpden, atnums, mm, pp, ss, pairs=pairs)  # noqa: E731
     fits = []
     for i, (name, (m0, p0, s0)) in enumerate(mbis_guesses(atnums)):
         fallback = i == 0 or fits[0][9]

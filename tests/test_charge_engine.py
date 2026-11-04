@@ -489,9 +489,9 @@ def test_mbis_select_drops_failed_check_guesses(monkeypatch):
         return r[0], r[1], r[4]
 
     monkeypatch.setattr(CE, "mbis_guesses", lambda atnums: guesses)
-    monkeypatch.setattr(CE, "_mbis_setup", lambda *a: (None, None, None))
+    monkeypatch.setattr(CE, "mbis_pairs", lambda *a: None)
     monkeypatch.setattr(CE, "_mbis_fit_converged", fake_fit)
-    monkeypatch.setattr(CE, "mbis_objective", lambda g, c, t, a, mm, pp, ss: results[round(float(ss[0, 0]), 2)][2])
+    monkeypatch.setattr(CE, "mbis_objective", lambda g, c, t, a, mm, pp, ss, **kw: results[round(float(ss[0, 0]), 2)][2])
     monkeypatch.setattr(CE, "mbis_degenerate", lambda mm, pp, ss: results[round(float(ss[0, 0]), 2)][3])
     q, *_, ncyc, info = CE.mbis_select(None, None, None, np.array([1, 1]), np.array([1.0, 1.0]))
     assert seen == [True, False, False]
