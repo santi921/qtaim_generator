@@ -1509,6 +1509,7 @@ def move_results_to_folder(
         "other.json",
         "orca.json",
         "horton.json",
+        "charge_engine_meta.json",
     ]
     results_folder = os.path.join(folder, "generator")
 
@@ -1849,6 +1850,9 @@ def _run_charge_engine(
             if isinstance(timings, dict) and timings.pop("charge_engine", None) is not None:
                 atomic_json_write(timings_path, timings)
         return False
+    # the engine's own record (MBIS selection, convergence, merged shells, grid electron
+    # count): read by audits, not by validation or the LMDB conversion
+    atomic_json_write(os.path.join(folder, "charge_engine_meta.json"), meta)
     _update_timing(folder, "charge_engine", elapsed, logger)
     logger.info(
         "charge_engine: %d routines in %.2f s (nelec grid %.4f of %.1f)",
@@ -2393,7 +2397,8 @@ def _wavefunction_electrons(path: str) -> Optional[float]:
 
 
 _KEEP_ON_WAVEFUNCTION_DISCARD = {"orca.out", "output.out", "orca.json", "timings.json", "memory.json"}
-_COMPILED_JSONS = ("charge.json", "bond.json", "fuzzy_full.json", "other.json", "qtaim.json", "horton.json")
+_COMPILED_JSONS = ("charge.json", "bond.json", "fuzzy_full.json", "other.json", "qtaim.json", "horton.json",
+                   "charge_engine_meta.json")
 _DISCARD_SUFFIXES_ROOT = (".wfn", ".wfx", ".molden.input", ".out", ".json")
 _DISCARD_SUFFIXES_GEN = (".wfn", ".wfx", ".out")
 _DISCARD_NAMES_GEN = set(_COMPILED_JSONS) | {"out_files.zip", "CPprop.txt"}

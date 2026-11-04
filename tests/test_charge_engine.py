@@ -294,6 +294,8 @@ def test_engine_jsons_compile_like_multiwfn_level1_and_alie(tmp_path, name, monk
     timings = json.loads((tmp_path / "timings.json").read_text())
 
     assert timings["charge_engine"] > 0 and timings["surface_engine"] > 0
+    meta = json.loads((tmp_path / "charge_engine_meta.json").read_text())
+    assert meta["full_set"] == 1 and meta["mbis_mode"] == "multiwfn" and "mbis_merged" in meta
     for step in ("vdd", "mbis"):
         for k, v in ref[step]["charge"].items():
             assert charge[step]["charge"][k] == pytest.approx(v, abs=CHARGE_TOL), (step, k)
@@ -536,6 +538,8 @@ def test_run_records_mbis_mode_and_uniqueness():
     assert meta["mbis_degenerate"] == {"charge": False, "fuzzy": False}
     assert meta["mbis_merged"] == {"charge": [], "fuzzy": []}
     assert meta["mbis_beyond_multiwfn"] is False
+    # the pipeline writes _meta to charge_engine_meta.json
+    assert json.loads(json.dumps(meta))["mbis_selection"]["selected"] == "default"
 
 
 def test_mbis_fitted_guess_covers_the_proatom_range():

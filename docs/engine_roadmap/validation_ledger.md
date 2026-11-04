@@ -193,6 +193,18 @@ Current behaviours without a validation on current code, and checks not yet done
 | results recorded on older code | the 87-job, 18-reference and 16-reference local sets predate the threading fixes (#63-#65) and the converged MBIS default | rerun the local sets on current code; they take minutes |
 | full_set 2 routines | still Multiwfn (bader, laplacian_bond, other_esp, grad_norm and laplacian fuzzy) | when engines exist |
 
+## 7b. Runs in progress (no results yet)
+
+Cluster runs submitted or planned whose results are not in the tables above. Each moves
+into its section as a row when it is audited.
+
+| cluster | job id | name | what | trees | code | status (2026-11-03) |
+|---|---|---|---|---|---|---|
+| LRC | 27498703, 27498704 | nc_ref, nc_fixed | converter check, full_set 1, `jobs_ref.txt` (200 tm_react) | `engine_test/nc_ref_l1` (`--native_convert off`) vs `nc_fixed_l1` | clone `qtaim_generator_nc`, feat/charge-engine before the MBIS changes | all 8 tasks TIMEOUT at 12 h; 18 of 200 compared (row in 4b). Not continued: the rerun uses fresh trees `nc_ref_l1b`/`nc_fixed_l1b` from perf/mbis-converged, so no tree mixes MBIS versions |
+| LRC | 27525266 | fz1 | elf_fuzzy and level 1 engine vs Multiwfn, full_set 1, `jobs_ref.txt` | `engine_test/fz_l1` (engine) vs `ref_l1`, `compare_engine_merge.py` (`report_fz_l1.json`) | clone `qtaim_generator_fz` (fuzzy-ELF work) | running |
+| LRC | 27527328, 27527329 | ref2, fz2 | level 2 engine vs Multiwfn, full_set 2, `jobs_l2.txt`, 5 jobs per task | `engine_test/ref_l2` (Multiwfn) vs `fz_l2` (engine) | clone `qtaim_generator_fz` or `qtaim_generator_esp`: the submitting session drafted both, which one ran is to be confirmed there | running; an earlier fz2 (27525268) ended after 10 s |
+| NERSC | - | l1_off, l1_fixed, l2_off, l2_fixed | converter at full_set 1 and 2 with every engine routine: MBIS (merge), VDD, CHELPG, elf_fuzzy, grad/Laplacian fuzzy, other_esp | `actinide_test/{l1,l2}_{off,fixed}`, 440-job sample (level 2: every 11th job), `audit_prod.py` fixed vs off, off vs `prod_l1` | integration branch: perf/mbis-converged + feat/engine-esp-surface | planned |
+
 ## 8. Adding a row
 
 For every new engine routine or validation run, add one row with: date, reference kind,
