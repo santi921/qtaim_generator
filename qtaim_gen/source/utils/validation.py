@@ -561,6 +561,25 @@ def validate_other_dict(other_dict_loc: str, verbose: bool = False, logger: any 
     return True
 
 
+def validate_ddec6(charge_json_loc, timing_json_loc, n_atoms, skipped=None, verbose=False, logger=None) -> bool:
+    """True when DDEC6 is recorded as permanently skipped, or charge.json holds a 'ddec6'
+    scheme with a charge for each of the n_atoms atoms and timings.json a positive
+    'ddec6' timing (omol._run_ddec6, merged by omol._merge_ddec6)."""
+    if "ddec6" in (skipped or ()):
+        return True
+    timings = _safe_json_load(timing_json_loc, logger=logger) or {}
+    charges = ((_safe_json_load(charge_json_loc, logger=logger) or {}).get("ddec6") or {}).get("charge") or {}
+    ok = isinstance(timings.get("ddec6"), (int, float)) and timings["ddec6"] > 0 and len(charges) == n_atoms
+    if not ok:
+        msg = (f"DDEC6 missing or incomplete: timing {timings.get('ddec6')!r}, "
+               f"{len(charges)} of {n_atoms} charges")
+        if verbose:
+            print(msg)
+        if logger:
+            logger.error(msg)
+    return ok
+
+
 def validate_charge_dict(
     charge_json_loc: str,
     n_atoms: int = None,
@@ -1624,6 +1643,7 @@ def validation_checks(
     recheck_cp_labels: bool = False,
     enforce_poincare_hopf: bool = False,
     native_convert: Optional[str] = None,
+    ddec6: bool = False,
 ):
     """
     Run all validation checks on the json files in the given folder.
@@ -1664,6 +1684,9 @@ def validation_checks(
             qtaim_engine run (see validate_timing_dict).
         native_convert (str): also fail unless timings.json records the
             wavefunction as written by core/wavefunction.py in this mode.
+        ddec6 (bool): also fail unless charge.json holds a 'ddec6' scheme with a charge
+            for every atom and timings.json a positive 'ddec6' timing, or DDEC6 is
+            recorded as permanently skipped (see validate_ddec6).
     Returns:
         bool: True if all validation checks pass, False otherwise.
     """
@@ -1760,6 +1783,13 @@ def validation_checks(
     ):
         if logger:
             logger.error(f"Charge json validation failed in folder: {folder}")
+        tf_cond = False
+
+    if ddec6 and not validate_ddec6(
+        charge_json_loc, timing_json_loc, n_atoms=n_atoms, skipped=skipped, verbose=verbose, logger=logger
+    ):
+        if logger:
+            logger.error(f"DDEC6 validation failed in folder: {folder}")
         tf_cond = False
 
     if not validate_qtaim_dict(

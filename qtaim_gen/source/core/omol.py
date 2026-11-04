@@ -1509,6 +1509,7 @@ def move_results_to_folder(
         "other.json",
         "orca.json",
         "horton.json",
+        DDEC6_JSON,
     ]
     results_folder = os.path.join(folder, "generator")
 
@@ -1858,6 +1859,119 @@ def _run_charge_engine(
     return True
 
 
+DDEC6_JSON = "ddec6.json"
+
+
+def _read_timings(folder: str) -> dict:
+    """timings.json of the folder, generator/ copy first; {} when neither is readable."""
+    for base in (os.path.join(folder, "generator"), folder):
+        try:
+            with open(os.path.join(base, "timings.json")) as f:
+                timings = json.load(f)
+            if isinstance(timings, dict):
+                return timings
+        except (OSError, json.JSONDecodeError):
+            continue
+    return {}
+
+
+def _ddec6_result_path(folder: str) -> Optional[str]:
+    """Path of a ddec6.json holding a ddec6 charge entry, root first; None when absent."""
+    for base in (folder, os.path.join(folder, "generator")):
+        path = os.path.join(base, DDEC6_JSON)
+        try:
+            with open(path) as f:
+                if json.load(f).get("ddec6", {}).get("charge"):
+                    return path
+        except (OSError, json.JSONDecodeError, AttributeError):
+            continue
+    return None
+
+
+def _run_ddec6(folder: str, n_threads: int, logger: logging.Logger, restart: bool = False) -> bool:
+    """DDEC6 (core/ddec6.py, a port of Chargemol) on orca.wfx. Writes ddec6.json (the
+    charge.json entry, the fuzzy_full.json features and _meta), a 'ddec6' timing and
+    _engine_versions.ddec6; _merge_ddec6 merges it after parse_multiwfn. Molecules above
+    ddec6.MAX_ATOMS atoms, and wavefunctions on which Chargemol stops, are recorded as
+    permanently skipped."""
+    from qtaim_gen.source.core import ddec6
+
+    timings = _read_timings(folder)
+    if "ddec6" in skipped_routines(timings):
+        logger.info("ddec6: recorded as permanently skipped - nothing to do")
+        return True
+    if restart and (timings.get("ddec6") or 0) > 0 and _ddec6_result_path(folder):
+        logger.info("ddec6: completed run found - skipping")
+        return True
+
+    wf_path = _wavefunction_path(folder)
+    if wf_path is None or not wf_path.endswith(".wfx"):
+        logger.error("ddec6: needs orca.wfx, found %s", wf_path)
+        return False
+
+    import numba
+    from qtaim_gen.source.core.charge_engine import read_wfx
+
+    natoms = int((read_wfx(wf_path)["zeff"] > 0.5).sum())
+    if natoms > ddec6.MAX_ATOMS:
+        _record_skipped(folder, {"ddec6": {"reason": f"natoms_above_{ddec6.MAX_ATOMS}", "by": "ddec6"}}, logger)
+        return True
+
+    numba.set_num_threads(max(1, min(n_threads, numba.config.NUMBA_NUM_THREADS)))
+    start = time.time()
+    try:
+        out = ddec6.analyze(wf_path)
+    except ddec6.ChargemolStop as e:
+        logger.warning("ddec6: Chargemol would stop on %s (%s); recording a permanent skip", wf_path, e)
+        _record_skipped(folder, {"ddec6": {"reason": f"chargemol_stop: {e}", "by": "ddec6"}}, logger)
+        return True
+    except Exception as e:
+        logger.error("ddec6 failed on %s: %s", wf_path, e)
+        return False
+    elapsed = time.time() - start
+    atomic_json_write(os.path.join(folder, DDEC6_JSON), out)
+    _update_timing(folder, "ddec6", elapsed, logger)
+    timings_path = os.path.join(folder, "timings.json")
+    with open(timings_path) as f:
+        timings = json.load(f)
+    versions = timings.get("_engine_versions")
+    versions = versions if isinstance(versions, dict) else {}
+    versions["ddec6"] = ddec6.DDEC6_VERSION
+    timings["_engine_versions"] = versions
+    atomic_json_write(timings_path, timings)
+    logger.info("ddec6: %d atoms, %d iterations in %.2f s", natoms, out["_meta"]["n_iterations"], elapsed)
+    return True
+
+
+def _merge_ddec6(folder: str, move_results: bool, logger: logging.Logger) -> None:
+    """Merge ddec6.json into charge.json (the 'ddec6' scheme) and fuzzy_full.json (the
+    ddec6_* features), in generator/ when move_results and present there, else in the
+    root (as _run_orca_parse does). Additive and idempotent: parse_multiwfn rewrites
+    charge.json from the per-step jsons, so this runs after every parse."""
+    src = _ddec6_result_path(folder)
+    if src is None:
+        return
+    with open(src) as f:
+        result = json.load(f)
+    for name, update in (("charge.json", {"ddec6": result["ddec6"]}), ("fuzzy_full.json", result.get("fuzzy", {}))):
+        path = os.path.join(folder, name)
+        gen = os.path.join(folder, "generator", name)
+        if move_results and os.path.isfile(gen):
+            path = gen
+        if not os.path.isfile(path):
+            logger.warning("ddec6: no %s to merge into in %s", name, folder)
+            continue
+        try:
+            with open(path) as f:
+                data = json.load(f)
+        except json.JSONDecodeError as e:
+            logger.error("ddec6: unreadable %s (%s); not merged", path, e)
+            continue
+        data.update(update)
+        atomic_json_write(path, data)
+    logger.info("ddec6: merged %s into charge.json and fuzzy_full.json", src)
+
+
 def _run_qtaim_engine(folder: str, n_threads: int, logger: logging.Logger, restart: bool = False) -> bool:
     """The QTAIM step with the QTAIM engine (core/cp_search.analyze: superset seeds,
     reseeding on a failing Poincare-Hopf sum, engine bond paths, exact Boys function)
@@ -1970,14 +2084,15 @@ def _run_engines(
     qtaim_engine: bool = False,
     charge_engine: bool = False,
     engine_subprocess: bool = True,
+    ddec6: bool = False,
 ) -> None:
-    """The QTAIM engine, then the charge and surface engines. By default in a child
+    """The QTAIM engine, then the charge and surface engines, then DDEC6. By default in a child
     process (core/engine_worker.py): parsl's local runner runs folders as threads of
     one process, where concurrent engine runs serialized on the GIL and shared the
     process-wide BLAS limits. The child gets single-threaded BLAS and at most
     n_threads numba threads (fewer if NUMBA_NUM_THREADS is lower), and imports the
     same qtaim_gen as this process."""
-    if not (qtaim_engine or charge_engine):
+    if not (qtaim_engine or charge_engine or ddec6):
         return
     if not engine_subprocess:
         if qtaim_engine:
@@ -1985,6 +2100,8 @@ def _run_engines(
         if charge_engine:
             _run_charge_engine(folder, n_threads=n_threads, logger=logger, restart=restart, full_set=full_set)
             _run_surface_engine(folder, n_threads=n_threads, logger=logger, restart=restart)
+        if ddec6:
+            _run_ddec6(folder, n_threads=n_threads, logger=logger, restart=restart)
         return
 
     import qtaim_gen
@@ -2005,6 +2122,7 @@ def _run_engines(
     cmd = [sys.executable, "-m", "qtaim_gen.source.core.engine_worker", folder,
            "--n_threads", str(n_threads), "--full_set", str(full_set)]
     cmd += (["--qtaim"] if qtaim_engine else []) + (["--charge"] if charge_engine else [])
+    cmd += ["--ddec6"] if ddec6 else []
     cmd += ["--restart"] if restart else []
     logger.info("engine steps in a child process: %s", " ".join(cmd[3:]))
     start = time.time()
@@ -2022,7 +2140,8 @@ def _run_engines(
         # one from an earlier run would otherwise vouch for outputs the child half-wrote.
         logger.error("engine child exited with status %d after %.1f s; stderr tail:\n%s",
                      proc.returncode, time.time() - start, proc.stderr[-3000:])
-        keys = (["qtaim_engine"] if qtaim_engine else []) + (["charge_engine", "surface_engine"] if charge_engine else [])
+        keys = ((["qtaim_engine"] if qtaim_engine else []) + (["charge_engine", "surface_engine"] if charge_engine else [])
+                + (["ddec6"] if ddec6 else []))
         for timings_path in (os.path.join(folder, "timings.json"), os.path.join(folder, "generator", "timings.json")):
             try:
                 with open(timings_path) as f:
@@ -3077,6 +3196,7 @@ def gbw_analysis(
     enforce_poincare_hopf: bool = False,
     engine_subprocess: bool = True,
     native_convert: Optional[str] = None,
+    ddec6: bool = False,
 ) -> None:
     """
     Run a full analysis on a folder of gbw files
@@ -3130,6 +3250,10 @@ def gbw_analysis(
             validation passes) and the loose CPprop.txt and qtaim.out are
             removed, so neither the reparse nor the rerun can reproduce the
             record (needs wfx and a gbw source; implies restart)
+        ddec6(bool): also run DDEC6 (core/ddec6.py, a port of Chargemol) in the engine step
+            and merge it into charge.json ('ddec6') and fuzzy_full.json (ddec6_* features);
+            validation then requires it unless recorded as permanently skipped (above
+            ddec6.MAX_ATOMS atoms, or a wavefunction on which Chargemol stops). Needs wfx
         native_convert(str): write orca.wfx from orca_2mkl's molden with
             core/wavefunction.py instead of Multiwfn's convert step. "fixed" gives ORCA's
             h functions their sign on both spins; "multiwfn_h" reproduces Multiwfn's
@@ -3384,6 +3508,7 @@ def gbw_analysis(
                     recheck_fuzzy=recheck_fuzzy,
                     charge_engine=charge_engine,
                     qtaim_engine=qtaim_engine,
+                    ddec6=ddec6,
                     native_convert=native_convert,
                     recheck_allalpha_qtaim=recheck_allalpha_qtaim,
                     recheck_cp_labels=recheck_cp_labels,
@@ -3426,6 +3551,7 @@ def gbw_analysis(
                         recheck_fuzzy=recheck_fuzzy,
                         charge_engine=charge_engine,
                         qtaim_engine=qtaim_engine,
+                        ddec6=ddec6,
                         native_convert=native_convert,
                         recheck_allalpha_qtaim=recheck_allalpha_qtaim,
                         recheck_cp_labels=recheck_cp_labels,
@@ -3440,6 +3566,8 @@ def gbw_analysis(
                         "Validation passes without orca check - running orca-only parse"
                     )
                     _run_orca_parse(folder, move_results, logger)
+                    if ddec6:
+                        _merge_ddec6(folder, move_results, logger)
                     if horton_python:
                         run_horton_analysis(
                             folder=folder,
@@ -3465,6 +3593,7 @@ def gbw_analysis(
                             recheck_fuzzy=recheck_fuzzy,
                             charge_engine=charge_engine,
                             qtaim_engine=qtaim_engine,
+                            ddec6=ddec6,
                             native_convert=native_convert,
                             recheck_allalpha_qtaim=recheck_allalpha_qtaim,
                             recheck_cp_labels=recheck_cp_labels,
@@ -3513,6 +3642,8 @@ def gbw_analysis(
 
                     # Also reparse ORCA output
                     _run_orca_parse(folder, move_results, logger)
+                    if ddec6:
+                        _merge_ddec6(folder, move_results, logger)
 
                     if move_results:
                         move_results_to_folder(folder, logger=logger, clean=clean)
@@ -3530,6 +3661,7 @@ def gbw_analysis(
                         recheck_fuzzy=recheck_fuzzy,
                         charge_engine=charge_engine,
                         qtaim_engine=qtaim_engine,
+                        ddec6=ddec6,
                         native_convert=native_convert,
                         recheck_allalpha_qtaim=recheck_allalpha_qtaim,
                         recheck_cp_labels=recheck_cp_labels,
@@ -3605,7 +3737,7 @@ def gbw_analysis(
         # after run_jobs: its convert step is what produces orca.wfx
         _run_engines(folder, n_threads=n_threads, logger=logger, restart=restart, full_set=full_set,
                      qtaim_engine=qtaim_engine, charge_engine=charge_engine,
-                     engine_subprocess=engine_subprocess)
+                     engine_subprocess=engine_subprocess, ddec6=ddec6)
 
     print("... Parsing multiwfn output")
     # parse those jobs to jsons for 5 categories
@@ -3616,6 +3748,8 @@ def gbw_analysis(
 
     # Parse ORCA output file (if present)
     _run_orca_parse(folder, move_results, logger)
+    if ddec6:
+        _merge_ddec6(folder, move_results, logger)
 
     # HORTON charge engine post-step (separate python env, see core/horton.py)
     if horton_python:
@@ -3644,6 +3778,7 @@ def gbw_analysis(
         recheck_fuzzy=recheck_fuzzy,
         charge_engine=charge_engine,
         qtaim_engine=qtaim_engine,
+        ddec6=ddec6,
         native_convert=native_convert,
         recheck_allalpha_qtaim=recheck_allalpha_qtaim,
         recheck_cp_labels=recheck_cp_labels,
@@ -3691,6 +3826,7 @@ def gbw_analysis(
                 enforce_poincare_hopf=enforce_poincare_hopf,
                 charge_engine=charge_engine,
                 qtaim_engine=qtaim_engine,
+                ddec6=ddec6,
                 native_convert=native_convert,
             )
 

@@ -26,6 +26,16 @@ import numpy as np
 
 from qtaim_gen.source.core.charge_engine import read_wfx
 
+DDEC6_VERSION = 1
+MAX_ATOMS = 120  # larger molecules are skipped (pair screening is O(nprim^2 nocc))
+
+
+class ChargemolStop(ValueError):
+    """A condition on which Chargemol stops the analysis (electrons not accounted for on
+    the grid, failed grid-spacing check, missing reference density, ...). It depends only
+    on the wavefunction, so the runner records it as a permanent skip."""
+
+
 # module_global_parameters.f08
 NSHELLS = 100
 CUTOFF_RADIUS = 500.0  # pm
@@ -197,7 +207,7 @@ def prepare(wfx):
     for k, (o, t) in enumerate(zip(occ, wfx["spin_types"])):
         if t == "Alpha":
             if o >= 1.01:
-                raise ValueError("Alpha orbital occupancy above 1")
+                raise ChargemolStop("Alpha orbital occupancy above 1")
             occ_a[k] = o
             spin_available = True
         elif t == "Beta":
@@ -614,7 +624,7 @@ def pair_data(prep, grid):
                                              prep["core_electrons"], grid["inv_boundary"], grid["boundary"],
                                              grid["origin"], np.array(grid["delta"], dtype=np.float64))
     if abs(check - prep["included_electrons"]) > 0.001:
-        raise ValueError(f"primitive pairs hold {check} electrons, expected {prep['included_electrons']}")
+        raise ChargemolStop(f"primitive pairs hold {check} electrons, expected {prep['included_electrons']}")
     _sort_blocks(data, pbd)
     return {"n_pairs": n_pairs, "n_analytic": n_analytic, "n_numeric": n_numeric, "n_blocks": n_blocks,
             "nsingleblocks": len(prep["blocks"]), "check_included_electrons": check,
@@ -1237,7 +1247,7 @@ def core_grids(prep, grid, grids):
             core_e[j] = 0.0
 
     if grid["pixelvolume"] > MAXPIXELVOLUME:
-        raise ValueError("grid pixel volume above Chargemol's maximum")
+        raise ChargemolStop("grid pixel volume above Chargemol's maximum")
     # align_periodic_atoms (end of Step 1) rebuilt the coordinates as
     # nabc*boundary + shift + origin, which is not bit-identical to the input, and
     # add_missing_core_density recomputes the centres from them: every later step
@@ -1256,19 +1266,23 @@ def core_grids(prep, grid, grids):
             ks = np.arange(-delta[k], delta[k] + 1) + nabc[j, k] + 1
             ok = np.nonzero((ks >= 1) & (ks <= totnum[k]))[0]
             if ok.size == 0:
-                raise ValueError(f"atom {j + 1} has no grid points")
+                raise ChargemolStop(f"atom {j + 1} has no grid points")
             lo[j, k], hi[j, k] = ok[0] - delta[k], ok[-1] - delta[k]
     sum_points, sum_density = _shell_points(nabc, shift, boundary, lo, hi)
     population = sum_density.sum(axis=0) * grid["pixelvolume"]
     if np.any(population - population.sum() / natoms > INTEGRATION_TOLERANCE):
-        raise ValueError("grid spacing check failed")
+        raise ChargemolStop("grid spacing check failed")
 
     missing = np.zeros(natoms, dtype=np.int64) if edf_available else np.rint(prep["core_electrons"]).astype(np.int64)
     if missing.any():
         ref = np.zeros((NSHELLS, natoms))
         for j in range(natoms):
             if missing[j]:
-                ref[:, j] = chargemol_refs.core_density(prep["atom_z"][j], missing[j])
+                try:
+                    ref[:, j] = chargemol_refs.core_density(prep["atom_z"][j], missing[j])
+                except KeyError:
+                    raise ChargemolStop(f"no core reference density for Z={prep['atom_z'][j]} with "
+                                        f"{missing[j]} core electrons") from None
         _missing_core(core, nabc, shift, boundary, lo, hi, ref, missing)
 
     grids.update(core_electrons=core_e, missing_core=missing, sum_points=sum_points, shell_lo=lo, shell_hi=hi,
@@ -1315,7 +1329,10 @@ def oxidation_density(z, atom_charge, rsv):
     prev = np.zeros(NSHELLS)
     for q in range(0, atom_charge + sign, sign):
         nel = z - q
-        t = chargemol_refs.c2_density(z, nel).astype(np.float64).copy()
+        try:
+            t = chargemol_refs.c2_density(z, nel).astype(np.float64).copy()
+        except KeyError:
+            raise ChargemolStop(f"no reference density for Z={z} with {nel} electrons") from None
         s = 0.0
         for k in range(1, NSHELLS):
             t[k] = max(t[k], 1.0e-16)
@@ -2294,7 +2311,7 @@ def run(wfx_path, parallel=True):
     int_tol = max(INTEGRATION_TOLERANCE, 0.10 * nvalence / 100.0)
     check = abs(nvalence - grids["valence_density"].sum() * grid["pixelvolume"] - _seq_sum(grids["occupancy_correction"][0]))
     if check > int_tol:
-        raise ValueError(f"valence electrons on the grid off by {check:.4f} e (Chargemol stops here)")
+        raise ChargemolStop(f"valence electrons on the grid off by {check:.4f} e (Chargemol stops here)")
     rsv = radial_shell_volume()
     neutral = np.column_stack([oxidation_density(int(z), 0, rsv) for z in prep["atom_z"]])
     state = {"geom": {"nabc": grids["center_nabc"], "shift": grids["center_shift"], "boundary": grid["boundary"],
@@ -2302,13 +2319,56 @@ def run(wfx_path, parallel=True):
              "atom_z": np.asarray(prep["atom_z"], dtype=np.int64), "core_electrons": core_e,
              "occupancy_correction": grids["occupancy_correction"], "valence_density": grids["valence_density"],
              "core_density": grids["core_density"], "spin_density": grids["spin_density"], "nvalence": nvalence,
-             "radial_shell_volume": rsv, "neutral_density": neutral, "net_charge": net_charge}
+             "radial_shell_volume": rsv, "neutral_density": neutral, "net_charge": net_charge,
+             "atom_xyz": prep["atom_xyz"], "spin_available": prep["spin_available"]}
     state = core_iterator(state)
     state = ddec6_valence_iterator(state)
     state = cloud_penetration(atomic_multipoles(state))
     if prep["spin_available"]:
         state = spin_moments(state)
     return state
+
+
+def analyze(wfx_path, parallel=True):
+    """DDEC6 for one wfx in qtaim_generator's layout: the charge.json entry (charges,
+    spin moments for open shells, the molecular point-charge dipole about the origin as
+    charge_engine's schemes give it, atomic dipoles and quadrupoles in atomic units, and
+    the eigenvalues Chargemol reports), the fuzzy_full.json per-atom features, and _meta.
+    Raises ChargemolStop where Chargemol would stop."""
+    from qtaim_gen.source.core.charge_engine import T_SYMBOL
+
+    st = run(wfx_path, parallel=parallel)
+    labels = [f"{i + 1}_{T_SYMBOL[int(z)]}" for i, z in enumerate(st["atom_z"])]
+
+    def per_atom(vals):
+        return {k: (float(v) if np.ndim(v) == 0 else [float(x) for x in v]) for k, v in zip(labels, vals)}
+
+    def fuzzy(vals):
+        d = per_atom(vals)
+        d["sum"] = float(np.sum(vals))
+        d["abs_sum"] = float(np.sum(np.abs(vals)))
+        return d
+
+    q = st["net_atomic_charge"]
+    dip = (np.asarray(st["atom_xyz"]) * q[:, None]).sum(0)
+    quad = st["atomic_quadrupole"]  # Qxy, Qxz, Qyz, Q(x2-y2), Q(3z2-r2)
+    qmag = []
+    for qxy, qxz, qyz, qx2y2, q3z2 in quad:
+        t = np.array([[0.5 * (qx2y2 - q3z2 / 3.0), qxy, qxz], [qxy, 0.5 * (-qx2y2 - q3z2 / 3.0), qyz],
+                      [qxz, qyz, q3z2 / 3.0]])
+        qmag.append(math.sqrt(float((t * t).sum())))
+    entry = {"charge": per_atom(q), "dipole": {"mag": float(np.linalg.norm(dip)), "xyz": [float(x) for x in dip]},
+             "atomic_dipole": per_atom(st["atomic_dipole"]), "atomic_quadrupole": per_atom(quad),
+             "atomic_quadrupole_eigenvalues": per_atom(st["quadrupole_eigenvalues"])}
+    meta = {"ddec6_version": DDEC6_VERSION, "n_iterations": int(st["n_iterations"]), "natoms": len(labels)}
+    if st["spin_available"]:
+        entry["spin"] = per_atom(st["spin_moment"])
+        meta["spin_iterations"] = int(st["spin_iterations"])
+        meta["total_spin_moment"] = float(st["total_spin_moment"])
+    feats = {"ddec6_atomic_dipole_mag": fuzzy(st["atomic_dipole_mag"]),
+             "ddec6_quadrupole_mag": fuzzy(np.array(qmag)),
+             "ddec6_tail_decay": fuzzy(st["tail_fit"][:, 1])}
+    return {"ddec6": entry, "fuzzy": feats, "_meta": meta}
 
 
 def load(wfx_path):
