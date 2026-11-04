@@ -166,3 +166,27 @@ def test_delta_g_is_nan_without_a_builtin_density():
     ghost = dict(wfx, atnums=np.where(np.arange(len(wfx["atnums"])) == 0, 999, wfx["atnums"]))
     eng = point_properties(np.array([c["pos_bohr"] for c in cps]), ghost, prepare_basis(ghost), allow_missing_edf=True)
     assert np.isnan(eng["delta_g_hirsh"]).all() and np.isfinite(eng["rho"]).all()
+
+
+@pytest.mark.skipif(not HAS_NUMBA, reason="numba not installed")
+@pytest.mark.parametrize("name", ["rmechdb_652_step10_0_2", "XeCl4_step2_0_1"])
+def test_first_derivative_modes_match_the_full_call(name):
+    """elf_only (elf_fuzzy at full_set 1) and hessian=False (CP search) skip the
+    second derivatives; every value they share with the full call is identical."""
+    from qtaim_gen.source.core.charge_engine import prepare_basis, read_wfx
+    from qtaim_gen.source.core.qtaim_engine import density_derivatives, elf_lol
+
+    wfx = read_wfx(os.path.join(FIXTURES, "charge_engine", name, "orca.wfx"))
+    basis = prepare_basis(wfx)
+    rng = np.random.default_rng(0)
+    pts = wfx["coords"][rng.integers(len(wfx["coords"]), size=400)] + rng.normal(scale=1.5, size=(400, 3))
+    full = density_derivatives(pts, wfx, basis)
+    elf = density_derivatives(pts, wfx, basis, elf_only=True)
+    assert not {"hessian", "K", "alie_num"} & set(elf)
+    for key, value in elf.items():
+        assert np.array_equal(value, full[key]), key
+    assert np.array_equal(elf_lol(elf, wfx)[0], elf_lol(full, wfx)[0])
+    first = density_derivatives(pts, wfx, basis, hessian=False)
+    assert set(first) == {"rho", "gradient"}
+    for key in first:
+        assert np.allclose(first[key], full[key], rtol=1e-12, atol=1e-14), key

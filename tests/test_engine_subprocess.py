@@ -155,7 +155,7 @@ def test_worker_passes_restart_and_full_set_to_the_engines(monkeypatch):
     monkeypatch.setattr(omol, "setup_logger", lambda folder: logging.getLogger("engine_worker_test"))
     rc = engine_worker.main(["/x", "--qtaim", "--charge", "--n_threads", "6", "--full_set", "1", "--restart"])
     assert rc == engine_worker.STEP_FAILED
-    assert calls == [("qtaim", "/x", True, None, 6), ("charge", "/x", True, 1, 6), ("surface", "/x", True, None, 6)]
+    assert calls == [("qtaim", "/x", True, None, 6), ("charge", "/x", True, 1, 6), ("surface", "/x", True, 1, 6)]
 
 
 def test_restart_skips_a_completed_qtaim_run(tmp_path):

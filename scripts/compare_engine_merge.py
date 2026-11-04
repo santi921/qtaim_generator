@@ -39,13 +39,13 @@ from rdkit import Chem
 
 from qtaim_gen.source.core.parse_qtaim import dft_inp_to_dict
 
-from qtaim_gen.source.data.multiwfn import ENGINE_ROUTINES
+from qtaim_gen.source.utils.validation import charge_engine_version, engine_routines_of
 
 MEDIAN_TOL = 0.005
 MAX_TOL = 0.03
 CHARGE = ("hirshfeld", "adch", "cm5", "becke", "vdd", "mbis")
 FUZZY = ("becke_fuzzy_density", "hirsh_fuzzy_density", "becke_fuzzy_spin", "hirsh_fuzzy_spin",
-         "mbis_fuzzy_density", "mbis_fuzzy_spin")
+         "mbis_fuzzy_density", "mbis_fuzzy_spin", "elf_fuzzy", "grad_norm_rho_fuzzy", "laplacian_rho_fuzzy")
 # other_alie (surface engine): relative tolerance for volume/areas, absolute otherwise
 ALIE_TOL = {"ALIE_Volume": ("rel", 1e-4), "ALIE_Overall_surface_area": ("rel", 1e-4),
             "ALIE_Positive_surface_area": ("rel", 1e-4), "ALIE_Negative_surface_area": ("abs", 1e-3),
@@ -146,6 +146,11 @@ def compare_job(orig, new):
         files[name] = (load(os.path.join(orig, "generator", name)), load(os.path.join(new, "generator", name)))
     o_t, n_t = files["timings.json"]
     rec["charge_engine_s"] = (n_t or {}).get("charge_engine")
+    # the routines the new tree's engine version computed: the rest must be unchanged, and the
+    # Multiwfn baseline time covers exactly these (it grew with elf_fuzzy and the level-2
+    # fuzzy integrals at charge-engine version 2)
+    engine_routines = engine_routines_of(n_t)
+    rec["charge_engine_version"] = charge_engine_version(n_t)
     rec["complete"] = bool(o_t) and bool(rec["charge_engine_s"])
     if not rec["complete"]:
         return rec
@@ -209,7 +214,7 @@ def compare_job(orig, new):
 
     for fname in ("charge.json", "bond.json", "fuzzy_full.json"):
         o_all, n_all = files[fname]
-        for k in set(o_all or {}) - ENGINE_ROUTINES:
+        for k in set(o_all or {}) - engine_routines:
             if (n_all or {}).get(k) != o_all[k]:
                 rec["untouched_changed"].append(f"{fname}:{k}")
     o_q, n_q = files["qtaim.json"]
@@ -228,7 +233,7 @@ def compare_job(orig, new):
     if strip(o_o) != strip(n_o):
         rec["untouched_changed"].append("other.json")
 
-    mwfn = [o_t.get(r) for r in ENGINE_ROUTINES if isinstance(o_t.get(r), (int, float)) and o_t.get(r) > 0]
+    mwfn = [o_t.get(r) for r in engine_routines if isinstance(o_t.get(r), (int, float)) and o_t.get(r) > 0]
     rec["mwfn_engine_routines_s"] = sum(mwfn) if mwfn else None
     rec["charge_engine_s"] += n_t.get("surface_engine") or 0.0
     return rec

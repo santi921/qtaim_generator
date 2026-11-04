@@ -633,7 +633,11 @@ def test_fuzzy_recheck_leaves_engine_routines_alone(tmp_path, monkeypatch):
             "rerun": ["becke_fuzzy_spin"], "derived": []}
     monkeypatch.setattr(fuzzy_recheck, "plan_recheck", lambda folder, mult: plan)
     monkeypatch.setattr(fuzzy_recheck, "_wavefunction_plan", lambda *a: (True, "wfx", []))
+    # every fuzzy routine, elf_fuzzy included, is an engine routine
     report = fuzzy_recheck.recheck_fuzzy(str(tmp_path), 2, dry_run=True, skip_routines=ENGINE_ROUTINES)
+    assert report["reparse"] == [] and report["rerun"] == []
+    # a routine outside skip_routines is still reparsed
+    report = fuzzy_recheck.recheck_fuzzy(str(tmp_path), 2, dry_run=True, skip_routines=ENGINE_ROUTINES - {"elf_fuzzy"})
     assert report["reparse"] == ["elf_fuzzy"] and report["rerun"] == []
     report = fuzzy_recheck.recheck_fuzzy(str(tmp_path), 2, dry_run=True)
     assert report["reparse"] == ["elf_fuzzy", "fuzzy_bond"] and report["rerun"] == ["becke_fuzzy_spin"]
@@ -676,12 +680,17 @@ def test_fuzzy_recheck_does_not_rewrite_engine_values(tmp_path, monkeypatch):
 
 
 def test_recheck_helper_recognizes_engine_folders(tmp_path):
-    from qtaim_gen.source.data.multiwfn import ENGINE_ROUTINES
+    from qtaim_gen.source.data.multiwfn import CHARGE_ENGINE_VERSION, ENGINE_ROUTINES, engine_routines_at
     from qtaim_gen.source.scripts.helpers.recheck_fuzzy_folders import _engine_routines_of
 
     assert _engine_routines_of(str(tmp_path)) is None
     (tmp_path / "generator").mkdir()
     (tmp_path / "generator" / "timings.json").write_text(json.dumps({"hirshfeld": 2.0}))
     assert _engine_routines_of(str(tmp_path)) is None
+    # no version stamp: a version-1 engine, which left elf_fuzzy to Multiwfn
     (tmp_path / "generator" / "timings.json").write_text(json.dumps({"charge_engine": 4.0}))
+    assert _engine_routines_of(str(tmp_path)) == engine_routines_at(1)
+    assert "elf_fuzzy" not in _engine_routines_of(str(tmp_path))
+    (tmp_path / "generator" / "timings.json").write_text(
+        json.dumps({"charge_engine": 4.0, "_engine_versions": {"charge_engine": CHARGE_ENGINE_VERSION}}))
     assert _engine_routines_of(str(tmp_path)) == ENGINE_ROUTINES

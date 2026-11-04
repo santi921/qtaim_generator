@@ -27,9 +27,11 @@ from qtaim_gen.source.utils.validation import (
     all_electron_count,
     _FIRST_ECP_Z,
     TIMINGS_PATCHED_KEY,
+    TIMINGS_ENGINE_VERSIONS_KEY,
     TIMINGS_SKIPPED_KEY,
     CONVERTER_KEY,
     _safe_json_load,
+    engine_routines_of,
     skipped_routines,
     TIMING_PLACEHOLDER,
 )
@@ -39,9 +41,13 @@ from qtaim_gen.source.utils.atomic_write import atomic_json_write
 from qtaim_gen.source.core.horton import run_horton_analysis
 
 from qtaim_gen.source.data.multiwfn import (
+    CHARGE_ENGINE_VERSION,
     ENGINE_LEVEL1_ROUTINES,
+    ENGINE_LEVEL2_ROUTINES,
     ENGINE_ROUTINES,
+    SURFACE_ENGINE_LEVEL2_ROUTINES,
     SURFACE_ENGINE_ROUTINES,
+    engine_routines_at,
     charge_data,
     charge_data_dict,
     bond_order_data,
@@ -1420,10 +1426,11 @@ def patch_timings_from_log(
     log_timings = _parse_timings_from_log(log_path)
 
     expected, _ = get_expected_timing_keys(full_set=full_set, spin_tf=spin_tf)
-    # as validate_timing_dict: a charge_engine timing stands in for ENGINE_ROUTINES and a
-    # surface_engine timing for 'other', so their keys are not missing and get no placeholder
-    if isinstance(timings.get("charge_engine"), (int, float)) and timings["charge_engine"] > 0:
-        expected = [k for k in expected if k not in ENGINE_ROUTINES]
+    # as validate_timing_dict: a charge_engine timing stands in for the routines that engine
+    # version computed and a surface_engine timing for 'other', so their keys are not missing
+    # and get no placeholder
+    engine = engine_routines_of(timings)
+    expected = [k for k in expected if k not in engine]
     if isinstance(timings.get("qtaim_engine"), (int, float)) and timings["qtaim_engine"] > 0:
         expected = [k for k in expected if k != "qtaim"]
     # permanently skipped routines never ran, so they get no placeholder either
@@ -1699,6 +1706,8 @@ def _engine_routines(full_set: int, spin_tf: bool) -> set:
     routines = set(ENGINE_ROUTINES - SURFACE_ENGINE_ROUTINES)
     if full_set < 1:
         routines -= ENGINE_LEVEL1_ROUTINES
+    if full_set < 2:
+        routines -= ENGINE_LEVEL2_ROUTINES
     if not spin_tf:
         routines -= {"becke_fuzzy_spin", "hirsh_fuzzy_spin", "mbis_fuzzy_spin"}
     return routines
@@ -1706,7 +1715,9 @@ def _engine_routines(full_set: int, spin_tf: bool) -> set:
 
 def _engine_outputs_present(folder: str, spin_tf: bool, full_set: int = 0) -> bool:
     """True when generator/ holds a completed charge-engine run: a positive
-    charge_engine timing and every engine routine in the compiled jsons."""
+    charge_engine timing from an engine version that computed every wanted
+    routine (an older one left some to Multiwfn), and every engine routine in the
+    compiled jsons."""
     gen = os.path.join(folder, "generator")
     file_of = {
         "hirshfeld": "charge.json", "adch": "charge.json", "cm5": "charge.json",
@@ -1718,8 +1729,11 @@ def _engine_outputs_present(folder: str, spin_tf: bool, full_set: int = 0) -> bo
             timings = json.load(f)
         if not timings.get("charge_engine", 0) > 0:
             return False
+        wanted = _engine_routines(full_set, spin_tf) - skipped_routines(timings)
+        if not wanted <= engine_routines_of(timings):
+            return False
         want = {}
-        for routine in _engine_routines(full_set, spin_tf) - skipped_routines(timings):
+        for routine in wanted:
             want.setdefault(file_of.get(routine, "fuzzy_full.json"), []).append(routine)
         for name, keys in want.items():
             with open(os.path.join(gen, name)) as f:
@@ -1729,6 +1743,18 @@ def _engine_outputs_present(folder: str, spin_tf: bool, full_set: int = 0) -> bo
     except (OSError, json.JSONDecodeError, TypeError):
         return False
     return True
+
+
+def _stamp_engine_version(folder: str, engine: str, version: int) -> None:
+    """Record {engine: version} in timings.json under TIMINGS_ENGINE_VERSIONS_KEY."""
+    timings_path = os.path.join(folder, "timings.json")
+    with open(timings_path) as f:
+        timings = json.load(f)
+    rec = timings.get(TIMINGS_ENGINE_VERSIONS_KEY)
+    rec = rec if isinstance(rec, dict) else {}
+    rec[engine] = version
+    timings[TIMINGS_ENGINE_VERSIONS_KEY] = rec
+    atomic_json_write(timings_path, timings)
 
 
 def _record_skipped(folder: str, records: dict, logger: logging.Logger) -> None:
@@ -1848,12 +1874,14 @@ def _run_charge_engine(
             except (OSError, json.JSONDecodeError):
                 continue
             if isinstance(timings, dict) and timings.pop("charge_engine", None) is not None:
+                (timings.get(TIMINGS_ENGINE_VERSIONS_KEY) or {}).pop("charge_engine", None)
                 atomic_json_write(timings_path, timings)
         return False
     # the engine's own record (MBIS selection, convergence, merged shells, grid electron
     # count): read by audits, not by validation or the LMDB conversion
     atomic_json_write(os.path.join(folder, "charge_engine_meta.json"), meta)
     _update_timing(folder, "charge_engine", elapsed, logger)
+    _stamp_engine_version(folder, "charge_engine", CHARGE_ENGINE_VERSION)
     logger.info(
         "charge_engine: %d routines in %.2f s (nelec grid %.4f of %.1f)",
         len(written), elapsed, meta.get("nelec_grid_becke", float("nan")),
@@ -1910,24 +1938,36 @@ def _run_qtaim_engine(folder: str, n_threads: int, logger: logging.Logger, resta
     return True
 
 
+def _surface_engine_routines(full_set: int) -> frozenset:
+    """The surface-engine routines a folder gets at this full_set level."""
+    return SURFACE_ENGINE_ROUTINES if full_set >= 2 else SURFACE_ENGINE_ROUTINES - SURFACE_ENGINE_LEVEL2_ROUTINES
+
+
 def _run_surface_engine(
     folder: str,
     n_threads: int,
     logger: logging.Logger,
     restart: bool = False,
+    full_set: int = 0,
 ) -> bool:
-    """other_geometry and other_alie with core/surface_engine.py: writes
-    other_geometry.json and other_alie.json (the flat payloads
-    parse_other_doc_geometry and parse_other_doc_esp produce, compiled into
-    other.json by parse_multiwfn) and a 'surface_engine' timing."""
+    """other_geometry, other_alie and, at full_set >= 2, other_esp with
+    core/surface_engine.py: writes other_geometry.json, other_alie.json and
+    other_esp.json (the flat payloads parse_other_doc_geometry and
+    parse_other_doc_esp produce, compiled into other.json by parse_multiwfn) and a
+    'surface_engine' timing."""
+    wanted = _surface_engine_routines(full_set)
     gen = os.path.join(folder, "generator")
     if restart:
         try:
             with open(os.path.join(gen, "timings.json")) as f:
-                done = json.load(f).get("surface_engine", 0) > 0
+                timings = json.load(f)
+            # a surface engine that left a wanted routine to Multiwfn (no stamp: version 1)
+            # is not a completed run
+            version = (timings.get(TIMINGS_ENGINE_VERSIONS_KEY) or {}).get("surface_engine", 1)
+            done = timings.get("surface_engine", 0) > 0 and wanted <= engine_routines_at(version)
             with open(os.path.join(gen, "other.json")) as f:
                 other = json.load(f)
-            done = done and all(other.get(_OTHER_MARKER_KEYS[r]) is not None for r in SURFACE_ENGINE_ROUTINES)
+            done = done and all(other.get(_OTHER_MARKER_KEYS[r]) is not None for r in wanted)
         except (OSError, json.JSONDecodeError, TypeError, AttributeError):
             done = False
         if done:
@@ -1951,16 +1991,22 @@ def _run_surface_engine(
     try:
         geometry = surface_engine.planarity(nuclei[2], nuclei[0])
         out, meta = surface_engine.alie_surface(wf_path)
+        esp = surface_engine.esp_surface(wf_path) if "other_esp" in wanted else None
     except Exception as e:
         logger.error("surface_engine failed on %s: %s", wf_path, e)
         return False
     elapsed = time.time() - start
     atomic_json_write(os.path.join(folder, "other_geometry.json"), geometry)
     atomic_json_write(os.path.join(folder, "other_alie.json"), out)
+    if esp is not None:
+        atomic_json_write(os.path.join(folder, "other_esp.json"), esp[0])
     _update_timing(folder, "surface_engine", elapsed, logger)
+    _stamp_engine_version(folder, "surface_engine", CHARGE_ENGINE_VERSION)
     logger.info(
-        "surface_engine: other_alie in %.2f s (grid %s, V/E/F %s)",
+        "surface_engine: other_alie in %.2f s (grid %s, V/E/F %s)%s",
         elapsed, meta.get("grid"), meta.get("vef_after"),
+        "" if esp is None else f"; other_esp grid {esp[1]['grid']}, V/E/F {esp[1]['vef_after']}, "
+                               f"ESP {esp[1]['timings_s'].get('esp')} s",
     )
     return True
 
@@ -1988,7 +2034,7 @@ def _run_engines(
             _run_qtaim_engine(folder, n_threads=n_threads, logger=logger, restart=restart)
         if charge_engine:
             _run_charge_engine(folder, n_threads=n_threads, logger=logger, restart=restart, full_set=full_set)
-            _run_surface_engine(folder, n_threads=n_threads, logger=logger, restart=restart)
+            _run_surface_engine(folder, n_threads=n_threads, logger=logger, restart=restart, full_set=full_set)
         return
 
     import qtaim_gen
