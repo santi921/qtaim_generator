@@ -36,23 +36,25 @@ Date: 2026-10-15. Branch feat/mbis-heavy-elements. Code: `core/charge_engine.py`
      (`mbis_degenerate`: two shells of an atom within 0.1% in width, or a shell below
      1e-6 e). Unguarded acceleration reached such points that plain iteration leaves
      (Li 1s emptied, two shells merged). Since 2026-11-03 the two check guesses get the
-     fallback only when the default fit needed it, and the fallback merges shell pairs
-     that stall (see the two sections below).
+     fallback only when the default fit needed it, or when their stalled fit already
+     beats the selection (then from the stalled state), and the fallback merges shell
+     pairs that stall (see the sections below).
 3. **Selection** (`mbis_select`, on the MBIS charge grid). Fits from the fitted guess and
    from it with every width scaled by 0.6 and 1.5. Among the converged, non-degenerate
    fits it keeps the one with the largest `mbis_objective`: the sum of w ln rho0 over the
-   grid, which is the part of int rho ln(rho / rho0) that differs between fixed points.
-   Ties within 1e-12 relative go to the earlier guess. When no fit is both converged and
-   non-degenerate, the default fit is returned. The fuzzy refit on the main grid is a
-   single fit from the winning guess.
+   grid, rho0 summed over every atom, which is the part of int rho ln(rho / rho0) that
+   differs between fixed points. Ties within `MBIS_TIE_REL` (1e-8 relative) go to the
+   earlier guess. When no fit is both converged and non-degenerate, the default fit is
+   returned. The fuzzy refit on the main grid is a single fit from the charge-grid fit's
+   own shells.
 4. **`_meta` fields.**
    - `mbis_mode`, `mbis_cycles`;
    - `mbis_selection`: the selected guess, objectives, degenerate and converged flags per
      guess, the merged shells per guess, the spread and the number of distinct solutions
      (both over the selected fit and the converged, non-degenerate fits only);
    - `mbis_merged`: the shells merged in the charge-grid fit and the fuzzy refit, as
-     `[atom, shells in the guess, shells in the fit]`;
-   - `mbis_unique`: one solution within 0.005 e;
+     `{"atom": 1-based index, "z": Z, "shells_guess": n, "shells_fit": m}`;
+   - `mbis_unique`: one solution within 0.005 e; `null` when a guess did not converge;
    - `mbis_degenerate`;
    - `mbis_beyond_multiwfn`: Z > 86;
    - `skipped`, with the reason `ecp_disabled` when `mbis_ecp=False`.
@@ -68,10 +70,13 @@ Cs+ clusters (10-39 atoms). Times are the charge-grid selection, at 16 threads.
 | converged fit vs plain iteration far past Multiwfn's rule, same guess | 2.5e-6 e or less on non-stalling jobs |
 | Multiwfn's rule vs converged, Z <= 86 (27 jobs) | 3 jobs off by more than 0.03 e, 7 by more than 0.005 e |
 | Multiwfn's rule vs converged, actinides (5 jobs) | 0.03-0.38 e |
-| fitted-guess selection vs Multiwfn-guess selection (35 jobs) | 32 the same within 0.005 e; in the 3 that differ (O13 0.023 e, Np25 0.19 e, Zn20 0.37 e) the fitted guess has the better objective |
-| selection when every guess has 20% of its core population moved to the valence shell | 34 of 35 the same within 0.005 e; Np25 lands on the worse solution |
+| fitted-guess selection vs Multiwfn-guess selection (35 jobs) | 32 the same within 0.005 e; in the 3 that differ (O13 0.023 e, Np25 0.19 e, Zn20 0.37 e) the fitted guess has the better objective [1] |
+| selection when every guess has 20% of its core population moved to the valence shell | 34 of 35 the same within 0.005 e; Np25 lands on the worse solution [1] |
 | more than one solution (fitted guess) | 3 of 35: Cl6, Pu10 (X2C-SVPall), Np25 |
 | time, fitted vs Multiwfn guess, all 35 jobs | 259 s vs 1132 s |
+
+[1] Ranked with the objective as it was then, with the map's atmrhocut cutoff, which can
+reverse rankings (see "Selection objective" below); not rechecked with the corrected one.
 
 Cost per molecule (charge-grid selection, fitted guess):
 
@@ -163,6 +168,126 @@ MBIS difference between the two LRC converter trees (2.95e-7 e). On one job (NpN
 def2-SVP) the change made the default's accelerated fit fail, and plain iteration took
 21343 evaluations without a merge to make. Pinning that step to one thread is a possible
 follow-up.
+
+## Selection objective, stalled checks and the fuzzy refit (2026-11-04)
+
+**NERSC finding.** On the openac level-1 pair (440 actinide jobs, Multiwfn convert vs the
+native converter, `audit_prod.py`), MBIS differed by up to 0.30 e between the two trees on
+3 nitrates (PuN3O11, US2O10N2H28C8 closed shell, NpN6O18), against 9.8e-4 e for every
+other charge scheme. In each, one tree's x1.5 check fit converged within the 1000
+accelerated evaluations and was selected, the other's did not and was dropped. The closed
+shell job, whose densities agree to about 1e-12, shows the cause is the selection, not the
+converter. 11 and 15 of the 440 folders had a dropped check fit with a higher objective
+than the selection.
+
+**The objective was biased.** `mbis_objective` used the map's per-atom cutoff (atoms beyond
+atmrhocut dropped from rho0, Multiwfn's ignorefar). On a local Pu nitrate
+(PuNO5Cl3 B3LYP X2C-TZVPall) the cutoff lowered the objective by 0.07 to 1.2 depending on
+the fit, far more than the differences between fixed points:
+
+| state | objective with the cutoff | every atom | max \|q - default\| |
+|---|---|---|---|
+| default fixed point | 375.624 | 376.704 (best) | 0 |
+| x1.5 after 1000 accelerated evaluations | 376.524 (ranked best) | 376.597 | 0.179 e |
+| x1.5 after plain iteration to convergence | 375.406 | 376.625 | 0.022 e |
+
+With the cutoff the objective fell along plain iteration; the every-atom sum rises, as
+expected since the plain MBIS update is an EM step for it. No grid point had rho0 = 0. The
+objective now sums every atom's shells (terms below MBIS_DENCUT skipped; 3e-5 from the
+untruncated sum here). The map is unchanged, so its fixed points and the Multiwfn-mode
+parity are unchanged. Cost: one distance test per point and atom per call, a few calls per
+selection; no measurable change on the 112 local jobs (2906 s vs 2865 s).
+
+**Ties.** Fits on one fixed point differ in the every-atom objective by up to 8.6e-10
+relative (fit tolerance); distinct fixed points by 2.1e-6 or more. `MBIS_TIE_REL = 1e-8`
+keeps the earlier guess within that band; with 1e-12 the selected-guess label moved on 23
+of 112 jobs with no change in charges.
+
+**Stalled checks.** A check fit that does not converge in 1000 accelerated evaluations
+gets the plain-and-merge fallback when its objective already exceeds the best converged,
+non-degenerate fit by more than MBIS_TIE_REL, continuing from the stalled state (restarting
+from the guess slid back to the default's fixed point on 9 local nitrates, at 5-40x the
+cost). Otherwise it is dropped, and `mbis_unique` is `null` (unknown) instead of true.
+
+**Fuzzy refit.** The main-grid refit now starts from the charge-grid fit's shells,
+merges included. From the raw guess, the refit of an x1.5 selection returned to the
+default's fixed point on the closed-shell U nitrate (5686 cycles), so the stored MBIS
+charges and MBIS fuzzy integrals came from fixed points 0.25 e apart.
+
+**Validation** (112 local jobs, same thread environment, against b9d9d30):
+
+| check | result |
+|---|---|
+| identical charges and selection | 111 of 112 |
+| selection moved to another fixed point | 1: omol ThN6O18 spin 1 def2-TZVPD, 3 solutions, x1.5 to x0.6, 0.026 e |
+| stalled-check fallback taken | 1: omol PuNO5Cl3 def2-TZVPD, same fixed point, 1249 to 9515 evaluations |
+| rmechdb_750, Ti FBFFF0, Sr 3824 (x1.5 selected) | unchanged: x1.5 is also best by the corrected objective |
+
+The NERSC "better x1.5" folders above were ranked with the biased objective; the next
+NERSC run will show how many remain.
+
+## Independent reference: HORTON MBIS (2026-11-04)
+
+horton-part MBISWPart (`horton` env, its own "fine" grid and initial guess) on the
+all-electron MOBH12_V4 (tm_react, 54 atoms, V, mult 2), where the converged engine and
+Multiwfn's rule differ by 0.71 e (V +0.795 vs +1.503):
+
+| comparison | max \|dq\| | median |
+|---|---|---|
+| HORTON vs converged engine | 0.0083 e | 0.0011 e |
+| HORTON vs Multiwfn's rule | 0.706 e | 0.0064 e |
+
+The converged fixed point is the MBIS answer there; Multiwfn's rule had stopped early. One
+job: HORTON has no EDF (no ECP jobs) and no Np/Pu tables.
+
+## Stalled shells on a cluster: Ag1Nb5 (2026-11-04)
+
+MOBH10_Ag1Nb5 (tm_react, 48 atoms, Ag and Nb ECP + EDF): the default accelerated fit ends
+unconverged and degenerate at 1000 evaluations, with Nb's two outer shells within 2.3e-5
+in width (Nb is about +2 e). Plain iteration brings that gap to 0.15, 0.025 and 3.2e-4 at
+250, 500 and 1000 cycles, so the merge (1e-2) is first possible between 500 and 1000
+cycles; each guess costs about 2000 evaluations. The merge record reads Nb (atom 5);
+the older 0-based record `[[4, 5, 4]]` had been read as Ag.
+
+## Cost and the map kernel (2026-11-04, branch perf/mbis-kernel)
+
+**Share of the engine.** NERSC openac level 1 (440 jobs): MBIS median 131 s per job
+(p90 596 s, max 1544 s), 63% (median) and 69% (overall) of the charge-engine time; the
+charge-grid selection is 71% of MBIS and the fuzzy refit 29% (before the refit started
+from the charge fit). Multiwfn's rule has no MBIS beyond Rn, so on actinides there is no
+Multiwfn baseline; on the two local clusters with one, converged MBIS cost 1.1x (V4) and
+30x (Ag1Nb5, before the refit change) the Multiwfn-rule MBIS stages.
+
+**Kernel.** The profile of one map evaluation (V4, Ag1Nb5, one thread) was 60-72% term
+gathering, which recomputed every grid point's distance to every candidate atom (26 M
+candidate pairs per evaluation on Ag1Nb5, 9.8 M inside atmrhocut) and allocated about 20x
+the term slots used; 5% numpy exp; 23-35% accumulation.
+
+1. `mbis_pairs` caches each point's (atom, distance) pairs inside atmrhocut once per grid
+   (12 bytes per pair: 0.12 GB at 48 atoms, 0.54 GB at 274 atoms on the charge grid),
+   shared by the three guesses and the fallback. Bit-identical to the gather version.
+2. `_mbis_map_blocks` fuses term evaluation (exp inline) and accumulation into one numba
+   prange pass over 4096-point blocks with per-block partials added in order, so the result
+   does not depend on the thread count; no term arrays, numpy exp or thread pool.
+
+Per evaluation (best of 5, loaded workstation; original and fused measured back to back,
+"cache only" in an earlier run):
+
+| job | threads | original | cache only | fused |
+|---|---|---|---|---|
+| V4, 54 atoms | 1 | 0.411 s | 0.173 s | 0.200 s |
+| V4 | 8 | 0.100 s | 0.080 s | 0.047 s |
+| Ag1Nb5, 48 atoms | 1 | 0.324 s | 0.239 s | 0.264 s |
+| Ag1Nb5 | 8 | 0.089 s | 0.075 s | 0.060 s |
+| 274 atoms | 1 | 2.42 s | 0.98 s | 1.08 s |
+| 274 atoms | 8 | 0.526 s | 0.244 s | 0.218 s |
+
+Single-threaded the inline exp (scalar) roughly cancels the saved allocations; the gain is
+at production thread counts. The fused exp differs from numpy's in the last digit, so fits
+agree with the gather version to the fit tolerance, not bit for bit. On the 112 local
+jobs: charges within 2.5e-7 e of perf/mbis-converged (median 3.2e-13), selection and
+solution counts identical on all 112, MBIS selection time 2836 s to 2184 s (loaded
+workstation; the per-evaluation table is the cleaner measure).
 
 ## ECP atoms
 
