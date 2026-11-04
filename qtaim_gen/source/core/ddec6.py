@@ -1266,5 +1266,702 @@ def core_grids(prep, grid, grids):
     return grids
 
 
+# ---------------------------------------------------------------------------------
+# P3: reference ions (module_oxidation_density, module_update_atomic_densities)
+# ---------------------------------------------------------------------------------
+
+CHARGE_CONVERGENCE_TOLERANCE = 1.0e-5
+MAX_CORE_ELECTRONS_PER_PIXEL = 30.0
+LOCALIZING_POWER = 4.0
+MINIMUM_BURIED_TAIL_EXPONENT = 1.75
+MAXIMUM_BURIED_TAIL_EXPONENT = 2.5
+WA_RENORMALIZATION_MAX = 10.0
+
+# available_reference_ion_range(Z, 1:2): lowest and highest reference-ion charge per element
+REF_ION_LO = (-2, -2, -2, -2, -2, -5, -4, -3, -2, -2, -2, -2, -2, -5, -4, -3, -3, -2, -2, -2, -2, -2, -2, -3, -4,
+              -3, -2, -2, -2, -2, -2, -5, -4, -3, -2, -2, -2, -2, -2, -2, -2, -3, -4, -3, -2, -2, -2, -2, -2, -5,
+              -4, -3, -2, -2, -2, -2, -2, -2, -2, -2, -2, -2, -2, -2, -2, -2, -2, -2, -2, -2, -2, -2, -2, -3, -4,
+              -3, -4, -3, -2, -2, -2, -5, -4, -3, -2, -2, -2, -2, -2, -2, -2, -2, -2, -2, -2, -2, -2, -2, -2, -2,
+              -2, -2, -2, -2, -2, -2, -2, -2, -2)
+REF_ION_HI = (1, 2, 2, 3, 4, 5, 6, 3, 2, 2, 2, 3, 4, 5, 6, 7, 8, 2, 2, 3, 4, 5, 6, 7, 8, 7, 6, 5, 5, 3, 4, 5, 6, 7,
+              8, 3, 2, 3, 4, 5, 6, 7, 8, 9, 7, 7, 5, 3, 4, 5, 6, 7, 8, 9, 2, 3, 4, 5, 5, 5, 4, 4, 4, 4, 5, 5, 4, 4,
+              4, 4, 4, 5, 6, 7, 8, 9, 9, 7, 6, 5, 4, 5, 6, 7, 8, 7, 2, 3, 4, 5, 6, 7, 8, 9, 8, 9, 5, 5, 5, 4, 4, 4,
+              4, 5, 6, 7, 8, 9, 9)
+
+
+def radial_shell_volume():
+    """chargemol.f08: 4 pi (k^3 - (k-1)^3) / (3 scalefactor^3) for shells k = 1..nshells."""
+    return np.array([4.0 * PI * (k ** 3 - (k - 1) ** 3) / (3.0 * ((SCALEFACTOR * SCALEFACTOR) * SCALEFACTOR))
+                     for k in range(1, NSHELLS + 1)])
+
+
+def oxidation_density(z, atom_charge, rsv):
+    """module_oxidation_density.f08: reference density of element z at integer charge
+    atom_charge, built up from the neutral atom one charge state at a time (cusp fix,
+    monotonic decrease, exact normalization, monotonic density difference)."""
+    from qtaim_gen.source.data import chargemol_refs
+
+    sign = -1 if atom_charge < 0 else 1
+    prev = np.zeros(NSHELLS)
+    for q in range(0, atom_charge + sign, sign):
+        nel = z - q
+        t = chargemol_refs.c2_density(z, nel).astype(np.float64).copy()
+        s = 0.0
+        for k in range(1, NSHELLS):
+            t[k] = max(t[k], 1.0e-16)
+            s = s + rsv[k] * t[k]
+        t[0] = max((nel - s) / rsv[0], 1.0e-16)
+        t1 = 1.0e-16
+        s = 0.0
+        for k in range(NSHELLS - 1, -1, -1):
+            if t[k] > t1:
+                t1 = t[k]
+            else:
+                t[k] = t1
+            s = s + rsv[k] * t[k]
+        for k in range(NSHELLS):
+            t[k] = max(t[k] * nel / s, 1.0e-16)
+        s = 0.0
+        for k in range(NSHELLS - 1, -1, -1):
+            s = s + rsv[k] * t[k]
+        if q != 0:
+            for _ in range(100):
+                sd = 0.0
+                dmin = 0.0
+                for k in range(NSHELLS - 1, -1, -1):
+                    dmin = max(dmin, sign * (prev[k] - t[k]))
+                    shift = prev[k] - sign * dmin - t[k]
+                    t[k] = t[k] + shift
+                    sd = sd + shift * rsv[k]
+                for k in range(NSHELLS):
+                    t[k] = t[k] * s / (s + sd)
+                if abs(sd) < 1.0e-16:
+                    break
+        prev = t
+    return prev
+
+
+def update_atomic_densities(atom_z, ref_charge, rsv, combined):
+    """module_update_atomic_densities.f08: interpolate between the bracketing reference
+    ions, or scale the end-of-range ion. combined (nshells, natoms) is updated in place."""
+    for j, (z, q) in enumerate(zip(atom_z, ref_charge)):
+        lo, hi = REF_ION_LO[z - 1], REF_ION_HI[z - 1]
+        if lo < q < hi:
+            c = int(math.ceil(q))
+            lower = oxidation_density(z, c, rsv)
+            upper = oxidation_density(z, c - 1, rsv)
+            f = math.ceil(q) - q
+            for k in range(NSHELLS):
+                combined[k, j] = upper[k] * f + lower[k] * (1.0 - f)
+        elif q <= lo or q >= hi:
+            c = lo if q <= lo else hi
+            if (z - c) > ZERO_TOLERANCE:
+                combined[:, j] = ((z - q) / (z - c)) * oxidation_density(z, c, rsv)
+            else:
+                combined[:, j] = 0.0
+    return combined
+
+
+# ---------------------------------------------------------------------------------
+# P3: atom-sphere kernels shared by the iterators
+# Grid accumulations run one z-plane per task with atoms in order; per-atom shell sums
+# run one atom per task over its points in order: both keep Chargemol's serial sums.
+# ---------------------------------------------------------------------------------
+
+@numba.njit(inline="always")
+def _shell(na, nb, nc, j, boundary, shift):
+    v0 = na * boundary[0, 0] + nb * boundary[1, 0] + nc * boundary[2, 0] - shift[j, 0]
+    v1 = na * boundary[0, 1] + nb * boundary[1, 1] + nc * boundary[2, 1] - shift[j, 1]
+    v2 = na * boundary[0, 2] + nb * boundary[1, 2] + nc * boundary[2, 2] - shift[j, 2]
+    return int(math.ceil(SCALEFACTOR * math.sqrt(v0 * v0 + v1 * v1 + v2 * v2) + ZERO_TOLERANCE))
+
+
+@numba.njit(parallel=True, cache=True)
+def _cap_grid(grid, cap, nabc, shift, boundary, lo, hi):
+    """grid = min(grid, cap) inside every atom's sphere."""
+    nct = grid.shape[2]
+    for kc in numba.prange(1, nct + 1):
+        for j in range(nabc.shape[0]):
+            nc = kc - nabc[j, 2] - 1
+            if nc < lo[j, 2] or nc > hi[j, 2]:
+                continue
+            for nb in range(lo[j, 1], hi[j, 1] + 1):
+                kb = nb + nabc[j, 1] + 1
+                for na in range(lo[j, 0], hi[j, 0] + 1):
+                    ka = na + nabc[j, 0] + 1
+                    if _shell(na, nb, nc, j, boundary, shift) <= NSHELLS:
+                        grid[ka - 1, kb - 1, kc - 1] = min(grid[ka - 1, kb - 1, kc - 1], cap)
+
+
+@numba.njit(parallel=True, cache=True)
+def _pseudo(out, dens, power, use, nabc, shift, boundary, lo, hi):
+    """out += dens(shell, j)**power summed over atoms j with use[j] (power 1 or 4)."""
+    nct = out.shape[2]
+    for kc in numba.prange(1, nct + 1):
+        for j in range(nabc.shape[0]):
+            if not use[j]:
+                continue
+            nc = kc - nabc[j, 2] - 1
+            if nc < lo[j, 2] or nc > hi[j, 2]:
+                continue
+            for nb in range(lo[j, 1], hi[j, 1] + 1):
+                kb = nb + nabc[j, 1] + 1
+                for na in range(lo[j, 0], hi[j, 0] + 1):
+                    ka = na + nabc[j, 0] + 1
+                    s = _shell(na, nb, nc, j, boundary, shift)
+                    if s <= NSHELLS:
+                        if power == 1:
+                            out[ka - 1, kb - 1, kc - 1] = out[ka - 1, kb - 1, kc - 1] + dens[s - 1, j]
+                        else:
+                            out[ka - 1, kb - 1, kc - 1] = out[ka - 1, kb - 1, kc - 1] + dens[s - 1, j] ** LOCALIZING_POWER
+
+
+@numba.njit(parallel=True, cache=True)
+def _share_sums(dens, num, pseudo, thresh, use, nabc, shift, boundary, lo, hi):
+    """Per atom and shell: sum of dens(s, j) * num / pseudo over points with pseudo > thresh,
+    and the number of such points (the core and conditioned-density shell sums)."""
+    natoms = nabc.shape[0]
+    sums = np.zeros((NSHELLS, natoms))
+    pts = np.zeros((NSHELLS, natoms), dtype=np.int64)
+    for j in numba.prange(natoms):
+        if not use[j]:
+            continue
+        for nc in range(lo[j, 2], hi[j, 2] + 1):
+            kc = nc + nabc[j, 2] + 1
+            for nb in range(lo[j, 1], hi[j, 1] + 1):
+                kb = nb + nabc[j, 1] + 1
+                for na in range(lo[j, 0], hi[j, 0] + 1):
+                    ka = na + nabc[j, 0] + 1
+                    s = _shell(na, nb, nc, j, boundary, shift)
+                    if s <= NSHELLS and pseudo[ka - 1, kb - 1, kc - 1] > thresh:
+                        sums[s - 1, j] = sums[s - 1, j] + dens[s - 1, j] * num[ka - 1, kb - 1, kc - 1] / pseudo[
+                            ka - 1, kb - 1, kc - 1]
+                        pts[s - 1, j] = pts[s - 1, j] + 1
+    return sums, pts
+
+
+@numba.njit(parallel=True, cache=True)
+def _core_cubes(pcd, core, pseudo, use, nabc, shift, boundary, lo, hi):
+    natoms = nabc.shape[0]
+    cubes = np.zeros(natoms)
+    maxd = np.zeros(natoms)
+    for j in numba.prange(natoms):
+        if not use[j]:
+            continue
+        for nc in range(lo[j, 2], hi[j, 2] + 1):
+            kc = nc + nabc[j, 2] + 1
+            for nb in range(lo[j, 1], hi[j, 1] + 1):
+                kb = nb + nabc[j, 1] + 1
+                for na in range(lo[j, 0], hi[j, 0] + 1):
+                    ka = na + nabc[j, 0] + 1
+                    s = _shell(na, nb, nc, j, boundary, shift)
+                    if s <= NSHELLS and pseudo[ka - 1, kb - 1, kc - 1] > ZERO_TOLERANCE:
+                        loc = pcd[s - 1, j] * core[ka - 1, kb - 1, kc - 1] / pseudo[ka - 1, kb - 1, kc - 1]
+                        cubes[j] = cubes[j] + (loc * loc) * loc
+                        maxd[j] = max(maxd[j], loc)
+    return cubes, maxd
+
+
+@numba.njit(parallel=True, cache=True)
+def _core_rescale(out, pcd, core, pseudo, kf, use, nabc, shift, boundary, lo, hi):
+    nct = out.shape[2]
+    for kc in numba.prange(1, nct + 1):
+        for j in range(nabc.shape[0]):
+            if not use[j]:
+                continue
+            nc = kc - nabc[j, 2] - 1
+            if nc < lo[j, 2] or nc > hi[j, 2]:
+                continue
+            for nb in range(lo[j, 1], hi[j, 1] + 1):
+                kb = nb + nabc[j, 1] + 1
+                for na in range(lo[j, 0], hi[j, 0] + 1):
+                    ka = na + nabc[j, 0] + 1
+                    s = _shell(na, nb, nc, j, boundary, shift)
+                    if s <= NSHELLS and pseudo[ka - 1, kb - 1, kc - 1] > ZERO_TOLERANCE:
+                        loc = pcd[s - 1, j] * core[ka - 1, kb - 1, kc - 1] / pseudo[ka - 1, kb - 1, kc - 1]
+                        if loc > ZERO_TOLERANCE * ZERO_TOLERANCE:
+                            out[ka - 1, kb - 1, kc - 1] = out[ka - 1, kb - 1, kc - 1] + loc / math.sqrt(
+                                1 - 2 * kf[j] * (loc * loc))
+
+
+def _update_profile(dens, avg, pts, exp_const):
+    """New atomic shell profile from spherical averages, decaying no faster than
+    exp_const per shell where both shells have points (core iterator update)."""
+    for j in range(dens.shape[1]):
+        dens[0, j] = avg[0, j]
+        t = dens[0, j]
+        for k in range(1, NSHELLS):
+            if pts[k, j] > 0 and t > 0.0:
+                dens[k, j] = max(min(avg[k, j], t * exp_const), 0.0)
+            else:
+                dens[k, j] = max(avg[k, j], 0.0)
+            t = dens[k, j]
+
+
+def _shell_average(sums, pts):
+    avg = np.zeros_like(sums)
+    nz = pts > 0
+    avg[nz] = sums[nz] / pts[nz]
+    return avg
+
+
+def _column_sums(a):
+    """Fortran sum(a, 1): sequential over shells for each atom."""
+    out = np.zeros(a.shape[1])
+    for j in range(a.shape[1]):
+        s = 0.0
+        for k in range(a.shape[0]):
+            s = s + a[k, j]
+        out[j] = s
+    return out
+
+
+def core_iterator(state):
+    """module_core_iterator.f08: partition the core density among atoms, then rescale the
+    core grid so each atom's core integrates to its core electron count."""
+    g = state["geom"]
+    args = (g["nabc"], g["shift"], g["boundary"], g["lo"], g["hi"])
+    pv = g["pixelvolume"]
+    core = state["core_density"]
+    core_e = state["core_electrons"]
+    use = core_e > ZERO_TOLERANCE
+    pcd = state["neutral_density"].copy()
+    core_pop = np.zeros(len(core_e))
+    _cap_grid(core, MAX_CORE_ELECTRONS_PER_PIXEL / pv, *args)
+    exp_const = math.exp(-2.0 * CUTOFF_RADIUS * BOHRPERANGSTROM / (100.0 * NSHELLS))
+    pseudo = np.zeros(core.shape, order="F")
+    for it in range(1, 201):
+        pseudo[...] = 0.0
+        _pseudo(pseudo, pcd, 1, use, *args)
+        sums, pts = _share_sums(pcd, core, pseudo, ZERO_TOLERANCE, use, *args)
+        avg = _shell_average(sums, pts)
+        old = core_pop
+        core_pop = pv * _column_sums(sums)
+        change = float(np.max(np.abs(core_pop - old))) if len(core_pop) else 0.0
+        if change < CHARGE_CONVERGENCE_TOLERANCE and it > 5:
+            break
+        _update_profile(pcd, avg, pts, exp_const)
+
+    na_corr = core_e - core_pop
+    for it in range(1, 41):
+        cubes, maxd = _core_cubes(pcd, core, pseudo, use, *args)
+        kf = np.zeros(len(core_e))
+        for j in range(len(core_e)):
+            if cubes[j] > (ZERO_TOLERANCE * ZERO_TOLERANCE) * ZERO_TOLERANCE and maxd[j] > ZERO_TOLERANCE:
+                kf[j] = na_corr[j] / (cubes[j] * pv)
+                kf[j] = min(kf[j], 0.25 / (maxd[j] * maxd[j]))
+        new = np.zeros(core.shape, order="F")
+        _core_rescale(new, pcd, core, pseudo, kf, use, *args)
+        core = new
+        sums, pts = _share_sums(pcd, core, pseudo, ZERO_TOLERANCE, use, *args)
+        avg = _shell_average(sums, pts)
+        core_pop = pv * _column_sums(sums)
+        na_corr = core_e - core_pop
+        if float(np.max(np.abs(na_corr))) < CHARGE_CONVERGENCE_TOLERANCE:
+            break
+        _update_profile(pcd, avg, pts, exp_const)
+        pseudo[...] = 0.0
+        _pseudo(pseudo, pcd, 1, use, *args)
+    state.update(core_density=core, core_pseudodensity=pseudo, core_population=core_pop,
+                 partial_core_density=pcd, spherical_avg_core_density=avg, sum_points=pts)
+    return state
+
+
+# ---------------------------------------------------------------------------------
+# P3: radial reshaping (module_reshaping_functions.f08)
+# ---------------------------------------------------------------------------------
+
+RESHAPING_TOLERANCE = 1.0e-10
+
+
+@numba.njit(cache=True)
+def _constrain(r, u, add, sq, w, fe, tail):
+    """r = u + add*sqrt(u), made non-negative and non-increasing (tail: decaying at
+    least by fe per shell) wherever the shell has points; returns its integral."""
+    n = r.shape[0]
+    for k in range(n):
+        r[k] = u[k] + add * sq[k]
+    r[0] = max(r[0], 0.0)
+    t = r[0]
+    for k in range(1, n):
+        r[k] = max(r[k], 0.0)
+        if w[k] > 0.0 and t > 0.0:
+            r[k] = min(r[k], t * fe[k] if tail else t)
+        t = r[k]
+    s = 0.0
+    for k in range(n):
+        s = s + r[k] * w[k]
+    return s
+
+
+@numba.njit(cache=True)
+def reshape_profile(u, w, fe, se, tail):
+    """monotonic_decay_function (tail=False) and tail_exponential_decay_function
+    (tail=True): add c*sqrt(u) to the radial profile u so that, after the shape
+    constraints, it keeps the integral of u; c by bracketing and interpolation."""
+    n = u.shape[0]
+    r = u.copy()
+    sq = np.empty(n)
+    weighted = 0.0
+    first = 0.0
+    for k in range(n):
+        sq[k] = math.sqrt(u[k])
+        weighted = weighted + sq[k] * w[k]
+        first = first + u[k] * w[k]
+    iters = 1
+    add = np.zeros(5)
+    err = np.zeros(5)
+    if weighted < RESHAPING_TOLERANCE or first < RESHAPING_TOLERANCE:
+        return r, iters
+    # the unshifted profile: _constrain with add = 0 reproduces u + 0*sqrt(u) = u
+    second = _constrain(r, u, 0.0, sq, w, fe, tail)
+    re = first - second
+    err[0] = re
+    if re < RESHAPING_TOLERANCE:
+        return r, iters
+    for _ in range(50):
+        add[1] = 2.0 * add[0] + re / weighted
+        second = _constrain(r, u, add[1], sq, w, fe, tail)
+        re = first - second
+        if re > 0.0:
+            add[0] = add[1]
+            err[0] = re
+        else:
+            add[4] = add[1]
+            err[4] = re
+            break
+    for trial in range(1, 51):
+        if abs(err[4] - err[0]) < RESHAPING_TOLERANCE:
+            break
+        iters = trial
+        add[2] = 0.5 * (add[0] + add[4])
+        err[2] = first - _constrain(r, u, add[2], sq, w, fe, tail)
+        if abs(err[2]) < RESHAPING_TOLERANCE:
+            break
+        m = 2.0 - 4.0 * (err[0] - err[2]) / (err[0] - err[4])
+        if abs(m) < RESHAPING_TOLERANCE:
+            add[3] = add[0] + (add[4] - add[0]) * (err[0] / (err[0] - err[4]))
+        else:
+            t = err[0] / (err[0] - err[4])
+            add[3] = add[0] + (add[4] - add[0]) * (m - 1.0 + math.sqrt((1.0 - m) ** 2 + 4.0 * m * t)) / (2.0 * m)
+        err[3] = first - _constrain(r, u, add[3], sq, w, fe, tail)
+        if abs(err[3]) < RESHAPING_TOLERANCE:
+            break
+        if err[2] > 0.0 and err[3] > 0.0:
+            if 3.0 * abs(err[4]) < abs(err[3]):
+                add[1] = add[4] + (add[4] - add[3]) * (2.0 * err[4]) / (err[3] - err[4])
+            elif 3.0 * abs(err[3]) < abs(err[4]):
+                add[1] = add[3] + (add[4] - add[3]) * (2.0 * err[3]) / (err[3] - err[4])
+            else:
+                add[1] = 0.5 * (add[3] + add[4])
+        elif err[2] > 0.0 and err[3] <= 0.0:
+            if 3.0 * abs(err[2]) < abs(err[3]):
+                add[1] = add[2] + (add[3] - add[2]) * (2.0 * err[2]) / (err[2] - err[3])
+            elif 3.0 * abs(err[3]) < abs(err[2]):
+                add[1] = add[3] + (add[3] - add[2]) * (2.0 * err[3]) / (err[2] - err[3])
+            else:
+                add[1] = 0.5 * (add[3] + add[2])
+        elif err[2] <= 0.0 and err[3] > 0.0:
+            if 3.0 * abs(err[2]) < abs(err[3]):
+                add[1] = add[2] + (add[2] - add[3]) * (2.0 * err[2]) / (err[3] - err[2])
+            elif 3.0 * abs(err[3]) < abs(err[2]):
+                add[1] = add[3] + (add[2] - add[3]) * (2.0 * err[3]) / (err[3] - err[2])
+            else:
+                add[1] = 0.5 * (add[3] + add[2])
+        else:
+            if 3.0 * abs(err[0]) < abs(err[3]):
+                add[1] = add[0] + (add[3] - add[0]) * (2.0 * err[0]) / (err[0] - err[3])
+            elif 3.0 * abs(err[3]) < abs(err[0]):
+                add[1] = add[3] + (add[3] - add[0]) * (2.0 * err[3]) / (err[0] - err[3])
+            else:
+                add[1] = 0.5 * (add[3] + add[0])
+        err[1] = first - _constrain(r, u, add[1], sq, w, fe, tail)
+        if abs(err[1]) < RESHAPING_TOLERANCE:
+            break
+        if err[1] > 0.0:
+            add[0] = add[1]
+            err[0] = err[1]
+        else:
+            add[4] = add[1]
+            err[4] = err[1]
+        if err[2] > 0.0:
+            add[0] = max(add[2], add[0])
+            err[0] = min(err[2], err[0])
+        else:
+            add[4] = min(add[2], add[4])
+            err[4] = max(err[2], err[4])
+        if err[3] > 0.0:
+            add[0] = max(add[3], add[0])
+            err[0] = min(err[3], err[0])
+        else:
+            add[4] = min(add[3], add[4])
+            err[4] = max(err[3], err[4])
+    if tail:
+        r[0] = max(r[0], 0.0)
+        t = r[0]
+        for k in range(1, n):
+            r[k] = max(r[k], t * se[k])
+            t = r[k]
+        s = 0.0
+        for k in range(n):
+            s = s + r[k] * w[k]
+        if abs(s) > RESHAPING_TOLERANCE:
+            for k in range(n):
+                r[k] = r[k] * first / s
+    return r, iters
+
+
+# ---------------------------------------------------------------------------------
+# P3: DDEC6 valence iterator (module_DDEC6_valence_iterator.f08)
+# ---------------------------------------------------------------------------------
+
+@numba.njit(parallel=True, cache=True)
+def _reference_pops(comb, total, ref, loc_ref, pv, nabc, shift, boundary, lo, hi):
+    """Steps 1-2: per-atom populations of the reference-ion and localized (power 4)
+    partitions, pixel volume inside each term as in Chargemol."""
+    natoms = nabc.shape[0]
+    vpop = np.zeros(natoms)
+    lpop = np.zeros(natoms)
+    for j in numba.prange(natoms):
+        for nc in range(lo[j, 2], hi[j, 2] + 1):
+            kc = nc + nabc[j, 2] + 1
+            for nb in range(lo[j, 1], hi[j, 1] + 1):
+                kb = nb + nabc[j, 1] + 1
+                for na in range(lo[j, 0], hi[j, 0] + 1):
+                    ka = na + nabc[j, 0] + 1
+                    s = _shell(na, nb, nc, j, boundary, shift)
+                    if s <= NSHELLS and ref[ka - 1, kb - 1, kc - 1] > ZERO_TOLERANCE:
+                        c = comb[s - 1, j]
+                        t = total[ka - 1, kb - 1, kc - 1]
+                        vpop[j] = vpop[j] + pv * c * t / ref[ka - 1, kb - 1, kc - 1]
+                        lpop[j] = lpop[j] + pv * (c ** LOCALIZING_POWER) * t / loc_ref[ka - 1, kb - 1, kc - 1]
+    return vpop, lpop
+
+
+@numba.njit(parallel=True, cache=True)
+def _tau_sums(cond, cref, nabc, shift, boundary, lo, hi):
+    natoms = nabc.shape[0]
+    pts = np.zeros((NSHELLS, natoms), dtype=np.int64)
+    s_sqrt = np.zeros((NSHELLS, natoms))
+    s_ratio = np.zeros((NSHELLS, natoms))
+    thresh = ZERO_TOLERANCE * ZERO_TOLERANCE
+    for j in numba.prange(natoms):
+        for nc in range(lo[j, 2], hi[j, 2] + 1):
+            kc = nc + nabc[j, 2] + 1
+            for nb in range(lo[j, 1], hi[j, 1] + 1):
+                kb = nb + nabc[j, 1] + 1
+                for na in range(lo[j, 0], hi[j, 0] + 1):
+                    ka = na + nabc[j, 0] + 1
+                    s = _shell(na, nb, nc, j, boundary, shift)
+                    if s <= NSHELLS and cref[ka - 1, kb - 1, kc - 1] > thresh:
+                        pts[s - 1, j] = pts[s - 1, j] + 1
+                        s_sqrt[s - 1, j] = s_sqrt[s - 1, j] + math.sqrt(cref[ka - 1, kb - 1, kc - 1])
+                        s_ratio[s - 1, j] = s_ratio[s - 1, j] + cond[s - 1, j] / math.sqrt(cref[ka - 1, kb - 1, kc - 1])
+    return pts, s_sqrt, s_ratio
+
+
+@numba.njit(parallel=True, cache=True)
+def _iter_sums(partial, total, tpseudo, nabc, shift, boundary, lo, hi):
+    """Steps 4-7: per atom and shell, the density share, its weighted share and the
+    (weighted) point counts."""
+    natoms = nabc.shape[0]
+    sd = np.zeros((NSHELLS, natoms))
+    swd = np.zeros((NSHELLS, natoms))
+    pts = np.zeros((NSHELLS, natoms), dtype=np.int64)
+    swp = np.zeros((NSHELLS, natoms))
+    for j in numba.prange(natoms):
+        for nc in range(lo[j, 2], hi[j, 2] + 1):
+            kc = nc + nabc[j, 2] + 1
+            for nb in range(lo[j, 1], hi[j, 1] + 1):
+                kb = nb + nabc[j, 1] + 1
+                for na in range(lo[j, 0], hi[j, 0] + 1):
+                    ka = na + nabc[j, 0] + 1
+                    s = _shell(na, nb, nc, j, boundary, shift)
+                    if s <= NSHELLS and tpseudo[ka - 1, kb - 1, kc - 1] > ZERO_TOLERANCE:
+                        t = partial[s - 1, j] / tpseudo[ka - 1, kb - 1, kc - 1]
+                        loc = t * total[ka - 1, kb - 1, kc - 1]
+                        sd[s - 1, j] = sd[s - 1, j] + loc
+                        swd[s - 1, j] = swd[s - 1, j] + t * loc
+                        pts[s - 1, j] = pts[s - 1, j] + 1
+                        swp[s - 1, j] = swp[s - 1, j] + t
+    return sd, swd, pts, swp
+
+
+def _seq_sum(v):
+    s = 0.0
+    for x in v:
+        s = s + x
+    return s
+
+
+def ddec6_valence_iterator(state):
+    """DDEC6_valence_iterator: steps 1-2 against reference ions, step 3 conditioned
+    reference density with tau and the tail constants, steps 4-7 iterative, with the
+    kappa (wA renormalization) updates when a valence population goes negative."""
+    g = state["geom"]
+    args = (g["nabc"], g["shift"], g["boundary"], g["lo"], g["hi"])
+    pv = g["pixelvolume"]
+    z = state["atom_z"].astype(np.float64)
+    core_e = state["core_electrons"]
+    occ1 = state["occupancy_correction"][0]
+    core_pop = state["core_population"]
+    nvalence = state["nvalence"]
+    rsv = state["radial_shell_volume"]
+    natoms = len(z)
+    everyone = np.ones(natoms, dtype=np.bool_)
+    total = state["valence_density"] + state["core_density"]
+    comb = state["neutral_density"].copy()
+    ref = np.zeros(total.shape, order="F")
+    loc_ref = np.zeros(total.shape, order="F")
+    net = np.zeros(natoms)
+    ref_charge = np.zeros(natoms)
+    hirshfeld = None
+    for it in (1, 2):
+        ref[...] = 0.0
+        loc_ref[...] = 0.0
+        _pseudo(ref, comb, 1, everyone, *args)
+        _pseudo(loc_ref, comb, 4, everyone, *args)
+        vpop, lpop = _reference_pops(comb, total, ref, loc_ref, pv, *args)
+        vpop = vpop + occ1 - core_pop
+        lpop = lpop + occ1 - core_e
+        norm = nvalence / _seq_sum(vpop)
+        vpop = norm * vpop
+        lpop = norm * lpop
+        net = z - core_e - vpop
+        lnet = z - core_e - lpop
+        if it == 1:
+            hirshfeld = net.copy()
+        ref_charge = (2.0 * lnet + net) / 3.0
+        update_atomic_densities(state["atom_z"], ref_charge, rsv, comb)
+
+    # step 3: conditioned reference density
+    ref[...] = 0.0
+    _pseudo(ref, comb, 1, everyone, *args)
+    del loc_ref
+    scond, pts = _share_sums(comb, total, ref, ZERO_TOLERANCE * ZERO_TOLERANCE, everyone, *args)
+    sigma = _shell_average(scond, pts)
+    crp = _column_sums(scond) * pv
+    ve = 0.0
+    for j in range(natoms):
+        ve = ve + crp[j] - core_pop[j] + occ1[j]
+    norm = nvalence / ve
+    for j in range(natoms):
+        target = (z[j] - core_e[j] - ref_charge[j]) / norm + core_pop[j] - occ1[j]
+        if crp[j] > CHARGE_CONVERGENCE_TOLERANCE:
+            for k in range(NSHELLS):
+                sigma[k, j] = max(sigma[k, j] * target / crp[j], 0.0)
+    cond = sigma.copy()
+    w = pts * pv
+    zeros = np.zeros(NSHELLS)
+    for j in range(natoms):
+        cond[:, j], _ = reshape_profile(sigma[:, j].copy(), w[:, j].astype(np.float64), zeros, zeros, False)
+
+    cref = ref
+    cref[...] = 0.0
+    _pseudo(cref, cond, 1, everyone, *args)
+    pts, s_sqrt, s_ratio = _tau_sums(cond, cref, *args)
+    tau = np.ones((NSHELLS, natoms))
+    nz = pts > 0
+    tau[nz] = s_ratio[nz] / s_sqrt[nz]
+    fe = np.zeros((NSHELLS, natoms))
+    se = np.zeros((NSHELLS, natoms))
+    for j in range(natoms):
+        for k in range(NSHELLS):
+            t2 = tau[k, j] * tau[k, j]
+            first = MINIMUM_BURIED_TAIL_EXPONENT * (1.0 - t2)
+            fe[k, j] = math.exp(-first / SCALEFACTOR)
+            second = (1.0 - t2) / MAXIMUM_BURIED_TAIL_EXPONENT
+            se[k, j] = math.exp(-1.0 / (SCALEFACTOR * second)) if second > 0.01 else 0.0
+    del cref
+    partial = cond.copy()
+
+    # steps 4-7
+    wa = np.ones(natoms)
+    nonoverlap = CHARGE_CONVERGENCE_TOLERANCE / (10.0 * WA_RENORMALIZATION_MAX)
+    completed = 3
+    update_kappa = False
+    max_change = 1.0
+    wsad = np.zeros((NSHELLS, natoms))
+    tpseudo = np.zeros(total.shape, order="F")
+    n_iter = 0
+    for it in range(4, 501):
+        n_iter = it
+        tpseudo[...] = 0.0
+        _pseudo(tpseudo, partial, 1, everyone, *args)
+        sd, swd, pts, swp = _iter_sums(partial, total, tpseudo, *args)
+        slope = np.zeros(natoms)
+        sad = np.zeros((NSHELLS, natoms))
+        new_wsad = np.zeros((NSHELLS, natoms))
+        for j in range(natoms):
+            for k in range(NSHELLS):
+                if pts[k, j] > 0:
+                    sad[k, j] = sd[k, j] / pts[k, j]
+                    new_wsad[k, j] = (sd[k, j] - swd[k, j] + 0.2 * swp[k, j] * sad[k, j]) / (pts[k, j] - 0.8 * swp[k, j])
+                    slope[j] = slope[j] + pv * (sd[k, j] - swd[k, j])
+        wsad = new_wsad
+        old_net = net
+        old_change = max_change
+        vpop = _column_sums(sd) * pv
+        vpop = vpop + occ1 - core_pop
+        norm = nvalence / _seq_sum(vpop)
+        vpop = norm * vpop
+        net = z - core_e - vpop
+        max_change = float(np.max(np.abs(net - old_net)))
+        if it == 4:
+            update_kappa = False
+        else:
+            if np.any(vpop < -CHARGE_CONVERGENCE_TOLERANCE):
+                update_kappa = True
+            if update_kappa and max(max_change, old_change) < CHARGE_CONVERGENCE_TOLERANCE:
+                update_kappa = False
+                wa[:] = 1.0
+        if update_kappa:
+            for j in range(natoms):
+                partial[:, j] = partial[:, j] / wa[j]
+                if slope[j] > nonoverlap:
+                    wa[j] = max(1.0, (wa[j] * math.exp(-vpop[j] / slope[j])))
+                else:
+                    wa[j] = 1.0
+                partial[:, j] = partial[:, j] * wa[j]
+        else:
+            completed += 1
+            if completed == 7:
+                break
+            w = pts * pv
+            partial = wsad.copy()
+            for j in range(natoms):
+                partial[:, j], _ = reshape_profile(wsad[:, j].copy(), w[:, j].astype(np.float64), fe[:, j].copy(),
+                                                   se[:, j].copy(), True)
+    state.update(net_atomic_charge=net, hirshfeld_net_atomic_charge=hirshfeld, n_iterations=n_iter,
+                 partial_density=partial, total_pseudodensity=tpseudo, total_density=total, tau=tau,
+                 sum_points=pts, valence_population=vpop, spherical_average_density=sad)
+    return state
+
+
+def run(wfx_path, parallel=True):
+    """DDEC6 net atomic charges for one wfx (P3: charges only so far)."""
+    prep = load(wfx_path)
+    grid = grid_setup(prep["atom_xyz"])
+    pairs = pair_data(prep, grid)
+    grids = core_grids(prep, grid, density_grids(prep, grid, pairs, parallel=parallel))
+    net_charge = float(prep["center_zeff"].sum() - (prep["occ_a"].sum() + prep["occ_b"].sum()))
+    core_e = grids["core_electrons"]
+    nvalence = float(prep["atom_z"].sum()) - net_charge - _seq_sum(core_e)
+    int_tol = max(INTEGRATION_TOLERANCE, 0.10 * nvalence / 100.0)
+    check = abs(nvalence - grids["valence_density"].sum() * grid["pixelvolume"] - _seq_sum(grids["occupancy_correction"][0]))
+    if check > int_tol:
+        raise ValueError(f"valence electrons on the grid off by {check:.4f} e (Chargemol stops here)")
+    rsv = radial_shell_volume()
+    neutral = np.column_stack([oxidation_density(int(z), 0, rsv) for z in prep["atom_z"]])
+    state = {"geom": {"nabc": grid["center_nabc"], "shift": grid["center_shift"], "boundary": grid["boundary"],
+                      "lo": grids["shell_lo"], "hi": grids["shell_hi"], "pixelvolume": grid["pixelvolume"]},
+             "atom_z": np.asarray(prep["atom_z"], dtype=np.int64), "core_electrons": core_e,
+             "occupancy_correction": grids["occupancy_correction"], "valence_density": grids["valence_density"],
+             "core_density": grids["core_density"], "spin_density": grids["spin_density"], "nvalence": nvalence,
+             "radial_shell_volume": rsv, "neutral_density": neutral, "net_charge": net_charge}
+    state = core_iterator(state)
+    return ddec6_valence_iterator(state)
+
+
 def load(wfx_path):
     return prepare(read_wfx(wfx_path))
