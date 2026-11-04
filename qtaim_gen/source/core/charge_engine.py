@@ -529,6 +529,9 @@ MBIS_MERGE_EVERY = 500  # plain cycles between later merge checks
 MBIS_EMPTY_POP = 1e-6  # e: a shell below this has emptied
 MBIS_CHECK_SIGMAS = (0.6, 1.5)  # width scales of the extra guesses mbis_select fits from
 MBIS_UNIQUE_TOL = 0.005  # e: larger guess spreads mark the MBIS record as not unique
+# relative objective gap below which two fits count as tied (earlier guess kept): fits on one fixed
+# point differ by up to 8.6e-10 relative, distinct fixed points by 2.1e-6 or more (112 local jobs)
+MBIS_TIE_REL = 1e-8
 
 
 @njit(nogil=True, cache=True)
@@ -1037,13 +1040,13 @@ def mbis_select(grel, coords, tmpden, atnums, qbase):
     for i, (name, (m0, p0, s0)) in enumerate(mbis_guesses(atnums)):
         fallback = i == 0 or fits[0][9]
         good_so_far = [f[6] for f in fits if f[8] and not f[7]]
-        above = max(good_so_far) + 1e-12 * abs(max(good_so_far)) if good_so_far else None
+        above = max(good_so_far) + MBIS_TIE_REL * abs(max(good_so_far)) if good_so_far else None
         (q, m, p, s, n), conv, fell_back = _mbis_fit_converged(step, m0, p0, s0, qbase, fallback=fallback,
                                                                objective=objective, fallback_above=above)
         merged = [[int(a), int(m0[a]), int(m[a])] for a in np.flatnonzero(m < m0)]
         fits.append((name, q, m, p, s, n, objective(m, p, s), mbis_degenerate(m, p, s), conv, fell_back, merged))
     good = [f for f in fits if f[8] and not f[7]]
-    tol = 1e-12 * max(abs(f[6]) for f in fits)
+    tol = MBIS_TIE_REL * max(abs(f[6]) for f in fits)
     best = fits[0]
     for f in good:
         if (best[7] and not f[7]) or (f[7] == best[7] and f[6] > best[6] + tol):
