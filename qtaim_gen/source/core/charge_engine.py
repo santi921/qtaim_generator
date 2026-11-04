@@ -565,7 +565,8 @@ def _mbis_pair_scan(grel, atcoords, tmpden, cut2, cand_ptr, cand, pptr, pj, pd, 
 def mbis_pairs(grel, coords, tmpden, atnums):
     """The (atom, distance) pairs every MBIS map evaluation on this grid reads,
     built once: point ip's pairs are pj/pd[pptr[ip]:pptr[ip + 1]], atoms in the
-    order of _mbis_setup's candidate lists. About 12 bytes per pair (0.12 GB
+    order of _mbis_setup's candidate lists; the fourth item is the most pairs of
+    any point. About 12 bytes per pair (0.12 GB
     for 48 atoms, 0.54 GB for 274 atoms on the MBIS charge grid)."""
     cut2, cand_ptr, cand = _mbis_setup(grel, coords, atnums)
     pptr = np.zeros(len(coords) * grel.shape[0] + 1, dtype=np.int64)
@@ -574,80 +575,16 @@ def mbis_pairs(grel, coords, tmpden, atnums):
     pptr = np.cumsum(pptr)
     pj, pd = np.empty(pptr[-1], dtype=np.int32), np.empty(pptr[-1])
     _mbis_pair_scan(grel, coords, tmpden, cut2, cand_ptr, cand, pptr, pj, pd, True)
-    return pptr, pj, pd
+    return pptr, pj, pd, int(np.diff(pptr).max())
 
 
-@njit(nogil=True, cache=True)
-def _mbis_gather(pptr, pj, pd, mshell, sig, dmax, dmax_atom, p0, p1, cap):
-    """MBIS terms (atom, shell, distance, -d/sigma) of the flat points p0..p1
-    that can reach MBIS_DENCUT, from the mbis_pairs cache; ptr[q] is where
-    point q's terms start. Skipped: atoms beyond every shell's dencut radius
-    and shells beyond their own (dmax, padded so a skipped term is certainly
-    below it)."""
-    n = p1 - p0
-    tj = np.empty(cap, dtype=np.int64)
-    tk = np.empty(cap, dtype=np.int64)
-    td = np.empty(cap)
-    targ = np.empty(cap)
-    ptr = np.zeros(n + 1, dtype=np.int64)
-    nt = 0
-    for q in range(n):
-        for s in range(pptr[p0 + q], pptr[p0 + q + 1]):
-            j = pj[s]
-            d = pd[s]
-            if d > dmax_atom[j]:
-                continue
-            for k in range(mshell[j]):
-                if d > dmax[j, k]:
-                    continue
-                tj[nt] = j
-                tk[nt] = k
-                td[nt] = d
-                targ[nt] = -d / sig[j, k]
-                nt += 1
-        ptr[q + 1] = nt
-    return tj[:nt], tk[:nt], td[:nt], targ[:nt], ptr
-
-
-@njit(nogil=True, cache=True)
-def _mbis_accumulate(tmpden, m, p0, amp, tj, tk, td, ex, ptr, nat):
-    """New shell populations and the integral part of the new widths (Eqs.
-    18-19 of the MBIS paper) from the gathered terms; ex holds exp(-d/sigma)."""
-    ppop = np.zeros((nat, MBIS_MAXSHELL))
-    psig = np.zeros((nat, MBIS_MAXSHELL))
-    for q in range(ptr.shape[0] - 1):
-        a, b = ptr[q], ptr[q + 1]
-        if a == b:
-            continue
-        rho0 = 0.0
-        for s in range(a, b):
-            t = amp[tj[s], tk[s]] * ex[s]
-            if t < MBIS_DENCUT:
-                t = 0.0
-            ex[s] = t
-            rho0 += t
-        if rho0 > 0.0:
-            ip = p0 + q
-            c = ip // m
-            w = tmpden[c, ip - c * m]
-            for s in range(a, b):
-                if ex[s] != 0.0:
-                    f = w * ex[s] / rho0
-                    ppop[tj[s], tk[s]] += f
-                    psig[tj[s], tk[s]] += f * td[s]
-    return ppop, psig
-
-
-def _mbis_cycle(tmpden, pairs, mshell, pop, sig, block=4096):
-    """One MBIS iteration (MBIS, imode 0). Points are processed in blocks on
-    numba.get_num_threads() worker threads: gather the terms that can matter
-    from the mbis_pairs cache, one vectorized numpy exp, accumulate."""
-    pptr, pj, pd = pairs
-    nat, m = tmpden.shape
-    npts = nat * m
+def _mbis_amp_dmax(mshell, pop, sig):
+    """Each shell's density at the nucleus, pop / (8 pi sigma^3), and the
+    distance beyond which it is below MBIS_DENCUT (padded so a skipped term is
+    certainly below it; -1 for shells that never reach it)."""
     amp = np.zeros_like(pop)
     dmax = np.full(pop.shape, -1.0)
-    for j in range(nat):
+    for j in range(len(mshell)):
         for k in range(mshell[j]):
             sv = sig[j, k]
             if not sv > 0:
@@ -657,23 +594,64 @@ def _mbis_cycle(tmpden, pairs, mshell, pop, sig, block=4096):
             amp[j, k] = pop[j, k] / sv**3 / 8 / np.pi
             if amp[j, k] > MBIS_DENCUT:
                 dmax[j, k] = sv * np.log(amp[j, k] / MBIS_DENCUT) * (1 + 1e-9) + 1e-12
-    dmax_atom = dmax.max(axis=1)
+    return amp, dmax, dmax.max(axis=1)
 
-    def one_block(p0):
-        p1 = min(npts, p0 + block)
-        cap = int(pptr[p1] - pptr[p0]) * MBIS_MAXSHELL
-        tj, tk, td, targ, ptr = _mbis_gather(pptr, pj, pd, mshell, sig, dmax, dmax_atom, p0, p1, cap)
-        return _mbis_accumulate(tmpden, m, p0, amp, tj, tk, td, np.exp(targ), ptr, nat)
 
-    starts = range(0, npts, block)
-    nthreads = numba.get_num_threads()
-    if nthreads == 1 or len(starts) == 1:
-        parts = [one_block(p0) for p0 in starts]
-    else:
-        with ThreadPoolExecutor(nthreads) as pool:
-            parts = list(pool.map(one_block, starts))
-    return sum(p[0] for p in parts), sum(p[1] for p in parts)
+@njit(parallel=True, cache=True)
+def _mbis_map_blocks(tmpden, pptr, pj, pd, mshell, amp, sig, dmax, dmax_atom, block, maxterms):
+    """New shell populations and the integral part of the new widths (Eqs.
+    18-19 of the MBIS paper), per block of flat points: each point's shell
+    terms amp exp(-d/sigma) at or above MBIS_DENCUT (atoms and shells beyond
+    their dmax skipped), their sum rho0, then w term / rho0. One partial per
+    block, so the total does not depend on the thread count."""
+    nat, m = tmpden.shape
+    npts = nat * m
+    nb = (npts + block - 1) // block
+    ppop = np.zeros((nb, nat, MBIS_MAXSHELL))
+    psig = np.zeros((nb, nat, MBIS_MAXSHELL))
+    for b in prange(nb):
+        tj = np.empty(maxterms, dtype=np.int64)
+        tk = np.empty(maxterms, dtype=np.int64)
+        tt = np.empty(maxterms)
+        tdd = np.empty(maxterms)
+        for ip in range(b * block, min(npts, (b + 1) * block)):
+            n = 0
+            rho0 = 0.0
+            for s in range(pptr[ip], pptr[ip + 1]):
+                j = pj[s]
+                d = pd[s]
+                if d > dmax_atom[j]:
+                    continue
+                for k in range(mshell[j]):
+                    if d > dmax[j, k]:
+                        continue
+                    t = amp[j, k] * np.exp(-d / sig[j, k])
+                    if t < MBIS_DENCUT:
+                        continue
+                    tj[n] = j
+                    tk[n] = k
+                    tt[n] = t
+                    tdd[n] = d
+                    n += 1
+                    rho0 += t
+            if rho0 > 0.0:
+                c = ip // m
+                w = tmpden[c, ip - c * m]
+                for u in range(n):
+                    f = w * tt[u] / rho0
+                    ppop[b, tj[u], tk[u]] += f
+                    psig[b, tj[u], tk[u]] += f * tdd[u]
+    return ppop, psig
 
+
+def _mbis_cycle(tmpden, pairs, mshell, pop, sig, block=4096):
+    """One MBIS iteration (MBIS, imode 0) on numba.get_num_threads() threads,
+    from the mbis_pairs cache."""
+    pptr, pj, pd, maxpairs = pairs
+    amp, dmax, dmax_atom = _mbis_amp_dmax(mshell, pop, sig)
+    ppop, psig = _mbis_map_blocks(tmpden, pptr, pj, pd, mshell, amp, sig, dmax, dmax_atom, block,
+                                  maxpairs * MBIS_MAXSHELL)
+    return ppop.sum(axis=0), psig.sum(axis=0)
 
 
 # ---------------------------------------------------------------- partitions
@@ -941,24 +919,37 @@ def mbis_degenerate(mshell, pop, sig):
     return False
 
 
-@njit(nogil=True, cache=True)
-def _mbis_logsum(tmpden, m, p0, amp, tj, tk, ex, ptr):
-    """sum over the block's points of w ln(rho0), rho0 the promolecule density
-    with the map's MBIS_DENCUT truncation; points with rho0 = 0 add w ln(1e-300)."""
-    tot = 0.0
-    for q in range(ptr.shape[0] - 1):
-        ip = p0 + q
-        c = ip // m
-        w = tmpden[c, ip - c * m]
-        if not w > 1e-14:
-            continue
-        rho0 = 0.0
-        for s in range(ptr[q], ptr[q + 1]):
-            t = amp[tj[s], tk[s]] * ex[s]
-            if t >= MBIS_DENCUT:
-                rho0 += t
-        tot += w * np.log(max(rho0, 1e-300))
-    return tot
+@njit(parallel=True, cache=True)
+def _mbis_logsum_blocks(tmpden, pptr, pj, pd, mshell, amp, sig, dmax, dmax_atom, block):
+    """Per block of flat points, the sum of w ln(rho0), rho0 the promolecule
+    density with the map's MBIS_DENCUT truncation; points with rho0 = 0 add
+    w ln(1e-300)."""
+    nat, m = tmpden.shape
+    npts = nat * m
+    nb = (npts + block - 1) // block
+    part = np.zeros(nb)
+    for b in prange(nb):
+        tot = 0.0
+        for ip in range(b * block, min(npts, (b + 1) * block)):
+            c = ip // m
+            w = tmpden[c, ip - c * m]
+            if not w > 1e-14:
+                continue
+            rho0 = 0.0
+            for s in range(pptr[ip], pptr[ip + 1]):
+                j = pj[s]
+                d = pd[s]
+                if d > dmax_atom[j]:
+                    continue
+                for k in range(mshell[j]):
+                    if d > dmax[j, k]:
+                        continue
+                    t = amp[j, k] * np.exp(-d / sig[j, k])
+                    if t >= MBIS_DENCUT:
+                        rho0 += t
+            tot += w * np.log(max(rho0, 1e-300))
+        part[b] = tot
+    return part
 
 
 def mbis_objective(grel, coords, tmpden, atnums, mshell, pop, sig, block=4096, pairs=None):
@@ -966,25 +957,9 @@ def mbis_objective(grel, coords, tmpden, atnums, mshell, pop, sig, block=4096, p
     Kullback-Leibler divergence int rho ln(rho / rho0) that differs between
     fixed points (their total populations all equal the grid's electron count).
     Larger is a better fit. pairs: the grid's mbis_pairs, built when not given."""
-    pptr, pj, pd = pairs if pairs is not None else mbis_pairs(grel, coords, tmpden, atnums)
-    nat, m = len(coords), grel.shape[0]
-    amp = np.zeros_like(pop)
-    dmax = np.full(pop.shape, -1.0)
-    for j in range(nat):
-        for k in range(mshell[j]):
-            sv = sig[j, k]
-            if sv > 0:
-                amp[j, k] = pop[j, k] / sv**3 / 8 / np.pi
-                if amp[j, k] > MBIS_DENCUT:
-                    dmax[j, k] = sv * np.log(amp[j, k] / MBIS_DENCUT) * (1 + 1e-9) + 1e-12
-    dmax_atom = dmax.max(axis=1)
-    tot = 0.0
-    for p0 in range(0, nat * m, block):
-        p1 = min(nat * m, p0 + block)
-        cap = int(pptr[p1] - pptr[p0]) * MBIS_MAXSHELL
-        tj, tk, td, targ, ptr = _mbis_gather(pptr, pj, pd, mshell, sig, dmax, dmax_atom, p0, p1, cap)
-        tot += _mbis_logsum(tmpden, m, p0, amp, tj, tk, np.exp(targ), ptr)
-    return tot
+    pptr, pj, pd, _ = pairs if pairs is not None else mbis_pairs(grel, coords, tmpden, atnums)
+    amp, dmax, dmax_atom = _mbis_amp_dmax(mshell, pop, sig)
+    return float(_mbis_logsum_blocks(tmpden, pptr, pj, pd, mshell, amp, sig, dmax, dmax_atom, block).sum())
 
 
 def mbis_fitted_shells(atnums):
