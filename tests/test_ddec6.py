@@ -132,3 +132,16 @@ def _check_grids(name):
               "spin_density"):
         if k in fin:
             assert np.array_equal(g[k], fin[k]), k
+
+
+@pytest.mark.skipif(not os.environ.get("DDEC6_SLOW"), reason="about a minute per fixture; set DDEC6_SLOW=1")
+@pytest.mark.parametrize("name", ["rmechdb_652_step10_0_2", "XeCl4_step2_0_1"])
+def test_charges_match_chargemol_bitwise(name):
+    """Net atomic charges against Chargemol's precise build (test_files/ddec6/chargemol,
+    written by scripts/ddec6_reference/run_chargemol.py, es25.16 output)."""
+    import json
+    with open(os.path.join(DDEC6_FIXTURES, "chargemol", f"{name}.json")) as f:
+        ref = json.load(f)
+    st = ddec6.run(_wfx(name))
+    assert st["n_iterations"] == ref["_meta"]["n_iterations"]
+    assert st["net_atomic_charge"].tolist() == list(ref["ddec6"]["charge"].values())
