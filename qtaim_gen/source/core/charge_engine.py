@@ -754,7 +754,7 @@ def mbis_fit(grel, coords, tmpden, atnums, qbase, crit=1e-4, maxcyc=500, mode=No
     pairs = mbis_pairs(grel, coords, tmpden, atnums)
     if mode == "converged":
         step = lambda mm, pp, ss: _mbis_step(tmpden, pairs, mm, pp, ss)  # noqa: E731
-        objective = lambda mm, pp, ss: mbis_objective(grel, coords, tmpden, atnums, mm, pp, ss, pairs=pairs)  # noqa: E731
+        objective = lambda mm, pp, ss: mbis_objective(grel, coords, tmpden, atnums, mm, pp, ss)  # noqa: E731
         return _mbis_fit_converged(step, mshell, pop, sig, qbase, objective=objective)[0]
     last = np.zeros(len(atnums))
     for icyc in range(1, maxcyc + 1):
@@ -815,7 +815,8 @@ def _mbis_fit_converged(step, mshell, pop, sig, qbase, fallback=True, objective=
     when acceleration stalls (MBIS_ANDERSON_MAXCYC evaluations) or settles on a
     merged/emptied-shell fixed point plain iteration leaves. Without fallback,
     the fallback still runs when fallback_above is given and the failed
-    accelerated fit's objective exceeds it.
+    accelerated fit's objective exceeds it, and then continues from the
+    accelerated fit's end state instead of the guess.
 
     With objective (mbis_objective of (mshell, pop, sig)), the plain fallback
     stops after MBIS_MERGE_FIRST and then every MBIS_MERGE_EVERY cycles to merge
@@ -833,9 +834,15 @@ def _mbis_fit_converged(step, mshell, pop, sig, qbase, fallback=True, objective=
     converged = res[4] < MBIS_ANDERSON_MAXCYC
     if converged and not mbis_degenerate(res[1], res[2], res[3]):
         return res, converged, False
-    if not fallback and (fallback_above is None or not objective(res[1], res[2], res[3]) > fallback_above):
-        return res, converged, False
-    evals, done, p, s = res[4], 0, pop, sig
+    p, s = pop, sig
+    if not fallback:
+        if fallback_above is None or not objective(res[1], res[2], res[3]) > fallback_above:
+            return res, converged, False
+        # plain iteration never lowers the objective (the MBIS update is an EM step), so from the
+        # stalled state it reaches a fixed point better than fallback_above; from the guess, it
+        # slid back to the default's fixed point on 9 local nitrates
+        p, s = res[2], res[3]
+    evals, done = res[4], 0
     while done < MBIS_MAXCYC:
         chunk = MBIS_MAXCYC - done
         if objective is not None:
@@ -920,10 +927,10 @@ def mbis_degenerate(mshell, pop, sig):
 
 
 @njit(parallel=True, cache=True)
-def _mbis_logsum_blocks(tmpden, pptr, pj, pd, mshell, amp, sig, dmax, dmax_atom, block):
-    """Per block of flat points, the sum of w ln(rho0), rho0 the promolecule
-    density with the map's MBIS_DENCUT truncation; points with rho0 = 0 add
-    w ln(1e-300)."""
+def _mbis_logsum_all(grel, atcoords, tmpden, mshell, amp, sig, dmax, dmax_atom2, block):
+    """Per block of flat points (centre * len(grel) + point), the sum of
+    w ln(rho0) with rho0 summed over every atom's shells (no atmrhocut), shell
+    terms below MBIS_DENCUT skipped; points with rho0 = 0 add w ln(1e-300)."""
     nat, m = tmpden.shape
     npts = nat * m
     nb = (npts + block - 1) // block
@@ -932,15 +939,22 @@ def _mbis_logsum_blocks(tmpden, pptr, pj, pd, mshell, amp, sig, dmax, dmax_atom,
         tot = 0.0
         for ip in range(b * block, min(npts, (b + 1) * block)):
             c = ip // m
-            w = tmpden[c, ip - c * m]
+            i = ip - c * m
+            w = tmpden[c, i]
             if not w > 1e-14:
                 continue
+            x = grel[i, 0] + atcoords[c, 0]
+            y = grel[i, 1] + atcoords[c, 1]
+            z = grel[i, 2] + atcoords[c, 2]
             rho0 = 0.0
-            for s in range(pptr[ip], pptr[ip + 1]):
-                j = pj[s]
-                d = pd[s]
-                if d > dmax_atom[j]:
+            for j in range(nat):
+                dx = x - atcoords[j, 0]
+                dy = y - atcoords[j, 1]
+                dz = z - atcoords[j, 2]
+                d2 = dx * dx + dy * dy + dz * dz
+                if d2 > dmax_atom2[j]:
                     continue
+                d = np.sqrt(d2)
                 for k in range(mshell[j]):
                     if d > dmax[j, k]:
                         continue
@@ -952,14 +966,19 @@ def _mbis_logsum_blocks(tmpden, pptr, pj, pd, mshell, amp, sig, dmax, dmax_atom,
     return part
 
 
-def mbis_objective(grel, coords, tmpden, atnums, mshell, pop, sig, block=4096, pairs=None):
+def mbis_objective(grel, coords, tmpden, atnums, mshell, pop, sig, block=4096):
     """sum_i w_i ln rho0(r_i) on the fit's grid: the part of the MBIS
     Kullback-Leibler divergence int rho ln(rho / rho0) that differs between
     fixed points (their total populations all equal the grid's electron count).
-    Larger is a better fit. pairs: the grid's mbis_pairs, built when not given."""
-    pptr, pj, pd, _ = pairs if pairs is not None else mbis_pairs(grel, coords, tmpden, atnums)
+    Larger is a better fit. rho0 includes every atom: the map drops atoms beyond
+    atmrhocut (Multiwfn's ignorefar), but an objective with that cutoff is not
+    the divergence the map lowers. On a Pu nitrate it was lower by 0.07 to 1.2
+    depending on the fit, it fell along plain iteration, and it ranked an x1.5
+    stalled state 0.18 e away above the default fixed point, which the full sum
+    ranks first."""
     amp, dmax, dmax_atom = _mbis_amp_dmax(mshell, pop, sig)
-    return float(_mbis_logsum_blocks(tmpden, pptr, pj, pd, mshell, amp, sig, dmax, dmax_atom, block).sum())
+    dmax_atom2 = np.where(dmax_atom < 0, -1.0, dmax_atom**2)
+    return float(_mbis_logsum_all(grel, coords, tmpden, mshell, amp, sig, dmax, dmax_atom2, block).sum())
 
 
 def mbis_fitted_shells(atnums):
@@ -1012,7 +1031,7 @@ def mbis_select(grel, coords, tmpden, atnums, qbase):
     shells in the guess, shells in the fit] per guess."""
     pairs = mbis_pairs(grel, coords, tmpden, atnums)
     step = lambda mm, pp, ss: _mbis_step(tmpden, pairs, mm, pp, ss)  # noqa: E731
-    objective = lambda mm, pp, ss: mbis_objective(grel, coords, tmpden, atnums, mm, pp, ss, pairs=pairs)  # noqa: E731
+    objective = lambda mm, pp, ss: mbis_objective(grel, coords, tmpden, atnums, mm, pp, ss)  # noqa: E731
     fits = []
     for i, (name, (m0, p0, s0)) in enumerate(mbis_guesses(atnums)):
         fallback = i == 0 or fits[0][9]
