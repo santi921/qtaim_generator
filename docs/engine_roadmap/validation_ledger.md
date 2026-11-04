@@ -71,6 +71,8 @@ deliberately diverges from Multiwfn, which stops when no charge moves by 1e-4 e 
 | Multiwfn's rule vs converged, Z <= 86 | 27 jobs | 3 off by more than 0.03 e, 7 by more than 0.005 e |
 | Multiwfn's rule vs converged, actinides | 5 jobs | 0.03-0.38 e |
 | fitted guess vs Multiwfn's guess | 35 jobs | 32 within 0.005 e; the 3 that differ have the better objective |
+| selection revision (2026-11-03, perf/mbis-converged): check guesses skip the fallback when the default converged, unconverged check fits excluded; old selection reconstructed on the same grid | 112 jobs (87 wfx_pull, 20 nitrates, 5 edge cases), scratchpad `mbis/old_vs_new.py` | 100 the same (42 by construction), max 0 e; 12 change selection, all from an unconverged x1.5 fit, max 3.6e-4 e (MOR39_Er3Ce3), rest 1.8e-5 e or less; 70 compared jobs 15312 s to 9556 s, Sm3Ir3 1366 s to 93 s |
+| shell merging in the plain fallback (2026-11-03, perf/mbis-converged) vs the selection revision above, same grid and thread environment | same 112 jobs, scratchpad `mbis/val_merge.py` | 97 jobs whose default fit converged identical (0 e); the 15 whose default failed: all fits converge, selection unchanged, max 4.4e-5 e (Ru, previously unconverged), rest 4.0e-6 e or less, objective equal or better; 15 jobs 8218 s to 1429 s, all 112 9759 s to 2906 s; BLAS thread count alone moves accelerated fits by up to 2.6e-7 e |
 
 ## 3. Surface engine (`core/surface_engine.py`, other_alie and other_geometry)
 
@@ -190,6 +192,18 @@ Current behaviours without a validation on current code, and checks not yet done
 | level-of-theory matrix | double hybrids, HF, Cartesian basis sets, ROKS beyond one radical, ORCA 5 vs ORCA 6 not covered | tier 3 supplementary set |
 | results recorded on older code | the 87-job, 18-reference and 16-reference local sets predate the threading fixes (#63-#65) and the converged MBIS default | rerun the local sets on current code; they take minutes |
 | full_set 2 routines | still Multiwfn (bader, laplacian_bond, other_esp, grad_norm and laplacian fuzzy) | when engines exist |
+
+## 7b. Runs in progress (no results yet)
+
+Cluster runs submitted or planned whose results are not in the tables above. Each moves
+into its section as a row when it is audited.
+
+| cluster | job id | name | what | trees | code | status (2026-11-03) |
+|---|---|---|---|---|---|---|
+| LRC | 27498703, 27498704 | nc_ref, nc_fixed | converter check, full_set 1, `jobs_ref.txt` (200 tm_react) | `engine_test/nc_ref_l1` (`--native_convert off`) vs `nc_fixed_l1` | clone `qtaim_generator_nc`, feat/charge-engine before the MBIS changes | all 8 tasks TIMEOUT at 12 h; 18 of 200 compared (row in 4b). Not continued: the rerun uses fresh trees `nc_ref_l1b`/`nc_fixed_l1b` from perf/mbis-converged, so no tree mixes MBIS versions |
+| LRC | 27525266 | fz1 | elf_fuzzy and level 1 engine vs Multiwfn, full_set 1, `jobs_ref.txt` | `engine_test/fz_l1` (engine) vs `ref_l1`, `compare_engine_merge.py` (`report_fz_l1.json`) | clone `qtaim_generator_fz` (fuzzy-ELF work) | running |
+| LRC | 27527328, 27527329 | ref2, fz2 | level 2 engine vs Multiwfn, full_set 2, `jobs_l2.txt`, 5 jobs per task | `engine_test/ref_l2` (Multiwfn) vs `fz_l2` (engine) | clone `qtaim_generator_fz` or `qtaim_generator_esp`: the submitting session drafted both, which one ran is to be confirmed there | running; an earlier fz2 (27525268) ended after 10 s |
+| NERSC | - | l1_off, l1_fixed, l2_off, l2_fixed | converter at full_set 1 and 2 with every engine routine: MBIS (merge), VDD, CHELPG, elf_fuzzy, grad/Laplacian fuzzy, other_esp | `actinide_test/{l1,l2}_{off,fixed}`, 440-job sample (level 2: every 11th job), `audit_prod.py` fixed vs off, off vs `prod_l1` | integration branch: perf/mbis-converged + feat/engine-esp-surface | planned |
 
 ## 8. Adding a row
 

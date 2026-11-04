@@ -59,7 +59,11 @@ def test_child_process_writes_what_the_in_process_run_writes(tmp_path):
     assert "hirshfeld.json" in names and "other_alie.json" in names, names
     for name in names:
         with open(os.path.join(child, name)) as a, open(os.path.join(inproc, name)) as b:
-            assert json.load(a) == json.load(b), name
+            x, y = json.load(a), json.load(b)
+        if name == "charge_engine_meta.json":  # wall-clock fields differ run to run
+            for d in (x, y):
+                d.pop("timings_s"), d.pop("wall_s", None)
+        assert x == y, name
 
 
 def test_killed_child_is_logged_and_drops_stale_engine_timings(tmp_path, monkeypatch):
