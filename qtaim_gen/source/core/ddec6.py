@@ -13,8 +13,10 @@ Implemented so far (docs/engine_roadmap/ddec6_port_plan.md, P2 map):
                                          parallelpiped
   K2 primitive density matrices          Step 2
   K3-K5 pair screening, data, sort       Steps 3-6
-  K6-K7 point loop (serial), coarse-grid Step 7
-        interpolation
+  K6-K7 point loop, coarse-grid          Step 7 (parallel: blocks, then z-planes;
+        interpolation                    bit-identical to the serial order)
+  K8 core grid, missing core, spacing    Step 8; add_missing_core_density;
+     check                               check_grid_spacing
 """
 
 import math
@@ -848,7 +850,226 @@ def _interpolate(fine, coarse, max_gs):
         _from_grid2(fine, g2)
 
 
-def density_grids(prep, grid, pairs):
+@numba.njit(cache=True)
+def _block_geometry(data, pbd, na_tot, nb_tot, nc_tot):
+    """Per pair block: grid spacing, first/last valid offset along a, b, c, and the
+    centre pixel (columns 0-9), with column 10 = 1 when the block has grid points."""
+    nb = pbd.shape[0]
+    geo = np.zeros((nb, 11), dtype=np.int64)
+    tots = (na_tot, nb_tot, nc_tot)
+    for b in range(nb):
+        start = int(pbd[b, 0]) - 1
+        gs = nint(data[start, 35])
+        geo[b, 0] = gs
+        valid = 1
+        for ax in range(3):
+            dn = nint(data[start, 19 + ax])
+            cen = nint(data[start, 25 + ax])
+            lo = dn
+            hi = -dn
+            for n in range(-dn, dn + 1):
+                k = n + cen + 1
+                if k < 1 or k > tots[ax]:
+                    continue
+                if gs > 1 and k % gs != gs - 1:
+                    continue
+                lo = min(lo, n)
+                hi = max(hi, n)
+            geo[b, 1 + 2 * ax] = lo
+            geo[b, 2 + 2 * ax] = hi
+            geo[b, 7 + ax] = cen
+            if lo > hi:
+                valid = 0
+        geo[b, 10] = valid
+    return geo
+
+
+@numba.njit(cache=True)
+def _block_value(data, start, stop, X, Y, Z, step, gs, spin, mult_pv, sums):
+    """Pair sum at one point of a block: (t4, t7, t8); with sums=True also accumulates
+    the pass-1 numeric overlap sums (columns 38, 39). Returns t4 < 0 when the point is
+    outside the block cutoff."""
+    x1, y1, z1 = data[start, 9], data[start, 10], data[start, 11]
+    x2, y2, z2 = data[start, 16], data[start, 17], data[start, 18]
+    d2 = (X - data[start, 22]) ** 2 + (Y - data[start, 23]) ** 2 + (Z - data[start, 24]) ** 2
+    if d2 > data[start, 33]:
+        return -1.0, 0.0, 0.0
+    dx1 = X - x1
+    dy1 = Y - y1
+    dz1 = Z - z1
+    dx2 = X - x2
+    dy2 = Y - y2
+    dz2 = Z - z2
+    t4 = math.exp(-(data[start, 5] + data[start, 12]) * d2) * data[start, 34]
+    t5 = t4 * mult_pv[0]
+    if mult_pv[1] != 1.0:
+        t5 = t5 * mult_pv[1]
+    t7 = 0.0
+    t8 = 0.0
+    for p in range(start, stop + 1):
+        if d2 > data[p, 33]:
+            break
+        renorm = 1.0 if (step == 1 or gs == 0) else data[p, 31]
+        if gs != 0 and step == 2 and renorm == 0.0:
+            continue
+        t6 = (powi(dx1, nint(data[p, 6])) * powi(dy1, nint(data[p, 7])) * powi(dz1, nint(data[p, 8]))
+              * powi(dx2, nint(data[p, 13])) * powi(dy2, nint(data[p, 14])) * powi(dz2, nint(data[p, 15])))
+        if gs != 0:
+            if step == 1:
+                if sums:
+                    data[p, 38] = data[p, 38] + t5 * t6
+                    data[p, 39] = data[p, 39] + t5 * abs(t6)
+            else:
+                t6 = abs(t6)
+        t7 = t7 + t6 * renorm * data[p, 2]
+        if spin:
+            t8 = t8 + t6 * renorm * data[p, 3]
+    return t4, t7, t8
+
+
+@numba.njit(cache=True)
+def _mult(gs, pv):
+    m = np.empty(2)
+    m[0] = pv
+    m[1] = 1.0
+    if gs == 2:
+        m[1] = 8.0
+    elif gs == 3:
+        m[1] = 27.0
+    elif gs == 4:
+        m[1] = 64.0
+    elif gs == 6:
+        m[1] = 216.0
+    elif gs == 8:
+        m[1] = 512.0
+    elif gs == 12:
+        m[1] = 1728.0
+    return m
+
+
+@numba.njit(parallel=True, cache=True)
+def _pass1_parallel(data, pbd, geo, boundary, pv):
+    """Phase A: pass-1 numeric overlap sums and the renormalization factors, one block
+    per task (a block's pairs only see its own points, so the order is the serial one)."""
+    nb = pbd.shape[0]
+    corr = np.zeros(nb)
+    for b in numba.prange(nb):
+        gs = geo[b, 0]
+        if gs == 0 or geo[b, 10] == 0:
+            continue
+        start = int(pbd[b, 0]) - 1
+        stop = int(pbd[b, 1]) - 1
+        t1 = data[start, 22] - data[start, 28]
+        t2 = data[start, 23] - data[start, 29]
+        t3 = data[start, 24] - data[start, 30]
+        mp = _mult(gs, pv)
+        for nc in range(geo[b, 5], geo[b, 6] + 1, gs):
+            for nbb in range(geo[b, 3], geo[b, 4] + 1, gs):
+                for na in range(geo[b, 1], geo[b, 2] + 1, gs):
+                    X = na * boundary[0, 0] + nbb * boundary[1, 0] + nc * boundary[2, 0] + t1
+                    Y = na * boundary[0, 1] + nbb * boundary[1, 1] + nc * boundary[2, 1] + t2
+                    Z = na * boundary[0, 2] + nbb * boundary[1, 2] + nc * boundary[2, 2] + t3
+                    _block_value(data, start, stop, X, Y, Z, 1, gs, False, mp, True)
+        mc = 0.0
+        for p in range(start, stop + 1):
+            max_coeff = abs((data[p, 2] + data[p, 3]) / 2.0) + abs((data[p, 2] - data[p, 3]) / 2.0)
+            if max_coeff * data[p, 39] > GAUSSIAN_OVERLAP_TOLERANCE:
+                data[p, 31] = max(min(((data[p, 4] - data[p, 38]) / data[p, 39]), 0.05), -0.05)
+                mc = max(abs((data[p, 4] - data[p, 38]) / data[p, 39]), mc)
+            else:
+                data[p, 31] = 0.0
+        corr[b] = mc
+    return corr
+
+
+@numba.njit(parallel=True, cache=True)
+def _accumulate_parallel(data, pbd, geo, boundary, nc_tot, pv, spin, val, spn, core, cval, cspn):
+    """Phase B: both passes' contributions, one fine z-plane per task. Every fine or
+    coarse cell is fed by points of a single plane, and each task visits blocks in
+    order, so each cell sums in the serial order."""
+    nb = pbd.shape[0]
+    for kc in numba.prange(1, nc_tot + 1):
+        for b in range(nb):
+            if geo[b, 10] == 0:
+                continue
+            gs = geo[b, 0]
+            stride = gs if gs > 1 else 1
+            nc = kc - geo[b, 9] - 1
+            if nc < geo[b, 5] or nc > geo[b, 6] or (nc - geo[b, 5]) % stride != 0:
+                continue
+            start = int(pbd[b, 0]) - 1
+            stop = int(pbd[b, 1]) - 1
+            t1 = data[start, 22] - data[start, 28]
+            t2 = data[start, 23] - data[start, 29]
+            t3 = data[start, 24] - data[start, 30]
+            mp = _mult(gs, pv)
+            slot = _coarse_slot(gs)
+            for step in range(1, 3):
+                if step == 2 and gs == 0:
+                    continue
+                for nbb in range(geo[b, 3], geo[b, 4] + 1, stride):
+                    kb = nbb + geo[b, 8] + 1
+                    for na in range(geo[b, 1], geo[b, 2] + 1, stride):
+                        ka = na + geo[b, 7] + 1
+                        X = na * boundary[0, 0] + nbb * boundary[1, 0] + nc * boundary[2, 0] + t1
+                        Y = na * boundary[0, 1] + nbb * boundary[1, 1] + nc * boundary[2, 1] + t2
+                        Z = na * boundary[0, 2] + nbb * boundary[1, 2] + nc * boundary[2, 2] + t3
+                        t4, t7, t8 = _block_value(data, start, stop, X, Y, Z, step, gs, spin, mp, False)
+                        if t4 < 0.0:
+                            continue
+                        if gs == 0:
+                            core[ka - 1, kb - 1, kc - 1] = core[ka - 1, kb - 1, kc - 1] + t7 * t4
+                            if spin:
+                                spn[ka - 1, kb - 1, kc - 1] = spn[ka - 1, kb - 1, kc - 1] + t8 * t4
+                        elif gs == 1:
+                            val[ka - 1, kb - 1, kc - 1] = val[ka - 1, kb - 1, kc - 1] + t7 * t4
+                            if spin:
+                                spn[ka - 1, kb - 1, kc - 1] = spn[ka - 1, kb - 1, kc - 1] + t8 * t4
+                        else:
+                            ia = nint((ka + 1) / float(gs)) - 1
+                            ib = nint((kb + 1) / float(gs)) - 1
+                            ic = nint((kc + 1) / float(gs)) - 1
+                            g = cval[slot]
+                            g[ia, ib, ic] = g[ia, ib, ic] + t7 * t4
+                            if spin:
+                                h = cspn[slot]
+                                h[ia, ib, ic] = h[ia, ib, ic] + t8 * t4
+
+
+@numba.njit(cache=True)
+def _analytic_spin_occ(data, pbd, geo, center, atom_of_center, boundary, pv, occ):
+    """Phase C: spin of the analytic pairs taken out of occupancy_correction row 2, in
+    the serial block and point order."""
+    for b in range(pbd.shape[0]):
+        if geo[b, 0] != 0 or geo[b, 10] == 0:
+            continue
+        start = int(pbd[b, 0]) - 1
+        stop = int(pbd[b, 1]) - 1
+        ai = atom_of_center[center[nint(data[start, 0]) - 1]]
+        aj = atom_of_center[center[nint(data[start, 1]) - 1]]
+        wi = data[start, 36]
+        wj = data[start, 37]
+        t1 = data[start, 22] - data[start, 28]
+        t2 = data[start, 23] - data[start, 29]
+        t3 = data[start, 24] - data[start, 30]
+        mp = _mult(0, pv)
+        for nc in range(geo[b, 5], geo[b, 6] + 1):
+            for nbb in range(geo[b, 3], geo[b, 4] + 1):
+                for na in range(geo[b, 1], geo[b, 2] + 1):
+                    X = na * boundary[0, 0] + nbb * boundary[1, 0] + nc * boundary[2, 0] + t1
+                    Y = na * boundary[0, 1] + nbb * boundary[1, 1] + nc * boundary[2, 1] + t2
+                    Z = na * boundary[0, 2] + nbb * boundary[1, 2] + nc * boundary[2, 2] + t3
+                    t4, t7, t8 = _block_value(data, start, stop, X, Y, Z, 1, 0, True, mp, False)
+                    if t4 < 0.0:
+                        continue
+                    sc = t8 * t4
+                    if ai >= 0:
+                        occ[1, ai] = occ[1, ai] - sc * pv * wi
+                    if aj >= 0:
+                        occ[1, aj] = occ[1, aj] - sc * pv * wj
+
+
+def density_grids(prep, grid, pairs, parallel=True):
     """Step 7: valence, spin and analytic-pair core grids before the EDF/core step."""
     na, nb, nc = grid["totnum"]
     spin = prep["spin_available"]
@@ -867,8 +1088,19 @@ def density_grids(prep, grid, pairs):
         shape = (na // s, nb // s, nc // s) if max_gs >= s else (2, 2, 2)
         cval.append(np.zeros(shape, order="F"))
         cspn.append(np.zeros(shape if spin else (2, 2, 2), order="F"))
-    max_corr = _point_loop(data, pairs["pair_block_data"], prep["center"], prep["atom_of_center"],
-                           grid["boundary"], na, nb, nc, grid["pixelvolume"], spin, occ, val, spn, core, cval, cspn)
+    pbd = pairs["pair_block_data"]
+    if parallel:
+        geo = _block_geometry(data, pbd, na, nb, nc)
+        corr = _pass1_parallel(data, pbd, geo, grid["boundary"], grid["pixelvolume"])
+        max_corr = float(corr.max()) if corr.size else 0.0
+        _accumulate_parallel(data, pbd, geo, grid["boundary"], nc, grid["pixelvolume"], spin, val, spn, core,
+                             cval, cspn)
+        if spin:
+            _analytic_spin_occ(data, pbd, geo, prep["center"], prep["atom_of_center"], grid["boundary"],
+                               grid["pixelvolume"], occ)
+    else:
+        max_corr = _point_loop(data, pbd, prep["center"], prep["atom_of_center"], grid["boundary"], na, nb, nc,
+                               grid["pixelvolume"], spin, occ, val, spn, core, cval, cspn)
     _interpolate(val, list(cval), max_gs)
     if spin:
         _interpolate(spn, list(cspn), max_gs)
@@ -876,6 +1108,162 @@ def density_grids(prep, grid, pairs):
             "included_primitive_data": data, "occupancy_correction": occ,
             "core_electrons": pairs["core_electrons"], "max_pair_correction": max_corr,
             "max_grid_spacing": max_gs}
+
+
+# ---------------------------------------------------------------------------------
+# K8: core grid, missing core, grid-spacing check (Step 8)
+# ---------------------------------------------------------------------------------
+
+MAXPIXELVOLUME = 0.0157
+INTEGRATION_TOLERANCE = 0.10
+
+
+@numba.njit(cache=True)
+def _edf_core(core, ncen, shift, xyz, alpha, coef, boundary, delta, totnum):
+    """Step 8 EDF loop: each EDF s primitive added on the fine grid inside the 500 pm
+    sphere of its centre (shell index <= nshells)."""
+    for j in range(alpha.shape[0]):
+        for nc in range(-delta[2], delta[2] + 1):
+            kc = nc + ncen[j, 2] + 1
+            if kc < 1 or kc > totnum[2]:
+                continue
+            for nb in range(-delta[1], delta[1] + 1):
+                kb = nb + ncen[j, 1] + 1
+                if kb < 1 or kb > totnum[1]:
+                    continue
+                for na in range(-delta[0], delta[0] + 1):
+                    ka = na + ncen[j, 0] + 1
+                    if ka < 1 or ka > totnum[0]:
+                        continue
+                    v0 = na * boundary[0, 0] + nb * boundary[1, 0] + nc * boundary[2, 0] - shift[j, 0]
+                    v1 = na * boundary[0, 1] + nb * boundary[1, 1] + nc * boundary[2, 1] - shift[j, 1]
+                    v2 = na * boundary[0, 2] + nb * boundary[1, 2] + nc * boundary[2, 2] - shift[j, 2]
+                    distance = math.sqrt(v0 * v0 + v1 * v1 + v2 * v2)
+                    if math.ceil(SCALEFACTOR * distance + ZERO_TOLERANCE) <= NSHELLS:
+                        ax, ay, az = xyz[j, 0], xyz[j, 1], xyz[j, 2]
+                        x = v0 + ax
+                        y = v1 + ay
+                        z = v2 + az
+                        g = (coef[j] * powi(x - ax, 0) * powi(y - ay, 0) * powi(z - az, 0)
+                             * math.exp(-alpha[j] * ((x - ax) ** 2 + (y - ay) ** 2 + (z - az) ** 2)))
+                        core[ka - 1, kb - 1, kc - 1] = core[ka - 1, kb - 1, kc - 1] + g
+
+
+@numba.njit(parallel=True, cache=True)
+def _clamp(core, val):
+    n0, n1, n2 = core.shape
+    for c in numba.prange(n2):
+        for b in range(n1):
+            for a in range(n0):
+                core[a, b, c] = max(core[a, b, c], 0.0)
+                val[a, b, c] = max(val[a, b, c], -core[a, b, c])
+
+
+@numba.njit(cache=True)
+def _shell_points(nabc, shift, boundary, lo, hi):
+    """check_grid_spacing: points per radial shell for each atom, and the population of
+    Chargemol's guess density used for the grid check."""
+    natoms = nabc.shape[0]
+    sum_points = np.zeros((NSHELLS, natoms), dtype=np.int64)
+    sum_density = np.zeros((NSHELLS, natoms))
+    guess = np.empty(NSHELLS)
+    for k in range(NSHELLS):
+        guess[k] = 0.05 * ((1.0 - (k + 1 - 1.0) / (NSHELLS - 1.0))) ** 3
+    for j in range(natoms):
+        for nc in range(lo[j, 2], hi[j, 2] + 1):
+            for nb in range(lo[j, 1], hi[j, 1] + 1):
+                for na in range(lo[j, 0], hi[j, 0] + 1):
+                    v0 = na * boundary[0, 0] + nb * boundary[1, 0] + nc * boundary[2, 0] - shift[j, 0]
+                    v1 = na * boundary[0, 1] + nb * boundary[1, 1] + nc * boundary[2, 1] - shift[j, 1]
+                    v2 = na * boundary[0, 2] + nb * boundary[1, 2] + nc * boundary[2, 2] - shift[j, 2]
+                    s = int(math.ceil(SCALEFACTOR * math.sqrt(v0 * v0 + v1 * v1 + v2 * v2) + ZERO_TOLERANCE))
+                    if s <= NSHELLS:
+                        sum_density[s - 1, j] = sum_density[s - 1, j] + guess[s - 1]
+                        sum_points[s - 1, j] = sum_points[s - 1, j] + 1
+    return sum_points, sum_density
+
+
+@numba.njit(cache=True)
+def _missing_core(core, nabc, shift, boundary, lo, hi, ref, missing):
+    """add_missing_core_density: core reference density by radial shell, for atoms whose
+    core electrons the wfx leaves out."""
+    for j in range(nabc.shape[0]):
+        if missing[j] == 0:
+            continue
+        for nc in range(lo[j, 2], hi[j, 2] + 1):
+            kc = nc + nabc[j, 2] + 1
+            for nb in range(lo[j, 1], hi[j, 1] + 1):
+                kb = nb + nabc[j, 1] + 1
+                for na in range(lo[j, 0], hi[j, 0] + 1):
+                    ka = na + nabc[j, 0] + 1
+                    v0 = na * boundary[0, 0] + nb * boundary[1, 0] + nc * boundary[2, 0] - shift[j, 0]
+                    v1 = na * boundary[0, 1] + nb * boundary[1, 1] + nc * boundary[2, 1] - shift[j, 1]
+                    v2 = na * boundary[0, 2] + nb * boundary[1, 2] + nc * boundary[2, 2] - shift[j, 2]
+                    s = int(math.ceil(SCALEFACTOR * math.sqrt(v0 * v0 + v1 * v1 + v2 * v2) + ZERO_TOLERANCE))
+                    if s <= NSHELLS:
+                        core[ka - 1, kb - 1, kc - 1] = core[ka - 1, kb - 1, kc - 1] + ref[s - 1, j]
+
+
+def core_grids(prep, grid, grids):
+    """Step 8: EDF core density, clamps, zero-core atoms, missing core from the core
+    reference densities (only when the wfx has no EDF block, as Chargemol decides per
+    file), and check_grid_spacing. Updates grids in place and adds the per-atom shell
+    geometry the iterators use."""
+    from qtaim_gen.source.data import chargemol_refs
+
+    wfx = prep["wfx"]
+    boundary, origin, inv_b = grid["boundary"], grid["origin"], grid["inv_boundary"]
+    delta = np.array(grid["delta"], dtype=np.int64)
+    totnum = np.array(grid["totnum"], dtype=np.int64)
+    core, val = grids["core_density"], grids["valence_density"]
+    edf_available = len(wfx["edf_exp"]) > 0
+    if edf_available:
+        xyz = prep["center_xyz"][wfx["edf_center"]]
+        ncen, shift = [], []
+        for p in xyz:
+            tv = _matvec(inv_b.tolist(), [p[k] - origin[k] for k in range(3)])
+            n = [_nint(v) for v in tv]
+            ncen.append(n)
+            shift.append(_matvec(boundary.T.tolist(), [tv[k] - n[k] for k in range(3)]))
+        _edf_core(core, np.array(ncen, dtype=np.int64), np.array(shift), xyz, wfx["edf_exp"].astype(np.float64),
+                  wfx["edf_coef"].astype(np.float64), boundary, delta, totnum)
+    _clamp(core, val)
+
+    occ = grids["occupancy_correction"]
+    core_e = grids["core_electrons"].copy()
+    for j in range(len(core_e)):
+        if core_e[j] < ZERO_TOLERANCE:
+            occ[0, j] = core_e[j]
+            core_e[j] = 0.0
+
+    if grid["pixelvolume"] > MAXPIXELVOLUME:
+        raise ValueError("grid pixel volume above Chargemol's maximum")
+    nabc, shift = grid["center_nabc"], grid["center_shift"]
+    natoms = len(nabc)
+    lo = np.zeros((natoms, 3), dtype=np.int64)
+    hi = np.zeros((natoms, 3), dtype=np.int64)
+    for j in range(natoms):
+        for k in range(3):
+            ks = np.arange(-delta[k], delta[k] + 1) + nabc[j, k] + 1
+            ok = np.nonzero((ks >= 1) & (ks <= totnum[k]))[0]
+            if ok.size == 0:
+                raise ValueError(f"atom {j + 1} has no grid points")
+            lo[j, k], hi[j, k] = ok[0] - delta[k], ok[-1] - delta[k]
+    sum_points, sum_density = _shell_points(nabc, shift, boundary, lo, hi)
+    population = sum_density.sum(axis=0) * grid["pixelvolume"]
+    if np.any(population - population.sum() / natoms > INTEGRATION_TOLERANCE):
+        raise ValueError("grid spacing check failed")
+
+    missing = np.zeros(natoms, dtype=np.int64) if edf_available else np.rint(prep["core_electrons"]).astype(np.int64)
+    if missing.any():
+        ref = np.zeros((NSHELLS, natoms))
+        for j in range(natoms):
+            if missing[j]:
+                ref[:, j] = chargemol_refs.core_density(prep["atom_z"][j], missing[j])
+        _missing_core(core, nabc, shift, boundary, lo, hi, ref, missing)
+
+    grids.update(core_electrons=core_e, missing_core=missing, sum_points=sum_points, shell_lo=lo, shell_hi=hi)
+    return grids
 
 
 def load(wfx_path):

@@ -95,7 +95,7 @@ def test_pair_data_matches_chargemol_bitwise(name):
 
 @pytest.mark.skipif(not os.environ.get("DDEC6_SLOW"), reason="several minutes per fixture; set DDEC6_SLOW=1")
 @pytest.mark.parametrize("name", ["rmechdb_652_step10_0_2", "XeCl4_step2_0_1"])
-def test_density_grids_match_chargemol_bitwise(name):
+def test_density_and_core_grids_match_chargemol_bitwise(name):
     dump_dir = os.path.join(DUMPS, name)
     if not os.path.exists(os.path.join(dump_dir, "dump_step7.bin")):
         pytest.skip("Chargemol validation dumps not available")
@@ -111,3 +111,9 @@ def test_density_grids_match_chargemol_bitwise(name):
     for k in ("valence_density", "core_density", "spin_density"):
         if k in s7:
             assert np.array_equal(g[k], s7[k]), k
+    fin = R.read_final(os.path.join(dump_dir, "dump_final.bin"), ref["natoms"])
+    g = ddec6.core_grids(prep, grid, g)
+    for k in ("occupancy_correction", "core_electrons", "missing_core", "valence_density", "core_density",
+              "spin_density"):
+        if k in fin:
+            assert np.array_equal(g[k], fin[k]), k
