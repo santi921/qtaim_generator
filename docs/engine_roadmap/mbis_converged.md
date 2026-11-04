@@ -36,7 +36,8 @@ Date: 2026-10-15. Branch feat/mbis-heavy-elements. Code: `core/charge_engine.py`
      (`mbis_degenerate`: two shells of an atom within 0.1% in width, or a shell below
      1e-6 e). Unguarded acceleration reached such points that plain iteration leaves
      (Li 1s emptied, two shells merged). Since 2026-11-03 the two check guesses get the
-     fallback only when the default fit failed (see below).
+     fallback only when the default fit needed it, and the fallback merges shell pairs
+     that stall (see the two sections below).
 3. **Selection** (`mbis_select`, on the MBIS charge grid). Fits from the fitted guess and
    from it with every width scaled by 0.6 and 1.5. Among the converged, non-degenerate
    fits it keeps the one with the largest `mbis_objective`: the sum of w ln rho0 over the
@@ -47,8 +48,10 @@ Date: 2026-10-15. Branch feat/mbis-heavy-elements. Code: `core/charge_engine.py`
 4. **`_meta` fields.**
    - `mbis_mode`, `mbis_cycles`;
    - `mbis_selection`: the selected guess, objectives, degenerate and converged flags per
-     guess, the spread and the number of distinct solutions (both over the selected fit
-     and the converged, non-degenerate fits only);
+     guess, the merged shells per guess, the spread and the number of distinct solutions
+     (both over the selected fit and the converged, non-degenerate fits only);
+   - `mbis_merged`: the shells merged in the charge-grid fit and the fuzzy refit, as
+     `[atom, shells in the guess, shells in the fit]`;
    - `mbis_unique`: one solution within 0.005 e;
    - `mbis_degenerate`;
    - `mbis_beyond_multiwfn`: Z > 86;
@@ -113,7 +116,53 @@ to 94; 16 threads over 4 workers):
 | 11 compared nitrates | 1023 s to 312 s, \|dq\| 0 |
 
 **Remaining cost.** The default fit fails on 15 of the 112 jobs, and those take 8218 of
-the 9759 s total.
+the 9759 s total. The next section removes most of it.
+
+## Shell merging in the fallback (2026-11-03, branch perf/mbis-converged)
+
+**Cause.** On all 15 jobs above, one atom's outermost two shells settle within 1.2e-6 to
+4.8e-3 (relative) of each other in width by about 1000 plain cycles and stay there. The
+atoms are cations or electropositive metals whose valence shell has no density of its
+own: Na, K, Ca, Sc, Ti, V, Sr, Y, Ru, Gd, Dy, Hf, Yb, Lu. Plain iteration then moves
+population between the two shells by 2e-8 to 5e-6 e per cycle for all 20000 cycles,
+while the charges move by 1.2e-11 e per cycle or less (the Ru job in MOR39_Ru3Au3 is the
+exception: 1.1e-8 e per cycle, still 4.4e-4 e over the last 10000 cycles). The stopping
+rule is on the shell populations, so it never fires.
+
+**Change** (`_mbis_fit_converged`, `mbis_merge_shells`). With an objective, the plain
+fallback stops after 1000 and then every 500 cycles. Shells of one atom whose widths agree
+within `MBIS_MERGE_DETECT` (1e-2 relative) are merged: populations summed, width
+population-weighted. The smaller model is refit with acceleration and kept when it
+converges, is not degenerate, and its objective is not below the plain state it came
+from; otherwise plain iteration continues to `MBIS_MAXCYC`. Without a merge the chunked
+plain run gives exactly the uninterrupted one. The check guesses get the fallback
+whenever the default fit needed it, also when the default then converged through a merge:
+rmechdb_750, Ti FBFFF0 and Sr 3824 keep their x1.5 fit, which needs the fallback and has
+the better objective (1.6e-3 to 1.7e-2 relative).
+
+Merging from the accelerated stall state instead was tried first and failed on K+ 57 and
+Hf ClO4 (1.2e-2 and 1.3e-2 e off): there the stall state is far from where plain iteration
+goes, and the merge locks it in.
+
+**Validation** (same 112 jobs and baseline b40ad8d, same thread environment):
+
+| check | result |
+|---|---|
+| 97 jobs whose default fit converged and is not degenerate | identical, \|dq\| 0 e |
+| the 15 jobs whose default fit failed | all 45 fits converged and not degenerate; selection unchanged; max \|dq\| 4.4e-5 e (Ru, previously unconverged), the rest 4.0e-6 e or less; objective of the selected fit equal or better in all 15 |
+| against a 20000-cycle plain fit from the default guess (prototype, same merge rule) | charges within 4.9e-5 e, objective better in all 15 (up to 2.8e-5 relative) |
+| selection | unchanged in all 112 |
+| `solutions` | 1 to 2 in 7 jobs: check fits that now converge (with a merge) on a second fixed point 1.2e-2 to 3.2e-2 e away, with a worse objective |
+| time, the 15 jobs | 8218 s to 1429 s |
+| time, all 112 | 9759 s to 2906 s (15500 s before b40ad8d) |
+
+**Thread count.** The Anderson least-squares step runs on BLAS. Changing its thread count
+(`OMP_NUM_THREADS` 4 vs unset) moved accelerated fits by up to 2.6e-7 e and their
+evaluation count by up to 10%; each setting is reproducible. This is the size of the
+MBIS difference between the two LRC converter trees (2.95e-7 e). On one job (NpN6O18
+def2-SVP) the change made the default's accelerated fit fail, and plain iteration took
+21343 evaluations without a merge to make. Pinning that step to one thread is a possible
+follow-up.
 
 ## ECP atoms
 
