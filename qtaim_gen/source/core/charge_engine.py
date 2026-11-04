@@ -807,7 +807,8 @@ def _mbis_fit_converged(step, mshell, pop, sig, qbase, fallback=True, objective=
     when acceleration stalls (MBIS_ANDERSON_MAXCYC evaluations) or settles on a
     merged/emptied-shell fixed point plain iteration leaves. Without fallback,
     the fallback still runs when fallback_above is given and the failed
-    accelerated fit's objective exceeds it.
+    accelerated fit's objective exceeds it, and then continues from the
+    accelerated fit's end state instead of the guess.
 
     With objective (mbis_objective of (mshell, pop, sig)), the plain fallback
     stops after MBIS_MERGE_FIRST and then every MBIS_MERGE_EVERY cycles to merge
@@ -825,9 +826,15 @@ def _mbis_fit_converged(step, mshell, pop, sig, qbase, fallback=True, objective=
     converged = res[4] < MBIS_ANDERSON_MAXCYC
     if converged and not mbis_degenerate(res[1], res[2], res[3]):
         return res, converged, False
-    if not fallback and (fallback_above is None or not objective(res[1], res[2], res[3]) > fallback_above):
-        return res, converged, False
-    evals, done, p, s = res[4], 0, pop, sig
+    p, s = pop, sig
+    if not fallback:
+        if fallback_above is None or not objective(res[1], res[2], res[3]) > fallback_above:
+            return res, converged, False
+        # plain iteration never lowers the objective (the MBIS update is an EM step), so from the
+        # stalled state it reaches a fixed point better than fallback_above; from the guess, it
+        # slid back to the default's fixed point on 9 local nitrates
+        p, s = res[2], res[3]
+    evals, done = res[4], 0
     while done < MBIS_MAXCYC:
         chunk = MBIS_MAXCYC - done
         if objective is not None:
@@ -911,36 +918,59 @@ def mbis_degenerate(mshell, pop, sig):
     return False
 
 
-@njit(nogil=True, cache=True)
-def _mbis_logsum(tmpden, m, p0, amp, tj, tk, ex, ptr):
-    """sum over the block's points of w ln(rho0), rho0 the promolecule density
-    with the map's MBIS_DENCUT truncation; points with rho0 = 0 add w ln(1e-300)."""
-    tot = 0.0
-    for q in range(ptr.shape[0] - 1):
-        ip = p0 + q
-        c = ip // m
-        w = tmpden[c, ip - c * m]
-        if not w > 1e-14:
-            continue
-        rho0 = 0.0
-        for s in range(ptr[q], ptr[q + 1]):
-            t = amp[tj[s], tk[s]] * ex[s]
-            if t >= MBIS_DENCUT:
-                rho0 += t
-        tot += w * np.log(max(rho0, 1e-300))
-    return tot
+@njit(parallel=True, cache=True)
+def _mbis_logsum_all(grel, atcoords, tmpden, mshell, amp, sig, dmax, dmax_atom2, block):
+    """Per block of flat points (centre * len(grel) + point), the sum of
+    w ln(rho0) with rho0 summed over every atom's shells (no atmrhocut), shell
+    terms below MBIS_DENCUT skipped; points with rho0 = 0 add w ln(1e-300)."""
+    nat, m = tmpden.shape
+    npts = nat * m
+    nb = (npts + block - 1) // block
+    part = np.zeros(nb)
+    for b in prange(nb):
+        tot = 0.0
+        for ip in range(b * block, min(npts, (b + 1) * block)):
+            c = ip // m
+            i = ip - c * m
+            w = tmpden[c, i]
+            if not w > 1e-14:
+                continue
+            x = grel[i, 0] + atcoords[c, 0]
+            y = grel[i, 1] + atcoords[c, 1]
+            z = grel[i, 2] + atcoords[c, 2]
+            rho0 = 0.0
+            for j in range(nat):
+                dx = x - atcoords[j, 0]
+                dy = y - atcoords[j, 1]
+                dz = z - atcoords[j, 2]
+                d2 = dx * dx + dy * dy + dz * dz
+                if d2 > dmax_atom2[j]:
+                    continue
+                d = np.sqrt(d2)
+                for k in range(mshell[j]):
+                    if d > dmax[j, k]:
+                        continue
+                    t = amp[j, k] * np.exp(-d / sig[j, k])
+                    if t >= MBIS_DENCUT:
+                        rho0 += t
+            tot += w * np.log(max(rho0, 1e-300))
+        part[b] = tot
+    return part
 
 
 def mbis_objective(grel, coords, tmpden, atnums, mshell, pop, sig, block=4096):
     """sum_i w_i ln rho0(r_i) on the fit's grid: the part of the MBIS
     Kullback-Leibler divergence int rho ln(rho / rho0) that differs between
     fixed points (their total populations all equal the grid's electron count).
-    Larger is a better fit."""
-    cut2, cand_ptr, cand = _mbis_setup(grel, coords, atnums)
-    nat, m = len(coords), grel.shape[0]
+    Larger is a better fit. rho0 includes every atom: the map drops atoms beyond
+    atmrhocut (Multiwfn's ignorefar), but an objective with that cutoff is not
+    the divergence the map lowers. On a Pu nitrate it was lower by 0.07 to 1.2
+    depending on the fit, it fell along plain iteration, and it ranked an x1.5
+    stalled state 0.18 e away above the default fixed point, which the full sum
+    ranks first."""
     amp = np.zeros_like(pop)
     dmax = np.full(pop.shape, -1.0)
-    for j in range(nat):
+    for j in range(len(coords)):
         for k in range(mshell[j]):
             sv = sig[j, k]
             if sv > 0:
@@ -949,15 +979,7 @@ def mbis_objective(grel, coords, tmpden, atnums, mshell, pop, sig, block=4096):
                     dmax[j, k] = sv * np.log(amp[j, k] / MBIS_DENCUT) * (1 + 1e-9) + 1e-12
     dmax_atom = dmax.max(axis=1)
     dmax_atom2 = np.where(dmax_atom < 0, -1.0, dmax_atom**2)
-    ncand = np.diff(cand_ptr)
-    tot = 0.0
-    for p0 in range(0, nat * m, block):
-        p1 = min(nat * m, p0 + block)
-        cap = (p1 - p0) * MBIS_MAXSHELL * int(ncand[p0 // m : (p1 - 1) // m + 1].max())
-        tj, tk, td, targ, ptr = _mbis_gather(
-            grel, coords, tmpden, cut2, mshell, sig, dmax, dmax_atom2, cand_ptr, cand, p0, p1, cap)
-        tot += _mbis_logsum(tmpden, m, p0, amp, tj, tk, np.exp(targ), ptr)
-    return tot
+    return float(_mbis_logsum_all(grel, coords, tmpden, mshell, amp, sig, dmax, dmax_atom2, block).sum())
 
 
 def mbis_fitted_shells(atnums):

@@ -386,13 +386,39 @@ def test_mbis_fallback_only_when_asked(monkeypatch):
     (_, _, _, _, n), conv, fell = CE._mbis_fit_converged(lambda m, p, s: (p, s), mshell, pop, sig, np.array([1.0]))
     assert (n, conv, fell) == (1, True, False)
 
-    # without fallback, a failed fit still falls back when its objective beats fallback_above
-    for above, want in ((2.0, (5, False)), (0.5, (12, True))):
+    # without fallback, a failed fit still falls back when its objective beats fallback_above,
+    # continuing from the accelerated end state (1.01**5) rather than from the guess
+    for above, want, end_pop in ((2.0, (5, False), 1.01**5), (0.5, (12, True), 1.01**12)):
         calls.clear()
-        (_, _, _, _, n), conv, fell = CE._mbis_fit_converged(drifting, mshell, pop, sig, np.array([1.0]),
+        (_, _, p, _, n), conv, fell = CE._mbis_fit_converged(drifting, mshell, pop, sig, np.array([1.0]),
                                                              fallback=False, objective=lambda m, p, s: 1.0,
                                                              fallback_above=above)
-        assert (n, fell) == want and conv is False
+        assert (n, fell) == want and conv is False and np.isclose(p[0, 0], end_pop)
+
+
+def test_mbis_objective_sums_every_atom():
+    """The selection objective is sum w ln rho0 over every atom's shells, also
+    atoms far beyond atmrhocut of a point, with terms below MBIS_DENCUT left out."""
+    import numpy as np
+
+    from qtaim_gen.source.core import charge_engine as CE
+
+    rng = np.random.default_rng(3)
+    grel = rng.normal(scale=1.5, size=(40, 3))
+    coords = np.array([[0.0, 0.0, 0.0], [1.4, 0.0, 0.0], [30.0, 0.0, 0.0]])
+    tmpden = rng.uniform(1e-3, 1.0, size=(3, 40))
+    mshell = np.array([2, 1, 1])
+    pop = np.array([[2.0, 4.0], [1.0, 0.0], [1.0, 0.0]])
+    sig = np.array([[0.1, 0.5], [0.6, 0.0], [8.0, 0.0]])
+    want = 0.0
+    for c in range(3):
+        for i in range(40):
+            d = np.linalg.norm(grel[i] + coords[c] - coords, axis=1)
+            terms = [pop[j, k] / sig[j, k] ** 3 / 8 / np.pi * np.exp(-d[j] / sig[j, k])
+                     for j in range(3) for k in range(mshell[j])]
+            want += tmpden[c, i] * np.log(max(sum(t for t in terms if t >= CE.MBIS_DENCUT), 1e-300))
+    got = CE.mbis_objective(grel, coords, tmpden, np.array([8, 1, 1]), mshell, pop, sig, block=16)
+    assert got == pytest.approx(want, rel=1e-13)
 
 
 def test_mbis_merge_shells_combines_equal_widths():
