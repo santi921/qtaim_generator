@@ -386,6 +386,14 @@ def test_mbis_fallback_only_when_asked(monkeypatch):
     (_, _, _, _, n), conv, fell = CE._mbis_fit_converged(lambda m, p, s: (p, s), mshell, pop, sig, np.array([1.0]))
     assert (n, conv, fell) == (1, True, False)
 
+    # without fallback, a failed fit still falls back when its objective beats fallback_above
+    for above, want in ((2.0, (5, False)), (0.5, (12, True))):
+        calls.clear()
+        (_, _, _, _, n), conv, fell = CE._mbis_fit_converged(drifting, mshell, pop, sig, np.array([1.0]),
+                                                             fallback=False, objective=lambda m, p, s: 1.0,
+                                                             fallback_above=above)
+        assert (n, fell) == want and conv is False
+
 
 def test_mbis_merge_shells_combines_equal_widths():
     import numpy as np
@@ -472,8 +480,11 @@ def test_mbis_select_drops_failed_check_guesses(monkeypatch):
     }
     seen = []
 
-    def fake_fit(step, mshell, pop, sig, qbase, fallback=True, objective=None):
+    above = []
+
+    def fake_fit(step, mshell, pop, sig, qbase, fallback=True, objective=None, fallback_above=None):
         seen.append(fallback)
+        above.append(fallback_above)
         r = results[round(float(sig[0, 0]), 2)]
         return r[0], r[1], r[4]
 
@@ -484,6 +495,8 @@ def test_mbis_select_drops_failed_check_guesses(monkeypatch):
     monkeypatch.setattr(CE, "mbis_degenerate", lambda mm, pp, ss: results[round(float(ss[0, 0]), 2)][3])
     q, *_, ncyc, info = CE.mbis_select(None, None, None, np.array([1, 1]), np.array([1.0, 1.0]))
     assert seen == [True, False, False]
+    # the check guesses fall back when their failed fit beats the best converged one (the default's 1.0)
+    assert above[0] is None and above[1] == above[2] == pytest.approx(1.0)
     assert info["selected"] == "default" and np.allclose(q, [0.1, -0.1])
     assert info["converged"] == {"default": True, "sigma_x0.6": False, "sigma_x1.5": True}
     assert info["solutions"] == 1 and info["spread"] == 0.0

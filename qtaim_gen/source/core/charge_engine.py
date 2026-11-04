@@ -802,10 +802,12 @@ def mbis_merge_shells(mshell, pop, sig):
     return ms, p, s
 
 
-def _mbis_fit_converged(step, mshell, pop, sig, qbase, fallback=True, objective=None):
+def _mbis_fit_converged(step, mshell, pop, sig, qbase, fallback=True, objective=None, fallback_above=None):
     """Accelerated fit; with fallback, redone by plain iteration from the guess
     when acceleration stalls (MBIS_ANDERSON_MAXCYC evaluations) or settles on a
-    merged/emptied-shell fixed point plain iteration leaves.
+    merged/emptied-shell fixed point plain iteration leaves. Without fallback,
+    the fallback still runs when fallback_above is given and the failed
+    accelerated fit's objective exceeds it.
 
     With objective (mbis_objective of (mshell, pop, sig)), the plain fallback
     stops after MBIS_MERGE_FIRST and then every MBIS_MERGE_EVERY cycles to merge
@@ -821,7 +823,9 @@ def _mbis_fit_converged(step, mshell, pop, sig, qbase, fallback=True, objective=
     the fallback ran."""
     res = _mbis_converged(step, mshell, pop, sig, qbase, maxcyc=MBIS_ANDERSON_MAXCYC)
     converged = res[4] < MBIS_ANDERSON_MAXCYC
-    if not fallback or (converged and not mbis_degenerate(res[1], res[2], res[3])):
+    if converged and not mbis_degenerate(res[1], res[2], res[3]):
+        return res, converged, False
+    if not fallback and (fallback_above is None or not objective(res[1], res[2], res[3]) > fallback_above):
         return res, converged, False
     evals, done, p, s = res[4], 0, pop, sig
     while done < MBIS_MAXCYC:
@@ -992,21 +996,28 @@ def mbis_select(grel, coords, tmpden, atnums, qbase):
     charge, mshell, pop, sig, the total cycles, and a record of the choice.
 
     The check guesses fall back to plain iteration (with shell merging, see
-    _mbis_fit_converged) only when the default fit needed the fallback;
-    otherwise a check guess whose accelerated fit stalls or ends degenerate is
-    left out of the selection (on Sm3Ir3, tm_react, the two check fallbacks
-    took 515 of 539 s and found nothing; on rmechdb_750, whose default fit
-    needs the fallback, the x1.5 fallback gives the fit with the best
-    objective). spread and solutions count only converged, non-degenerate fits;
-    merged lists [atom, shells in the guess, shells in the fit] per guess."""
+    _mbis_fit_converged) when the default fit needed the fallback, or when
+    their failed accelerated fit already has a larger objective than every
+    converged, non-degenerate fit so far; otherwise a check guess whose
+    accelerated fit stalls or ends degenerate is left out of the selection (on
+    Sm3Ir3, tm_react, the two check fallbacks took 515 of 539 s and found
+    nothing; on rmechdb_750, whose default fit needs the fallback, the x1.5
+    fallback gives the fit with the best objective; on 11-15 of 440 NERSC
+    actinide jobs a stalled x1.5 fit was better than the selection by up to
+    5e-3 relative, and whether it converged in MBIS_ANDERSON_MAXCYC evaluations
+    flipped the stored charges by up to 0.3 e between runs). spread and
+    solutions count only converged, non-degenerate fits; merged lists [atom,
+    shells in the guess, shells in the fit] per guess."""
     cut2, cand_ptr, cand = _mbis_setup(grel, coords, atnums)
     step = lambda mm, pp, ss: _mbis_step(grel, coords, tmpden, cut2, cand_ptr, cand, mm, pp, ss)  # noqa: E731
     objective = lambda mm, pp, ss: mbis_objective(grel, coords, tmpden, atnums, mm, pp, ss)  # noqa: E731
     fits = []
     for i, (name, (m0, p0, s0)) in enumerate(mbis_guesses(atnums)):
         fallback = i == 0 or fits[0][9]
+        good_so_far = [f[6] for f in fits if f[8] and not f[7]]
+        above = max(good_so_far) + 1e-12 * abs(max(good_so_far)) if good_so_far else None
         (q, m, p, s, n), conv, fell_back = _mbis_fit_converged(step, m0, p0, s0, qbase, fallback=fallback,
-                                                               objective=objective)
+                                                               objective=objective, fallback_above=above)
         merged = [[int(a), int(m0[a]), int(m[a])] for a in np.flatnonzero(m < m0)]
         fits.append((name, q, m, p, s, n, objective(m, p, s), mbis_degenerate(m, p, s), conv, fell_back, merged))
     good = [f for f in fits if f[8] and not f[7]]
@@ -1255,10 +1266,12 @@ def run(wfx_path, nrad=75, nang=434, radcut=10.0, bond_nrad=45, bond_nang=170, f
         # radial tables from the fit, then integrate like the Hirshfeld fuzzy steps
         t0 = time.perf_counter()
         if mbis_mode == "converged":
-            # one fit, from the guess the charge-grid selection kept (same density, finer grid)
+            # one fit, from the charge-grid fit's own shells (same density, finer grid), so both
+            # land on the same fixed point: from the raw guess, the refit of an x1.5 selection
+            # could return to the default's fixed point (0.25 e away on a U nitrate)
             guess = dict(mbis_guesses(atnums))[selection["charge"]["selected"]]
             _, mshell, spop, ssig, ncyc_fuzzy = mbis_fit(grid_pts, coords, td_rho, atnums, qbase, mode=mbis_mode,
-                                                        guess=guess)
+                                                        guess=(cm, cp, cs))
         else:
             guess = mbis_initial_shells(atnums)
             _, mshell, spop, ssig, ncyc_fuzzy = mbis_fit(grid_pts, coords, td_rho, atnums, qbase, mode=mbis_mode)
@@ -1352,10 +1365,11 @@ def run(wfx_path, nrad=75, nang=434, radcut=10.0, bond_nrad=45, bond_nang=170, f
         "mbis_cycles": {"charge": ncyc_charge, "fuzzy": ncyc_fuzzy} if mbis_ok else None,
         "mbis_mode": mbis_mode if mbis_ok else None,
         # converged mode: which guess's fixed point the charge-grid fit kept and why (mbis_select;
-        # the fuzzy refit starts from that guess); not unique when another guess reached a fixed
-        # point more than MBIS_UNIQUE_TOL away
+        # the fuzzy refit starts from that fit); not unique when another guess reached a fixed
+        # point more than MBIS_UNIQUE_TOL away, None (unknown) when a guess did not converge
         "mbis_selection": selection.get("charge") if mbis_ok else None,
-        "mbis_unique": selection["charge"]["solutions"] == 1 if mbis_ok and selection else None,
+        "mbis_unique": (selection["charge"]["solutions"] == 1 if all(selection["charge"]["converged"].values())
+                        else None) if mbis_ok and selection else None,
         # a merged or emptied shell in the stored fit (see mbis_degenerate)
         "mbis_degenerate": degenerate if mbis_ok else None,
         # shells the plain fallback merged, as [atom, shells in the guess, shells in the fit]
