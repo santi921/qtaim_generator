@@ -1,8 +1,9 @@
-"""DDEC6 port (core/ddec6.py), density-grid kernels K0-K5.
+"""DDEC6 port (core/ddec6.py), density-grid kernels K0-K8.
 
 Unit tests run everywhere. The parity test compares against Chargemol's validation
 dumps (scripts/ddec6_reference, chargemol_serial_dump) and is skipped without them:
 DDEC6_DUMPS, default ~/dev/qtaim_generator/data/ddec6_ref/dumps/<fixture>/.
+diffuse_h2 is a synthetic two-centre wfx whose 0.004 exponents reach the 12x coarse grid.
 """
 
 import math
@@ -14,7 +15,13 @@ import pytest
 from qtaim_gen.source.core import ddec6
 
 FIXTURES = os.path.join(os.path.dirname(__file__), "test_files", "charge_engine")
+DDEC6_FIXTURES = os.path.join(os.path.dirname(__file__), "test_files", "ddec6")
 DUMPS = os.environ.get("DDEC6_DUMPS", os.path.expanduser("~/dev/qtaim_generator/data/ddec6_ref/dumps"))
+
+
+def _wfx(name):
+    d = os.path.join(DDEC6_FIXTURES, name)
+    return os.path.join(d if os.path.isdir(d) else os.path.join(FIXTURES, name), "orca.wfx")
 
 
 def _read_dumps():
@@ -61,7 +68,7 @@ def test_sort_order_groups_centre_then_exponent():
 
 @pytest.mark.parametrize("name", ["rmechdb_652_step10_0_2", "XeCl4_step2_0_1"])
 def test_pair_data_electron_count(name):
-    prep = ddec6.load(os.path.join(FIXTURES, name, "orca.wfx"))
+    prep = ddec6.load(_wfx(name))
     grid = ddec6.grid_setup(prep["atom_xyz"])
     pairs = ddec6.pair_data(prep, grid)
     assert abs(pairs["check_included_electrons"] - pairs["included_electrons"]) < 1e-8
@@ -69,7 +76,7 @@ def test_pair_data_electron_count(name):
     assert pairs["n_pairs"] == pairs["n_analytic"] + pairs["n_numeric"]
 
 
-@pytest.mark.parametrize("name", ["rmechdb_652_step10_0_2", "XeCl4_step2_0_1"])
+@pytest.mark.parametrize("name", ["rmechdb_652_step10_0_2", "XeCl4_step2_0_1", "diffuse_h2"])
 def test_pair_data_matches_chargemol_bitwise(name):
     dump_dir = os.path.join(DUMPS, name)
     if not os.path.exists(os.path.join(dump_dir, "dump_pairs.bin")):
@@ -78,7 +85,7 @@ def test_pair_data_matches_chargemol_bitwise(name):
     ref = R.read_pairs(os.path.join(dump_dir, "dump_pairs.bin"))
     s7 = R.read_step7(os.path.join(dump_dir, "dump_step7.bin"), ref["n_pairs"], ref["natoms"])
 
-    prep = ddec6.load(os.path.join(FIXTURES, name, "orca.wfx"))
+    prep = ddec6.load(_wfx(name))
     grid = ddec6.grid_setup(prep["atom_xyz"])
     pairs = ddec6.pair_data(prep, grid)
     for k in ("n_pairs", "n_analytic", "n_numeric", "n_blocks", "nsingleblocks", "included_electrons"):
@@ -93,16 +100,24 @@ def test_pair_data_matches_chargemol_bitwise(name):
     assert np.array_equal(pairs["core_electrons"], ref["core_electrons"])
 
 
+def test_density_and_core_grids_12x_match_chargemol_bitwise():
+    _check_grids("diffuse_h2")
+
+
 @pytest.mark.skipif(not os.environ.get("DDEC6_SLOW"), reason="several minutes per fixture; set DDEC6_SLOW=1")
 @pytest.mark.parametrize("name", ["rmechdb_652_step10_0_2", "XeCl4_step2_0_1"])
 def test_density_and_core_grids_match_chargemol_bitwise(name):
+    _check_grids(name)
+
+
+def _check_grids(name):
     dump_dir = os.path.join(DUMPS, name)
     if not os.path.exists(os.path.join(dump_dir, "dump_step7.bin")):
         pytest.skip("Chargemol validation dumps not available")
     R = _read_dumps()
     ref = R.read_pairs(os.path.join(dump_dir, "dump_pairs.bin"))
     s7 = R.read_step7(os.path.join(dump_dir, "dump_step7.bin"), ref["n_pairs"], ref["natoms"])
-    prep = ddec6.load(os.path.join(FIXTURES, name, "orca.wfx"))
+    prep = ddec6.load(_wfx(name))
     grid = ddec6.grid_setup(prep["atom_xyz"])
     g = ddec6.density_grids(prep, grid, ddec6.pair_data(prep, grid))
     assert g["max_pair_correction"] == s7["max_pair_correction"]
