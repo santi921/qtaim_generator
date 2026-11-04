@@ -1,4 +1,5 @@
-"""Compare the DDEC6 port's Step 7 grids (K6-K7) with Chargemol's dump_step7.bin.
+"""Compare the DDEC6 port's Step 7 grids (K6-K7) with Chargemol's dump_step7.bin and
+the Step 8 grids (K8) with dump_final.bin.
 
     python compare_step7.py <orca.wfx> <dump dir>
 """
@@ -33,7 +34,20 @@ def main(wfx, dump_dir):
     pv = grid["pixelvolume"]
     print(f"  sums*pv: valence {g['valence_density'].sum() * pv:.12f} core {g['core_density'].sum() * pv:.12f}")
     print("K6-K7: BIT-IDENTICAL" if ok else "K6-K7: DIFFERENCES (see above)")
-    return 0 if ok else 1
+
+    t0 = time.time()
+    g = ddec6.core_grids(prep, grid, g)
+    print(f"port: Step 8 {time.time() - t0:.1f} s")
+    fin = R.read_final(os.path.join(dump_dir, "dump_final.bin"), ref["natoms"])
+    ok8 = report("occupancy_correction", g["occupancy_correction"], fin["occupancy_correction"])
+    ok8 &= report("core_electrons", g["core_electrons"], fin["core_electrons"])
+    ok8 &= report("missing_core", g["missing_core"], fin["missing_core"])
+    for k in ("valence_density", "core_density", "spin_density"):
+        if k in fin:
+            ok8 &= report(k, g[k], fin[k])
+    print(f"  sums*pv: valence {g['valence_density'].sum() * pv:.12f} core {g['core_density'].sum() * pv:.12f}")
+    print("K8: BIT-IDENTICAL" if ok8 else "K8: DIFFERENCES (see above)")
+    return 0 if ok and ok8 else 1
 
 
 if __name__ == "__main__":
