@@ -204,6 +204,33 @@ spin_density, core_density, occupancy_correction, core_electrons and the pair co
 stream-access binary files after Step 8. The port compares arrays element by element
 (about 56 MB per grid for a 7M-point fixture).
 
+### P2 status (2026-11-05)
+
+Done: core/ddec6.py K0-K8, commits cbc9ead (K0-K5), ab5e839 (K6-K7), a0c72e0 (K8 and
+parallel Step 7), 78de148 (12x fixture). Every array of the density module equals
+Chargemol's serial dump bit for bit on three fixtures:
+
+| Fixture | What it exercises |
+|---|---|
+| rmechdb_652_step10_0_2 | open shell, all-electron Br, coarse grids up to 4x, parallel Step 7 |
+| XeCl4_step2_0_1 | closed shell, ECP + EDF core grid |
+| tests/test_files/ddec6/diffuse_h2 | synthetic; 12x grid and all six interpolation stages |
+
+Arithmetic that had to follow gfortran:
+- NINT rounds half away from zero.
+- A variable integer power is libgcc __powidf2.
+- The constant x**10 uses GCC's powi tree (x^5 * x^5).
+
+Not covered by a real fixture:
+- 6x and 8x grids (the rmechdb_750 dump is pending).
+- The missing-core path (no local ECP job lacks an EDF block).
+
+Notes for P3:
+- core_iterator overwrites the global sum_points.
+- The core grid integral is far above the core electron count after K8 (XeCl4:
+  1074 e). core_iterator first caps each pixel at 30 e and then renormalizes the
+  grid to the core electron counts.
+
 ## 5. Validation
 
 Reference tiers, as in the ledger:
