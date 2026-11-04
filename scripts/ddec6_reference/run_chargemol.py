@@ -259,7 +259,8 @@ def _compare(a, b, path, worst):
 
 
 def cmd_golden(args):
-    root = os.path.join(CHARGEMOL, "chargemol_09_26_2017", "examples_to_run")
+    # the examples ship next to atomic_densities/ in chargemol_09_26_2017/
+    root = os.path.join(os.path.dirname(os.path.normpath(args.atomic_densities)), "examples_to_run")
     examples = sorted(d for d in os.listdir(root) if d.startswith("GAUSSIAN_WFX") and
                       os.path.isdir(os.path.join(root, d, "DDEC6")))
     ok = True
