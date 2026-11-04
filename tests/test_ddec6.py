@@ -136,12 +136,22 @@ def _check_grids(name):
 
 @pytest.mark.skipif(not os.environ.get("DDEC6_SLOW"), reason="about a minute per fixture; set DDEC6_SLOW=1")
 @pytest.mark.parametrize("name", ["rmechdb_652_step10_0_2", "XeCl4_step2_0_1"])
-def test_charges_match_chargemol_bitwise(name):
-    """Net atomic charges against Chargemol's precise build (test_files/ddec6/chargemol,
-    written by scripts/ddec6_reference/run_chargemol.py, es25.16 output)."""
+def test_outputs_match_chargemol_bitwise(name):
+    """Charges, atomic dipoles, quadrupoles and their eigenvalues, tail fits and spin
+    moments against Chargemol's precise serial -O2 build (test_files/ddec6/chargemol,
+    written by scripts/ddec6_reference/run_chargemol.py, es25.16 output). Chargemol's
+    own -O0 build differs from -O2 in one rmechdb dipole component by 1.4e-17."""
     import json
     with open(os.path.join(DDEC6_FIXTURES, "chargemol", f"{name}.json")) as f:
         ref = json.load(f)
     st = ddec6.run(_wfx(name))
+    r = ref["ddec6"]
+    keys = list(r["charge"])
     assert st["n_iterations"] == ref["_meta"]["n_iterations"]
-    assert st["net_atomic_charge"].tolist() == list(ref["ddec6"]["charge"].values())
+    assert st["net_atomic_charge"].tolist() == [r["charge"][k] for k in keys]
+    assert st["atomic_dipole"].tolist() == [r["atomic_dipole"][k] for k in keys]
+    assert st["atomic_quadrupole"].tolist() == [r["atomic_quadrupole"][k] for k in keys]
+    assert st["quadrupole_eigenvalues"].tolist() == [r["quadrupole_eigenvalues"][k] for k in keys]
+    assert st["tail_fit"].tolist() == [r["tail_fit"][k] for k in keys]
+    if "spin" in r:
+        assert st["spin_moment"].tolist() == [r["spin"][k] for k in keys]

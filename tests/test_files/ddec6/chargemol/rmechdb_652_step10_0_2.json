@@ -8,7 +8,7 @@
   },
   "atomic_dipole": {
    "1_Br": [
-    0.07989703895477328,
+    0.07989703895477329,
     -0.044456414898706914,
     0.00016340756070968936
    ],
@@ -151,9 +151,10 @@
  "_meta": {
   "electron_error_before_renorm": 1.829e-10,
   "n_iterations": 7,
-  "binary": "chargemol_serial_precise",
-  "seconds": 161.305,
+  "binary": "chargemol_serial_precise (-O2)",
+  "seconds": 251.581,
   "returncode": 0,
-  "threads": 1
+  "threads": 1,
+  "edf_types_rewritten": false
  }
 }
