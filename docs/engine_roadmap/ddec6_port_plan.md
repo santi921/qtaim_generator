@@ -275,7 +275,27 @@ Two findings:
 Radial moments (r^2, r^3, r^4) read corrected_total_density from the bond-order prep,
 so they move to P7.
 
-### P5 plan: runner wiring (proposed 2026-11-05, not started)
+### P5 status (2026-11-05): runner wiring done
+
+Implemented as planned below, with two differences:
+- `--ddec6` is on full-runner-parsl-alcf only: it is the only runner with
+  `--charge_engine`. full-runner-engine wraps it.
+- ddec6_quadrupole_mag is the Frobenius norm of the traceless tensor built from the
+  corrected components (the stored Qxy..Q(3z2-r2)), not from Chargemol's eigenvalues,
+  which come from the uncorrected sums.
+
+What was added:
+- core/ddec6.py: ChargemolStop marks the conditions on which Chargemol stops.
+- omol: _run_ddec6 writes ddec6.json, and ddec6.json moves to generator/.
+- omol: _merge_ddec6 runs after every ORCA-parse call in gbw_analysis.
+- validation.validate_ddec6.
+- The flag is plumbed through workflow.py and io.get_folders_from_file.
+
+Tests: tests/test_ddec6_runner.py, 11 tests; analyze layout and child vs in-process
+behind DDEC6_SLOW. Full suite: 1588 passed. Two critic2 end-to-end tests fail on the
+base commit too and are unrelated.
+
+### P5 plan: runner wiring (as proposed 2026-11-05)
 
 Modelled on the existing engine steps (omol._run_charge_engine, _run_engines,
 core/engine_worker.py) and on _run_orca_parse's additive merge into charge.json.
