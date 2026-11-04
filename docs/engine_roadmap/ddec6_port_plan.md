@@ -248,6 +248,29 @@ Not ported yet (P4): spin moments, atomic multipoles, radial moments, cloud
 penetration, bond orders (P7). local_multipole_moment_analysis and compute_CM5 are
 called inside step 1; they produce output only and do not feed the charges.
 
+### P4 status (2026-11-05)
+
+Ported: local multipoles (atomic dipoles, traceless quadrupoles, and their eigenvalues
+from Chargemol's trigonometric 3x3 solver, which tests for a diagonal matrix with the
+single-precision literal 1e-10), the cloud-penetration tail fit, and the collinear
+spin-moment iterator (Xi lookup tables). Every output equals Chargemol's serial -O2
+precise build bit for bit on rmechdb_652 and XeCl4. Chargemol -O0 differs from its own
+-O2 in one rmechdb dipole component by 1.4e-17.
+
+Two findings:
+- align_periodic_atoms runs for nonperiodic systems too. It rebuilds the atomic
+  coordinates as nabc*boundary + shift + origin, and add_missing_core_density
+  recomputes the centres from them. The iterators and multipoles use those shifts. The
+  charges did not notice (they use radial shell indices only); the dipoles were off by
+  1e-14 until the port used the aligned centres.
+- The spin moments are the grid integral of each atom's spin share plus the
+  analytic-pair corrections. The spin density is never renormalized, which explains the
+  P0 spin sums off from Na - Nb by up to 5.5e-3. This is by design, not a harness
+  error.
+
+Radial moments (r^2, r^3, r^4) read corrected_total_density from the bond-order prep,
+so they move to P7.
+
 ## 5. Validation
 
 Reference tiers, as in the ledger:

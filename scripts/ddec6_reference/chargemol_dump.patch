@@ -1,3 +1,28 @@
+diff -ru a/chargemol.f08 b/chargemol.f08
+--- a/chargemol.f08	2026-11-04 00:19:41.133970800 -0500
++++ b/chargemol.f08	2026-11-04 15:06:58.409898899 -0500
+@@ -35,7 +35,7 @@
+  
+  IMPLICIT NONE
+ 
+- INTEGER :: k
++ INTEGER :: k,dump_fid
+  INTEGER :: clock_count,clock_count_rate,clock_count_max,clock_count2
+  LOGICAl :: file_was_selected
+  
+@@ -151,6 +151,12 @@
+    CALL DDEC6_valence_iterator()
+  END IF
+  
++ ! ddec6 port validation dump: inputs of the final multipole analysis
++ OPEN(NEWUNIT=dump_fid,FILE='dump_mpole.bin',ACCESS='stream',FORM='unformatted',STATUS='replace')
++ WRITE(dump_fid) totnumA,totnumB,totnumC,natoms
++ WRITE(dump_fid) normalization,partial_density,partial_core_density,core_population
++ WRITE(dump_fid) core_density,core_pseudodensity,total_pseudodensity,total_density
++ CLOSE(dump_fid)
+  CALL local_multipole_moment_analysis()
+  DEALLOCATE(core_pseudodensity)
+  DEALLOCATE(core_density)
 diff -ru a/module_gen_dens_grids_from_gaussian_basis_set_coeff.f08 b/module_gen_dens_grids_from_gaussian_basis_set_coeff.f08
 --- a/module_gen_dens_grids_from_gaussian_basis_set_coeff.f08	2026-11-04 00:19:41.136477780 -0500
 +++ b/module_gen_dens_grids_from_gaussian_basis_set_coeff.f08	2026-11-04 12:22:33.678424423 -0500

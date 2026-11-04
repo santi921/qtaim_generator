@@ -1238,7 +1238,16 @@ def core_grids(prep, grid, grids):
 
     if grid["pixelvolume"] > MAXPIXELVOLUME:
         raise ValueError("grid pixel volume above Chargemol's maximum")
-    nabc, shift = grid["center_nabc"], grid["center_shift"]
+    # align_periodic_atoms (end of Step 1) rebuilt the coordinates as
+    # nabc*boundary + shift + origin, which is not bit-identical to the input, and
+    # add_missing_core_density recomputes the centres from them: every later step
+    # uses these shifts
+    aligned = [[grid["center_nabc"][j][0] * boundary[0][i] + grid["center_nabc"][j][1] * boundary[1][i]
+                + grid["center_nabc"][j][2] * boundary[2][i] + grid["center_shift"][j][i] + origin[i]
+                for i in range(3)] for j in range(len(grid["center_nabc"]))]
+    _, nabc, shift = _center_positions(aligned, boundary.tolist(), origin.tolist())
+    nabc = np.array(nabc, dtype=np.int64)
+    shift = np.array(shift)
     natoms = len(nabc)
     lo = np.zeros((natoms, 3), dtype=np.int64)
     hi = np.zeros((natoms, 3), dtype=np.int64)
@@ -1262,7 +1271,8 @@ def core_grids(prep, grid, grids):
                 ref[:, j] = chargemol_refs.core_density(prep["atom_z"][j], missing[j])
         _missing_core(core, nabc, shift, boundary, lo, hi, ref, missing)
 
-    grids.update(core_electrons=core_e, missing_core=missing, sum_points=sum_points, shell_lo=lo, shell_hi=hi)
+    grids.update(core_electrons=core_e, missing_core=missing, sum_points=sum_points, shell_lo=lo, shell_hi=hi,
+                 center_nabc=nabc, center_shift=shift, atom_xyz_aligned=np.array(aligned))
     return grids
 
 
@@ -1932,14 +1942,348 @@ def ddec6_valence_iterator(state):
             for j in range(natoms):
                 partial[:, j], _ = reshape_profile(wsad[:, j].copy(), w[:, j].astype(np.float64), fe[:, j].copy(),
                                                    se[:, j].copy(), True)
-    state.update(net_atomic_charge=net, hirshfeld_net_atomic_charge=hirshfeld, n_iterations=n_iter,
+    state.update(net_atomic_charge=net, hirshfeld_net_atomic_charge=hirshfeld, n_iterations=n_iter, normalization=norm,
                  partial_density=partial, total_pseudodensity=tpseudo, total_density=total, tau=tau,
                  sum_points=pts, valence_population=vpop, spherical_average_density=sad)
     return state
 
 
+# ---------------------------------------------------------------------------------
+# P4: atomic multipoles (module_local_multipole_moment_analysis.f08)
+# ---------------------------------------------------------------------------------
+
+@numba.njit(parallel=True, cache=True)
+def _multipole_sums(partial, total, tpseudo, pcd, core, cpseudo, norm, pv, nabc, shift, boundary, lo, hi):
+    """Per atom: dipole (x, y, z) and quadrupole (xy, xz, yz, x2-y2, 3z2-r2) sums of the
+    atom's valence density, relative to its nucleus."""
+    natoms = nabc.shape[0]
+    out = np.zeros((8, natoms))
+    for j in numba.prange(natoms):
+        for nc in range(lo[j, 2], hi[j, 2] + 1):
+            kc = nc + nabc[j, 2] + 1
+            for nb in range(lo[j, 1], hi[j, 1] + 1):
+                kb = nb + nabc[j, 1] + 1
+                for na in range(lo[j, 0], hi[j, 0] + 1):
+                    ka = na + nabc[j, 0] + 1
+                    x = na * boundary[0, 0] + nb * boundary[1, 0] + nc * boundary[2, 0] - shift[j, 0]
+                    y = na * boundary[0, 1] + nb * boundary[1, 1] + nc * boundary[2, 1] - shift[j, 1]
+                    z = na * boundary[0, 2] + nb * boundary[1, 2] + nc * boundary[2, 2] - shift[j, 2]
+                    s = int(math.ceil(SCALEFACTOR * math.sqrt(x * x + y * y + z * z) + ZERO_TOLERANCE))
+                    if s <= NSHELLS and tpseudo[ka - 1, kb - 1, kc - 1] > ZERO_TOLERANCE:
+                        lad = partial[s - 1, j] * total[ka - 1, kb - 1, kc - 1] / tpseudo[ka - 1, kb - 1, kc - 1]
+                        if cpseudo[ka - 1, kb - 1, kc - 1] >= ZERO_TOLERANCE:
+                            lcd = pcd[s - 1, j] * core[ka - 1, kb - 1, kc - 1] / cpseudo[ka - 1, kb - 1, kc - 1]
+                        else:
+                            lcd = 0.0
+                        t = norm * (lad - lcd) * pv
+                        out[0, j] = out[0, j] - x * t
+                        out[1, j] = out[1, j] - y * t
+                        out[2, j] = out[2, j] - z * t
+                        out[3, j] = out[3, j] - x * y * t
+                        out[4, j] = out[4, j] - x * z * t
+                        out[5, j] = out[5, j] - y * z * t
+                        out[6, j] = out[6, j] - (x * x - y * y) * t
+                        out[7, j] = out[7, j] - (3.0 * z * z - (x * x + y * y + z * z)) * t
+    return out
+
+
+def _eig3(a):
+    """module_matrix_operations.f08 eig: sorted eigenvalues of a symmetric 3x3 matrix
+    (trigonometric method). The diagonal test uses a default-REAL literal, so the
+    threshold is the single-precision value of 1e-10."""
+    p1 = a[0][1] * a[0][1] + a[0][2] * a[0][2] + a[1][2] * a[1][2]
+    q = (a[0][0] + a[1][1] + a[2][2]) / 3.0
+    if p1 < float(np.float32(0.0000000001)):
+        e1 = min(a[0][0], a[1][1], a[2][2])
+        e3 = max(a[0][0], a[1][1], a[2][2])
+        return [e1, (q * 3.0) - e1 - e3, e3]
+    p2 = (a[0][0] - q) * (a[0][0] - q) + (a[1][1] - q) * (a[1][1] - q) + (a[2][2] - q) * (a[2][2] - q) + 2.0 * p1
+    p = math.sqrt(p2 / 6.0)
+    b = [[(1.0 / p) * (a[i][k] - q * (1.0 if i == k else 0.0)) for k in range(3)] for i in range(3)]
+    r = _det3(b) / 2.0
+    if r <= -1.0:
+        phi = PI / 3.0
+    elif r >= 1.0:
+        phi = 0.0
+    else:
+        phi = math.acos(r) / 3.0
+    e3 = q + 2.0 * p * math.cos(phi)
+    e1 = q + 2.0 * p * math.cos(phi + (2.0 * PI / 3.0))
+    return [e1, 3.0 * q - e1 - e3, e3]
+
+
+def atomic_multipoles(state):
+    """Atomic dipoles and traceless quadrupoles in atomic units (analytic-pair corrections
+    included), and the eigenvalues of each quadrupole tensor (from the grid sums only, as
+    in Chargemol)."""
+    g = state["geom"]
+    m = _multipole_sums(state["partial_density"], state["total_density"], state["total_pseudodensity"],
+                        state["partial_core_density"], state["core_density"], state["core_pseudodensity"],
+                        state["normalization"], g["pixelvolume"], g["nabc"], g["shift"], g["boundary"], g["lo"], g["hi"])
+    occ = state["occupancy_correction"]
+    natoms = m.shape[1]
+    dip = np.zeros((natoms, 3))
+    quad = np.zeros((natoms, 5))
+    eigs = np.zeros((natoms, 3))
+    for j in range(natoms):
+        dip[j] = [m[0, j] + occ[2, j], m[1, j] + occ[3, j], m[2, j] + occ[4, j]]
+        quad[j] = [m[3, j] + occ[8, j], m[4, j] + occ[9, j], m[5, j] + occ[10, j],
+                   m[6, j] + occ[5, j] - occ[6, j], m[7, j] + 2.0 * occ[7, j] - occ[5, j] - occ[6, j]]
+        t = [[0.5 * (m[6, j] - m[7, j] / 3.0), m[3, j], m[4, j]],
+             [m[3, j], 0.5 * (-m[6, j] - m[7, j] / 3.0), m[5, j]],
+             [m[4, j], m[5, j], m[7, j] / 3.0]]
+        eigs[j] = _eig3(t)
+    mag = np.array([math.sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]) for d in dip])
+    state.update(atomic_dipole=dip, atomic_dipole_mag=mag, atomic_quadrupole=quad, quadrupole_eigenvalues=eigs)
+    return state
+
+
+def cloud_penetration(state):
+    """module_cloud_penetration.f08: fit ln(spherical average density) = a - b r over the
+    shells beyond 200 pm; returns (a, b, R^2) per atom."""
+    sad = state["spherical_average_density"]
+    kmin = int(math.ceil(200.0 * NSHELLS / CUTOFF_RADIUS))
+    out = np.zeros((sad.shape[1], 3))
+    for j in range(sad.shape[1]):
+        sx = sxx = sxy = sy = syy = 0.0
+        n = 0
+        for k in range(kmin, NSHELLS + 1):
+            x = (k - 0.5) * (CUTOFF_RADIUS * BOHRPERANGSTROM / (100.0 * NSHELLS))
+            if sad[k - 1, j] < ZERO_TOLERANCE ** 1.5:
+                continue
+            y = math.log(sad[k - 1, j])
+            sx = sx + x
+            sxx = sxx + x * x
+            sxy = sxy + x * y
+            sy = sy + y
+            syy = syy + y * y
+            n = n + 1
+        slope = (n * sxy - sx * sy) / (n * sxx - sx * sx)
+        intercept = (sy - slope * sx) / n
+        r2 = (n * sxy - sx * sy) * (n * sxy - sx * sy) / ((n * sxx - sx * sx) * (n * syy - sy * sy))
+        out[j] = [intercept, -slope, r2]
+    state["tail_fit"] = out
+    return state
+
+
+# ---------------------------------------------------------------------------------
+# P4: collinear spin moments (module_spin_functions, module_collinear_spin_moments_iterator)
+# ---------------------------------------------------------------------------------
+
+NUM_LOOKUP_POINTS = 10000
+XI_THRESHOLD = 0.001
+XI_ZERO_TOLERANCE = 0.000001
+SPIN_CONVERGENCE_TOLERANCE = 5.0e-5
+SPIN_REF_FRACTION = 1.0 / 2.0
+
+
+def _xi(tau):
+    if tau < 0.0:
+        return 0.0
+    if tau > 1.0:
+        return 2.0 * PI
+    if tau < XI_THRESHOLD:
+        return 4.0 * PI * tau / 3.0
+    if tau > (1.0 - XI_THRESHOLD):
+        return 2.0 * PI + (tau - 1.0) * 49.956 + ((tau - 1.0) * (tau - 1.0)) * 8370.6
+    return PI * ((1.0 / (tau * tau) - 1.0) * math.log((1.0 - tau) / (1.0 + tau)) + 2.0 / tau)
+
+
+def _xi_derivative(tau):
+    if tau < XI_THRESHOLD:
+        return 4.0 * PI / 3.0
+    if tau > (1.0 - XI_THRESHOLD):
+        return 50.0
+    return 2.0 * PI * (math.log((1.0 + tau) / (1.0 - tau)) - 2.0 * tau) / ((tau * tau) * tau)
+
+
+def _inverse_xi(x):
+    if x < 0.0:
+        return 0.0
+    if x < XI_ZERO_TOLERANCE:
+        return 3.0 * x / (4.0 * PI)
+    if x > 2.0 * PI - XI_ZERO_TOLERANCE:
+        return 1.0
+    t = (x - 0.036835 * x * x) / (4.178319 - 0.136129 * x + 0.038148 * x * x)
+    d = _xi_derivative(t)
+    for _ in range(5):
+        t = t + (x - _xi(t)) / d
+    return t
+
+
+def spin_lookup_tables():
+    """generate_spin_lookup_tables: Xi(i/N) and inverse Xi(2 pi i/N), i = 1..N."""
+    xi = np.array([_xi(i / NUM_LOOKUP_POINTS) for i in range(1, NUM_LOOKUP_POINTS + 1)])
+    inv = np.array([_inverse_xi(i * 2.0 * PI / NUM_LOOKUP_POINTS) for i in range(1, NUM_LOOKUP_POINTS + 1)])
+    return xi, inv
+
+
+@numba.njit(inline="always")
+def _fast_xi(tau, table):
+    thr = 1.0 / NUM_LOOKUP_POINTS
+    if tau <= 0.0:
+        return 0.0
+    if tau >= 1.0:
+        return 2.0 * PI
+    if tau < thr:
+        return 4.0 * PI * tau / 3.0
+    i = int(math.floor(tau * NUM_LOOKUP_POINTS))
+    f = tau * NUM_LOOKUP_POINTS - i
+    return (1.0 - f) * table[i - 1] + f * table[i]
+
+
+@numba.njit(inline="always")
+def _fast_inverse_xi(x, table):
+    thr = 1.0 / NUM_LOOKUP_POINTS
+    sx = x / (2.0 * PI)
+    if sx <= 0.0:
+        return 0.0
+    if sx >= 1.0:
+        return 1.0
+    if sx < thr:
+        return x * 0.75 / PI
+    i = int(math.floor(sx * NUM_LOOKUP_POINTS))
+    f = sx * NUM_LOOKUP_POINTS - i
+    return (1.0 - f) * table[i - 1] + f * table[i]
+
+
+@numba.njit(inline="always")
+def _theta(a, b, table):
+    if abs(b) < 1.0e-10 or a < 1.0e-10:
+        return 0.0
+    return b * _fast_xi(abs(b) / a, table) / (2.0 * abs(b))
+
+
+@numba.njit(inline="always")
+def _local_spin(s, j, ka, kb, kc, it, partial, total, tpseudo, spin, sad, saas, ups, omega, trial, xi, inv):
+    """One atom's spin at one point (0-based pixel) and its L value: the proportional
+    spin at spin_iter 1, the Xi-function update afterwards."""
+    lad = partial[s - 1, j] * total[ka, kb, kc] / tpseudo[ka, kb, kc]
+    prop = partial[s - 1, j] * spin[ka, kb, kc] / tpseudo[ka, kb, kc]
+    ptheta = _theta(lad, prop, xi)
+    if it == 1:
+        return prop, ptheta
+    theta = _theta(sad[s - 1, j], saas[s - 1, j], xi)
+    L = (ups[ka, kb, kc] - omega[ka, kb, kc] + PI * (spin[ka, kb, kc] - trial[ka, kb, kc]) / (total[ka, kb, kc])
+         + (1.0 - SPIN_REF_FRACTION) * theta + SPIN_REF_FRACTION * ptheta)
+    mag_l = abs(L)
+    sign = -1 if L < 0.0 else 1
+    if mag_l > PI:
+        mag = lad
+    else:
+        mag = lad * _fast_inverse_xi(2.0 * mag_l, inv)
+    return mag * sign, L
+
+
+@numba.njit(parallel=True, cache=True)
+def _spin_atom_sums(it, partial, total, tpseudo, spin, sad, saas, ups, omega, trial, xi, inv, nabc, shift, boundary,
+                    lo, hi):
+    natoms = nabc.shape[0]
+    ssd = np.zeros((NSHELLS, natoms))
+    pts = np.zeros((NSHELLS, natoms), dtype=np.int64)
+    for j in numba.prange(natoms):
+        for nc in range(lo[j, 2], hi[j, 2] + 1):
+            kc = nc + nabc[j, 2]
+            for nb in range(lo[j, 1], hi[j, 1] + 1):
+                kb = nb + nabc[j, 1]
+                for na in range(lo[j, 0], hi[j, 0] + 1):
+                    ka = na + nabc[j, 0]
+                    s = _shell(na, nb, nc, j, boundary, shift)
+                    if s <= NSHELLS and tpseudo[ka, kb, kc] > ZERO_TOLERANCE and total[ka, kb, kc] > ZERO_TOLERANCE:
+                        pts[s - 1, j] = pts[s - 1, j] + 1
+                        las, L = _local_spin(s, j, ka, kb, kc, it, partial, total, tpseudo, spin, sad, saas, ups,
+                                             omega, trial, xi, inv)
+                        ssd[s - 1, j] = ssd[s - 1, j] + las
+    return ssd, pts
+
+
+@numba.njit(parallel=True, cache=True)
+def _spin_grid_sums(it, partial, total, tpseudo, spin, sad, saas, ups, omega, trial, xi, inv, nabc, shift, boundary,
+                    lo, hi, new_ups, new_trial):
+    nct = total.shape[2]
+    for kc in numba.prange(nct):
+        for j in range(nabc.shape[0]):
+            nc = kc - nabc[j, 2]
+            if nc < lo[j, 2] or nc > hi[j, 2]:
+                continue
+            for nb in range(lo[j, 1], hi[j, 1] + 1):
+                kb = nb + nabc[j, 1]
+                for na in range(lo[j, 0], hi[j, 0] + 1):
+                    ka = na + nabc[j, 0]
+                    s = _shell(na, nb, nc, j, boundary, shift)
+                    if s <= NSHELLS and tpseudo[ka, kb, kc] > ZERO_TOLERANCE and total[ka, kb, kc] > ZERO_TOLERANCE:
+                        las, L = _local_spin(s, j, ka, kb, kc, it, partial, total, tpseudo, spin, sad, saas, ups,
+                                             omega, trial, xi, inv)
+                        new_ups[ka, kb, kc] = new_ups[ka, kb, kc] + L * partial[s - 1, j] / tpseudo[ka, kb, kc]
+                        new_trial[ka, kb, kc] = new_trial[ka, kb, kc] + las
+
+
+@numba.njit(parallel=True, cache=True)
+def _spin_omega(partial, total, tpseudo, spin, sad, saas, xi, nabc, shift, boundary, lo, hi, omega):
+    nct = total.shape[2]
+    for kc in numba.prange(nct):
+        for j in range(nabc.shape[0]):
+            nc = kc - nabc[j, 2]
+            if nc < lo[j, 2] or nc > hi[j, 2]:
+                continue
+            for nb in range(lo[j, 1], hi[j, 1] + 1):
+                kb = nb + nabc[j, 1]
+                for na in range(lo[j, 0], hi[j, 0] + 1):
+                    ka = na + nabc[j, 0]
+                    s = _shell(na, nb, nc, j, boundary, shift)
+                    if s <= NSHELLS and tpseudo[ka, kb, kc] > ZERO_TOLERANCE and total[ka, kb, kc] > ZERO_TOLERANCE:
+                        lad = partial[s - 1, j] * total[ka, kb, kc] / tpseudo[ka, kb, kc]
+                        prop = partial[s - 1, j] * spin[ka, kb, kc] / tpseudo[ka, kb, kc]
+                        theta = _theta(sad[s - 1, j], saas[s - 1, j], xi)
+                        ptheta = _theta(lad, prop, xi)
+                        omega[ka, kb, kc] = omega[ka, kb, kc] + ((1.0 - SPIN_REF_FRACTION) * theta
+                                                                 + SPIN_REF_FRACTION * ptheta) * partial[s - 1, j] / \
+                            tpseudo[ka, kb, kc]
+
+
+def spin_moments(state):
+    """collinear_spin_moments_iterator: DDEC atomic spin moments. Like Chargemol, the
+    spin density is not renormalized, so the moments sum to the grid integral of the
+    spin density plus the analytic-pair corrections, not exactly to Na - Nb."""
+    g = state["geom"]
+    args = (g["nabc"], g["shift"], g["boundary"], g["lo"], g["hi"])
+    pv = g["pixelvolume"]
+    xi, inv = spin_lookup_tables()
+    partial, total, tpseudo = state["partial_density"], state["total_density"], state["total_pseudodensity"]
+    spin, sad = state["spin_density"], state["spherical_average_density"]
+    occ2 = state["occupancy_correction"][1]
+    natoms = sad.shape[1]
+    saas = np.zeros((NSHELLS, natoms))
+    ups = np.zeros(total.shape, order="F")
+    omega = np.zeros(total.shape, order="F")
+    trial = np.zeros(total.shape, order="F")
+    spin_pop = np.zeros(natoms)
+    n_iter = 0
+    for it in range(1, 501):
+        n_iter = it
+        ssd, pts = _spin_atom_sums(it, partial, total, tpseudo, spin, sad, saas, ups, omega, trial, xi, inv, *args)
+        new_ups = np.zeros(total.shape, order="F")
+        new_trial = np.zeros(total.shape, order="F")
+        _spin_grid_sums(it, partial, total, tpseudo, spin, sad, saas, ups, omega, trial, xi, inv, *args,
+                        new_ups, new_trial)
+        ups, trial = new_ups, new_trial
+        saas = _shell_average(ssd, pts)
+        old = spin_pop
+        spin_pop = _column_sums(ssd) * pv
+        spin_pop = spin_pop + occ2
+        max_change = float(np.max(np.abs(spin_pop - old)))
+        if ((max_change < SPIN_CONVERGENCE_TOLERANCE and it > 6)
+                or (max(float(np.max(np.abs(spin_pop))), max_change) < SPIN_CONVERGENCE_TOLERANCE and it > 1)):
+            break
+        omega[...] = 0.0
+        _spin_omega(partial, total, tpseudo, spin, sad, saas, xi, *args, omega)
+    state.update(spin_moment=spin_pop, spin_iterations=n_iter, total_spin_moment=_seq_sum(spin_pop))
+    return state
+
+
 def run(wfx_path, parallel=True):
-    """DDEC6 net atomic charges for one wfx (P3: charges only so far)."""
+    """DDEC6 analysis of one wfx: net atomic charges, atomic multipoles, cloud
+    penetration fits and (open shell) atomic spin moments."""
     prep = load(wfx_path)
     grid = grid_setup(prep["atom_xyz"])
     pairs = pair_data(prep, grid)
@@ -1953,14 +2297,18 @@ def run(wfx_path, parallel=True):
         raise ValueError(f"valence electrons on the grid off by {check:.4f} e (Chargemol stops here)")
     rsv = radial_shell_volume()
     neutral = np.column_stack([oxidation_density(int(z), 0, rsv) for z in prep["atom_z"]])
-    state = {"geom": {"nabc": grid["center_nabc"], "shift": grid["center_shift"], "boundary": grid["boundary"],
+    state = {"geom": {"nabc": grids["center_nabc"], "shift": grids["center_shift"], "boundary": grid["boundary"],
                       "lo": grids["shell_lo"], "hi": grids["shell_hi"], "pixelvolume": grid["pixelvolume"]},
              "atom_z": np.asarray(prep["atom_z"], dtype=np.int64), "core_electrons": core_e,
              "occupancy_correction": grids["occupancy_correction"], "valence_density": grids["valence_density"],
              "core_density": grids["core_density"], "spin_density": grids["spin_density"], "nvalence": nvalence,
              "radial_shell_volume": rsv, "neutral_density": neutral, "net_charge": net_charge}
     state = core_iterator(state)
-    return ddec6_valence_iterator(state)
+    state = ddec6_valence_iterator(state)
+    state = cloud_penetration(atomic_multipoles(state))
+    if prep["spin_available"]:
+        state = spin_moments(state)
+    return state
 
 
 def load(wfx_path):
