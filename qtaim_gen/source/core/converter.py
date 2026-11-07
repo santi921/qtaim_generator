@@ -1691,6 +1691,14 @@ class GeneralConverter(Converter):
         self._scheme_fill = self.sentinel_value if self.fill_missing_schemes else None
         if self.fill_missing_schemes and self.charge_filter is None and self.fuzzy_filter is None:
             self.logger.warning("fill_missing_schemes needs charge_filter/fuzzy_filter to know the expected schemes")
+        # charge_<scheme>_dipole_mag globals are computed from the charges, so they must stay out of
+        # the inputs whenever a charge is a target; False drops them even if keys_data lists them
+        self.charge_dipole_global = bool(config_dict.get("charge_dipole_global", True))
+        if not self.charge_dipole_global:
+            self.keys_data["global"] = [
+                k for k in self.keys_data["global"]
+                if not (k.startswith("charge_") and k.endswith("_dipole_mag"))
+            ]
 
         # Build reverse mapping: data_input name -> actual LMDB key in lmdb_dict
         # This resolves naming inconsistencies (e.g. "fuzzy" -> "fuzzy_full_lmdb" or "fuzzy_lmdb")
@@ -1753,7 +1761,8 @@ class GeneralConverter(Converter):
                 dict_charge_raw = self.__getitem__(self._data_input_to_lmdb_key["charge"], key)
                 if dict_charge_raw is not None:
                     atom_feats_charge, global_dipole_feats = parse_charge_data(
-                        dict_charge_raw, global_feats["n_atoms"], self.charge_filter, fill_missing=self._scheme_fill
+                        dict_charge_raw, global_feats["n_atoms"], self.charge_filter, fill_missing=self._scheme_fill,
+                        include_dipoles=self.charge_dipole_global,
                     )
                     global_feats.update(global_dipole_feats)
                     for atom_idx, charge_feats in atom_feats_charge.items():
@@ -2053,7 +2062,8 @@ class GeneralConverter(Converter):
                         dict_charge_raw = self.__getitem__(self._data_input_to_lmdb_key["charge"], key)
                         if dict_charge_raw is not None:
                             atom_feats_charge, global_dipole_feats = parse_charge_data(
-                                dict_charge_raw, global_feats["n_atoms"], self.charge_filter, fill_missing=self._scheme_fill
+                                dict_charge_raw, global_feats["n_atoms"], self.charge_filter, fill_missing=self._scheme_fill,
+                                include_dipoles=self.charge_dipole_global,
                             )
                             for feat_key in atom_feats_charge[0].keys():
                                 if feat_key not in self.keys_data["atom"]:

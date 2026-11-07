@@ -566,6 +566,7 @@ def parse_charge_data(
     n_atoms:int,
     charge_filter: Optional[List[str]] = None,
     fill_missing: Optional[float] = None,
+    include_dipoles: bool = True,
 ) -> Tuple[Dict[int, Dict[str, Any]], Dict[str, float]]:
     """
     Parse charge-related data and update atom features.
@@ -579,6 +580,8 @@ def parse_charge_data(
             its dipole for CHARGE_DIPOLE_SCHEMES; every filtered scheme gets a global flag
             missing_charge_<scheme> (1.0 missing, 0.0 present), so all records share one
             feature set. None (default) leaves absent schemes out.
+        include_dipoles (bool): False omits the charge_<scheme>_dipole_mag globals. They are
+            computed from the same charges, so they leak the labels when a charge is a target.
     Returns:
         atom_feats_charge (Dict[int, Dict[str, Any]]): Dictionary containing atom features related
         to charge and spin information.
@@ -603,7 +606,7 @@ def parse_charge_data(
 
         # dipole (global)
         dip = data.get("dipole")
-        if isinstance(dip, dict) and "mag" in dip:
+        if include_dipoles and isinstance(dip, dict) and "mag" in dip:
             global_dipole_feats["charge_"+ charge_type + "_dipole_mag"] = float(dip["mag"])
 
         # spin
@@ -624,7 +627,7 @@ def parse_charge_data(
             if missing:
                 for idx in range(n_atoms):
                     atom_feats_charge[idx]["charge_" + scheme] = float(fill_missing)
-                if scheme in CHARGE_DIPOLE_SCHEMES:
+                if include_dipoles and scheme in CHARGE_DIPOLE_SCHEMES:
                     global_dipole_feats["charge_" + scheme + "_dipole_mag"] = float(fill_missing)
 
     return atom_feats_charge, global_dipole_feats
