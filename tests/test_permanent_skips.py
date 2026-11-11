@@ -176,3 +176,15 @@ def test_converter_keeps_a_molecule_whose_scheme_is_missing(tmp_path):
     assert all(math.isnan(v) for v in flagged[0]["atom"].feat[:, i_mbis].tolist())
     others = [g for g in graphs if g["global"].feat[0, i_flag] == 0.0]
     assert others and all(not math.isnan(v) for g in others for v in g["atom"].feat[:, i_mbis].tolist())
+
+
+def test_a_skipped_esp_surface_needs_no_esp_fields(tmp_path):
+    from qtaim_gen.source.utils.validation import validate_other_dict
+
+    other = {k: 1.0 for k in ("mpp_full", "sdp_full", "mpp_heavy", "sdp_heavy", "ALIE_Volume", "ALIE_Surface_Density",
+                              "ALIE_Minimal_value", "ALIE_Maximal_value", "ALIE_Overall_surface_area",
+                              "ALIE_Positive_surface_area", "ALIE_Negative_surface_area", "ALIE_Overall_skewness")}
+    (tmp_path / "other.json").write_text(json.dumps(other))
+    assert validate_other_dict(str(tmp_path / "other.json"), full_set=1)
+    assert not validate_other_dict(str(tmp_path / "other.json"), full_set=2)
+    assert validate_other_dict(str(tmp_path / "other.json"), full_set=2, skipped={"other_esp"})

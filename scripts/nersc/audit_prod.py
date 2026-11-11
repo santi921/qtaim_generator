@@ -190,7 +190,7 @@ def compare(new_folder, ref_folder, actinide_atoms=()):
             for key, v in diffs.items():
                 out[f"{key}_{t}"] = max(out.get(f"{key}_{t}", 0.0), v)
     out["ph_ref"] = (qb.get("_meta") or {}).get("poincare_hopf")
-    out["engine_version"] = provenance.load(new_folder).get("engine_version")
+    out["engine_versions"] = ",".join(map(str, provenance.engine_versions(provenance.load(new_folder)))) or "none"
     return out
 
 
@@ -253,7 +253,7 @@ def main():
     if args.ref:
         both = [r for r in done if r.get("ref_validated")]
         print(f"\nvs {args.ref}: {len(both)} folders validated in both (max per-atom |diff|, e; acceptance max {MAX_DIFF_E})")
-        print(f"engine versions in this tree: {dict(collections.Counter(r.get('engine_version') for r in both))}; "
+        print(f"engine versions of the engine routines, per folder: {dict(collections.Counter(r.get('engine_versions') for r in both))}; "
               f"elf_fuzzy and the level-2 fuzzy rows are in their own units (ELF, a.u.)")
         print("| scheme | n | median | p99 | max | over max |")
         print("| --- | --- | --- | --- | --- | --- |")

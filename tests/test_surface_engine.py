@@ -274,3 +274,28 @@ def test_esp_failure_keeps_alie_and_is_retried_once_then_skipped(tmp_path, monke
     prov = provenance.load(str(folder))
     assert prov["skipped"]["other_esp"]["by"] == "surface_engine"
     assert "MemoryError" in prov["skipped"]["other_esp"]["reason"]
+
+
+@pytest.mark.skipif(not HAS_NUMBA, reason="numba not installed")
+def test_esp_failure_drops_a_multiwfn_esp_timing(tmp_path, monkeypatch):
+    """In a folder that already holds Multiwfn's ESP surface (a merge-mode copy), a failed
+    engine ESP removes the 'other_esp' timing and record, so validation fails until the
+    retry instead of passing with Multiwfn's ESP under engine output."""
+    import logging
+
+    from qtaim_gen.source.core import surface_engine
+    from qtaim_gen.source.core.omol import _run_surface_engine
+    from qtaim_gen.source.utils import provenance
+
+    def boom(*a, **k):
+        raise RuntimeError("no ESP")
+
+    monkeypatch.setattr(surface_engine, "esp_surface", boom)
+    folder = _restart_folder(tmp_path, {"ALIE_Volume": 1.0, "mpp_full": 0.1, "ESP_Volume": 1.0},
+                             {"other_esp": {"by": "multiwfn"}}, {"other_esp": 9.0, "qtaim": 1.0})
+    assert not _run_surface_engine(str(folder), n_threads=2, logger=logging.getLogger("t"), restart=True, full_set=2)
+    for path in (folder / "timings.json", folder / "generator" / "timings.json"):
+        assert "other_esp" not in json.loads(path.read_text())
+    prov = provenance.load(str(folder))
+    assert "other_esp" not in prov["routines"] and "other_esp" not in prov["skipped"]
+    assert prov["engines"]["surface_engine"]["failures"] == {"other_esp": 1}

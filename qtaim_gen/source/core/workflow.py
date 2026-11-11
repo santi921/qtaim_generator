@@ -7,6 +7,7 @@ from typing import Optional, Dict, Any, List
 import shutil
 
 from qtaim_gen.source.core.omol import _poincare_hopf_needs_escalation, gbw_analysis
+from qtaim_gen.source.utils import provenance
 from qtaim_gen.source.utils.atomic_write import atomic_json_write
 from qtaim_gen.source.utils.validation import validation_checks
 
@@ -127,6 +128,16 @@ def _carry_forward(stash: str, gen: str, logger: logging.Logger) -> None:
             elif not os.path.exists(new_p):
                 shutil.copy2(old_p, new_p)
                 carried.append(name)
+            elif name == provenance.PROVENANCE_FILE:
+                # entry by entry, the rerun's on top: the steps carried above keep their records
+                with open(old_p) as f:
+                    old = json.load(f)
+                with open(new_p) as f:
+                    new = json.load(f)
+                kept = sorted(set(old.get("routines") or {}) - set(new.get("routines") or {}))
+                atomic_json_write(new_p, provenance.merge(old, new))
+                if kept:
+                    carried.append(f"{name}[{','.join(kept)}]")
             elif name in _STEP_KEYED:
                 with open(old_p) as f:
                     old = json.load(f)

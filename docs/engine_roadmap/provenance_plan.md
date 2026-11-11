@@ -59,10 +59,11 @@ def is_current(routine, version) -> bool   # version >= last_change(routine)
 ```
 
 - Versions 1-3 are the old charge/surface numbers, which always moved together. The QTAIM
-  engine (version 1, shipped 2026-10-16) and the native converter (2026-11-03) predate the
-  first stamp (version 2, 77b1565), so they enter under version 1 [V].
+  engine (version 1, shipped 2026-10-16) predates the first stamp (version 2, 77b1565), so it
+  enters under version 1 [V]. The native converter is identified by its mode, not versioned
+  (review 2026-11-11: a version on it was never checked).
 - `ROUTINE_ENGINE` maps each engine routine to its sub-engine (charge_engine,
-  surface_engine, qtaim_engine, converter); that is the `by` of its provenance entry.
+  surface_engine, qtaim_engine); that is the `by` of its provenance entry.
 - `ENGINE_ROUTINES`, the level sets and `DERIV_FUZZY_FAMILY` stay in data/multiwfn.py;
   `CHARGE_ENGINE_VERSION`, `CHARGE_ENGINE_ROUTINES_ADDED` and `engine_routines_at` go.
 - Rule for the future: a change that alters stored values of a routine adds it to

@@ -13,7 +13,7 @@ from qtaim_gen.source.utils import provenance as P
 def test_version_table():
     assert max(ENGINE_CHANGES) == ENGINE_VERSION
     assert routines_at(ENGINE_VERSION) == frozenset(ROUTINE_ENGINE)
-    assert set(ROUTINE_ENGINE) == ENGINE_ROUTINES | {"qtaim", "convert"}
+    assert set(ROUTINE_ENGINE) == ENGINE_ROUTINES | {"qtaim"}
     # every routine was added exactly once
     added = [r for c in ENGINE_CHANGES.values() for r in c["added"]]
     assert len(added) == len(set(added))
@@ -107,3 +107,37 @@ def test_json_to_lmdb_provenance(tmp_path):
         assert sorted(k.decode() for k, _ in txn.cursor() if k.decode() != "length") == ["job_a", "job_b"]
         assert pickle.loads(txn.get(b"job_a"))["routines"]["hirshfeld"]["by"] == "charge_engine"
     env.close()
+
+
+def test_merge_resolves_produced_against_skipped(tmp_path):
+    """A routine recorded as produced in the root file is not still skipped through the
+    generator/ file, nor the reverse."""
+    folder = tmp_path / "job"
+    (folder / "generator").mkdir(parents=True)
+    gen = P.empty()
+    gen["skipped"]["mbis"] = {"reason": "z_above_86", "by": "multiwfn"}
+    gen["routines"]["hirshfeld"] = {"by": "multiwfn"}
+    (folder / "generator" / P.PROVENANCE_FILE).write_text(json.dumps(gen))
+    P.record_routines(str(folder), ["mbis"], "charge_engine", ENGINE_VERSION)
+    P.record_skips(str(folder), {"hirshfeld": {"reason": "ecp_without_edf", "by": "charge_engine"}})
+    prov = P.load(str(folder))
+    assert "mbis" in prov["routines"] and "mbis" not in prov["skipped"]
+    assert "hirshfeld" in prov["skipped"] and "hirshfeld" not in prov["routines"]
+    merged = P.merge(gen, json.loads((folder / P.PROVENANCE_FILE).read_text()))  # as move_results does
+    assert merged["routines"].keys() == {"mbis"} and merged["skipped"].keys() == {"hirshfeld"}
+
+
+def test_engine_produced_and_versions():
+    prov = P.empty()
+    prov["routines"] = {"hirshfeld": {"by": "charge_engine", "engine_version": 2},
+                        "other_alie": {"by": "surface_engine", "engine_version": ENGINE_VERSION},
+                        "chelpg": {"by": "multiwfn"}, "orca": {"by": "orca", "parser_version": 2}}
+    assert P.engine_produced(prov) == {"hirshfeld", "other_alie"}
+    assert P.engine_versions(prov) == [2, ENGINE_VERSION]
+    assert P.engine_routines(prov) == {"hirshfeld", "other_alie"}
+
+
+def test_drop_engines(tmp_path):
+    P.record_engine(str(tmp_path), "surface_engine", {"failures": {"other_esp": 1}})
+    P.drop(str(tmp_path), engines=True)
+    assert P.load(str(tmp_path))["engines"] == {}

@@ -28,32 +28,23 @@ Dry run unless --apply. Folders with a .processing.lock are left alone.
 
 import argparse
 import csv
-import json
 import os
 import sys
-from typing import Iterator, Optional
+from typing import Iterator
 
+from qtaim_gen.source.core.omol import _OTHER_MARKER_KEYS as OTHER_MARKERS
 from qtaim_gen.source.data.engine_versions import routines_at
 from qtaim_gen.source.data.multiwfn import ENGINE_ROUTINES, SURFACE_ENGINE_ROUTINES
 from qtaim_gen.source.utils import provenance
 from qtaim_gen.source.utils.atomic_write import atomic_json_write
+from qtaim_gen.source.utils.provenance import _read
 from qtaim_gen.source.utils.validation import get_expected_timing_keys
 
 LEGACY_KEYS = ("_engine_versions", "_surface_engine_routines", "_converter", "_skipped_routines")
 ENGINE_TIMINGS = ("charge_engine", "surface_engine", "qtaim_engine")
-OTHER_MARKERS = {"other_geometry": "mpp_full", "other_alie": "ALIE_Volume", "other_esp": "ESP_Volume"}
 CHARGE_ROUTINES = ENGINE_ROUTINES - SURFACE_ENGINE_ROUTINES
 _keys, _spin_keys = get_expected_timing_keys(full_set=2, spin_tf=True)
 STEP_ROUTINES = (set(_keys) | set(_spin_keys) | set(OTHER_MARKERS)) - {"other", "convert"}
-
-
-def _read(path: str) -> Optional[dict]:
-    try:
-        with open(path) as f:
-            d = json.load(f)
-    except (OSError, json.JSONDecodeError):
-        return None
-    return d if isinstance(d, dict) else None
 
 
 def _positive(v) -> bool:
@@ -61,14 +52,18 @@ def _positive(v) -> bool:
 
 
 def job_folders(root: str) -> Iterator[str]:
-    """Folders under root holding a generator/timings.json, or a timings.json and no generator/."""
+    """Folders under root holding a timings.json in generator/ or in the folder itself (a
+    run interrupted before its results moved), each once."""
+    seen = set()
     for dirpath, dirnames, files in os.walk(root):
         if os.path.basename(dirpath) == "generator":
             dirnames[:] = []
-            if "timings.json" in files:
-                yield os.path.dirname(dirpath)
-        elif "timings.json" in files and "generator" not in dirnames:
-            yield dirpath
+            folder = os.path.dirname(dirpath) if "timings.json" in files else None
+        else:
+            folder = dirpath if "timings.json" in files else None
+        if folder is not None and folder not in seen:
+            seen.add(folder)
+            yield folder
 
 
 def legacy_provenance(folder: str):

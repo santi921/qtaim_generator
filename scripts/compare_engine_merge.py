@@ -45,7 +45,6 @@ from rdkit import Chem
 
 from qtaim_gen.source.core.parse_qtaim import dft_inp_to_dict
 
-from qtaim_gen.source.data.engine_versions import ENGINES
 from qtaim_gen.source.data.multiwfn import SURFACE_ENGINE_ROUTINES
 from qtaim_gen.source.utils import provenance
 
@@ -189,11 +188,12 @@ def compare_job(orig, new):
         files[name] = (load(os.path.join(orig, "generator", name)), load(os.path.join(new, "generator", name)))
     o_t, n_t = files["timings.json"]
     rec["charge_engine_s"] = (n_t or {}).get("charge_engine")
-    # the routines an engine computed in the new tree (its provenance.json): the rest must be
-    # unchanged, and the Multiwfn baseline time covers exactly these
+    # the charge- and surface-engine routines of the new tree (its provenance.json): the rest
+    # must be unchanged, and the Multiwfn baseline time covers exactly these (QTAIM is not in
+    # charge_engine_s, so its Multiwfn time is not in the baseline either)
     prov_n = provenance.load(new)
-    engine_routines = frozenset(r for r, e in prov_n["routines"].items() if (e or {}).get("by") in ENGINES)
-    rec["engine_version"] = prov_n.get("engine_version")
+    engine_routines = provenance.engine_produced(prov_n) - {"qtaim"}
+    rec["engine_versions"] = ",".join(map(str, provenance.engine_versions(prov_n))) or "none"
     rec["complete"] = bool(o_t) and bool(rec["charge_engine_s"])
     if not rec["complete"]:
         return rec

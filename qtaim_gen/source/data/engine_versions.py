@@ -1,16 +1,18 @@
 """
-One version number for the whole descriptor engine (charge, surface and QTAIM engines and the
-native wavefunction converter), and per version the routines it added or whose stored values
-it changed. Every engine-produced routine records the ENGINE_VERSION it ran at in the job's
-provenance.json (utils/provenance.py); a stored routine is current when that version is at
-least the last version that added or changed it.
+One version number for the whole descriptor engine (charge, surface and QTAIM engines), and
+per version the routines it added or whose stored values it changed. Every engine-produced
+routine records the ENGINE_VERSION it ran at in the job's provenance.json
+(utils/provenance.py); a stored routine is current when that version is at least the last
+version that added or changed it.
 
 Rules: a new routine goes in "added" under a new version; a change that alters a routine's
 stored values goes in "changed". Versions 1-3 are the earlier charge/surface-engine stamps
-(timings.json "_engine_versions", which moved together); the QTAIM engine and the native
-converter predate the first stamp and enter under version 1. Stamps only exist since
-2026-11-03, so changes before that (converged MBIS as the default, 2026-10-15; planarity in
-the surface engine, 2026-11-02) carry no version of their own.
+(timings.json "_engine_versions", which moved together); the QTAIM engine predates the first
+stamp and enters under version 1. The native wavefunction converter is not versioned here:
+its provenance entry records the mode, and a converter change that alters wavefunctions is a
+new mode (omol.NATIVE_CONVERT_MODES), which validation and the converter check compare.
+Stamps only exist since 2026-11-03, so changes before that (converged MBIS as the default,
+2026-10-15; planarity in the surface engine, 2026-11-02) carry no version of their own.
 """
 
 from qtaim_gen.source.data.multiwfn import (
@@ -27,14 +29,13 @@ ROUTINE_ENGINE = {
     **{r: "charge_engine" for r in ENGINE_ROUTINES - SURFACE_ENGINE_ROUTINES},
     **{r: "surface_engine" for r in SURFACE_ENGINE_ROUTINES},
     "qtaim": "qtaim_engine",
-    "convert": "converter",
 }
 ENGINES = frozenset(ROUTINE_ENGINE.values())
 
 _V2 = ENGINE_LEVEL2_ROUTINES | {"elf_fuzzy"}
 ENGINE_CHANGES = {
     1: {"added": frozenset(ROUTINE_ENGINE) - _V2 - SURFACE_ENGINE_LEVEL2_ROUTINES, "changed": frozenset(),
-        "note": "charge and surface engines, QTAIM engine, native converter (before version stamps)"},
+        "note": "charge and surface engines, QTAIM engine (before version stamps)"},
     2: {"added": _V2, "changed": frozenset(),
         "note": "elf_fuzzy (full_set 1), gradient-norm and Laplacian fuzzy integrals (full_set 2)"},
     3: {"added": SURFACE_ENGINE_LEVEL2_ROUTINES, "changed": frozenset(),

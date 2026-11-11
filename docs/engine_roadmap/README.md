@@ -55,7 +55,7 @@ Still open: see the "Open decisions" section of each plan; the resolved ones are
 ## Engine versions and provenance (2026-11-11)
 
 One number, `ENGINE_VERSION` (`data/engine_versions.py`), covers the charge, surface and
-QTAIM engines and the native converter. `ENGINE_CHANGES` lists per version the routines it
+QTAIM engines (the native converter is identified by its mode). `ENGINE_CHANGES` lists per version the routines it
 added and the routines whose stored values it changed. Every job folder has a
 `provenance.json` (`utils/provenance.py`, plan in `provenance_plan.md`): per routine, what
 produced it (an engine, Multiwfn with its build, or ORCA with its parser version), the engine
@@ -79,7 +79,7 @@ of their own (converged MBIS as the default, 2026-10-15; planarity in the surfac
 
 | engine version | change |
 |---|---|
-| 1 | all runs before the stamp: charges, fuzzy density and spin, fuzzy_bond (full_set 0); vdd, mbis, mbis fuzzy (full_set 1); ALIE and planarity (surface engine); QTAIM engine; native converter |
+| 1 | all runs before the stamp: charges, fuzzy density and spin, fuzzy_bond (full_set 0); vdd, mbis, mbis fuzzy (full_set 1); ALIE and planarity (surface engine); QTAIM engine |
 | 2 | adds elf_fuzzy (full_set 1), grad_norm_rho_fuzzy and laplacian_rho_fuzzy (full_set 2); EDF-dependent schemes skipped when any ECP atom lacks EDF (was: when the wavefunction has no EDF at all; no local wavefunction differs, 552 checked) |
 | 3 | adds other_esp (full_set 2, surface engine, exact ESP kernel) |
 | 4 | one ENGINE_VERSION and provenance.json; no routine values change. An ESP surface failure keeps ALIE and planarity, is retried once, then recorded as a permanent skip |

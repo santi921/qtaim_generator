@@ -2024,6 +2024,14 @@ def _run_surface_engine(
         else:
             logger.error("surface_engine: esp_surface failed on %s (%s); retried on the next pass",
                          wf_path, esp_error)
+        # an earlier (e.g. Multiwfn) 'other_esp' timing must not vouch for the ESP fields, nor
+        # its provenance entry: validation then fails until the retry
+        for timings_path in (os.path.join(folder, "timings.json"), os.path.join(gen, "timings.json")):
+            t = _safe_json_load(timings_path)
+            if isinstance(t, dict) and t.pop("other_esp", None) is not None:
+                atomic_json_write(timings_path, t)
+        if not skip_recorded:
+            provenance.drop(folder, ["other_esp"])
     else:
         failures.pop("other_esp", None)
     provenance.record_engine(folder, "surface_engine", {
@@ -2487,7 +2495,8 @@ def _discard_wavefunction_derived_outputs(folder: str, logger: logging.Logger) -
     only ORCA's entry."""
     gen = os.path.join(folder, "generator")
     prov = provenance.load(folder)
-    provenance.drop(folder, (set(prov["routines"]) - {"orca"}) | provenance.skipped(prov), converter=True)
+    provenance.drop(folder, (set(prov["routines"]) - {"orca"}) | provenance.skipped(prov), converter=True,
+                    engines=True)
     targets = []
     for name in os.listdir(folder):
         if name in _KEEP_ON_WAVEFUNCTION_DISCARD:

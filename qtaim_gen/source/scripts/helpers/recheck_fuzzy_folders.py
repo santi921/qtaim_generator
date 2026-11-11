@@ -71,12 +71,9 @@ def _multiplicity(folder: str, entry: str) -> Optional[int]:
 def _engine_routines_of(folder: str) -> Optional[frozenset]:
     """The routines an engine computed for the folder (provenance.json): the recheck
     must not put archived Multiwfn values back over them."""
-    from qtaim_gen.source.data.engine_versions import ENGINES
     from qtaim_gen.source.utils import provenance
 
-    prov = provenance.load(folder)
-    routines = frozenset(r for r, e in prov["routines"].items() if (e or {}).get("by") in ENGINES)
-    return routines or None
+    return provenance.engine_produced(provenance.load(folder)) or None
 
 
 def process_folder(

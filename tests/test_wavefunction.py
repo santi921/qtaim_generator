@@ -280,10 +280,12 @@ def test_other_converter_is_discarded_or_refused(tmp_path):
     redo = _job(tmp_path, "mwfn_with_gbw", wfx_src=mwfn_wfx, gbw=True, timings={"convert": 1.0})
     provenance.record_converter(str(redo), "multiwfn")
     provenance.record_routines(str(redo), ["orca"], "orca", parser_version=2)
+    provenance.record_engine(str(redo), "surface_engine", {"failures": {"other_esp": 1}})
     assert gate(str(redo), "fixed", logger) is True
     assert not (redo / "orca.wfx").exists()
     prov = provenance.load(str(redo))
     assert provenance.converter_tag(prov) is None and set(prov["routines"]) == {"orca"}
+    assert prov["engines"] == {}  # a failure count belongs to the discarded wavefunction
 
     stuck = _job(tmp_path, "mwfn_no_gbw", wfx_src=mwfn_wfx)
     assert gate(str(stuck), "fixed", logger) is None

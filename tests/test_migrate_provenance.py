@@ -89,3 +89,17 @@ def test_cli_walks_a_tree_and_reports(tmp_path, capsys):
     assert "would_migrate: 1" in capsys.readouterr().out
     lines = report.read_text().splitlines()
     assert lines[0].startswith("folder\tstatus") and len(lines) == 2 and "multiwfn" in lines[1]
+
+
+def test_a_folder_with_root_timings_and_an_empty_generator_is_found(tmp_path):
+    from qtaim_gen.source.scripts.helpers.migrate_provenance import job_folders
+
+    folder = tmp_path / "tree" / "cat" / "interrupted"
+    (folder / "generator").mkdir(parents=True)
+    (folder / "generator" / "orca.json").write_text("{}")
+    (folder / "timings.json").write_text(json.dumps({"convert": 1.0, "_converter": "native:fixed"}))
+    _folder(tmp_path, "done", {"charge_engine": 4.0})
+    assert sorted(job_folders(str(tmp_path / "tree"))) == sorted([str(folder), str(tmp_path / "tree" / "cat" / "done")])
+    assert migrate(str(folder), apply=True)["status"] == "migrated"
+    assert provenance.converter_tag(provenance.load(str(folder))) == "native:fixed"
+    assert "_converter" not in json.loads((folder / "timings.json").read_text())

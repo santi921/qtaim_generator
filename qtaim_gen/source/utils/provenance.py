@@ -40,9 +40,14 @@ def _read(path: str) -> Optional[dict]:
 
 def merge(old: Optional[dict], new: Optional[dict]) -> dict:
     """new on top of old, entry by entry in each section (a routine of old that new does
-    not mention is kept); top-level fields from new."""
+    not mention is kept); top-level fields from new. A routine new records as produced
+    is no longer skipped, and one new records as skipped is no longer produced."""
     out = empty()
     for d in (old or {}, new or {}):
+        for r in d.get("routines") or {}:
+            out["skipped"].pop(r, None)
+        for r in d.get("skipped") or {}:
+            out["routines"].pop(r, None)
         for k, v in d.items():
             if k in _SECTIONS and isinstance(v, dict):
                 out[k].update(v)
@@ -109,9 +114,10 @@ def converter_tag(prov: dict) -> Optional[str]:
     return c.get("by")
 
 
-def drop(folder: str, routines=(), converter: bool = False) -> None:
+def drop(folder: str, routines=(), converter: bool = False, engines: bool = False) -> None:
     """Remove entries from both the root and the generator/ file (a partial engine run,
-    or outputs discarded with their wavefunction)."""
+    or outputs discarded with their wavefunction: then also the converter and the
+    engines' run records, e.g. failure counts)."""
     routines = set(routines)
     for path in (os.path.join(folder, PROVENANCE_FILE), os.path.join(folder, "generator", PROVENANCE_FILE)):
         prov = _read(path)
@@ -122,6 +128,8 @@ def drop(folder: str, routines=(), converter: bool = False) -> None:
                 prov[sec].pop(r)
         if converter:
             prov.pop("converter", None)
+        if engines:
+            prov["engines"] = {}
         atomic_json_write(path, prov)
 
 
@@ -142,6 +150,18 @@ def engine_current(prov: dict, routine: str) -> bool:
 def engine_routines(prov: dict) -> frozenset:
     """The folder's routines that are current engine output."""
     return frozenset(r for r in prov.get("routines") or {} if engine_current(prov, r))
+
+
+def engine_produced(prov: dict) -> frozenset:
+    """The folder's routines an engine produced, at any version (values that are the
+    engine's, current or not)."""
+    return frozenset(r for r, e in (prov.get("routines") or {}).items() if (e or {}).get("by") in ENGINES)
+
+
+def engine_versions(prov: dict) -> list:
+    """The engine versions the folder's engine routines were computed at, sorted."""
+    return sorted({e["engine_version"] for e in (prov.get("routines") or {}).values()
+                   if (e or {}).get("by") in ENGINES and isinstance(e.get("engine_version"), int)})
 
 
 def multiwfn_build(out_path: str, multiwfn_cmd: Optional[str] = None) -> dict:

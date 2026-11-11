@@ -511,10 +511,12 @@ def validate_fuzzy_dict(
     return True
 
 
-def validate_other_dict(other_dict_loc: str, verbose: bool = False, logger: any = None, full_set: int = 0):
+def validate_other_dict(other_dict_loc: str, verbose: bool = False, logger: any = None, full_set: int = 0,
+                        skipped: Optional[set] = None):
     """
     Basic check that the other json file has the expected structure.
     Check that it has the keys 'atoms', 'bonds', 'charges', and 'fuzzy'.
+    A permanently skipped other_esp (skipped) needs no ESP_* fields.
     """
     other_dict = _safe_json_load(other_dict_loc, logger=logger)
     if other_dict is None:
@@ -534,7 +536,7 @@ def validate_other_dict(other_dict_loc: str, verbose: bool = False, logger: any 
         "ALIE_Negative_surface_area",
         "ALIE_Overall_skewness",
     ]
-    if full_set > 1:
+    if full_set > 1 and "other_esp" not in (skipped or ()):
         expected_keys += [
             "ESP_Volume",
             "ESP_Surface_Density",
@@ -1753,7 +1755,7 @@ def validation_checks(
             logger.error(f"Fuzzy json validation failed in folder: {folder}")
         tf_cond = False
 
-    if not validate_other_dict(other_dict_loc, verbose=verbose, logger=logger, full_set=full_set):
+    if not validate_other_dict(other_dict_loc, verbose=verbose, logger=logger, full_set=full_set, skipped=skipped):
         if logger:
             logger.error(f"Other json validation failed in folder: {folder}")
         tf_cond = False
