@@ -1,0 +1,71 @@
+{
+ "_note": "Multiwfn 3.8 other_esp (production stdin, production parser) on this orca.wfx: eleesp1 = settings.ini iESPcode=1 (exact up to Multiwfn's Fmch), libreta = iESPcode=2 (production)",
+ "eleesp1": {
+  "other_esp": {
+   "ESP_Volume": 1086.79879,
+   "ESP_Surface_Density": 2.816,
+   "ESP_Minimal_value": -6.99849,
+   "ESP_Maximal_value": 37.2308,
+   "ESP_Overall_surface_area": 586.93527,
+   "ESP_Positive_surface_area": 285.79978,
+   "ESP_Negative_surface_area": 301.13549,
+   "ESP_Overall_average_value": 0.00613691,
+   "ESP_Positive_average_value": 0.01791409,
+   "ESP_Negative_average_value": -0.0050405,
+   "ESP_Overall_variance": 0.00036027,
+   "ESP_Positive_variance": 0.00035163,
+   "ESP_Negative_variance": 8.63e-06,
+   "ESP_Balance_of_charges": 0.02339159,
+   "ESP_Product_of_sigma": 8.43e-06,
+   "ESP_Internal_charge_separation": 0.01257644,
+   "ESP_Molecular_polarity_index": 0.30773669,
+   "ESP_Nonpolar_surface_area": 137.69,
+   "ESP_Polar_surface_area": 26.67,
+   "ESP_Overall_skewness": 1.4070620767
+  },
+  "vef_before": [
+   42120,
+   126354,
+   84236
+  ],
+  "vef_after": [
+   12453,
+   37353,
+   24902
+  ]
+ },
+ "libreta": {
+  "other_esp": {
+   "ESP_Volume": 1086.79879,
+   "ESP_Surface_Density": 2.816,
+   "ESP_Minimal_value": -6.99875,
+   "ESP_Maximal_value": 37.23041,
+   "ESP_Overall_surface_area": 586.93527,
+   "ESP_Positive_surface_area": 285.79978,
+   "ESP_Negative_surface_area": 301.13549,
+   "ESP_Overall_average_value": 0.00613659,
+   "ESP_Positive_average_value": 0.01791377,
+   "ESP_Negative_average_value": -0.00504081,
+   "ESP_Overall_variance": 0.00036027,
+   "ESP_Positive_variance": 0.00035163,
+   "ESP_Negative_variance": 8.63e-06,
+   "ESP_Balance_of_charges": 0.02339182,
+   "ESP_Product_of_sigma": 8.43e-06,
+   "ESP_Internal_charge_separation": 0.01257642,
+   "ESP_Molecular_polarity_index": 0.30773666,
+   "ESP_Nonpolar_surface_area": 137.69,
+   "ESP_Polar_surface_area": 26.67,
+   "ESP_Overall_skewness": 1.4070627484
+  },
+  "vef_before": [
+   42120,
+   126354,
+   84236
+  ],
+  "vef_after": [
+   12453,
+   37353,
+   24902
+  ]
+ }
+}

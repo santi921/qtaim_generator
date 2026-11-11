@@ -29,9 +29,11 @@ from qtaim_gen.source.utils.validation import (
     TIMINGS_PATCHED_KEY,
     TIMINGS_ENGINE_VERSIONS_KEY,
     TIMINGS_SKIPPED_KEY,
+    TIMINGS_SURFACE_ROUTINES_KEY,
     CONVERTER_KEY,
     _safe_json_load,
     engine_routines_of,
+    surface_engine_routines_of,
     skipped_routines,
     TIMING_PLACEHOLDER,
 )
@@ -45,6 +47,7 @@ from qtaim_gen.source.data.multiwfn import (
     ENGINE_LEVEL1_ROUTINES,
     ENGINE_LEVEL2_ROUTINES,
     ENGINE_ROUTINES,
+    SURFACE_ENGINE_LEVEL2_ROUTINES,
     SURFACE_ENGINE_ROUTINES,
     charge_data,
     charge_data_dict,
@@ -1932,29 +1935,45 @@ def _run_qtaim_engine(folder: str, n_threads: int, logger: logging.Logger, resta
     return True
 
 
+def _surface_engine_routines(full_set: int) -> frozenset:
+    """The surface-engine routines a folder gets at this full_set level."""
+    return SURFACE_ENGINE_ROUTINES if full_set >= 2 else SURFACE_ENGINE_ROUTINES - SURFACE_ENGINE_LEVEL2_ROUTINES
+
+
 def _run_surface_engine(
     folder: str,
     n_threads: int,
     logger: logging.Logger,
     restart: bool = False,
+    full_set: int = 0,
 ) -> bool:
-    """other_geometry and other_alie with core/surface_engine.py: writes
-    other_geometry.json and other_alie.json (the flat payloads
-    parse_other_doc_geometry and parse_other_doc_esp produce, compiled into
-    other.json by parse_multiwfn) and a 'surface_engine' timing."""
+    """other_geometry, other_alie and, at full_set >= 2, other_esp with
+    core/surface_engine.py: writes other_geometry.json, other_alie.json and
+    other_esp.json (the flat payloads parse_other_doc_geometry and
+    parse_other_doc_esp produce, compiled into other.json by parse_multiwfn), a
+    'surface_engine' timing, an 'other_esp' timing when it computed the ESP surface,
+    and the routines it computed (TIMINGS_SURFACE_ROUTINES_KEY). On a restart it
+    computes only the wanted routines generator/ lacks: those it did not compute
+    itself (Multiwfn's, or outside an older engine version's routine set) or whose
+    values are not in other.json; move_results merges the new values into the stored
+    other.json."""
+    wanted = _surface_engine_routines(full_set)
     gen = os.path.join(folder, "generator")
+    have = frozenset()
     if restart:
         try:
             with open(os.path.join(gen, "timings.json")) as f:
-                done = json.load(f).get("surface_engine", 0) > 0
+                timings = json.load(f)
             with open(os.path.join(gen, "other.json")) as f:
                 other = json.load(f)
-            done = done and all(other.get(_OTHER_MARKER_KEYS[r]) is not None for r in SURFACE_ENGINE_ROUTINES)
+            have = frozenset(r for r in surface_engine_routines_of(timings)
+                             if other.get(_OTHER_MARKER_KEYS[r]) is not None)
         except (OSError, json.JSONDecodeError, TypeError, AttributeError):
-            done = False
-        if done:
+            have = frozenset()
+        if wanted <= have:
             logger.info("surface_engine: completed run found in generator/ - skipping")
             return True
+    todo = wanted - have
 
     wf_path = _wavefunction_path(folder)
     if wf_path is None or not wf_path.endswith(".wfx"):
@@ -1966,23 +1985,34 @@ def _run_surface_engine(
 
     numba.set_num_threads(max(1, min(n_threads, numba.config.NUMBA_NUM_THREADS)))
     start = time.time()
-    nuclei = wfx_nuclei(wf_path)
-    if nuclei is None:
-        logger.error("surface_engine: no nuclei in %s", wf_path)
-        return False
+    results, esp_s = {}, None
     try:
-        geometry = surface_engine.planarity(nuclei[2], nuclei[0])
-        out, meta = surface_engine.alie_surface(wf_path)
+        wf = surface_engine.load_wavefunction(wf_path)
+        if "other_geometry" in todo:
+            results["other_geometry"] = (surface_engine.planarity(wf[0]["coords"], wf[0]["atnums"]), {})
+        if "other_alie" in todo:
+            results["other_alie"] = surface_engine.alie_surface(wf_path, wf=wf)
+        if "other_esp" in todo:
+            t0 = time.time()
+            results["other_esp"] = surface_engine.esp_surface(wf_path, wf=wf)
+            esp_s = time.time() - t0
     except Exception as e:
         logger.error("surface_engine failed on %s: %s", wf_path, e)
         return False
     elapsed = time.time() - start
-    atomic_json_write(os.path.join(folder, "other_geometry.json"), geometry)
-    atomic_json_write(os.path.join(folder, "other_alie.json"), out)
+    for routine, (payload, _) in results.items():
+        atomic_json_write(os.path.join(folder, f"{routine}.json"), payload)
     _update_timing(folder, "surface_engine", elapsed, logger)
+    if esp_s is not None:
+        # the step's own timing, which validation expects at full_set >= 2
+        _update_timing(folder, "other_esp", esp_s, logger)
+    _stamp_engine_version(folder, "surface_engine", CHARGE_ENGINE_VERSION)
+    _update_timing(folder, TIMINGS_SURFACE_ROUTINES_KEY, sorted(have | todo), logger)
     logger.info(
-        "surface_engine: other_alie in %.2f s (grid %s, V/E/F %s)",
-        elapsed, meta.get("grid"), meta.get("vef_after"),
+        "surface_engine: %s in %.2f s%s%s",
+        sorted(todo), elapsed,
+        "".join(f"; {r} grid {m['grid']}, V/E/F {m['vef_after']}" for r, (_, m) in sorted(results.items()) if m),
+        f"; kept {sorted(have & wanted)} from generator/" if have & wanted else "",
     )
     return True
 
@@ -2010,7 +2040,7 @@ def _run_engines(
             _run_qtaim_engine(folder, n_threads=n_threads, logger=logger, restart=restart)
         if charge_engine:
             _run_charge_engine(folder, n_threads=n_threads, logger=logger, restart=restart, full_set=full_set)
-            _run_surface_engine(folder, n_threads=n_threads, logger=logger, restart=restart)
+            _run_surface_engine(folder, n_threads=n_threads, logger=logger, restart=restart, full_set=full_set)
         return
 
     import qtaim_gen

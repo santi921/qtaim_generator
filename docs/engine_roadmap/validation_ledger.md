@@ -4,7 +4,7 @@ Every validation run of the native engines (charge, surface, QTAIM) against Mult
 gbasis, critic2, extended precision or physical invariants. One row per run, with the
 reference, the data, the result and where the raw output lives.
 
-State as of 2026-11-11, branch `feat/charge-engine` (098e2ab), plus `feat/engine-fuzzy-elf`. Companion documents:
+State as of 2026-11-11, branch `feat/charge-engine` (c309d2a), plus `feat/engine-esp-surface`. Companion documents:
 `README.md` (decisions, divergence changelog), `qtaim_verification_campaign.md` (QTAIM
 tiers 1-3), `mbis_converged.md` (MBIS).
 
@@ -101,7 +101,7 @@ deliberately diverges from Multiwfn, which stops when no charge moves by 1e-4 e 
 | Multiwfn's rule vs converged, actinides | 5 jobs | 0.03-0.38 e |
 | fitted guess vs Multiwfn's guess | 35 jobs | 32 within 0.005 e; the 3 that differ have the better objective |
 
-## 3. Surface engine (`core/surface_engine.py`, other_alie and other_geometry)
+## 3. Surface engine (`core/surface_engine.py`, other_alie, other_geometry and other_esp)
 
 **Planarity** (other_geometry: MPP and SDP for all atoms and for heavy atoms, Angstrom).
 
@@ -128,6 +128,20 @@ No local molecule outside these test geometries has a non-trivial exact tie.
 
 The NERSC difference is larger than the local and LRC runs. Its cause (print rounding of
 the statistics, the mesh, or the Multiwfn build) has not been checked.
+
+| date | reference | data | result | code | raw output |
+|---|---|---|---|---|---|
+| 2026-11-03 | refactor guard (shared mesh builder for ALIE and ESP) | 2 fixtures + 10 wfx_pull jobs | ALIE values and mesh counts bit-identical before and after | feat/engine-esp-surface | `data/engine_test_2026-11/esp_surface/alie_baseline.json`, `alie_check.py` |
+
+**ESP surface** (other_esp, full_set 2; 20 parsed values: extremes in kcal/mol, areas in
+Bohr^2, averages, variances and Pi in a.u., polarity index in eV, polar and nonpolar areas in
+Angstrom^2).
+
+| date | reference | data | result | code | raw output |
+|---|---|---|---|---|---|
+| 2026-11-03 | Multiwfn parity, exact ESP (iESPcode=1, eleesp1; engine with Multiwfn's Fmch Boys function) | 2 fixtures (open shell; Xe ECP + EDF) | identical mesh (counts before and after elimination); all 20 values within print precision | feat/engine-esp-surface | `tests/test_files/charge_engine/*/multiwfn_reference_esp.json` |
+| 2026-11-03 | production Multiwfn (libreta, iESPcode=2) vs engine (exact ESP) | 99 jobs: 87 wfx_pull (7 OMol verticals, 25 ECP) + 12 actinide nitrates (Th, U, Np, Pu; X2C and ECP) | mesh identical in 99/99; volume, total area, density within print precision. ESP fields (median / p90 / max): extremes 2.2e-3 / 7.9e-2 / 0.47 kcal/mol (min) and 3.8e-3 / 9.9e-2 / 0.49 (max), average 4.1e-6 / 1.3e-4 / 7.4e-4 a.u., positive area 2.4e-6 / 0.33 / 3.7 Bohr^2, polarity index 7.0e-5 / 2.7e-3 / 2.0e-2 eV, skewness 5.0e-5 / 2.8e-3 / 4.0e-2; nitrates alone at most 0.048 kcal/mol. A divergence by design (README changelog); attributed to libreta [I], with exact-code parity shown on the 2 fixtures only (the 27-job eleesp1 run was stopped). Engine median 2.8x faster than Multiwfn (0.97-12.1x; nitrates 9.8x) | same | `data/engine_test_2026-11/esp_surface/` (`esp_vs_libreta.jsonl`, `refs_esp_libreta/`) |
+| 2026-11-04 | production Multiwfn (libreta), LRC full runner at full_set 2 | tm_react, 9 jobs (Re, Ag + Nb, Ti, Pt, Pd, Hf; `ref_l2` vs `fz_l2`) | extremes within 0.067 kcal/mol (maximum) and 0.027 (minimum); positive and negative areas 5.8e-2 Bohr^2, polar and nonpolar 3.1e-2 Angstrom^2; overall average 6.2e-5 a.u., polarity index 1.7e-3 eV, skewness 1.1e-4; volume, total area and density within print precision (4.9e-6). All inside the range of the 99-job row. Surface engine 114-741 s vs Multiwfn other_esp 133-1292 s (1.2-2.9x) | `feat/engine-esp-surface` (qtaim_generator_esp clone) | LRC `engine_test/ref_l2`, `fz_l2` |
 
 ## 4. QTAIM engine (`core/qtaim_engine.py`, `cp_search.py`, `esp.py`)
 
@@ -218,7 +232,8 @@ Current behaviours without a validation on current code, and checks not yet done
 | determinism across thread counts (QTAIM criterion E) | not recorded | run 1, 4, 8 threads on the ladder |
 | level-of-theory matrix | double hybrids, HF, Cartesian basis sets, ROKS beyond one radical, ORCA 5 vs ORCA 6 not covered | tier 3 supplementary set |
 | results recorded on older code | the 87-job, 18-reference and 16-reference local sets predate the threading fixes (#63-#65) and the converged MBIS default | rerun the local sets on current code; they take minutes |
-| full_set 2 routines | still Multiwfn (bader, laplacian_bond, other_esp) | when engines exist |
+| full_set 2 routines | still Multiwfn (bader, laplacian_bond) | when engines exist |
+| ESP surface vs Multiwfn's exact code | exact-code parity on 2 fixtures only; the libreta differences on 99 jobs are attributed, not shown | eleesp1 (iESPcode=1) references on more jobs; slow (about 25x libreta) |
 | fuzzy ELF / gradient / Laplacian on cluster actinides | done on LRC tm_react (ELF 70 jobs, gradient and Laplacian 9 jobs); none on actinides on a cluster; the Laplacian ECP-core differences are read as roundoff, not proven | NERSC: a separate eval that includes these changes (not tracked here yet); 80-bit Laplacian on one Hf or Tl job |
 
 ## 8. Adding a row

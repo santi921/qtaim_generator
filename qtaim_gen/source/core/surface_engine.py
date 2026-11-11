@@ -1,23 +1,25 @@
-"""ALIE molecular-surface analysis following Multiwfn 3.8 surfana, as run by the
-production other_alie step ("12\\n2\\n2\\n0\\n-1\\n-1\\nq\\n": main function 12,
-mapped function 2 = average local ionization energy, default rho = 0.001 a.u.
-isosurface).
+"""ALIE and ESP molecular-surface analysis following Multiwfn 3.8 surfana, as run by
+the production other_alie step ("12\\n2\\n2\\n0\\n-1\\n-1\\nq\\n": main function 12,
+mapped function 2 = average local ionization energy) and other_esp step
+("12\\n0\\n-1\\n-1\\nq\\n": the default mapped function 1, ESP), both on the default
+rho = 0.001 a.u. isosurface.
 
 Reproduces, in Multiwfn's order:
-  - grid box: atoms +- 1.7 * vdW radius, 0.2 Bohr spacing, rho incl. EDF at
-    D20.13-rounded coordinates (savecubmat)
+  - grid box: atoms +- 1.7 * vdW radius, 0.2 Bohr spacing (ALIE) or 0.25 Bohr
+    (ESP), rho incl. EDF at D20.13-rounded coordinates (savecubmat)
   - marching tetrahedra (marchtetra/genvertex: main-axis decomposition, six
     tetrahedra sharing the 4-3 diagonal), one vertex per cut edge placed by three
     bisections plus linear interpolation (vertexinterpolate), and the enclosed
     volume from the pre-merge vertices
-  - vertex elimination: greedy merge within 0.1 Bohr, then removal of vertices
-    with two and then three live neighbours, all serial in index order
+  - vertex elimination: greedy merge within half the spacing, then removal of
+    vertices with two and then three live neighbours, all serial in index order
   - ALIE = sum n_i |e_i| phi_i^2 / sum n_i phi_i^2 at the surviving vertices (MOs
-    only, no EDF), area-weighted facet statistics
+    only, no EDF), or the total ESP there (core/esp.py, no EDF term), and the
+    area-weighted facet statistics
 
-and returns the eight values the production parser keeps (other.json ALIE_*).
+and returns the values the production parser keeps (other.json ALIE_*, ESP_*).
 
-    surface-engine --wfx orca.wfx --out alie.json
+    surface-engine --wfx orca.wfx --out alie.json [--function esp]
 """
 
 import argparse
@@ -37,11 +39,14 @@ from qtaim_gen.source.data import multiwfn_tables as T
 
 ISOVALUE = 0.001  # surfisoval
 SPACING = 0.2  # grdspc for ALIE
-CRITMERGE = SPACING * 0.5  # grdspc * spcmergeratio
+ESP_SPACING = 0.25  # grdspc for ESP (imapfunc 1)
+SPCMERGERATIO = 0.5  # critmerge = grdspc * spcmergeratio
 VDWMULTI = 1.7
 NBISEC = 3
 AU2EV = 27.2113838  # Multiwfn's au2eV
 AVOGADRO = 6.02214179e23  # Multiwfn's avogacst
+AU2KCAL = 627.51  # Multiwfn's au2kcal
+POLAR_KCAL = 10.0  # surface with |ESP| above this (kcal/mol) is polar
 
 # getvertind: cube corner 1..8 -> (dx, dy, dz) offset from the cube origin
 CORNER_OFFSET = np.array(
@@ -406,7 +411,7 @@ def _eliminate(pos, conn, cpos, tri, crit2):
     return elim, alltri[:nt], elimtri[:nt], ok
 
 
-def _bisect_vertices(vtx_a, vtx_b, val, org, coords, basis, wfx, shape):
+def _bisect_vertices(vtx_a, vtx_b, val, org, coords, basis, wfx, shape, spacing):
     """vertexinterpolate with nbisec=3: bisect the corner pair (a = first
     argument) three times on fdens, then interpolate linearly on the last
     bracket. Corner positions are org + index * spacing (not the rounded grid
@@ -414,8 +419,8 @@ def _bisect_vertices(vtx_a, vtx_b, val, org, coords, basis, wfx, shape):
     _, ny, nz = shape
     ia = np.stack([vtx_a // (ny * nz), (vtx_a // nz) % ny, vtx_a % nz], axis=1)
     ib = np.stack([vtx_b // (ny * nz), (vtx_b // nz) % ny, vtx_b % nz], axis=1)
-    a = org + ia * SPACING
-    b = org + ib * SPACING
+    a = org + ia * spacing
+    b = org + ib * spacing
     flat = val.ravel()
     va = flat[vtx_a].copy()
     vb = flat[vtx_b].copy()
@@ -472,24 +477,20 @@ def planarity(coords, atnums):
     return out
 
 
-@limit_blas_threads
-def alie_surface(wfx_path, chunk_points=262144):
+def molecular_surface(wfx, basis, spacing, chunk_points=262144):
+    """The rho = ISOVALUE surface surfana builds at this grid spacing: grid,
+    marching tetrahedra, bisection, enclosed volume, vertex elimination and facet
+    areas. Returns the vertex positions with the surviving ones (live), the
+    surviving facets and their areas, the volume and mesh counts, and timings."""
     t = {}
-    t0 = time.perf_counter()
-    wfx = read_wfx(wfx_path)
-    if wfx["mo_energy"] is None:
-        raise ValueError("wfx has no <Molecular Orbital Energies>")
-    basis = prepare_basis(wfx)
     coords = wfx["coords"]
     atnums = wfx["atnums"]
-    t["load"] = time.perf_counter() - t0
-
     t0 = time.perf_counter()
     vdw = np.array([T.VDWR[z] for z in atnums]) / B2A
     org = (coords - VDWMULTI * vdw[:, None]).min(axis=0)
     end = (coords + VDWMULTI * vdw[:, None]).max(axis=0)
-    shape = tuple(int(np.floor((end[k] - org[k]) / SPACING + 0.5)) + 1 for k in range(3))
-    axes = [np.array([_d20_13(org[k] + i * SPACING) for i in range(shape[k])]) for k in range(3)]
+    shape = tuple(int(np.floor((end[k] - org[k]) / spacing + 0.5)) + 1 for k in range(3))
+    axes = [np.array([_d20_13(org[k] + i * spacing) for i in range(shape[k])]) for k in range(3)]
     val = np.empty(shape)
     slab = max(1, chunk_points // (shape[1] * shape[2]))
     yz = np.stack(np.meshgrid(axes[1], axes[2], indexing="ij"), axis=-1).reshape(-1, 2)
@@ -506,33 +507,33 @@ def alie_surface(wfx_path, chunk_points=262144):
     width = 32
     while True:
         vtx_a, vtx_b, tri, conn, cpos, _, nint, ok = _march(
-            val, ISOVALUE, org, SPACING, CORNER_OFFSET, TETRAHEDRA, np.zeros((0, 3)), width
+            val, ISOVALUE, org, spacing, CORNER_OFFSET, TETRAHEDRA, np.zeros((0, 3)), width
         )
         if ok:
             break
         width *= 2
     t["polygonize"] = time.perf_counter() - t0
     t0 = time.perf_counter()
-    pos = _bisect_vertices(vtx_a, vtx_b, val, org, coords, basis, wfx, shape)
+    pos = _bisect_vertices(vtx_a, vtx_b, val, org, coords, basis, wfx, shape, spacing)
     t["bisect"] = time.perf_counter() - t0
     t0 = time.perf_counter()
-    *_, vol, _, _ = _march(val, ISOVALUE, org, SPACING, CORNER_OFFSET, TETRAHEDRA, pos, conn.shape[1])
-    totvol = vol[0] + vol[1] + vol[2] + vol[3] + nint * SPACING**3
+    *_, vol, _, _ = _march(val, ISOVALUE, org, spacing, CORNER_OFFSET, TETRAHEDRA, pos, conn.shape[1])
+    totvol = vol[0] + vol[1] + vol[2] + vol[3] + nint * spacing**3
     n_before = (len(pos), int(cpos.sum()) // 2, len(tri))
 
+    critmerge = spacing * SPCMERGERATIO
     while True:
         conn_w = np.zeros((len(pos), width), dtype=np.int64)
         conn_w[:, : conn.shape[1]] = conn
         pos_m = pos.copy()
         cpos_m = cpos.copy()
-        elim, alltri, elimtri, ok = _eliminate(pos_m, conn_w, cpos_m, tri, CRITMERGE**2)
+        elim, alltri, elimtri, ok = _eliminate(pos_m, conn_w, cpos_m, tri, critmerge**2)
         if ok:
             break
         width *= 2
     live_tri = alltri[elimtri == 0]
     t["eliminate"] = time.perf_counter() - t0
 
-    t0 = time.perf_counter()
     p1, p2, p3 = pos_m[live_tri[:, 0]], pos_m[live_tri[:, 1]], pos_m[live_tri[:, 2]]
     va, vb = p2 - p1, p3 - p1
     cross = np.stack([
@@ -541,19 +542,27 @@ def alie_surface(wfx_path, chunk_points=262144):
         va[:, 0] * vb[:, 1] - va[:, 1] * vb[:, 0],
     ], axis=1)
     area = 0.5 * np.sqrt(cross[:, 0] ** 2 + cross[:, 1] ** 2 + cross[:, 2] ** 2)
-
     live = np.flatnonzero(elim == 0)
-    _, rho_mo, num = _evaluate(pos_m[live], coords, basis, wfx, with_alie=True)
-    with np.errstate(divide="ignore", invalid="ignore"):
-        alie_live = np.where(rho_mo == 0.0, 0.0, num / rho_mo)
-    alie = np.zeros(len(pos_m))
-    alie[live] = alie_live
-    t["alie"] = time.perf_counter() - t0
+    slots = np.arange(conn_w.shape[1])[None, :] < cpos_m[live][:, None]
+    e_after = ((elim[conn_w[live]] == 0) & slots).sum() // 2
+    return {
+        "pos": pos_m, "live": live, "live_tri": live_tri, "area": area, "volume": float(totvol),
+        "grid": list(shape), "vef_before": list(n_before),
+        "vef_after": [int(len(live)), int(e_after), int(len(live_tri))], "timings_s": t,
+    }
 
-    # statistics (first live vertex wins ties, as the strict comparisons do)
-    vmin = alie_live[np.argmin(alie_live)]
-    vmax = alie_live[np.argmax(alie_live)]
-    fval = (alie[live_tri[:, 0]] + alie[live_tri[:, 1]] + alie[live_tri[:, 2]]) / 3.0
+
+def _facet_statistics(val, live, live_tri, area):
+    """surfana's statistics (MW/surfana.f90:1188-1325) of a function with values val
+    at the vertices: extremes over the live vertices (the first wins ties, as the
+    strict comparisons do); facet value = mean of its three vertices; area-weighted
+    averages, variances and skewness by sign; Pi, the polarity index and the polar
+    and nonpolar areas (ESP). An average over an empty sign is 0/0 = NaN and its
+    variance 0, as Multiwfn computes them."""
+    v = val[live]
+    vmin = v[np.argmin(v)]
+    vmax = v[np.argmax(v)]
+    fval = (val[live_tri[:, 0]] + val[live_tri[:, 1]] + val[live_tri[:, 2]]) / 3.0
     area_all = area.sum()
     pos_f = fval >= 0
     area_pos = area[pos_f].sum()
@@ -561,33 +570,134 @@ def alie_surface(wfx_path, chunk_points=262144):
     sum_pos = (fval[pos_f] * area[pos_f]).sum()
     sum_neg = (fval[~pos_f] * area[~pos_f]).sum()
     avg_all = (sum_pos + sum_neg) / area_all
-    avg_pos = sum_pos / area_pos if area_pos else 0.0
-    avg_neg = sum_neg / area_neg if area_neg else 0.0
+    with np.errstate(divide="ignore", invalid="ignore"):
+        avg_pos = sum_pos / area_pos
+        avg_neg = sum_neg / area_neg
     var_pos = (area[pos_f] * (fval[pos_f] - avg_pos) ** 2).sum() / area_pos if area_pos else 0.0
     var_neg = (area[~pos_f] * (fval[~pos_f] - avg_neg) ** 2).sum() / area_neg if area_neg else 0.0
     var_all = var_pos + var_neg
-    skew_all = (area * (fval - avg_all) ** 3).sum() / area_all / var_all**1.5
-    totmass = sum(T.ATMWEI[z] for z in atnums)
-    density = totmass / AVOGADRO * (1e24 / (totvol * B2A**3))
-
-    out = {
-        "ALIE_Volume": float(totvol),
-        "ALIE_Surface_Density": float(density),
-        "ALIE_Minimal_value": float(vmin * AU2EV),
-        "ALIE_Maximal_value": float(vmax * AU2EV),
-        "ALIE_Overall_surface_area": float(area_all),
-        "ALIE_Positive_surface_area": float(area_pos),
-        "ALIE_Negative_surface_area": float(area_neg),
-        "ALIE_Overall_skewness": float(skew_all),
+    with np.errstate(divide="ignore", invalid="ignore"):
+        nu = var_pos * var_neg / (var_pos + var_neg) ** 2
+    nonpolar = np.abs(fval * AU2KCAL) <= POLAR_KCAL
+    return {
+        "min": vmin, "max": vmax, "area": area_all, "area_pos": area_pos, "area_neg": area_neg,
+        "avg": avg_all, "avg_pos": avg_pos, "avg_neg": avg_neg,
+        "var": var_all, "var_pos": var_pos, "var_neg": var_neg, "nu": nu,
+        "skew": (area * (fval - avg_all) ** 3).sum() / area_all / var_all**1.5,
+        "pi": (np.abs(fval - avg_all) * area).sum() / area_all,
+        "mpi": (np.abs(fval) * area).sum() / area_all,
+        "area_nonpolar": area[nonpolar].sum(), "area_polar": area[~nonpolar].sum(),
     }
-    slots = np.arange(conn_w.shape[1])[None, :] < cpos_m[live][:, None]
-    e_after = ((elim[conn_w[live]] == 0) & slots).sum() // 2
+
+
+def _surface_density(atnums, volume):
+    """Estimated density (M/V) in g/cm^3 from the enclosed volume in Bohr^3."""
+    totmass = sum(T.ATMWEI[z] for z in atnums)
+    return totmass / AVOGADRO * (1e24 / (volume * B2A**3))
+
+
+def load_wavefunction(wfx_path):
+    """(wfx, basis) of a .wfx, for the surface functions to share one read."""
+    wfx = read_wfx(wfx_path)
+    return wfx, prepare_basis(wfx)
+
+
+@limit_blas_threads
+def alie_surface(wfx_path, chunk_points=262144, wf=None):
+    """wf: (wfx, basis) from load_wavefunction, instead of reading wfx_path."""
+    t0 = time.perf_counter()
+    wfx, basis = wf or load_wavefunction(wfx_path)
+    if wfx["mo_energy"] is None:
+        raise ValueError("wfx has no <Molecular Orbital Energies>")
+    load = time.perf_counter() - t0
+    surf = molecular_surface(wfx, basis, SPACING, chunk_points)
+    t = {"load": load, **surf["timings_s"]}
+
+    t0 = time.perf_counter()
+    live = surf["live"]
+    _, rho_mo, num = _evaluate(surf["pos"][live], wfx["coords"], basis, wfx, with_alie=True)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        alie_live = np.where(rho_mo == 0.0, 0.0, num / rho_mo)
+    alie = np.zeros(len(surf["pos"]))
+    alie[live] = alie_live
+    t["alie"] = time.perf_counter() - t0
+
+    st = _facet_statistics(alie, live, surf["live_tri"], surf["area"])
+    out = {
+        "ALIE_Volume": surf["volume"],
+        "ALIE_Surface_Density": float(_surface_density(wfx["atnums"], surf["volume"])),
+        "ALIE_Minimal_value": float(st["min"] * AU2EV),
+        "ALIE_Maximal_value": float(st["max"] * AU2EV),
+        "ALIE_Overall_surface_area": float(st["area"]),
+        "ALIE_Positive_surface_area": float(st["area_pos"]),
+        "ALIE_Negative_surface_area": float(st["area_neg"]),
+        "ALIE_Overall_skewness": float(st["skew"]),
+    }
     meta = {
-        "grid": list(shape),
-        "vef_before": list(n_before),
-        "vef_after": [int(len(live)), int(e_after), int(len(live_tri))],
-        "average_au": float(avg_pos),
-        "variance_au2": float(var_all),
+        "grid": surf["grid"],
+        "vef_before": surf["vef_before"],
+        "vef_after": surf["vef_after"],
+        "average_au": float(st["avg_pos"]),
+        "variance_au2": float(st["var"]),
+        "timings_s": {k: round(v, 3) for k, v in t.items()},
+    }
+    return out, meta
+
+
+@limit_blas_threads
+def esp_surface(wfx_path, chunk_points=262144, boys_mode="exact", wf=None):
+    """The production other_esp step ("12\\n0\\n-1\\n-1\\nq\\n": function 12 with
+    the default mapped function, ESP, on the rho = 0.001 isosurface at 0.25 Bohr):
+    the same surface construction as alie_surface, the total ESP (core/esp.py,
+    no EDF term, as Multiwfn) at the surviving vertices, and the 20 values the
+    production parser keeps (other.json ESP_*), in the units it reads them: kcal/mol
+    for the extremes, Bohr^2 for areas, a.u. for averages, variances and Pi, eV for
+    the polarity index, Angstrom^2 for the polar and nonpolar areas. Production
+    Multiwfn evaluates the ESP with libreta (iESPcode=2), the engine exactly
+    (docs/engine_roadmap/README.md, divergence changelog). wf: (wfx, basis) from
+    load_wavefunction, instead of reading wfx_path."""
+    from qtaim_gen.source.core.esp import electrostatic_potential
+
+    t0 = time.perf_counter()
+    wfx, basis = wf or load_wavefunction(wfx_path)
+    load = time.perf_counter() - t0
+    surf = molecular_surface(wfx, basis, ESP_SPACING, chunk_points)
+    t = {"load": load, **surf["timings_s"]}
+
+    t0 = time.perf_counter()
+    live = surf["live"]
+    esp = np.zeros(len(surf["pos"]))
+    esp[live] = electrostatic_potential(surf["pos"][live], wfx, basis, boys_mode=boys_mode)[2]
+    t["esp"] = time.perf_counter() - t0
+
+    st = _facet_statistics(esp, live, surf["live_tri"], surf["area"])
+    out = {
+        "ESP_Volume": surf["volume"],
+        "ESP_Surface_Density": float(_surface_density(wfx["atnums"], surf["volume"])),
+        "ESP_Minimal_value": float(st["min"] * AU2KCAL),
+        "ESP_Maximal_value": float(st["max"] * AU2KCAL),
+        "ESP_Overall_surface_area": float(st["area"]),
+        "ESP_Positive_surface_area": float(st["area_pos"]),
+        "ESP_Negative_surface_area": float(st["area_neg"]),
+        "ESP_Overall_average_value": float(st["avg"]),
+        "ESP_Positive_average_value": float(st["avg_pos"]),
+        "ESP_Negative_average_value": float(st["avg_neg"]),
+        "ESP_Overall_variance": float(st["var"]),
+        "ESP_Positive_variance": float(st["var_pos"]),
+        "ESP_Negative_variance": float(st["var_neg"]),
+        "ESP_Balance_of_charges": float(st["nu"]),
+        "ESP_Product_of_sigma": float(st["nu"] * st["var"]),
+        "ESP_Internal_charge_separation": float(st["pi"]),
+        "ESP_Molecular_polarity_index": float(st["mpi"] * AU2EV),
+        "ESP_Nonpolar_surface_area": float(st["area_nonpolar"] * B2A * B2A),
+        "ESP_Polar_surface_area": float(st["area_polar"] * B2A * B2A),
+        "ESP_Overall_skewness": float(st["skew"]),
+    }
+    meta = {
+        "grid": surf["grid"],
+        "vef_before": surf["vef_before"],
+        "vef_after": surf["vef_after"],
+        "boys_mode": boys_mode,
         "timings_s": {k: round(v, 3) for k, v in t.items()},
     }
     return out, meta
@@ -598,19 +708,25 @@ def main(argv=None):
     p.add_argument("--wfx", required=True)
     p.add_argument("--out", required=True)
     p.add_argument("--nthreads", type=int, default=None)
+    p.add_argument("--function", choices=("alie", "esp"), default="alie", help="mapped function")
+    p.add_argument("--boys_mode", choices=("exact", "multiwfn"), default="exact",
+                   help="ESP Boys function: exact, or Multiwfn's Fmch (eleesp1 parity checks)")
     args = p.parse_args(argv)
     if args.nthreads:
         import numba
 
         numba.set_num_threads(args.nthreads)
     t0 = time.perf_counter()
-    out, meta = alie_surface(args.wfx)
+    if args.function == "alie":
+        out, meta = alie_surface(args.wfx)
+    else:
+        out, meta = esp_surface(args.wfx, boys_mode=args.boys_mode)
     meta["wall_s"] = round(time.perf_counter() - t0, 3)
     out_abs = os.path.abspath(args.out)
     fd, tmp = tempfile.mkstemp(dir=os.path.dirname(out_abs), prefix=os.path.basename(out_abs) + ".", suffix=".tmp")
     os.fchmod(fd, 0o644)
     with os.fdopen(fd, "w") as f:
-        json.dump({"other_alie": out, "_meta": meta}, f, indent=1)
+        json.dump({f"other_{args.function}": out, "_meta": meta}, f, indent=1)
     os.replace(tmp, out_abs)
     return 0
 
