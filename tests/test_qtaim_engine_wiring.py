@@ -27,7 +27,7 @@ HAS_NUMBA = importlib.util.find_spec("numba") is not None
 
 @pytest.mark.skipif(not HAS_NUMBA, reason="numba not installed")
 def test_engine_qtaim_step_end_to_end(tmp_path):
-    from qtaim_gen.source.core.cp_search import QTAIM_ENGINE_VERSION
+    from qtaim_gen.source.data.engine_versions import ENGINE_VERSION
     from qtaim_gen.source.core.omol import _run_qtaim_engine, parse_multiwfn
     from qtaim_gen.source.core.parse_multiwfn import parse_qtaim
 
@@ -38,12 +38,15 @@ def test_engine_qtaim_step_end_to_end(tmp_path):
     status = qtaim_run_status(str(tmp_path))
     assert status["search_done"] and status["export_done"]
     assert json.loads((tmp_path / "timings.json").read_text())["qtaim_engine"] > 0
+    from qtaim_gen.source.utils import provenance
+
+    assert provenance.engine_current(provenance.load(str(tmp_path)), "qtaim")
 
     parse_multiwfn(str(tmp_path), separate=True, logger=LOG, full_set=0)
     rec = json.loads((tmp_path / "qtaim.json").read_text())
     meta = rec[QTAIM_META_KEY]
     assert meta["qtaim_search"] == QTAIM_SEARCH_ENGINE and meta["poincare_hopf"] == 1
-    assert meta["qtaim_engine"]["version"] == QTAIM_ENGINE_VERSION
+    assert meta["qtaim_engine"]["version"] == ENGINE_VERSION
     assert meta["qtaim_engine"]["seeds"] == "superset" and meta["qtaim_engine"]["poincare_hopf_full_set"] == 1
     assert status["reported_bcp"] == meta["cp_counts"]["BCP"]
 
@@ -82,6 +85,8 @@ def test_engine_record_is_never_escalated(tmp_path):
 
 def test_qtaim_engine_timing_stands_in_for_qtaim(tmp_path):
     from qtaim_gen.source.core.omol import patch_timings_from_log
+    from qtaim_gen.source.data.engine_versions import ENGINE_VERSION
+    from qtaim_gen.source.utils import provenance
     from qtaim_gen.source.utils.validation import get_expected_timing_keys
 
     expected, _ = get_expected_timing_keys(full_set=0, spin_tf=False)
@@ -91,15 +96,18 @@ def test_qtaim_engine_timing_stands_in_for_qtaim(tmp_path):
     assert not validate_timing_dict(str(path))
     timings["qtaim_engine"] = 2.0
     path.write_text(json.dumps(timings))
+    provenance.record_routines(str(tmp_path), ["qtaim"], "qtaim_engine", ENGINE_VERSION)
     assert validate_timing_dict(str(path)) and validate_timing_dict(str(path), qtaim_engine=True)
     del timings["qtaim_engine"]
     timings["qtaim"] = 1.0
     path.write_text(json.dumps(timings))
+    provenance.record_routines(str(tmp_path), ["qtaim"], "multiwfn")
     assert not validate_timing_dict(str(path), qtaim_engine=True)  # a Multiwfn QTAIM record is not done
 
     timings = {k: 1.0 for k in expected if k != "qtaim"}
     timings["qtaim_engine"] = 2.0
     path.write_text(json.dumps(timings))
+    provenance.record_routines(str(tmp_path), ["qtaim"], "qtaim_engine", ENGINE_VERSION)
     (tmp_path / "gbw_analysis.log").write_text("")
     patch_timings_from_log(str(tmp_path), full_set=0, spin_tf=False, move_results=False, logger=LOG)
     assert "qtaim" not in json.loads(path.read_text())

@@ -20,21 +20,7 @@ ENGINE_ROUTINES = frozenset({
     "becke_fuzzy_spin", "hirsh_fuzzy_spin",
     "fuzzy_bond",
 }) | ENGINE_LEVEL1_ROUTINES | ENGINE_LEVEL2_ROUTINES | SURFACE_ENGINE_ROUTINES
-
-# charge-engine version, stamped into timings.json (TIMINGS_ENGINE_VERSIONS_KEY in
-# utils/validation.py) by every complete engine run. Bump it when a change alters
-# stored values or the routine set, and list the routines a version adds below, so a
-# folder from an older engine is not taken to hold engine values for them. A folder
-# with a charge_engine timing and no stamp ran version 1. The stamp also covers the
-# surface engine, which runs with the charge engine (one engine version is planned).
-CHARGE_ENGINE_VERSION = 3
-CHARGE_ENGINE_ROUTINES_ADDED = {2: ENGINE_LEVEL2_ROUTINES | {"elf_fuzzy"}, 3: SURFACE_ENGINE_LEVEL2_ROUTINES}
-
-
-def engine_routines_at(version: int) -> frozenset:
-    """The ENGINE_ROUTINES a charge engine of this version computed."""
-    later = [r for v, r in CHARGE_ENGINE_ROUTINES_ADDED.items() if v > version]
-    return ENGINE_ROUTINES.difference(*later)
+# versions of the engine and what each changed: data/engine_versions.py
 
 
 def charge_data() -> str:
@@ -89,7 +75,7 @@ def chelpg_radii_file(atnums) -> "str | None":
     return "".join(f"{pt.GetElementSymbol(z)} {chelpg_radius(z)!r}\n" for z in zs)
 
 
-# routines a permanent skip removes (see TIMINGS_SKIPPED_KEY in utils/validation.py):
+# routines a permanent skip removes (recorded in provenance.json, utils/provenance.py):
 # the charge engine skips the Hirshfeld family without free-atom densities or with an
 # ECP atom but no EDF, the MBIS family per its own limits, and the EDF-dependent
 # derivative fuzzy integrals with an ECP atom but no EDF; Multiwfn refuses MBIS

@@ -256,9 +256,20 @@ class TestTimingValidation:
         "becke_fuzzy_density": 1.0, "hirsh_fuzzy_density": 1.0,
     }
 
-    def _write(self, tmp_path, timings):
+    def _write(self, tmp_path, timings, version=None):
+        """timings.json, plus engine provenance for the routines an engine of this version
+        computed when the timings hold a charge_engine timing (default: the current one)."""
+        from qtaim_gen.source.data.engine_versions import ENGINE_VERSION, ROUTINE_ENGINE, routines_at
+        from qtaim_gen.source.utils import provenance
+
         path = tmp_path / "timings.json"
         path.write_text(json.dumps(timings))
+        prov = provenance.empty()
+        if timings.get("charge_engine"):
+            v = version or ENGINE_VERSION
+            prov["routines"] = {r: {"by": ROUTINE_ENGINE[r], "engine_version": v}
+                                for r in routines_at(v) - {"qtaim", "convert"}}
+        (tmp_path / provenance.PROVENANCE_FILE).write_text(json.dumps(prov))
         return str(path)
 
     def _validate(self, path, **kw):
@@ -286,13 +297,12 @@ class TestTimingValidation:
         from qtaim_gen.source.utils.validation import validate_timing_dict
 
         # elf_fuzzy comes from the engine (version 2; tests/test_engine_version.py has version 1)
-        timings = {**self.BASE, "charge_engine": 2.0, "surface_engine": 1.0,
-                   "chelpg": 1.0, "ibsi_bond": 1.0, "_engine_versions": {"charge_engine": 2}}
-        path = self._write(tmp_path, timings)
+        timings = {**self.BASE, "charge_engine": 2.0, "surface_engine": 1.0, "chelpg": 1.0, "ibsi_bond": 1.0}
+        path = self._write(tmp_path, timings, version=2)
         assert validate_timing_dict(path, full_set=1, charge_engine=True)
         # chelpg and ibsi_bond still come from Multiwfn
         del timings["chelpg"]
-        assert not validate_timing_dict(self._write(tmp_path, timings), full_set=1, charge_engine=True)
+        assert not validate_timing_dict(self._write(tmp_path, timings, version=2), full_set=1, charge_engine=True)
 
     def test_engine_mode_rejects_multiwfn_only(self, tmp_path):
         path = self._write(tmp_path, {**self.BASE, **self.MWFN})
@@ -380,9 +390,12 @@ def test_engine_jsons_compile_like_multiwfn_level1_and_alie(tmp_path, name, monk
     timings = json.loads((tmp_path / "timings.json").read_text())
 
     assert timings["charge_engine"] > 0 and timings["surface_engine"] > 0
-    from qtaim_gen.source.data.multiwfn import CHARGE_ENGINE_VERSION
+    from qtaim_gen.source.data.engine_versions import ENGINE_VERSION
+    from qtaim_gen.source.utils import provenance
 
-    assert timings["_engine_versions"]["charge_engine"] == CHARGE_ENGINE_VERSION
+    prov = provenance.load(str(tmp_path))
+    assert {e["engine_version"] for r, e in prov["routines"].items() if e["by"] == "charge_engine"} == {ENGINE_VERSION}
+    assert prov["engines"]["charge_engine"]["grid"]["nrad"] == 75
     for step in ("vdd", "mbis"):
         for k, v in ref[step]["charge"].items():
             assert charge[step]["charge"][k] == pytest.approx(v, abs=CHARGE_TOL), (step, k)

@@ -166,7 +166,7 @@ def setup_logging(verbose: bool = False, log_file: Optional[str] = None) -> logg
 
 
 # Valid data types for JSON conversion
-JSON_DATA_TYPES = ["charge", "qtaim", "bond", "fuzzy_full", "other", "orca", "timings"]
+JSON_DATA_TYPES = ["charge", "qtaim", "bond", "fuzzy_full", "other", "orca", "timings", "provenance"]
 
 # Default output LMDB names
 DEFAULT_LMDB_NAMES = {
@@ -178,6 +178,7 @@ DEFAULT_LMDB_NAMES = {
     "other": "other.lmdb",
     "orca": "orca.lmdb",
     "timings": "timings.lmdb",
+    "provenance": "provenance.lmdb",
 }
 
 
@@ -833,6 +834,7 @@ def main():
             other       Convert other.json files
             orca        Convert orca.json files (parsed ORCA .out properties)
             timings     Convert timings.json files (raw {step: seconds} dicts; provenance only)
+            provenance  Convert provenance.json files (who produced each routine, engine version, settings)
 
             Examples:
             # Convert all data types with defaults
@@ -875,7 +877,7 @@ def main():
         "--types",
         type=str,
         nargs="+",
-        choices=["structure", "charge", "qtaim", "bond", "fuzzy_full", "other", "orca", "timings"],
+        choices=["structure", "charge", "qtaim", "bond", "fuzzy_full", "other", "orca", "timings", "provenance"],
         help="Data types to convert (use --all for all types)",
     )
 

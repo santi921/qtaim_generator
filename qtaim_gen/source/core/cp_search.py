@@ -35,6 +35,7 @@ from scipy.spatial import Delaunay, QhullError
 
 from qtaim_gen.source.core.charge_engine import B2A
 from qtaim_gen.source.core.qtaim_engine import density_derivatives
+from qtaim_gen.source.data.engine_versions import ENGINE_VERSION
 
 GRADCONV = 1e-6
 DISPCONV = 1e-7
@@ -496,9 +497,6 @@ def bond_paths(cps, wfx, basis, mode="multiwfn"):
 
 # ---------------------------------------------------------------- full analysis and CPprop.txt
 
-# Version of the QTAIM engine's results (search, paths, properties) recorded in every
-# record's _meta.qtaim_engine; bump it when a change alters the stored values
-QTAIM_ENGINE_VERSION = 1
 WEAK_DROP = 1e-5  # rho below this is dropped, after the Poincare-Hopf check (README decision 10)
 WEAK_FLAG = 1e-3  # rho below this is flagged
 AU2EV, AU2KCAL = 27.2113838, 627.51  # Multiwfn's constants (MW/define.f90:29)
@@ -678,7 +676,7 @@ def qtaim_engine_out(res, seconds, settings):
     counts = np.bincount(res["type"], minlength=4)
     nuc = next((st for st in res["stats"] if st["stage"] == "nuclei"), {})
     meta = {
-        "version": QTAIM_ENGINE_VERSION,
+        "version": ENGINE_VERSION,
         **settings,
         "poincare_hopf": int(res["poincare_hopf"]),
         "poincare_hopf_full_set": int(res["poincare_hopf_full_set"]),
@@ -694,7 +692,7 @@ def qtaim_engine_out(res, seconds, settings):
         "seconds": round(float(seconds), 3),
     }
     lines = [
-        f" {QTAIM_ENGINE_MARKER}, version {QTAIM_ENGINE_VERSION}",
+        f" {QTAIM_ENGINE_MARKER}, version {ENGINE_VERSION}",
         f" {QTAIM_ENGINE_META_PREFIX}{json.dumps(meta, sort_keys=True)}",
         f" Number of (3,-3) CPs:{int(counts[0]):7d}",
         f" Number of (3,-1) CPs:{int(counts[1]):7d}",

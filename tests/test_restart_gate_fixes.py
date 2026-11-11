@@ -571,10 +571,13 @@ def test_every_validation_in_gbw_analysis_forwards_the_mode_flags():
 
 
 def test_patch_timings_leaves_engine_routines_alone(tmp_path):
-    # a charge_engine timing stands in for ENGINE_ROUTINES and a surface_engine one for
-    # 'other' (validate_timing_dict); only keys that are really missing get patched
+    # current engine output (provenance.json) needs no step timing and a surface_engine
+    # timing stands in for 'other' (validate_timing_dict); only keys that are really
+    # missing get patched
     from qtaim_gen.source.core.omol import patch_timings_from_log
-    from qtaim_gen.source.data.multiwfn import ENGINE_ROUTINES
+    from qtaim_gen.source.data.engine_versions import ENGINE_VERSION
+    from qtaim_gen.source.data.multiwfn import ENGINE_ROUTINES, SURFACE_ENGINE_ROUTINES
+    from qtaim_gen.source.utils import provenance
     from qtaim_gen.source.utils.validation import get_expected_timing_keys
 
     expected, _ = get_expected_timing_keys(full_set=0, spin_tf=False)
@@ -583,6 +586,7 @@ def test_patch_timings_leaves_engine_routines_alone(tmp_path):
     gen = tmp_path / "generator"
     gen.mkdir()
     (gen / "timings.json").write_text(json.dumps(timings))
+    provenance.record_routines(str(tmp_path), ENGINE_ROUTINES - SURFACE_ENGINE_ROUTINES, "charge_engine", ENGINE_VERSION)
     assert patch_timings_from_log(str(tmp_path), full_set=0, move_results=True)
     patched = json.loads((gen / "timings.json").read_text())["_timings_patched"]
     assert set(patched) == {"qtaim"}
@@ -680,17 +684,14 @@ def test_fuzzy_recheck_does_not_rewrite_engine_values(tmp_path, monkeypatch):
 
 
 def test_recheck_helper_recognizes_engine_folders(tmp_path):
-    from qtaim_gen.source.data.multiwfn import CHARGE_ENGINE_VERSION, ENGINE_ROUTINES, engine_routines_at
+    from qtaim_gen.source.data.engine_versions import ENGINE_VERSION
     from qtaim_gen.source.scripts.helpers.recheck_fuzzy_folders import _engine_routines_of
+    from qtaim_gen.source.utils import provenance
 
     assert _engine_routines_of(str(tmp_path)) is None
     (tmp_path / "generator").mkdir()
-    (tmp_path / "generator" / "timings.json").write_text(json.dumps({"hirshfeld": 2.0}))
+    provenance.record_routines(str(tmp_path), ["hirshfeld", "elf_fuzzy"], "multiwfn")
     assert _engine_routines_of(str(tmp_path)) is None
-    # no version stamp: a version-1 engine, which left elf_fuzzy to Multiwfn
-    (tmp_path / "generator" / "timings.json").write_text(json.dumps({"charge_engine": 4.0}))
-    assert _engine_routines_of(str(tmp_path)) == engine_routines_at(1)
-    assert "elf_fuzzy" not in _engine_routines_of(str(tmp_path))
-    (tmp_path / "generator" / "timings.json").write_text(
-        json.dumps({"charge_engine": 4.0, "_engine_versions": {"charge_engine": CHARGE_ENGINE_VERSION}}))
-    assert _engine_routines_of(str(tmp_path)) == ENGINE_ROUTINES
+    # Multiwfn's elf_fuzzy beside the engine's charges: only the engine's are protected
+    provenance.record_routines(str(tmp_path), ["hirshfeld", "becke_fuzzy_density"], "charge_engine", ENGINE_VERSION)
+    assert _engine_routines_of(str(tmp_path)) == {"hirshfeld", "becke_fuzzy_density"}

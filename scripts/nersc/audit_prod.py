@@ -25,8 +25,9 @@ import re
 
 import numpy as np
 
+from qtaim_gen.source.utils import provenance
 from qtaim_gen.source.utils.validation import (
-    all_electron_count, charge_engine_version, get_charge_spin_n_atoms_from_folder,
+    all_electron_count, get_charge_spin_n_atoms_from_folder,
 )
 
 ACT = {"Ac", "Th", "Pa", "U", "Np", "Pu", "Am", "Cm", "Bk", "Cf", "Es", "Fm", "Md", "No", "Lr"}
@@ -135,7 +136,7 @@ def audit(folder):
         rec["flags"].append("actinide_ncp")
     rec["ncp_missing"] = sum(str(i) not in qt for i in mol)
 
-    skipped = (load(gen(folder, "timings.json")) or {}).get("_skipped_routines") or {}
+    skipped = provenance.load(folder)["skipped"]
     rec["skipped"] = sorted(f"{r}:{v.get('reason')}" for r, v in skipped.items())
     return rec
 
@@ -189,7 +190,7 @@ def compare(new_folder, ref_folder, actinide_atoms=()):
             for key, v in diffs.items():
                 out[f"{key}_{t}"] = max(out.get(f"{key}_{t}", 0.0), v)
     out["ph_ref"] = (qb.get("_meta") or {}).get("poincare_hopf")
-    out["charge_engine_version"] = charge_engine_version(load(gen(new_folder, "timings.json")))
+    out["engine_version"] = provenance.load(new_folder).get("engine_version")
     return out
 
 
@@ -252,7 +253,7 @@ def main():
     if args.ref:
         both = [r for r in done if r.get("ref_validated")]
         print(f"\nvs {args.ref}: {len(both)} folders validated in both (max per-atom |diff|, e; acceptance max {MAX_DIFF_E})")
-        print(f"charge-engine versions in this tree: {dict(collections.Counter(r.get('charge_engine_version') for r in both))}; "
+        print(f"engine versions in this tree: {dict(collections.Counter(r.get('engine_version') for r in both))}; "
               f"elf_fuzzy and the level-2 fuzzy rows are in their own units (ELF, a.u.)")
         print("| scheme | n | median | p99 | max | over max |")
         print("| --- | --- | --- | --- | --- | --- |")

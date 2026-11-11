@@ -1,14 +1,13 @@
-"""Routines that can never be computed for a wavefunction are recorded in timings.json
-(TIMINGS_SKIPPED_KEY) and no longer expected by validation, so the folder completes
-instead of rerunning them on every pass."""
+"""Routines that can never be computed for a wavefunction are recorded in provenance.json
+("skipped") and no longer expected by validation, so the folder completes instead of
+rerunning them on every pass."""
 
 import json
 import logging
 
 from qtaim_gen.source.data.multiwfn import MBIS_FAMILY
+from qtaim_gen.source.utils import provenance
 from qtaim_gen.source.utils.validation import (
-    TIMINGS_SKIPPED_KEY,
-    skipped_routines,
     validate_charge_dict,
     validate_fuzzy_dict,
     validate_timing_dict,
@@ -35,7 +34,9 @@ def test_engine_skip_is_recorded_and_the_run_stamped(tmp_path, monkeypatch):
     assert omol._run_charge_engine(str(tmp_path), n_threads=1, logger=LOG, full_set=1) is True
     timings = json.loads((tmp_path / "timings.json").read_text())
     assert timings["charge_engine"] > 0
-    assert timings[TIMINGS_SKIPPED_KEY] == {r: {"reason": "ecp_disabled", "by": "charge_engine"} for r in mbis}
+    prov = provenance.load(str(tmp_path))
+    assert prov["skipped"] == {r: {"reason": "ecp_disabled", "by": "charge_engine"} for r in mbis}
+    assert provenance.engine_routines(prov) == wanted - mbis
 
 
 def test_a_routine_missing_without_a_skip_still_blocks_the_stamp(tmp_path, monkeypatch):
@@ -50,7 +51,9 @@ def test_a_routine_missing_without_a_skip_still_blocks_the_stamp(tmp_path, monke
     if wanted[0] in MBIS_FAMILY:  # the dropped routine must be one the skip does not cover
         out.pop(wanted[1])
     assert omol._run_charge_engine(str(tmp_path), n_threads=1, logger=LOG, full_set=1) is False
-    assert "charge_engine" not in json.loads((tmp_path / "timings.json").read_text())
+    timings = tmp_path / "timings.json"
+    assert not timings.exists() or "charge_engine" not in json.loads(timings.read_text())
+    assert not provenance.engine_routines(provenance.load(str(tmp_path)))
 
 
 def test_multiwfn_skips_mbis_beyond_rn_at_level_1(tmp_path):
@@ -91,20 +94,19 @@ def test_timing_validation_and_patching_ignore_skipped_routines(tmp_path):
 
     expected, _ = get_expected_timing_keys(full_set=1, spin_tf=False)
     timings = {k: 1.0 for k in expected if k not in MBIS_FAMILY}
-    timings[TIMINGS_SKIPPED_KEY] = {r: {"reason": "z_above_86", "by": "multiwfn"} for r in MBIS_FAMILY}
     (tmp_path / "timings.json").write_text(json.dumps(timings))
-    assert skipped_routines(timings) == set(MBIS_FAMILY)
+    skips = {r: {"reason": "z_above_86", "by": "multiwfn"} for r in MBIS_FAMILY}
+    provenance.record_skips(str(tmp_path), skips)
+    assert provenance.skipped(provenance.load(str(tmp_path))) == set(MBIS_FAMILY)
     assert validate_timing_dict(str(tmp_path / "timings.json"), full_set=1)
-    del timings[TIMINGS_SKIPPED_KEY]
-    (tmp_path / "timings.json").write_text(json.dumps(timings))
+    provenance.drop(str(tmp_path), MBIS_FAMILY)
     assert not validate_timing_dict(str(tmp_path / "timings.json"), full_set=1)
 
-    timings[TIMINGS_SKIPPED_KEY] = {r: {"reason": "z_above_86", "by": "multiwfn"} for r in MBIS_FAMILY}
-    (tmp_path / "timings.json").write_text(json.dumps(timings))
+    provenance.record_skips(str(tmp_path), skips)
     (tmp_path / "gbw_analysis.log").write_text("")
     assert patch_timings_from_log(str(tmp_path), full_set=1, spin_tf=False, move_results=False, logger=LOG) is not None
     patched = json.loads((tmp_path / "timings.json").read_text())
-    assert not set(MBIS_FAMILY) & set(patched) - {TIMINGS_SKIPPED_KEY}
+    assert not set(MBIS_FAMILY) & set(patched)
 
 
 def test_parsers_fill_missing_schemes_with_nan_and_flag():

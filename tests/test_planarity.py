@@ -71,10 +71,17 @@ def test_surface_engine_writes_planarity_into_other_json(tmp_path):
 
 
 def _write_generator(folder, other):
+    from qtaim_gen.source.data.engine_versions import ENGINE_VERSION
+    from qtaim_gen.source.utils import provenance
+
     gen = folder / "generator"
     gen.mkdir()
     (gen / "timings.json").write_text(json.dumps({"surface_engine": 3.0}))
     (gen / "other.json").write_text(json.dumps(other))
+    prov = provenance.empty()
+    prov["routines"] = {r: {"by": "surface_engine", "engine_version": ENGINE_VERSION}
+                        for r in ("other_alie", "other_geometry")}
+    (gen / provenance.PROVENANCE_FILE).write_text(json.dumps(prov))
 
 
 def test_restart_skips_only_when_planarity_and_alie_are_present(tmp_path):
