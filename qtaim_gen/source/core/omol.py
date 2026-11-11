@@ -27,9 +27,11 @@ from qtaim_gen.source.utils.validation import (
     all_electron_count,
     _FIRST_ECP_Z,
     TIMINGS_PATCHED_KEY,
+    TIMINGS_ENGINE_VERSIONS_KEY,
     TIMINGS_SKIPPED_KEY,
     CONVERTER_KEY,
     _safe_json_load,
+    engine_routines_of,
     skipped_routines,
     TIMING_PLACEHOLDER,
 )
@@ -39,7 +41,9 @@ from qtaim_gen.source.utils.atomic_write import atomic_json_write
 from qtaim_gen.source.core.horton import run_horton_analysis
 
 from qtaim_gen.source.data.multiwfn import (
+    CHARGE_ENGINE_VERSION,
     ENGINE_LEVEL1_ROUTINES,
+    ENGINE_LEVEL2_ROUTINES,
     ENGINE_ROUTINES,
     SURFACE_ENGINE_ROUTINES,
     charge_data,
@@ -1420,10 +1424,11 @@ def patch_timings_from_log(
     log_timings = _parse_timings_from_log(log_path)
 
     expected, _ = get_expected_timing_keys(full_set=full_set, spin_tf=spin_tf)
-    # as validate_timing_dict: a charge_engine timing stands in for ENGINE_ROUTINES and a
-    # surface_engine timing for 'other', so their keys are not missing and get no placeholder
-    if isinstance(timings.get("charge_engine"), (int, float)) and timings["charge_engine"] > 0:
-        expected = [k for k in expected if k not in ENGINE_ROUTINES]
+    # as validate_timing_dict: a charge_engine timing stands in for the routines that engine
+    # version computed and a surface_engine timing for 'other', so their keys are not missing
+    # and get no placeholder
+    engine = engine_routines_of(timings)
+    expected = [k for k in expected if k not in engine]
     if isinstance(timings.get("qtaim_engine"), (int, float)) and timings["qtaim_engine"] > 0:
         expected = [k for k in expected if k != "qtaim"]
     # permanently skipped routines never ran, so they get no placeholder either
@@ -1698,6 +1703,8 @@ def _engine_routines(full_set: int, spin_tf: bool) -> set:
     routines = set(ENGINE_ROUTINES - SURFACE_ENGINE_ROUTINES)
     if full_set < 1:
         routines -= ENGINE_LEVEL1_ROUTINES
+    if full_set < 2:
+        routines -= ENGINE_LEVEL2_ROUTINES
     if not spin_tf:
         routines -= {"becke_fuzzy_spin", "hirsh_fuzzy_spin", "mbis_fuzzy_spin"}
     return routines
@@ -1705,7 +1712,9 @@ def _engine_routines(full_set: int, spin_tf: bool) -> set:
 
 def _engine_outputs_present(folder: str, spin_tf: bool, full_set: int = 0) -> bool:
     """True when generator/ holds a completed charge-engine run: a positive
-    charge_engine timing and every engine routine in the compiled jsons."""
+    charge_engine timing from an engine version that computed every wanted
+    routine (an older one left some to Multiwfn), and every engine routine in the
+    compiled jsons."""
     gen = os.path.join(folder, "generator")
     file_of = {
         "hirshfeld": "charge.json", "adch": "charge.json", "cm5": "charge.json",
@@ -1717,8 +1726,11 @@ def _engine_outputs_present(folder: str, spin_tf: bool, full_set: int = 0) -> bo
             timings = json.load(f)
         if not timings.get("charge_engine", 0) > 0:
             return False
+        wanted = _engine_routines(full_set, spin_tf) - skipped_routines(timings)
+        if not wanted <= engine_routines_of(timings):
+            return False
         want = {}
-        for routine in _engine_routines(full_set, spin_tf) - skipped_routines(timings):
+        for routine in wanted:
             want.setdefault(file_of.get(routine, "fuzzy_full.json"), []).append(routine)
         for name, keys in want.items():
             with open(os.path.join(gen, name)) as f:
@@ -1728,6 +1740,18 @@ def _engine_outputs_present(folder: str, spin_tf: bool, full_set: int = 0) -> bo
     except (OSError, json.JSONDecodeError, TypeError):
         return False
     return True
+
+
+def _stamp_engine_version(folder: str, engine: str, version: int) -> None:
+    """Record {engine: version} in timings.json under TIMINGS_ENGINE_VERSIONS_KEY."""
+    timings_path = os.path.join(folder, "timings.json")
+    with open(timings_path) as f:
+        timings = json.load(f)
+    rec = timings.get(TIMINGS_ENGINE_VERSIONS_KEY)
+    rec = rec if isinstance(rec, dict) else {}
+    rec[engine] = version
+    timings[TIMINGS_ENGINE_VERSIONS_KEY] = rec
+    atomic_json_write(timings_path, timings)
 
 
 def _record_skipped(folder: str, records: dict, logger: logging.Logger) -> None:
@@ -1847,9 +1871,11 @@ def _run_charge_engine(
             except (OSError, json.JSONDecodeError):
                 continue
             if isinstance(timings, dict) and timings.pop("charge_engine", None) is not None:
+                (timings.get(TIMINGS_ENGINE_VERSIONS_KEY) or {}).pop("charge_engine", None)
                 atomic_json_write(timings_path, timings)
         return False
     _update_timing(folder, "charge_engine", elapsed, logger)
+    _stamp_engine_version(folder, "charge_engine", CHARGE_ENGINE_VERSION)
     logger.info(
         "charge_engine: %d routines in %.2f s (nelec grid %.4f of %.1f)",
         len(written), elapsed, meta.get("nelec_grid_becke", float("nan")),
