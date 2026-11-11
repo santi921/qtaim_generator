@@ -20,7 +20,9 @@ tiers 1-3), `mbis_converged.md` (MBIS).
   - *Invariants*: physical checks that need no reference (charge and spin sums, electron
     count on the grid, Poincare-Hopf, an NCP on every nucleus).
 - **Engine version.** Results are only as current as the code they ran on. The column
-  "code" gives the branch or commit where it was recorded. Section 7 lists which current
+  "code" gives the branch or commit where it was recorded. Since 2026-11-11 each job
+  folder's provenance.json records the ENGINE_VERSION of every engine routine (README.md,
+  "Engine versions and provenance"). Section 7 lists which current
   behaviours have no validation on current code.
 - **Numbers** are the largest per-atom (or per-point) absolute difference unless marked
   relative ("rel"). Charges and populations are in e, positions in Bohr, planarity in

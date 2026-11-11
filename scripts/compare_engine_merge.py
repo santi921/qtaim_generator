@@ -46,7 +46,7 @@ from rdkit import Chem
 from qtaim_gen.source.core.parse_qtaim import dft_inp_to_dict
 
 from qtaim_gen.source.data.multiwfn import SURFACE_ENGINE_ROUTINES
-from qtaim_gen.source.utils.validation import charge_engine_version, engine_routines_of, surface_engine_routines_of
+from qtaim_gen.source.utils import provenance
 
 MEDIAN_TOL = 0.005
 MAX_TOL = 0.03
@@ -188,11 +188,12 @@ def compare_job(orig, new):
         files[name] = (load(os.path.join(orig, "generator", name)), load(os.path.join(new, "generator", name)))
     o_t, n_t = files["timings.json"]
     rec["charge_engine_s"] = (n_t or {}).get("charge_engine")
-    # the routines the new tree's engine version computed: the rest must be unchanged, and the
-    # Multiwfn baseline time covers exactly these (it grew with elf_fuzzy and the level-2
-    # fuzzy integrals at charge-engine version 2)
-    engine_routines = engine_routines_of(n_t)
-    rec["charge_engine_version"] = charge_engine_version(n_t)
+    # the charge- and surface-engine routines of the new tree (its provenance.json): the rest
+    # must be unchanged, and the Multiwfn baseline time covers exactly these (QTAIM is not in
+    # charge_engine_s, so its Multiwfn time is not in the baseline either)
+    prov_n = provenance.load(new)
+    engine_routines = provenance.engine_produced(prov_n) - {"qtaim"}
+    rec["engine_versions"] = ",".join(map(str, provenance.engine_versions(prov_n))) or "none"
     rec["complete"] = bool(o_t) and bool(rec["charge_engine_s"])
     if not rec["complete"]:
         return rec
@@ -270,7 +271,7 @@ def compare_job(orig, new):
     o_o, n_o = files["other.json"]
     o_o, n_o = o_o or {}, n_o or {}
     # fields the surface engine wrote, for the routines it computed in this folder
-    surface_routines = surface_engine_routines_of(n_t)
+    surface_routines = engine_routines & SURFACE_ENGINE_ROUTINES
 
     def engine_field(k):
         return any(OTHER_FIELDS[r](k) for r in surface_routines)
@@ -293,8 +294,7 @@ def compare_job(orig, new):
     untouched("other.json", {k: v for k, v in o_o.items() if not engine_field(k)},
               {k: v for k, v in n_o.items() if not engine_field(k)})
 
-    covered = (engine_routines - SURFACE_ENGINE_ROUTINES) | surface_routines
-    mwfn = [o_t.get(r) for r in covered if isinstance(o_t.get(r), (int, float)) and o_t.get(r) > 0]
+    mwfn = [o_t.get(r) for r in engine_routines if isinstance(o_t.get(r), (int, float)) and o_t.get(r) > 0]
     rec["mwfn_engine_routines_s"] = sum(mwfn) if mwfn else None
     rec["charge_engine_s"] += n_t.get("surface_engine") or 0.0
     return rec
