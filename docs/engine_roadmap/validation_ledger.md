@@ -4,7 +4,7 @@ Every validation run of the native engines (charge, surface, QTAIM) against Mult
 gbasis, critic2, extended precision or physical invariants. One row per run, with the
 reference, the data, the result and where the raw output lives.
 
-State as of 2026-11-02, branch `feat/charge-engine` (098e2ab), plus `feat/engine-fuzzy-elf`. Companion documents:
+State as of 2026-11-11, branch `feat/charge-engine` (098e2ab), plus `feat/engine-fuzzy-elf`. Companion documents:
 `README.md` (decisions, divergence changelog), `qtaim_verification_campaign.md` (QTAIM
 tiers 1-3), `mbis_converged.md` (MBIS).
 
@@ -36,7 +36,7 @@ tiers 1-3), `mbis_converged.md` (MBIS).
   difference seen anywhere is 1.12e-6 e (ADC-Becke, LRC full_set 1). The ELF, gradient
   norm and Laplacian fuzzy integrals (full_set 1 and 2) match at print precision too, apart
   from Laplacian values on ECP heavy atoms, which agree to 2.3e-11 of their integrand scale
-  (local sets only; no cluster run yet).
+  (on a cluster: ELF on 70 LRC tm_react jobs, gradient and Laplacian on 9).
 - **QTAIM kernels** agree with gbasis to a median 7.5e-14 rel (rho) on 100
   wavefunctions; where they differ more, 80-bit evaluation sides with the engine. The CP
   search reproduces Multiwfn's CP sets exactly in its Multiwfn-compatible mode. In engine
@@ -46,6 +46,20 @@ tiers 1-3), `mbis_converged.md` (MBIS).
   difference on the NERSC actinides (3.4e-5 rel) is unexplained; engine-only CPs are not
   yet confirmed by critic2; no run covers double hybrids, HF, Cartesian basis sets or a
   systematic ORCA 5 vs 6 comparison.
+
+## Runs in progress
+
+Cluster runs submitted but not finished. When a run ends, its result becomes a row in the
+section it validates and its entry here is removed; an abandoned run is removed with a note
+in its row or in section 7.
+
+LRC `fz1` (27525266) and `ref2`/`fz2` (27527328/27527329) ended at the 12 h limit on
+2026-11-04 and were not resubmitted; their results are rows in section 2 (and the ESP row in
+section 3 on `feat/engine-esp-surface`).
+
+| cluster, jobs | trees | code | checks | status (last checked 2026-11-03) |
+|---|---|---|---|---|
+| LRC `ncref` 27498703, `ncfix` 27498704 | `engine_test/nc_ref_l1` vs `nc_fixed_l1` | `feat/charge-engine` | wavefunction converter (section 4b row of 2026-11-03) | both hit the 12 h limit; `ncref` task 0 resumed (27498993, completed); `ncfix` not resumed. Continued in a separate session |
 
 ## 2. Charge engine (`core/charge_engine.py`)
 
@@ -68,6 +82,8 @@ elf_fuzzy (full_set 1); grad_norm_rho_fuzzy, laplacian_rho_fuzzy (full_set 2).
 | 2026-11-02 | Multiwfn parity, local, fresh Multiwfn | 87 wfx_pull jobs (as the 2026-10-04 row) | elf_fuzzy within 5.0e-9 and grad_norm_rho_fuzzy within 5.3e-9 on all 87. laplacian_rho_fuzzy: 63 jobs within 1e-8; 24 jobs exceed it, every one on an ECP + EDF heavy atom (Xe, I, Te, Sb, Hf, Tl, Au, Ir, In, lanthanides; max 1.08e-6 on Hf, value 25712.9, 4.2e-11 rel). All 24 are within 2.3e-11 of the atom's integral of abs(integrand); summation order alone moves the result by about 1e-11. Read as per-point roundoff of the Laplacian near the core [I], not checked against 80-bit | same | `data/engine_test_2026-11/fuzzy_elf/` (`wfx_pull_fuzzy.txt`, `lapl_rel.py`, `refs_wfx_pull/`) |
 | 2026-11-03 | internal consistency | 2 fixtures, 400 random points each | `density_derivatives(elf_only=True)` (the full_set 1 ELF pass) gives values identical bit for bit to the full call, and `hessian=False` agrees within 1e-12 rel; elf_only takes 0.34 s vs 0.59 s per atom grid on MOR22 (tm_react) and 0.73 s vs 1.05 s on a TZVPPall Np nitrate (4 threads), so the 14.4 s nitrate median above is now lower | feat/engine-fuzzy-elf (review fixes) | `tests/test_qtaim_engine.py` |
 | 2026-11-03 | invariant scan | 552 local orca.wfx (85 with ECP) | the per-ECP-atom EDF rule (charge engine version 2) decides every skip as the molecule-wide rule did | same | `data/engine_test_2026-11/fuzzy_elf/edf_scan.py` |
+| 2026-11-03 | Multiwfn parity, LRC, full_set 1, charge engine version 2 | tm_react, 70 of 200 jobs compared (73 finished before the 12 h limit; not resubmitted), 43 open shell; engine on native-converted wfx (`multiwfn_h`, per its timings.json), reference on Multiwfn's | elf_fuzzy within 5.00e-9 (median 2.51e-9) over 5097 atoms; hirshfeld, cm5, vdd, Becke and Hirshfeld fuzzy within 5.0e-9 e, adch 7.8e-8, becke 8.11e-8, fuzzy_bond 5e-7; ALIE as the 2026-10-12 row; no routine missing. Non-engine data (first 34 jobs): chelpg within 2.0e-10 e (Multiwfn's last printed digit, as in section 4b); the `other.json` flags are the planarity fields (mpp, sdp within 5e-7 Angstrom, print precision), which `compare_engine_merge.py` does not yet exempt as engine output; ORCA Mulliken charges identical (the Ru4 step27 flag on the ORCA charge entries and qtaim.json is in another field, not yet identified). MBIS: mbis and mbis_fuzzy_density up to 0.71 e (median 3.6e-4), mbis_fuzzy_spin 3.4e-2, from Multiwfn's stopping rule: on MOBH12_V4 (mult 2, the 0.71 e job) `--mbis_mode multiwfn` reproduces Multiwfn exactly (85 cycles, V +1.50) and the converged fit (139 cycles, V +0.79) is the one fixed point of all three guesses (local rerun, `data/engine_test_2026-11/mbis_lrc/`). Speed: median 4.6x, p10 0.4x, aggregate 1.2x; the slow jobs spend their time in converged MBIS (MOBH10_Ag1Nb5 step0, one Ag and one Nb: 8362 s in the charge engine on LRC; locally 6057 plain-fallback cycles with the outer Ag shells merged, vs 137 cycles in multiwfn mode), handed to the MBIS work (`mbis_lrc/mbis_handoff.md`) | 59ac8ef | LRC `engine_test/fz_l1` vs `ref_l1`, `report_fz_l1.json` |
+| 2026-11-04 | Multiwfn parity, LRC, full_set 2 (full runner) | tm_react, 9 of the first 20 jobs of `jobs_ref.txt` compared (Re, Ag + Nb, Ti, Pt, Pd, Hf; 4 open shell; 16 of 20 finished in `ref_l2`, 10 in `fz_l2` before the 12 h limit) | grad_norm_rho_fuzzy within 4.99e-9 (median 2.44e-9); laplacian_rho_fuzzy median 2.68e-9, max 1.08e-6 (the size of the local Hf ECP-core case; atom not checked); elf_fuzzy 5.00e-9; every other non-MBIS scheme within 5.1e-9 e, fuzzy_bond 5e-7; MBIS up to 0.43 e (as in the full_set 1 row). Multiwfn's own bader on our wfx differs by 1e-6 to 2.9e-4 e (not yet tested whether Multiwfn's bader varies by that much run to run); chelpg 1e-10 e. Time: the level-2 derivative pass adds 0 to 33 s (charge engine at full_set 1 vs 2 on the 2 jobs in both trees: 4140 vs 4103 s, 194 vs 227 s); the charge engine's 3500-17600 s on 7 of the 9 jobs is the converged-MBIS cost of the full_set 1 row (inferred from that overlap and the local profile, `_meta` not written by this code). Multiwfn's bader alone takes 2200-11500 s per job and has no engine | `feat/engine-esp-surface` (qtaim_generator_esp clone) | LRC `engine_test/ref_l2` vs `fz_l2`, `report_fz_l2.json` |
 
 `scripts/compare_engine_merge.py` takes the routines a tree's engine covers from its
 version stamp. From charge engine version 2 its Multiwfn baseline time
@@ -203,7 +219,7 @@ Current behaviours without a validation on current code, and checks not yet done
 | level-of-theory matrix | double hybrids, HF, Cartesian basis sets, ROKS beyond one radical, ORCA 5 vs ORCA 6 not covered | tier 3 supplementary set |
 | results recorded on older code | the 87-job, 18-reference and 16-reference local sets predate the threading fixes (#63-#65) and the converged MBIS default | rerun the local sets on current code; they take minutes |
 | full_set 2 routines | still Multiwfn (bader, laplacian_bond, other_esp) | when engines exist |
-| fuzzy ELF / gradient / Laplacian on a cluster | only local sets so far; the Laplacian ECP-core differences are read as roundoff, not proven | LRC tm_react `nc_ref_l1` (elf_fuzzy); 80-bit Laplacian on one Hf or Tl job |
+| fuzzy ELF / gradient / Laplacian on cluster actinides | done on LRC tm_react (ELF 70 jobs, gradient and Laplacian 9 jobs); none on actinides on a cluster; the Laplacian ECP-core differences are read as roundoff, not proven | NERSC: a separate eval that includes these changes (not tracked here yet); 80-bit Laplacian on one Hf or Tl job |
 
 ## 8. Adding a row
 
