@@ -17,12 +17,13 @@
 # Optional: N (lines per task, default 5), CONDA_ENV (default qtaim_engine), SRC, CHARGEMOL,
 # DENSITIES, ORCA_2MKL, SKIP_CHARGEMOL=1 (port timings only).
 
-set -eo pipefail
 case "${SLURM_JOB_ACCOUNT:-}" in *blau*) echo "refusing to run on a blau account (${SLURM_JOB_ACCOUNT})"; exit 1 ;; esac
-
+# batch shells start without conda: ~/.bashrc sets it up, as in the other LRC scripts
+# (before set -e, so a nonzero return inside ~/.bashrc does not end the job)
+source ~/.bashrc
 module load gcc
-eval "$(conda shell.bash hook)"
 conda activate ${CONDA_ENV:-qtaim_engine}
+set -eo pipefail
 CODE=${CODE:?CODE is required (the feat/engine-ddec6 checkout)}
 export PYTHONPATH=$CODE
 export PYTHONUNBUFFERED=1
