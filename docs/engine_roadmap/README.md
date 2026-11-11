@@ -10,7 +10,7 @@ Since 2026-11-03 the wavefunction conversion is native as well: `full-runner-par
 writes orca.wfx with `core/wavefunction.py` by default (`--native_convert fixed`). orca_2mkl
 still writes the molden. `--native_convert off` runs Multiwfn's convert step, and is needed
 to continue a tree Multiwfn converted (prod_l1, existing OMol trees): with a native mode,
-validation requires a native record (`_converter` in timings.json), and folders converted
+validation requires a native converter record (provenance.json), and folders converted
 another way are discarded and recomputed when a gbw is there. With `--wfn` the default is
 `off`. With the charge and QTAIM engines, a full_set 0 run makes no Multiwfn call.
 
@@ -52,24 +52,37 @@ Verified locally: iESPcode 1 and 2 give byte-identical CPprop.txt.
 
 Still open: see the "Open decisions" section of each plan; the resolved ones are marked there.
 
-## Engine versions (2026-11-03)
+## Engine versions and provenance (2026-11-11)
 
-Every complete charge-engine run stamps `timings.json` with
-`"_engine_versions": {"charge_engine": CHARGE_ENGINE_VERSION}` (`data/multiwfn.py`). A
-folder with a `charge_engine` timing and no stamp ran version 1. Validation, the restart
-check and the fuzzy recheck treat a timing as covering only the routines that version
-computed (`engine_routines_at`), so a folder from an older engine still needs, and keeps,
-its Multiwfn values for routines added later. Bump the version whenever a change alters
-stored values or the routine set, and list added routines in `CHARGE_ENGINE_ROUTINES_ADDED`.
-This is the first step of the per-folder provenance decided on 2026-10-13 (provenance.json,
-ENGINE_VERSION, provenance.lmdb), which is not built yet. The QTAIM engine has its own
-version (`QTAIM_ENGINE_VERSION`, in `qtaim.json` `_meta`); the surface engine has none yet.
+One number, `ENGINE_VERSION` (`data/engine_versions.py`), covers the charge, surface and
+QTAIM engines and the native converter. `ENGINE_CHANGES` lists per version the routines it
+added and the routines whose stored values it changed. Every job folder has a
+`provenance.json` (`utils/provenance.py`, plan in `provenance_plan.md`): per routine, what
+produced it (an engine, Multiwfn with its build, or ORCA with its parser version), the engine
+version and its settings; the wavefunction converter; permanent skips; and the engines' run
+records (the charge engine's `_meta`, the surface engine's grids and failure counts).
+`json-to-lmdb` converts it to `provenance.lmdb`.
 
-| charge engine version | change |
+A stored routine is current when its recorded version is at least the last version that
+added or changed it. Validation, the restart checks and the fuzzy recheck use that rule, so
+a folder from an older engine still needs, and keeps, its Multiwfn values for routines added
+later, and a release that changes a routine's values recomputes it. Rule: a new routine goes
+in `added` under a new version; a change to stored values goes in `changed`.
+
+`timings.json` holds timings only (and `_timings_patched`, which describes them). Engine
+folders written before 2026-11-11 kept their records in timings.json (`_engine_versions`,
+`_surface_engine_routines`, `_converter`, `_skipped_routines`); `migrate-provenance` rewrites
+them (dry run by default) and must run on those trees before their next restart. Their
+entries are marked `legacy`. Value changes before the first stamp (2026-11-03) have no version
+of their own (converged MBIS as the default, 2026-10-15; planarity in the surface engine,
+2026-11-02).
+
+| engine version | change |
 |---|---|
-| 1 | all runs before the stamp: charges, fuzzy density and spin, fuzzy_bond (full_set 0); vdd, mbis, mbis fuzzy (full_set 1) |
+| 1 | all runs before the stamp: charges, fuzzy density and spin, fuzzy_bond (full_set 0); vdd, mbis, mbis fuzzy (full_set 1); ALIE and planarity (surface engine); QTAIM engine; native converter |
 | 2 | adds elf_fuzzy (full_set 1), grad_norm_rho_fuzzy and laplacian_rho_fuzzy (full_set 2); EDF-dependent schemes skipped when any ECP atom lacks EDF (was: when the wavefunction has no EDF at all; no local wavefunction differs, 552 checked) |
-| 3 | adds other_esp (full_set 2, surface engine, exact ESP kernel); the surface engine stamps its own entry (`surface_engine`) |
+| 3 | adds other_esp (full_set 2, surface engine, exact ESP kernel) |
+| 4 | one ENGINE_VERSION and provenance.json; no routine values change. An ESP surface failure keeps ALIE and planarity, is retried once, then recorded as a permanent skip |
 
 ## Cross-cutting requirements
 
