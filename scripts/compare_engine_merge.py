@@ -45,7 +45,8 @@ from rdkit import Chem
 
 from qtaim_gen.source.core.parse_qtaim import dft_inp_to_dict
 
-from qtaim_gen.source.utils.validation import charge_engine_version, engine_routines_of
+from qtaim_gen.source.data.multiwfn import SURFACE_ENGINE_ROUTINES
+from qtaim_gen.source.utils.validation import charge_engine_version, engine_routines_of, surface_engine_routines_of
 
 MEDIAN_TOL = 0.005
 MAX_TOL = 0.03
@@ -268,17 +269,21 @@ def compare_job(orig, new):
         rec["untouched_changed"].append("qtaim.json")
     o_o, n_o = files["other.json"]
     o_o, n_o = o_o or {}, n_o or {}
-    # fields the surface engine wrote, for the routines its version computed
-    engine_field = (lambda k: any(OTHER_FIELDS[r](k) for r in OTHER_FIELDS if r in engine_routines)) \
-        if n_t.get("surface_engine") else (lambda k: False)
-    if n_t.get("surface_engine"):
+    # fields the surface engine wrote, for the routines it computed in this folder
+    surface_routines = surface_engine_routines_of(n_t)
+
+    def engine_field(k):
+        return any(OTHER_FIELDS[r](k) for r in surface_routines)
+
+    if surface_routines:
         rec["alie_diffs"], rec["geometry_diffs"], rec["esp_diffs"] = {}, {}, {}
         for k in set(o_o) & set(n_o):
             if not (engine_field(k) and is_num(o_o[k]) and is_num(n_o[k])):
                 continue
             if math.isnan(o_o[k]) and math.isnan(n_o[k]):
                 continue
-            d = abs(n_o[k] - o_o[k])
+            # NaN on one side only (e.g. no negative facets on one side) counts as infinite
+            d = math.inf if math.isnan(o_o[k]) or math.isnan(n_o[k]) else abs(n_o[k] - o_o[k])
             if k in ALIE_TOL:
                 rec["alie_diffs"][k] = d / abs(o_o[k]) if ALIE_TOL[k][0] == "rel" and o_o[k] else d
             elif k in GEOMETRY_TOL:
@@ -288,7 +293,8 @@ def compare_job(orig, new):
     untouched("other.json", {k: v for k, v in o_o.items() if not engine_field(k)},
               {k: v for k, v in n_o.items() if not engine_field(k)})
 
-    mwfn = [o_t.get(r) for r in engine_routines if isinstance(o_t.get(r), (int, float)) and o_t.get(r) > 0]
+    covered = (engine_routines - SURFACE_ENGINE_ROUTINES) | surface_routines
+    mwfn = [o_t.get(r) for r in covered if isinstance(o_t.get(r), (int, float)) and o_t.get(r) > 0]
     rec["mwfn_engine_routines_s"] = sum(mwfn) if mwfn else None
     rec["charge_engine_s"] += n_t.get("surface_engine") or 0.0
     return rec

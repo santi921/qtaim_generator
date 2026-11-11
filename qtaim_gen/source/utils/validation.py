@@ -11,7 +11,7 @@ import zlib
 from typing import Optional
 from qtaim_gen.source.core.parse_qtaim import dft_inp_to_dict, fortran_float
 from qtaim_gen.source.core.parse_orca import ORCA_PARSER_VERSION
-from qtaim_gen.source.data.multiwfn import engine_routines_at
+from qtaim_gen.source.data.multiwfn import SURFACE_ENGINE_ROUTINES, engine_routines_at
 import numpy as np
 from datetime import datetime
 
@@ -39,6 +39,9 @@ def skipped_routines(timing_dict) -> set:
 # timings.json key recording which engine versions wrote the folder's values
 # ({"charge_engine": CHARGE_ENGINE_VERSION}); see engine_routines_at in data/multiwfn.py
 TIMINGS_ENGINE_VERSIONS_KEY = "_engine_versions"
+# timings.json key listing the routines the surface engine computed in this folder (it
+# runs only the missing ones on a restart, so its version stamp alone does not say which)
+TIMINGS_SURFACE_ROUTINES_KEY = "_surface_engine_routines"
 
 
 def charge_engine_version(timing_dict) -> Optional[int]:
@@ -60,6 +63,23 @@ def engine_routines_of(timing_dict) -> frozenset:
     did not run): ENGINE_ROUTINES as of the version that ran."""
     v = charge_engine_version(timing_dict)
     return frozenset() if v is None else engine_routines_at(v)
+
+
+def surface_engine_routines_of(timing_dict) -> frozenset:
+    """The SURFACE_ENGINE_ROUTINES a timings dict says the surface engine computed (empty
+    when it did not run): its TIMINGS_SURFACE_ROUTINES_KEY record, or for runs before the
+    record the routines of its version stamp (no stamp: version 1)."""
+    if not isinstance(timing_dict, dict):
+        return frozenset()
+    t = timing_dict.get("surface_engine")
+    if not (isinstance(t, (int, float)) and t > 0):
+        return frozenset()
+    rec = timing_dict.get(TIMINGS_SURFACE_ROUTINES_KEY)
+    if isinstance(rec, list):
+        return frozenset(rec) & SURFACE_ENGINE_ROUTINES
+    stamp = timing_dict.get(TIMINGS_ENGINE_VERSIONS_KEY)
+    v = stamp.get("surface_engine", 1) if isinstance(stamp, dict) else 1
+    return engine_routines_at(v) & SURFACE_ENGINE_ROUTINES
 
 
 def timing_total(timing_dict) -> float:

@@ -596,13 +596,19 @@ def _surface_density(atnums, volume):
     return totmass / AVOGADRO * (1e24 / (volume * B2A**3))
 
 
-@limit_blas_threads
-def alie_surface(wfx_path, chunk_points=262144):
-    t0 = time.perf_counter()
+def load_wavefunction(wfx_path):
+    """(wfx, basis) of a .wfx, for the surface functions to share one read."""
     wfx = read_wfx(wfx_path)
+    return wfx, prepare_basis(wfx)
+
+
+@limit_blas_threads
+def alie_surface(wfx_path, chunk_points=262144, wf=None):
+    """wf: (wfx, basis) from load_wavefunction, instead of reading wfx_path."""
+    t0 = time.perf_counter()
+    wfx, basis = wf or load_wavefunction(wfx_path)
     if wfx["mo_energy"] is None:
         raise ValueError("wfx has no <Molecular Orbital Energies>")
-    basis = prepare_basis(wfx)
     load = time.perf_counter() - t0
     surf = molecular_surface(wfx, basis, SPACING, chunk_points)
     t = {"load": load, **surf["timings_s"]}
@@ -639,7 +645,7 @@ def alie_surface(wfx_path, chunk_points=262144):
 
 
 @limit_blas_threads
-def esp_surface(wfx_path, chunk_points=262144, boys_mode="exact"):
+def esp_surface(wfx_path, chunk_points=262144, boys_mode="exact", wf=None):
     """The production other_esp step ("12\\n0\\n-1\\n-1\\nq\\n": function 12 with
     the default mapped function, ESP, on the rho = 0.001 isosurface at 0.25 Bohr):
     the same surface construction as alie_surface, the total ESP (core/esp.py,
@@ -648,12 +654,12 @@ def esp_surface(wfx_path, chunk_points=262144, boys_mode="exact"):
     for the extremes, Bohr^2 for areas, a.u. for averages, variances and Pi, eV for
     the polarity index, Angstrom^2 for the polar and nonpolar areas. Production
     Multiwfn evaluates the ESP with libreta (iESPcode=2), the engine exactly
-    (docs/engine_roadmap/README.md, divergence changelog)."""
+    (docs/engine_roadmap/README.md, divergence changelog). wf: (wfx, basis) from
+    load_wavefunction, instead of reading wfx_path."""
     from qtaim_gen.source.core.esp import electrostatic_potential
 
     t0 = time.perf_counter()
-    wfx = read_wfx(wfx_path)
-    basis = prepare_basis(wfx)
+    wfx, basis = wf or load_wavefunction(wfx_path)
     load = time.perf_counter() - t0
     surf = molecular_surface(wfx, basis, ESP_SPACING, chunk_points)
     t = {"load": load, **surf["timings_s"]}

@@ -144,3 +144,88 @@ def test_full_set_2_surface_engine_writes_esp_into_other_json(tmp_path):
     # geometry-only fields do not depend on the ESP kernel
     for k in ("ESP_Volume", "ESP_Overall_surface_area"):
         assert other[k] == pytest.approx(ref[k], abs=ESP_TOL[k[4:]]), k
+
+
+@pytest.mark.skipif(not HAS_NUMBA, reason="numba not installed")
+def test_restart_at_full_set_2_adds_only_the_esp_surface_and_validates(tmp_path):
+    """A full_set 1 folder from charge and surface engine version 2, restarted at
+    full_set 2: the surface engine computes only other_esp (ALIE and planarity stay
+    as stored), writes its 'other_esp' timing and routine record, and the folder then
+    validates at full_set 2 although the charge stamp is still 2. Before, validation
+    expected a Multiwfn other_esp timing that the engine mode never writes. A second
+    restart finds every routine and skips."""
+    import logging
+    import shutil
+
+    from qtaim_gen.source.core.omol import _run_surface_engine, move_results_to_folder, parse_multiwfn
+    from qtaim_gen.source.data.multiwfn import ENGINE_ROUTINES, engine_routines_at
+    from qtaim_gen.source.utils.validation import (
+        TIMINGS_ENGINE_VERSIONS_KEY, TIMINGS_SURFACE_ROUTINES_KEY, get_expected_timing_keys, validate_timing_dict,
+    )
+
+    src = os.path.join(FIXTURES, "rmechdb_652_step10_0_2")
+    logger = logging.getLogger("test_surface_engine")
+    folder = tmp_path / "job"
+    gen = folder / "generator"
+    gen.mkdir(parents=True)
+    for f in ("orca.wfx", "orca.inp"):
+        shutil.copy(os.path.join(src, f), folder / f)
+    stored = {"ALIE_Volume": 123.0, "mpp_full": 0.5}
+    (gen / "other.json").write_text(json.dumps(stored))
+    # Multiwfn's timings for the full_set 2 routines no engine covers; no other_esp timing
+    keys, _ = get_expected_timing_keys(full_set=2)
+    timings = {k: 1.0 for k in keys if k not in engine_routines_at(2) and k != "other_esp"}
+    timings.update({"charge_engine": 1.0, "surface_engine": 1.0,
+                    TIMINGS_ENGINE_VERSIONS_KEY: {"charge_engine": 2, "surface_engine": 2}})
+    (gen / "timings.json").write_text(json.dumps(timings))
+    assert not validate_timing_dict(str(gen / "timings.json"), full_set=2, charge_engine=True)
+
+    # run_jobs seeds the root timings.json from generator/ on a restart
+    shutil.copy(gen / "timings.json", folder / "timings.json")
+    assert _run_surface_engine(str(folder), n_threads=2, logger=logger, restart=True, full_set=2)
+    assert (folder / "other_esp.json").exists()
+    assert not (folder / "other_alie.json").exists() and not (folder / "other_geometry.json").exists()
+    parse_multiwfn(str(folder), separate=True, logger=logger, full_set=2, skip_routines=ENGINE_ROUTINES)
+    move_results_to_folder(str(folder), logger=logger, clean=True)
+
+    other = json.loads((gen / "other.json").read_text())
+    assert {k: other[k] for k in stored} == stored
+    with open(os.path.join(src, "multiwfn_reference_esp.json")) as f:
+        ref = json.load(f)["eleesp1"]["other_esp"]
+    assert other["ESP_Volume"] == pytest.approx(ref["ESP_Volume"], abs=ESP_TOL["Volume"])
+    t = json.loads((gen / "timings.json").read_text())
+    assert t["other_esp"] > 0
+    assert t[TIMINGS_SURFACE_ROUTINES_KEY] == ["other_alie", "other_esp", "other_geometry"]
+    assert t[TIMINGS_ENGINE_VERSIONS_KEY]["charge_engine"] == 2
+    assert validate_timing_dict(str(gen / "timings.json"), full_set=2, charge_engine=True)
+
+    assert not (folder / "other_esp.json").exists()  # parse_multiwfn removed the intermediate
+    assert _run_surface_engine(str(folder), n_threads=2, logger=logger, restart=True, full_set=2)
+    assert not (folder / "other_esp.json").exists()
+
+
+@pytest.mark.skipif(not HAS_NUMBA, reason="numba not installed")
+def test_restart_recomputes_surface_values_the_engine_did_not_write(tmp_path):
+    """ESP values in other.json that Multiwfn computed (no surface-engine record of
+    other_esp) are recomputed by the engine, not reused, even under a version 3 stamp:
+    the routine record, not the stamp, says what the engine wrote."""
+    import logging
+    import shutil
+
+    from qtaim_gen.source.core.omol import _run_surface_engine
+    from qtaim_gen.source.utils.validation import TIMINGS_ENGINE_VERSIONS_KEY, TIMINGS_SURFACE_ROUTINES_KEY
+
+    src = os.path.join(FIXTURES, "rmechdb_652_step10_0_2")
+    logger = logging.getLogger("test_surface_engine")
+    folder = tmp_path / "job"
+    gen = folder / "generator"
+    gen.mkdir(parents=True)
+    for f in ("orca.wfx", "orca.inp"):
+        shutil.copy(os.path.join(src, f), folder / f)
+    (gen / "other.json").write_text(json.dumps({"ALIE_Volume": 123.0, "mpp_full": 0.5, "ESP_Volume": 1.0}))
+    timings = {"surface_engine": 1.0, "other_esp": 9.0, TIMINGS_ENGINE_VERSIONS_KEY: {"surface_engine": 3},
+               TIMINGS_SURFACE_ROUTINES_KEY: ["other_alie", "other_geometry"]}
+    (gen / "timings.json").write_text(json.dumps(timings))
+    shutil.copy(gen / "timings.json", folder / "timings.json")
+    assert _run_surface_engine(str(folder), n_threads=2, logger=logger, restart=True, full_set=2)
+    assert (folder / "other_esp.json").exists() and not (folder / "other_alie.json").exists()

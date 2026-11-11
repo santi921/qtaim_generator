@@ -14,8 +14,10 @@ from qtaim_gen.source.data.multiwfn import (
 from qtaim_gen.source.utils.validation import (
     TIMINGS_ENGINE_VERSIONS_KEY,
     TIMINGS_SKIPPED_KEY,
+    TIMINGS_SURFACE_ROUTINES_KEY,
     charge_engine_version,
     engine_routines_of,
+    surface_engine_routines_of,
     timing_total,
     validate_timing_dict,
 )
@@ -42,6 +44,17 @@ def test_version_of_timings():
     assert engine_routines_of(stamped) == ENGINE_ROUTINES
     assert engine_routines_of({"charge_engine": 2.0}) == ENGINE_ROUTINES - V2_ROUTINES - V3_ROUTINES
     assert engine_routines_of({"qtaim": 1.0}) == frozenset()
+
+
+def test_surface_routines_of_timings():
+    assert surface_engine_routines_of({"qtaim": 1.0}) == frozenset()
+    # no routine record: the routines of the stamped version (no stamp: version 1)
+    assert surface_engine_routines_of({"surface_engine": 1.0}) == {"other_alie", "other_geometry"}
+    v3 = {"surface_engine": 1.0, TIMINGS_ENGINE_VERSIONS_KEY: {"surface_engine": 3}}
+    assert surface_engine_routines_of(v3) == {"other_alie", "other_geometry", "other_esp"}
+    # the record says what was computed, whatever the stamp
+    assert surface_engine_routines_of({**v3, TIMINGS_SURFACE_ROUTINES_KEY: ["other_alie"]}) == {"other_alie"}
+    assert surface_engine_routines_of({TIMINGS_SURFACE_ROUTINES_KEY: ["other_alie"]}) == frozenset()
 
 
 def test_timing_total_skips_metadata():
