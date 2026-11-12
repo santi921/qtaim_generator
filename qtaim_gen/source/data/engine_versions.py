@@ -22,19 +22,20 @@ from qtaim_gen.source.data.multiwfn import (
     SURFACE_ENGINE_ROUTINES,
 )
 
-ENGINE_VERSION = 4
+ENGINE_VERSION = 5
 
 # the sub-engine that produces each engine routine: the "by" of its provenance entry
 ROUTINE_ENGINE = {
     **{r: "charge_engine" for r in ENGINE_ROUTINES - SURFACE_ENGINE_ROUTINES},
     **{r: "surface_engine" for r in SURFACE_ENGINE_ROUTINES},
     "qtaim": "qtaim_engine",
+    "ddec6": "ddec6",
 }
 ENGINES = frozenset(ROUTINE_ENGINE.values())
 
 _V2 = ENGINE_LEVEL2_ROUTINES | {"elf_fuzzy"}
 ENGINE_CHANGES = {
-    1: {"added": frozenset(ROUTINE_ENGINE) - _V2 - SURFACE_ENGINE_LEVEL2_ROUTINES, "changed": frozenset(),
+    1: {"added": frozenset(ROUTINE_ENGINE) - _V2 - SURFACE_ENGINE_LEVEL2_ROUTINES - {"ddec6"}, "changed": frozenset(),
         "note": "charge and surface engines, QTAIM engine (before version stamps)"},
     2: {"added": _V2, "changed": frozenset(),
         "note": "elf_fuzzy (full_set 1), gradient-norm and Laplacian fuzzy integrals (full_set 2)"},
@@ -42,6 +43,8 @@ ENGINE_CHANGES = {
         "note": "ESP surface (other_esp, full_set 2) in the surface engine"},
     4: {"added": frozenset(), "changed": frozenset(),
         "note": "one ENGINE_VERSION for all engines; provenance.json replaces the timings.json stamps"},
+    5: {"added": frozenset({"ddec6"}), "changed": frozenset(),
+        "note": "DDEC6 (core/ddec6.py, a port of Chargemol 09_26_2017), opt-in with --ddec6"},
 }
 
 

@@ -11,7 +11,9 @@ import shutil
 import pytest
 
 from qtaim_gen.source.core import ddec6, omol
-from qtaim_gen.source.utils.validation import TIMINGS_SKIPPED_KEY, validate_ddec6
+from qtaim_gen.source.data.engine_versions import ENGINE_VERSION
+from qtaim_gen.source.utils import provenance
+from qtaim_gen.source.utils.validation import validate_ddec6
 
 FIXTURE = os.path.join(os.path.dirname(__file__), "test_files", "charge_engine", "rmechdb_652_step10_0_2")
 LABELS = ["1_Br", "2_O", "3_O", "4_O"]
@@ -23,7 +25,7 @@ def _fake_result():
     feats = {name: {**{k: 0.1 for k in LABELS}, "sum": 0.4, "abs_sum": 0.4}
              for name in ("ddec6_atomic_dipole_mag", "ddec6_quadrupole_mag", "ddec6_tail_decay")}
     return {"ddec6": {"charge": q, "dipole": {"mag": 0.0, "xyz": [0.0, 0.0, 0.0]}}, "fuzzy": feats,
-            "_meta": {"ddec6_version": ddec6.DDEC6_VERSION, "n_iterations": 7, "natoms": 4}}
+            "_meta": {"n_iterations": 7, "natoms": 4}}
 
 
 @pytest.fixture
@@ -43,18 +45,32 @@ def test_run_writes_result_timing_and_version(folder, monkeypatch):
     assert omol._run_ddec6(folder, n_threads=1, logger=LOG)
     with open(os.path.join(folder, omol.DDEC6_JSON)) as f:
         assert json.load(f)["ddec6"]["charge"]["1_Br"] == 0.15
-    t = _timings(folder)
-    assert t["ddec6"] > 0 and t["_engine_versions"]["ddec6"] == ddec6.DDEC6_VERSION
+    assert _timings(folder)["ddec6"] > 0
+    prov = provenance.load(folder)
+    entry = prov["routines"]["ddec6"]
+    assert entry["by"] == "ddec6" and entry["engine_version"] == ENGINE_VERSION
+    assert entry["spec"] == {"chargemol": "09_26_2017", "grid_spacing_bohr": 0.14, "max_atoms": ddec6.MAX_ATOMS}
+    assert prov["engines"]["ddec6"] == {"n_iterations": 7, "natoms": 4}
     # restart finds the completed run and does not recompute
     assert omol._run_ddec6(folder, n_threads=1, logger=LOG, restart=True)
     assert len(calls) == 1
+
+
+def test_restart_recomputes_a_result_from_an_older_version(folder, monkeypatch):
+    calls = []
+    monkeypatch.setattr(ddec6, "analyze", lambda path: calls.append(path) or _fake_result())
+    assert omol._run_ddec6(folder, n_threads=1, logger=LOG)
+    provenance.record_routines(folder, ["ddec6"], "ddec6", ENGINE_VERSION - 1)
+    assert omol._run_ddec6(folder, n_threads=1, logger=LOG, restart=True)
+    assert len(calls) == 2
+    assert provenance.load(folder)["routines"]["ddec6"]["engine_version"] == ENGINE_VERSION
 
 
 def test_size_cap_is_a_permanent_skip(folder, monkeypatch):
     monkeypatch.setattr(ddec6, "MAX_ATOMS", 3)
     monkeypatch.setattr(ddec6, "analyze", lambda path: pytest.fail("analyze must not run above the cap"))
     assert omol._run_ddec6(folder, n_threads=1, logger=LOG)
-    assert _timings(folder)[TIMINGS_SKIPPED_KEY]["ddec6"]["reason"] == "natoms_above_3"
+    assert provenance.load(folder)["skipped"]["ddec6"]["reason"] == "natoms_above_3"
     # a recorded skip is final: later passes do nothing
     assert omol._run_ddec6(folder, n_threads=1, logger=LOG)
 
@@ -64,7 +80,7 @@ def test_chargemol_stop_is_a_permanent_skip(folder, monkeypatch):
         raise ddec6.ChargemolStop("grid spacing check failed")
     monkeypatch.setattr(ddec6, "analyze", stop)
     assert omol._run_ddec6(folder, n_threads=1, logger=LOG)
-    rec = _timings(folder)[TIMINGS_SKIPPED_KEY]["ddec6"]
+    rec = provenance.load(folder)["skipped"]["ddec6"]
     assert rec["reason"] == "chargemol_stop: grid spacing check failed" and rec["by"] == "ddec6"
 
 
@@ -74,6 +90,7 @@ def test_other_errors_fail_without_a_skip(folder, monkeypatch):
     monkeypatch.setattr(ddec6, "analyze", boom)
     assert not omol._run_ddec6(folder, n_threads=1, logger=LOG)
     assert not os.path.exists(os.path.join(folder, "timings.json"))
+    assert "ddec6" not in provenance.load(folder)["routines"]
 
 
 def test_merge_into_generator_copy_and_idempotent(folder):
@@ -161,10 +178,12 @@ def test_killed_child_drops_the_ddec6_timing(folder, monkeypatch):
         f.write("#!/bin/sh\nkill -9 $$\n")
     os.chmod(fake, os.stat(fake).st_mode | stat.S_IEXEC)
     monkeypatch.setattr(sys, "executable", fake)
+    provenance.record_routines(folder, ["ddec6"], "ddec6", ENGINE_VERSION)
     omol._run_engines(folder, n_threads=1, logger=LOG, ddec6=True)
     for path in (os.path.join(folder, "timings.json"), os.path.join(folder, "generator", "timings.json")):
         with open(path) as f:
             assert json.load(f) == {"other_geometry": 0.2}
+    assert "ddec6" not in provenance.load(folder)["routines"]
 
 
 @pytest.mark.skipif(not os.environ.get("DDEC6_SLOW"), reason="a few minutes; set DDEC6_SLOW=1")

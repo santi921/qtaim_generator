@@ -26,7 +26,7 @@ import numpy as np
 
 from qtaim_gen.source.core.charge_engine import read_wfx
 
-DDEC6_VERSION = 1
+CHARGEMOL_RELEASE = "09_26_2017"
 MAX_ATOMS = 120  # larger molecules are skipped (pair screening is O(nprim^2 nocc))
 
 
@@ -2360,7 +2360,7 @@ def analyze(wfx_path, parallel=True):
     entry = {"charge": per_atom(q), "dipole": {"mag": float(np.linalg.norm(dip)), "xyz": [float(x) for x in dip]},
              "atomic_dipole": per_atom(st["atomic_dipole"]), "atomic_quadrupole": per_atom(quad),
              "atomic_quadrupole_eigenvalues": per_atom(st["quadrupole_eigenvalues"])}
-    meta = {"ddec6_version": DDEC6_VERSION, "n_iterations": int(st["n_iterations"]), "natoms": len(labels)}
+    meta = {"n_iterations": int(st["n_iterations"]), "natoms": len(labels)}
     if st["spin_available"]:
         entry["spin"] = per_atom(st["spin_moment"])
         meta["spin_iterations"] = int(st["spin_iterations"])

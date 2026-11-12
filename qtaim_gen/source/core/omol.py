@@ -1887,19 +1887,6 @@ def _run_charge_engine(
 DDEC6_JSON = "ddec6.json"
 
 
-def _read_timings(folder: str) -> dict:
-    """timings.json of the folder, generator/ copy first; {} when neither is readable."""
-    for base in (os.path.join(folder, "generator"), folder):
-        try:
-            with open(os.path.join(base, "timings.json")) as f:
-                timings = json.load(f)
-            if isinstance(timings, dict):
-                return timings
-        except (OSError, json.JSONDecodeError):
-            continue
-    return {}
-
-
 def _ddec6_result_path(folder: str) -> Optional[str]:
     """Path of a ddec6.json holding a ddec6 charge entry, root first; None when absent."""
     for base in (folder, os.path.join(folder, "generator")):
@@ -1915,17 +1902,18 @@ def _ddec6_result_path(folder: str) -> Optional[str]:
 
 def _run_ddec6(folder: str, n_threads: int, logger: logging.Logger, restart: bool = False) -> bool:
     """DDEC6 (core/ddec6.py, a port of Chargemol) on orca.wfx. Writes ddec6.json (the
-    charge.json entry, the fuzzy_full.json features and _meta), a 'ddec6' timing and
-    _engine_versions.ddec6; _merge_ddec6 merges it after parse_multiwfn. Molecules above
-    ddec6.MAX_ATOMS atoms, and wavefunctions on which Chargemol stops, are recorded as
-    permanently skipped."""
+    charge.json entry, the fuzzy_full.json features and _meta), a 'ddec6' timing, a
+    provenance entry and the run's _meta as the provenance engine record; _merge_ddec6
+    merges it after parse_multiwfn. On a restart a result that is current engine output
+    is kept. Molecules above ddec6.MAX_ATOMS atoms, and wavefunctions on which Chargemol
+    stops, are recorded as permanently skipped."""
     from qtaim_gen.source.core import ddec6
 
-    timings = _read_timings(folder)
-    if "ddec6" in skipped_routines(timings):
+    prov = provenance.load(folder)
+    if "ddec6" in provenance.skipped(prov):
         logger.info("ddec6: recorded as permanently skipped - nothing to do")
         return True
-    if restart and (timings.get("ddec6") or 0) > 0 and _ddec6_result_path(folder):
+    if restart and provenance.engine_current(prov, "ddec6") and _ddec6_result_path(folder):
         logger.info("ddec6: completed run found - skipping")
         return True
 
@@ -1956,14 +1944,10 @@ def _run_ddec6(folder: str, n_threads: int, logger: logging.Logger, restart: boo
     elapsed = time.time() - start
     atomic_json_write(os.path.join(folder, DDEC6_JSON), out)
     _update_timing(folder, "ddec6", elapsed, logger)
-    timings_path = os.path.join(folder, "timings.json")
-    with open(timings_path) as f:
-        timings = json.load(f)
-    versions = timings.get("_engine_versions")
-    versions = versions if isinstance(versions, dict) else {}
-    versions["ddec6"] = ddec6.DDEC6_VERSION
-    timings["_engine_versions"] = versions
-    atomic_json_write(timings_path, timings)
+    provenance.record_routines(folder, ["ddec6"], "ddec6", ENGINE_VERSION, spec={
+        "chargemol": ddec6.CHARGEMOL_RELEASE, "grid_spacing_bohr": ddec6.PREFERRED_GRID_SPACING,
+        "max_atoms": ddec6.MAX_ATOMS})
+    provenance.record_engine(folder, "ddec6", out["_meta"])
     logger.info("ddec6: %d atoms, %d iterations in %.2f s", natoms, out["_meta"]["n_iterations"], elapsed)
     return True
 

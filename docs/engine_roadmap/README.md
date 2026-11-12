@@ -83,6 +83,7 @@ of their own (converged MBIS as the default, 2026-10-15; planarity in the surfac
 | 2 | adds elf_fuzzy (full_set 1), grad_norm_rho_fuzzy and laplacian_rho_fuzzy (full_set 2); EDF-dependent schemes skipped when any ECP atom lacks EDF (was: when the wavefunction has no EDF at all; no local wavefunction differs, 552 checked) |
 | 3 | adds other_esp (full_set 2, surface engine, exact ESP kernel) |
 | 4 | one ENGINE_VERSION and provenance.json; no routine values change. An ESP surface failure keeps ALIE and planarity, is retried once, then recorded as a permanent skip |
+| 5 | adds ddec6 (opt-in `--ddec6`, a port of Chargemol 09_26_2017; molecules above 120 atoms skipped) |
 
 ## Cross-cutting requirements
 
