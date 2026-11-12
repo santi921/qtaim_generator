@@ -27,7 +27,7 @@ def main():
     for r in rows.values():
         key = r["job"].split("/")[0] if args.by == "vertical" else r["job"].rstrip("/").split("_")[-1]
         groups[key].append(r)
-    print("group\tn\tok\tskipped\tchargemol_stop\terrors\titer_mismatch\tmax_dq\tmax_ddipole\tmax_dspin"
+    print("group\tn\tok\tskipped\tchargemol_stop\terrors\titer_mismatch\tmax_dq\tmax_ddipole\tmax_dquadrupole\tmax_dspin"
           "\tmedian_atoms\tmedian_port_s\tmedian_chargemol_s\tmedian_port/chargemol")
     for key in sorted(groups):
         g = groups[key]
@@ -38,7 +38,7 @@ def main():
         print("\t".join(str(x) for x in (
             key, len(g), len(ok), sum("skipped" in r for r in g), sum("port_chargemol_stop" in r for r in g),
             sum("error" in r for r in g), sum(r.get("iter_port") != r.get("iter_chargemol") for r in ok),
-            mx("max_dq"), mx("max_ddipole"), mx("max_dspin"), med("natoms"), med("port_s"), med("chargemol_s"),
+            mx("max_dq"), mx("max_ddipole"), mx("max_dquadrupole"), mx("max_dspin"), med("natoms"), med("port_s"), med("chargemol_s"),
             f"{st.median(ratio):.2f}" if ratio else "")))
     for r in rows.values():
         if "error" in r:

@@ -20,6 +20,7 @@ Implemented so far (docs/engine_roadmap/ddec6_port_plan.md, P2 map):
 """
 
 import math
+import time
 
 import numba
 import numpy as np
@@ -2300,11 +2301,25 @@ def spin_moments(state):
 
 def run(wfx_path, parallel=True):
     """DDEC6 analysis of one wfx: net atomic charges, atomic multipoles, cloud
-    penetration fits and (open shell) atomic spin moments."""
+    penetration fits and (open shell) atomic spin moments. state["stage_s"] holds the
+    wall time of each stage (numba compilation included on a cold cache)."""
+    stage_s = {}
+    clock = [time.perf_counter()]
+
+    def lap(name):
+        now = time.perf_counter()
+        stage_s[name] = round(now - clock[0], 3)
+        clock[0] = now
+
     prep = load(wfx_path)
+    lap("load")
     grid = grid_setup(prep["atom_xyz"])
     pairs = pair_data(prep, grid)
-    grids = core_grids(prep, grid, density_grids(prep, grid, pairs, parallel=parallel))
+    lap("pair_data")
+    dens = density_grids(prep, grid, pairs, parallel=parallel)
+    lap("density_grids")
+    grids = core_grids(prep, grid, dens)
+    lap("core_grids")
     net_charge = float(prep["center_zeff"].sum() - (prep["occ_a"].sum() + prep["occ_b"].sum()))
     core_e = grids["core_electrons"]
     nvalence = float(prep["atom_z"].sum()) - net_charge - _seq_sum(core_e)
@@ -2321,11 +2336,19 @@ def run(wfx_path, parallel=True):
              "core_density": grids["core_density"], "spin_density": grids["spin_density"], "nvalence": nvalence,
              "radial_shell_volume": rsv, "neutral_density": neutral, "net_charge": net_charge,
              "atom_xyz": prep["atom_xyz"], "spin_available": prep["spin_available"]}
+    lap("setup")
     state = core_iterator(state)
+    lap("core_iterator")
     state = ddec6_valence_iterator(state)
-    state = cloud_penetration(atomic_multipoles(state))
+    lap("valence_iterator")
+    state = atomic_multipoles(state)
+    lap("multipoles")
+    state = cloud_penetration(state)
+    lap("cloud_penetration")
     if prep["spin_available"]:
         state = spin_moments(state)
+        lap("spin")
+    state["stage_s"] = stage_s
     return state
 
 
@@ -2360,7 +2383,7 @@ def analyze(wfx_path, parallel=True):
     entry = {"charge": per_atom(q), "dipole": {"mag": float(np.linalg.norm(dip)), "xyz": [float(x) for x in dip]},
              "atomic_dipole": per_atom(st["atomic_dipole"]), "atomic_quadrupole": per_atom(quad),
              "atomic_quadrupole_eigenvalues": per_atom(st["quadrupole_eigenvalues"])}
-    meta = {"n_iterations": int(st["n_iterations"]), "natoms": len(labels)}
+    meta = {"n_iterations": int(st["n_iterations"]), "natoms": len(labels), "stage_s": st["stage_s"]}
     if st["spin_available"]:
         entry["spin"] = per_atom(st["spin_moment"])
         meta["spin_iterations"] = int(st["spin_iterations"])
