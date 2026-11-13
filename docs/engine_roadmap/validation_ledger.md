@@ -63,7 +63,13 @@ LRC `ncref`/`ncfix` (27498703/27498704) hit the 12 h limit and were not continue
 trees `nc_ref_l1b`/`nc_fixed_l1b` replaced them so no tree mixes MBIS versions. The NERSC
 level 1/2 batches and the LRC `l1b` pair are done (rows in section 4b, 2026-11-12).
 
-No runs in progress (last checked 2026-11-13).
+QTAIM P4 adjudication (`qtaim_verify_stored.py --adjudicate`, feat/qtaim-p4 45ba764, critic2 694cb1ee
+built from source on both clusters), submitted 2026-11-13:
+- LRC `qadj` (27826590, 12 tasks): the 57 qeng2 jobs in `data/engine_test_2026-10/qtaim_adjudicate_jobs.txt`
+  (42 with engine-only CPs, 9 with NNAs, 4 with kept-set Poincare-Hopf 2, the 3 tier-2 Laplacian
+  outliers, the 5 largest esp_total cases); output `engine_test/qverify/qadj_*.jsonl`.
+- NERSC (61245039): the 92 openac folders with engine-only QTAIM keys in `prod_l1_audit.tsv`, against
+  the stored CPprop.txt of `mwfn_l0`; output `actinide_test/qtaim_adj/adj_*.jsonl`.
 
 ## 2. Charge engine (`core/charge_engine.py`)
 
