@@ -939,6 +939,46 @@ def _block_value(data, start, stop, X, Y, Z, step, gs, spin, mult_pv, sums):
 
 
 @numba.njit(cache=True)
+def _block_value_both(data, start, stop, X, Y, Z, gs, spin):
+    """Accumulate-phase pair sums of both steps at one point of a block: t4, (t7, t8) of
+    step 1 and (t7, t8) of step 2 (zero for gs == 0, which has no step 2). Each sum runs
+    over the same rows in the same order as a separate _block_value call per step, so
+    the values are bitwise the same with one evaluation of the pair products. Returns
+    t4 < 0 when the point is outside the block cutoff."""
+    x1, y1, z1 = data[start, 9], data[start, 10], data[start, 11]
+    x2, y2, z2 = data[start, 16], data[start, 17], data[start, 18]
+    d2 = (X - data[start, 22]) ** 2 + (Y - data[start, 23]) ** 2 + (Z - data[start, 24]) ** 2
+    if d2 > data[start, 33]:
+        return -1.0, 0.0, 0.0, 0.0, 0.0
+    dx1 = X - x1
+    dy1 = Y - y1
+    dz1 = Z - z1
+    dx2 = X - x2
+    dy2 = Y - y2
+    dz2 = Z - z2
+    t4 = math.exp(-(data[start, 5] + data[start, 12]) * d2) * data[start, 34]
+    a7 = 0.0
+    a8 = 0.0
+    b7 = 0.0
+    b8 = 0.0
+    for p in range(start, stop + 1):
+        if d2 > data[p, 33]:
+            break
+        t6 = (powi(dx1, nint(data[p, 6])) * powi(dy1, nint(data[p, 7])) * powi(dz1, nint(data[p, 8]))
+              * powi(dx2, nint(data[p, 13])) * powi(dy2, nint(data[p, 14])) * powi(dz2, nint(data[p, 15])))
+        a7 = a7 + t6 * 1.0 * data[p, 2]
+        if spin:
+            a8 = a8 + t6 * 1.0 * data[p, 3]
+        if gs != 0:
+            renorm = data[p, 31]
+            if renorm != 0.0:
+                b7 = b7 + abs(t6) * renorm * data[p, 2]
+                if spin:
+                    b8 = b8 + abs(t6) * renorm * data[p, 3]
+    return t4, a7, a8, b7, b8
+
+
+@numba.njit(cache=True)
 def _mult(gs, pv):
     m = np.empty(2)
     m[0] = pv
@@ -996,11 +1036,13 @@ def _pass1_parallel(data, pbd, geo, boundary, pv, order):
 
 
 @numba.njit(parallel=True, cache=True)
-def _accumulate_parallel(data, pbd, geo, boundary, pv, spin, val, spn, core, cval, cspn, plane_order):
+def _accumulate_parallel(data, pbd, geo, boundary, spin, val, spn, core, cval, cspn, plane_order):
     """Phase B: both passes' contributions, one fine z-plane per task (planes 1-based, in
     the given order, see _strided_order). Every fine or coarse cell is fed by points of a
     single plane, and each task visits blocks in order, so each cell sums in the serial
-    order."""
+    order. Within a block and plane every point feeds a different cell, so adding a
+    point's step-1 and step-2 terms back to back (one visit, _block_value_both) keeps
+    each cell's order of the serial two-visit loop."""
     nb = pbd.shape[0]
     for i in numba.prange(plane_order.shape[0]):
         kc = plane_order[i]
@@ -1017,38 +1059,38 @@ def _accumulate_parallel(data, pbd, geo, boundary, pv, spin, val, spn, core, cva
             t1 = data[start, 22] - data[start, 28]
             t2 = data[start, 23] - data[start, 29]
             t3 = data[start, 24] - data[start, 30]
-            mp = _mult(gs, pv)
             slot = _coarse_slot(gs)
-            for step in range(1, 3):
-                if step == 2 and gs == 0:
-                    continue
-                for nbb in range(geo[b, 3], geo[b, 4] + 1, stride):
-                    kb = nbb + geo[b, 8] + 1
-                    for na in range(geo[b, 1], geo[b, 2] + 1, stride):
-                        ka = na + geo[b, 7] + 1
-                        X = na * boundary[0, 0] + nbb * boundary[1, 0] + nc * boundary[2, 0] + t1
-                        Y = na * boundary[0, 1] + nbb * boundary[1, 1] + nc * boundary[2, 1] + t2
-                        Z = na * boundary[0, 2] + nbb * boundary[1, 2] + nc * boundary[2, 2] + t3
-                        t4, t7, t8 = _block_value(data, start, stop, X, Y, Z, step, gs, spin, mp, False)
-                        if t4 < 0.0:
-                            continue
-                        if gs == 0:
-                            core[ka - 1, kb - 1, kc - 1] = core[ka - 1, kb - 1, kc - 1] + t7 * t4
-                            if spin:
-                                spn[ka - 1, kb - 1, kc - 1] = spn[ka - 1, kb - 1, kc - 1] + t8 * t4
-                        elif gs == 1:
-                            val[ka - 1, kb - 1, kc - 1] = val[ka - 1, kb - 1, kc - 1] + t7 * t4
-                            if spin:
-                                spn[ka - 1, kb - 1, kc - 1] = spn[ka - 1, kb - 1, kc - 1] + t8 * t4
-                        else:
-                            ia = nint((ka + 1) / float(gs)) - 1
-                            ib = nint((kb + 1) / float(gs)) - 1
-                            ic = nint((kc + 1) / float(gs)) - 1
-                            g = cval[slot]
-                            g[ia, ib, ic] = g[ia, ib, ic] + t7 * t4
-                            if spin:
-                                h = cspn[slot]
-                                h[ia, ib, ic] = h[ia, ib, ic] + t8 * t4
+            for nbb in range(geo[b, 3], geo[b, 4] + 1, stride):
+                kb = nbb + geo[b, 8] + 1
+                for na in range(geo[b, 1], geo[b, 2] + 1, stride):
+                    ka = na + geo[b, 7] + 1
+                    X = na * boundary[0, 0] + nbb * boundary[1, 0] + nc * boundary[2, 0] + t1
+                    Y = na * boundary[0, 1] + nbb * boundary[1, 1] + nc * boundary[2, 1] + t2
+                    Z = na * boundary[0, 2] + nbb * boundary[1, 2] + nc * boundary[2, 2] + t3
+                    t4, a7, a8, b7, b8 = _block_value_both(data, start, stop, X, Y, Z, gs, spin)
+                    if t4 < 0.0:
+                        continue
+                    if gs == 0:
+                        core[ka - 1, kb - 1, kc - 1] = core[ka - 1, kb - 1, kc - 1] + a7 * t4
+                        if spin:
+                            spn[ka - 1, kb - 1, kc - 1] = spn[ka - 1, kb - 1, kc - 1] + a8 * t4
+                    elif gs == 1:
+                        val[ka - 1, kb - 1, kc - 1] = val[ka - 1, kb - 1, kc - 1] + a7 * t4
+                        val[ka - 1, kb - 1, kc - 1] = val[ka - 1, kb - 1, kc - 1] + b7 * t4
+                        if spin:
+                            spn[ka - 1, kb - 1, kc - 1] = spn[ka - 1, kb - 1, kc - 1] + a8 * t4
+                            spn[ka - 1, kb - 1, kc - 1] = spn[ka - 1, kb - 1, kc - 1] + b8 * t4
+                    else:
+                        ia = nint((ka + 1) / float(gs)) - 1
+                        ib = nint((kb + 1) / float(gs)) - 1
+                        ic = nint((kc + 1) / float(gs)) - 1
+                        g = cval[slot]
+                        g[ia, ib, ic] = g[ia, ib, ic] + a7 * t4
+                        g[ia, ib, ic] = g[ia, ib, ic] + b7 * t4
+                        if spin:
+                            h = cspn[slot]
+                            h[ia, ib, ic] = h[ia, ib, ic] + a8 * t4
+                            h[ia, ib, ic] = h[ia, ib, ic] + b8 * t4
 
 
 @numba.njit(cache=True)
@@ -1120,7 +1162,7 @@ def density_grids(prep, grid, pairs, parallel=True):
         nt = numba.get_num_threads()
         corr = _pass1_parallel(data, pbd, geo, grid["boundary"], grid["pixelvolume"],
                                _strided_order(pbd.shape[0], nt))
-        _accumulate_parallel(data, pbd, geo, grid["boundary"], grid["pixelvolume"], spin, val, spn, core,
+        _accumulate_parallel(data, pbd, geo, grid["boundary"], spin, val, spn, core,
                              cval, cspn, _strided_order(nc, nt) + 1)
         max_corr = float(corr.max()) if corr.size else 0.0
         if spin:
