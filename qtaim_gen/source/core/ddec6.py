@@ -896,79 +896,93 @@ def _block_geometry(data, pbd, na_tot, nb_tot, nc_tot):
 
 
 @numba.njit(cache=True)
-def _block_value(data, start, stop, X, Y, Z, step, gs, spin, mult_pv, sums):
-    """Pair sum at one point of a block: (t4, t7, t8); with sums=True also accumulates
-    the pass-1 numeric overlap sums (columns 38, 39). Returns t4 < 0 when the point is
-    outside the block cutoff."""
+def _prefix_lmax(ex, pbd):
+    """Row p: the largest angular exponent of each of the six factors over the rows of
+    its block up to p. A point evaluates a prefix of its block's rows (sorted by cutoff,
+    descending), so this bounds the powers it needs."""
+    pm = np.zeros_like(ex)
+    for b in range(pbd.shape[0]):
+        start = int(pbd[b, 0]) - 1
+        for p in range(start, int(pbd[b, 1])):
+            for k in range(6):
+                pm[p, k] = ex[p, k] if p == start else max(pm[p - 1, k], ex[p, k])
+    return pm
+
+
+@numba.njit(cache=True)
+def _powers(tab, lm, dx1, dy1, dz1, dx2, dy2, dz2):
+    """tab[k, n] = powi(d_k, n) for n <= lm[k]. Every row of a block shares its two
+    centres, so the six factors of a row's pair product are table lookups, bitwise
+    equal to calling powi per row."""
+    d = (dx1, dy1, dz1, dx2, dy2, dz2)
+    for k in range(6):
+        tab[k, 0] = 1.0
+        for n in range(1, lm[k] + 1):
+            tab[k, n] = powi(d[k], n)
+
+
+@numba.njit(cache=True)
+def _block_value(data, ex, pm, tab, start, stop, X, Y, Z, spin, mult_pv, sums):
+    """Step-1 pair sum at one point of a block. With sums=True accumulates the pass-1
+    numeric overlap sums (columns 38, 39) and returns (t4, 0, 0); otherwise returns
+    (t4, t7, t8). t4 < 0 when the point is outside the block cutoff. Rows run while
+    d2 <= their cutoff (the serial break); tab is scratch for _powers."""
     x1, y1, z1 = data[start, 9], data[start, 10], data[start, 11]
     x2, y2, z2 = data[start, 16], data[start, 17], data[start, 18]
     d2 = (X - data[start, 22]) ** 2 + (Y - data[start, 23]) ** 2 + (Z - data[start, 24]) ** 2
     if d2 > data[start, 33]:
         return -1.0, 0.0, 0.0
-    dx1 = X - x1
-    dy1 = Y - y1
-    dz1 = Z - z1
-    dx2 = X - x2
-    dy2 = Y - y2
-    dz2 = Z - z2
+    last = start
+    while last < stop and d2 <= data[last + 1, 33]:
+        last += 1
+    _powers(tab, pm[last], X - x1, Y - y1, Z - z1, X - x2, Y - y2, Z - z2)
     t4 = math.exp(-(data[start, 5] + data[start, 12]) * d2) * data[start, 34]
     t5 = t4 * mult_pv[0]
     if mult_pv[1] != 1.0:
         t5 = t5 * mult_pv[1]
     t7 = 0.0
     t8 = 0.0
-    for p in range(start, stop + 1):
-        if d2 > data[p, 33]:
-            break
-        renorm = 1.0 if (step == 1 or gs == 0) else data[p, 31]
-        if gs != 0 and step == 2 and renorm == 0.0:
-            continue
-        t6 = (powi(dx1, nint(data[p, 6])) * powi(dy1, nint(data[p, 7])) * powi(dz1, nint(data[p, 8]))
-              * powi(dx2, nint(data[p, 13])) * powi(dy2, nint(data[p, 14])) * powi(dz2, nint(data[p, 15])))
-        if gs != 0:
-            if step == 1:
-                if sums:
-                    data[p, 38] = data[p, 38] + t5 * t6
-                    data[p, 39] = data[p, 39] + t5 * abs(t6)
-            else:
-                t6 = abs(t6)
-        t7 = t7 + t6 * renorm * data[p, 2]
-        if spin:
-            t8 = t8 + t6 * renorm * data[p, 3]
+    for p in range(start, last + 1):
+        t6 = (tab[0, ex[p, 0]] * tab[1, ex[p, 1]] * tab[2, ex[p, 2]]
+              * tab[3, ex[p, 3]] * tab[4, ex[p, 4]] * tab[5, ex[p, 5]])
+        if sums:
+            data[p, 38] = data[p, 38] + t5 * t6
+            data[p, 39] = data[p, 39] + t5 * abs(t6)
+        else:
+            t7 = t7 + t6 * data[p, 2]
+            if spin:
+                t8 = t8 + t6 * data[p, 3]
     return t4, t7, t8
 
 
 @numba.njit(cache=True)
-def _block_value_both(data, start, stop, X, Y, Z, gs, spin):
+def _block_value_both(data, ex, pm, tab, start, stop, X, Y, Z, gs, spin):
     """Accumulate-phase pair sums of both steps at one point of a block: t4, (t7, t8) of
     step 1 and (t7, t8) of step 2 (zero for gs == 0, which has no step 2). Each sum runs
-    over the same rows in the same order as a separate _block_value call per step, so
-    the values are bitwise the same with one evaluation of the pair products. Returns
-    t4 < 0 when the point is outside the block cutoff."""
+    over the same rows in the same order as one visit per step, so the values are
+    bitwise the same with one evaluation of the pair products. Returns t4 < 0 when the
+    point is outside the block cutoff. Rows run while d2 <= their cutoff (the serial
+    break); tab is scratch for _powers."""
     x1, y1, z1 = data[start, 9], data[start, 10], data[start, 11]
     x2, y2, z2 = data[start, 16], data[start, 17], data[start, 18]
     d2 = (X - data[start, 22]) ** 2 + (Y - data[start, 23]) ** 2 + (Z - data[start, 24]) ** 2
     if d2 > data[start, 33]:
         return -1.0, 0.0, 0.0, 0.0, 0.0
-    dx1 = X - x1
-    dy1 = Y - y1
-    dz1 = Z - z1
-    dx2 = X - x2
-    dy2 = Y - y2
-    dz2 = Z - z2
+    last = start
+    while last < stop and d2 <= data[last + 1, 33]:
+        last += 1
+    _powers(tab, pm[last], X - x1, Y - y1, Z - z1, X - x2, Y - y2, Z - z2)
     t4 = math.exp(-(data[start, 5] + data[start, 12]) * d2) * data[start, 34]
     a7 = 0.0
     a8 = 0.0
     b7 = 0.0
     b8 = 0.0
-    for p in range(start, stop + 1):
-        if d2 > data[p, 33]:
-            break
-        t6 = (powi(dx1, nint(data[p, 6])) * powi(dy1, nint(data[p, 7])) * powi(dz1, nint(data[p, 8]))
-              * powi(dx2, nint(data[p, 13])) * powi(dy2, nint(data[p, 14])) * powi(dz2, nint(data[p, 15])))
-        a7 = a7 + t6 * 1.0 * data[p, 2]
+    for p in range(start, last + 1):
+        t6 = (tab[0, ex[p, 0]] * tab[1, ex[p, 1]] * tab[2, ex[p, 2]]
+              * tab[3, ex[p, 3]] * tab[4, ex[p, 4]] * tab[5, ex[p, 5]])
+        a7 = a7 + t6 * data[p, 2]
         if spin:
-            a8 = a8 + t6 * 1.0 * data[p, 3]
+            a8 = a8 + t6 * data[p, 3]
         if gs != 0:
             renorm = data[p, 31]
             if renorm != 0.0:
@@ -999,7 +1013,7 @@ def _mult(gs, pv):
 
 
 @numba.njit(parallel=True, cache=True)
-def _pass1_parallel(data, pbd, geo, boundary, pv, order):
+def _pass1_parallel(data, ex, pmax, ntab, pbd, geo, boundary, pv, order):
     """Phase A: pass-1 numeric overlap sums and the renormalization factors, one block
     per task (a block's pairs only see its own points, so the order is the serial one).
     Blocks are taken in the given order (see _strided_order)."""
@@ -1016,13 +1030,14 @@ def _pass1_parallel(data, pbd, geo, boundary, pv, order):
         t2 = data[start, 23] - data[start, 29]
         t3 = data[start, 24] - data[start, 30]
         mp = _mult(gs, pv)
+        tab = np.empty((6, ntab))
         for nc in range(geo[b, 5], geo[b, 6] + 1, gs):
             for nbb in range(geo[b, 3], geo[b, 4] + 1, gs):
                 for na in range(geo[b, 1], geo[b, 2] + 1, gs):
                     X = na * boundary[0, 0] + nbb * boundary[1, 0] + nc * boundary[2, 0] + t1
                     Y = na * boundary[0, 1] + nbb * boundary[1, 1] + nc * boundary[2, 1] + t2
                     Z = na * boundary[0, 2] + nbb * boundary[1, 2] + nc * boundary[2, 2] + t3
-                    _block_value(data, start, stop, X, Y, Z, 1, gs, False, mp, True)
+                    _block_value(data, ex, pmax, tab, start, stop, X, Y, Z, False, mp, True)
         mc = 0.0
         for p in range(start, stop + 1):
             max_coeff = abs((data[p, 2] + data[p, 3]) / 2.0) + abs((data[p, 2] - data[p, 3]) / 2.0)
@@ -1036,7 +1051,7 @@ def _pass1_parallel(data, pbd, geo, boundary, pv, order):
 
 
 @numba.njit(parallel=True, cache=True)
-def _accumulate_parallel(data, pbd, geo, boundary, spin, val, spn, core, cval, cspn, plane_order):
+def _accumulate_parallel(data, ex, pmax, ntab, pbd, geo, boundary, spin, val, spn, core, cval, cspn, plane_order):
     """Phase B: both passes' contributions, one fine z-plane per task (planes 1-based, in
     the given order, see _strided_order). Every fine or coarse cell is fed by points of a
     single plane, and each task visits blocks in order, so each cell sums in the serial
@@ -1046,6 +1061,7 @@ def _accumulate_parallel(data, pbd, geo, boundary, spin, val, spn, core, cval, c
     nb = pbd.shape[0]
     for i in numba.prange(plane_order.shape[0]):
         kc = plane_order[i]
+        tab = np.empty((6, ntab))
         for b in range(nb):
             if geo[b, 10] == 0:
                 continue
@@ -1067,7 +1083,7 @@ def _accumulate_parallel(data, pbd, geo, boundary, spin, val, spn, core, cval, c
                     X = na * boundary[0, 0] + nbb * boundary[1, 0] + nc * boundary[2, 0] + t1
                     Y = na * boundary[0, 1] + nbb * boundary[1, 1] + nc * boundary[2, 1] + t2
                     Z = na * boundary[0, 2] + nbb * boundary[1, 2] + nc * boundary[2, 2] + t3
-                    t4, a7, a8, b7, b8 = _block_value_both(data, start, stop, X, Y, Z, gs, spin)
+                    t4, a7, a8, b7, b8 = _block_value_both(data, ex, pmax, tab, start, stop, X, Y, Z, gs, spin)
                     if t4 < 0.0:
                         continue
                     if gs == 0:
@@ -1094,7 +1110,7 @@ def _accumulate_parallel(data, pbd, geo, boundary, spin, val, spn, core, cval, c
 
 
 @numba.njit(cache=True)
-def _analytic_spin_occ(data, pbd, geo, center, atom_of_center, boundary, pv, occ):
+def _analytic_spin_occ(data, ex, pmax, ntab, pbd, geo, center, atom_of_center, boundary, pv, occ):
     """Phase C: spin of the analytic pairs taken out of occupancy_correction row 2, in
     the serial block and point order."""
     for b in range(pbd.shape[0]):
@@ -1110,13 +1126,14 @@ def _analytic_spin_occ(data, pbd, geo, center, atom_of_center, boundary, pv, occ
         t2 = data[start, 23] - data[start, 29]
         t3 = data[start, 24] - data[start, 30]
         mp = _mult(0, pv)
+        tab = np.empty((6, ntab))
         for nc in range(geo[b, 5], geo[b, 6] + 1):
             for nbb in range(geo[b, 3], geo[b, 4] + 1):
                 for na in range(geo[b, 1], geo[b, 2] + 1):
                     X = na * boundary[0, 0] + nbb * boundary[1, 0] + nc * boundary[2, 0] + t1
                     Y = na * boundary[0, 1] + nbb * boundary[1, 1] + nc * boundary[2, 1] + t2
                     Z = na * boundary[0, 2] + nbb * boundary[1, 2] + nc * boundary[2, 2] + t3
-                    t4, t7, t8 = _block_value(data, start, stop, X, Y, Z, 1, 0, True, mp, False)
+                    t4, t7, t8 = _block_value(data, ex, pmax, tab, start, stop, X, Y, Z, True, mp, False)
                     if t4 < 0.0:
                         continue
                     sc = t8 * t4
@@ -1159,15 +1176,19 @@ def density_grids(prep, grid, pairs, parallel=True):
     pbd = pairs["pair_block_data"]
     if parallel:
         geo = _block_geometry(data, pbd, na, nb, nc)
+        # angular exponents (columns 6-8, 13-15) as integers, for the _powers lookups
+        ex = np.rint(data[:, [6, 7, 8, 13, 14, 15]]).astype(np.int8)
+        pmax = _prefix_lmax(ex, pbd)
+        ntab = int(ex.max()) + 1 if ex.size else 1
         nt = numba.get_num_threads()
-        corr = _pass1_parallel(data, pbd, geo, grid["boundary"], grid["pixelvolume"],
+        corr = _pass1_parallel(data, ex, pmax, ntab, pbd, geo, grid["boundary"], grid["pixelvolume"],
                                _strided_order(pbd.shape[0], nt))
-        _accumulate_parallel(data, pbd, geo, grid["boundary"], spin, val, spn, core,
+        _accumulate_parallel(data, ex, pmax, ntab, pbd, geo, grid["boundary"], spin, val, spn, core,
                              cval, cspn, _strided_order(nc, nt) + 1)
         max_corr = float(corr.max()) if corr.size else 0.0
         if spin:
-            _analytic_spin_occ(data, pbd, geo, prep["center"], prep["atom_of_center"], grid["boundary"],
-                               grid["pixelvolume"], occ)
+            _analytic_spin_occ(data, ex, pmax, ntab, pbd, geo, prep["center"], prep["atom_of_center"],
+                               grid["boundary"], grid["pixelvolume"], occ)
     else:
         max_corr = _point_loop(data, pbd, prep["center"], prep["atom_of_center"], grid["boundary"], na, nb, nc,
                                grid["pixelvolume"], spin, occ, val, spn, core, cval, cspn)
