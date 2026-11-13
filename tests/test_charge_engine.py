@@ -547,6 +547,18 @@ def test_mbis_select_drops_failed_check_guesses(monkeypatch):
     assert seen == [True, True, True]
     assert info["merged"]["default"] == [{"atom": 1, "z": 1, "shells_guess": 2, "shells_fit": 1}] and info["selected"] == "sigma_x1.5"
 
+    # objectives within MBIS_TIE_REL: a converged fit wins a tie over an unconverged default
+    # (openac PuN3O11 def2-TZVPD: default unconverged after the fallback, x0.6 converged 2.8e-9
+    # relative above it on the same fixed point); with both converged the earlier guess stays
+    results[0.5] = ((np.array([0.1, -0.1]), m, p, s, 20000), False, 325.9688976126, False, True)
+    results[0.3] = ((np.array([0.1001, -0.1001]), m, p, s * 0.6, 900), True, 325.9688985146, False, True)
+    results[0.75] = ((np.array([0.3, -0.3]), m, p, s * 1.5, 20000), False, 325.9650200332, False, True)
+    q, *_, info = CE.mbis_select(None, None, None, np.array([1, 1]), np.array([1.0, 1.0]))
+    assert info["selected"] == "sigma_x0.6" and np.allclose(q, [0.1001, -0.1001])
+    results[0.5] = ((np.array([0.1, -0.1]), m, p, s, 400), True, 325.9688976126, False, False)
+    q, *_, info = CE.mbis_select(None, None, None, np.array([1, 1]), np.array([1.0, 1.0]))
+    assert info["selected"] == "default" and info["solutions"] == 1
+
 
 def test_mbis_guess_beyond_rn_keeps_six_shells():
     """Period 7 uses Multiwfn's Rn rule: 6 shells, valence Z - 54."""

@@ -529,7 +529,8 @@ MBIS_MERGE_EVERY = 500  # plain cycles between later merge checks
 MBIS_EMPTY_POP = 1e-6  # e: a shell below this has emptied
 MBIS_CHECK_SIGMAS = (0.6, 1.5)  # width scales of the extra guesses mbis_select fits from
 MBIS_UNIQUE_TOL = 0.005  # e: larger guess spreads mark the MBIS record as not unique
-# relative objective gap below which two fits count as tied (earlier guess kept): fits on one fixed
+# relative objective gap below which two fits count as tied (a converged fit, then the earlier guess,
+# kept; on an openac PuN3O11 an unconverged default tied a converged x0.6 at 2.8e-9): fits on one fixed
 # point differ by up to 8.6e-10 relative, distinct fixed points by 2.1e-6 or more (112 local jobs)
 MBIS_TIE_REL = 1e-8
 
@@ -1024,7 +1025,8 @@ def mbis_select(grel, coords, tmpden, atnums, qbase):
     another more than 0.005 e away; every actinide tested did, up to 0.9 e).
     Fit from the default guess and from it with every width scaled by each of
     MBIS_CHECK_SIGMAS, keep the fit with the largest mbis_objective (smallest
-    divergence), non-degenerate fits first, ties to the earlier guess. Returns
+    divergence), non-degenerate fits first, ties to a converged fit, then to
+    the earlier guess. Returns
     charge, mshell, pop, sig, the total cycles, and a record of the choice.
 
     The check guesses fall back to plain iteration (with shell merging, see
@@ -1056,7 +1058,8 @@ def mbis_select(grel, coords, tmpden, atnums, qbase):
     tol = MBIS_TIE_REL * max(abs(f[6]) for f in fits)
     best = fits[0]
     for f in good:
-        if (best[7] and not f[7]) or (f[7] == best[7] and f[6] > best[6] + tol):
+        tied = abs(f[6] - best[6]) <= tol
+        if (best[7] and not f[7]) or (f[7] == best[7] and (f[6] > best[6] + tol or (tied and not best[8]))):
             best = f
     kept = [best] + [f for f in good if f is not best]
     distinct = []
