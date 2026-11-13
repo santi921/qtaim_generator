@@ -20,7 +20,9 @@ Tools pinned by `actinide_test.slurm`:
 ```bash
 module load python
 conda activate /pscratch/sd/s/santiago/envs/generator
-git clone -b integration/nersc-actinide https://github.com/santi921/qtaim_generator.git /pscratch/sd/s/santiago/qtaim_generator_nersc
+# one clone per branch under test; the Slurm scripts import it and require CODE
+CODE=/pscratch/sd/s/santiago/qtaim_generator_<name>
+git clone -b <branch> https://github.com/santi921/qtaim_generator.git $CODE
 python -c "import numba, threadpoolctl, rdkit; print('ok')"   # charge engine and CHELPG radii need these
 ```
 
@@ -28,8 +30,7 @@ python -c "import numba, threadpoolctl, rdkit; print('ok')"   # charge engine an
 
 ```bash
 WORK=/pscratch/sd/s/santiago/actinide_test; mkdir -p $WORK && cd $WORK
-PYTHONPATH=/pscratch/sd/s/santiago/qtaim_generator_nersc python \
-  /pscratch/sd/s/santiago/qtaim_generator_nersc/scripts/nersc/sample_jobs.py \
+PYTHONPATH=$CODE python $CODE/scripts/nersc/sample_jobs.py \
   --roots <vertical root 1> <vertical root 2> ... --per_vertical 50 --actinide_first --out $WORK/sample.txt
 ```
 
@@ -43,10 +44,10 @@ time at 8 threads, on one node.
 
 ```bash
 cd $WORK
-S=/pscratch/sd/s/santiago/qtaim_generator_nersc/scripts/nersc/actinide_test.slurm
-sbatch -J mwfn   --export=ALL,LIST=$WORK/sample.txt,TREE=mwfn_l0          --array=0-9 $S
+S=$CODE/scripts/nersc/actinide_test.slurm
+sbatch -J mwfn   --export=ALL,CODE=$CODE,LIST=$WORK/sample.txt,TREE=mwfn_l0          --array=0-9 $S
 # after the Multiwfn run checks out:
-sbatch -J engine --export=ALL,LIST=$WORK/sample.txt,TREE=engine_l0,ENGINE=1 --array=0-9 $S
+sbatch -J engine --export=ALL,CODE=$CODE,LIST=$WORK/sample.txt,TREE=engine_l0,ENGINE=1 --array=0-9 $S
 ```
 
 `QTAIM_ENGINE=1` (with `ENGINE=1`) also runs the QTAIM step with the QTAIM engine (`--qtaim_engine`).
@@ -58,8 +59,7 @@ In Multiwfn mode, MBIS fails for Z > 86, so level-1 actinide folders do not vali
 ## 4. Check
 
 ```bash
-PYTHONPATH=/pscratch/sd/s/santiago/qtaim_generator_nersc python \
-  /pscratch/sd/s/santiago/qtaim_generator_nersc/scripts/nersc/summarize.py $WORK/mwfn_l0 \
+PYTHONPATH=$CODE python $CODE/scripts/nersc/summarize.py $WORK/mwfn_l0 \
   --list $WORK/sample.txt --src /pscratch/sd/s/santiago --failed $WORK/mwfn_l0_failed.txt
 ```
 

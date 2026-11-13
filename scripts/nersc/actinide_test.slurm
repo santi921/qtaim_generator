@@ -3,9 +3,9 @@
 # charge-engine mode from the same checkout. Each array task takes a disjoint slice of
 # N lines of $LIST and runs them on one CPU node, N_PAR jobs at a time.
 #
-#   sbatch -J mwfn   --export=ALL,LIST=$WORK/sample.txt,TREE=mwfn_l0         --array=0-9 actinide_test.slurm
-#   sbatch -J engine --export=ALL,LIST=$WORK/sample.txt,TREE=engine_l0,ENGINE=1 --array=0-9 actinide_test.slurm
-#   sbatch -J qeng   --export=ALL,LIST=$WORK/sample.txt,TREE=qengine_l0,ENGINE=1,QTAIM_ENGINE=1 --array=0-9 actinide_test.slurm
+#   sbatch -J mwfn   --export=ALL,CODE=$CODE,LIST=$WORK/sample.txt,TREE=mwfn_l0         --array=0-9 actinide_test.slurm
+#   sbatch -J engine --export=ALL,CODE=$CODE,LIST=$WORK/sample.txt,TREE=engine_l0,ENGINE=1 --array=0-9 actinide_test.slurm
+#   sbatch -J qeng   --export=ALL,CODE=$CODE,LIST=$WORK/sample.txt,TREE=qengine_l0,ENGINE=1,QTAIM_ENGINE=1 --array=0-9 actinide_test.slurm
 # Optional: FULL_SET (default 0), N (lines per task, default 50), N_PAR (concurrent jobs per
 # node, default 16), THREADS (per job, default 8), SRC (input root the list is under),
 # MULTIWFN and ORCA_2MKL (tool paths, defaults below), NATIVE_CONVERT (the runner's default is
@@ -27,7 +27,7 @@ set -eo pipefail
 module load python
 conda activate /pscratch/sd/s/santiago/envs/generator
 # the branch checkout, imported ahead of whatever qtaim_gen the env has installed
-CODE=${CODE:-/pscratch/sd/s/santiago/qtaim_generator_nersc}
+CODE=${CODE:?CODE is required: the branch checkout to import, e.g. /pscratch/sd/s/santiago/qtaim_generator_<name>}
 export PYTHONPATH=$CODE
 export PYTHONUNBUFFERED=1
 export PYTHONNOUSERSITE=1

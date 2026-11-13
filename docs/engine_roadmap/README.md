@@ -46,6 +46,14 @@ another way are discarded and recomputed when a gbw is there. With `--wfn` the d
 | 10 | Weak CPs (QTAIM plan D6) | Revised 2026-10-12: Poincare-Hopf is checked (and reseeding triggered) on the CPs with rho >= 1e-5, because near-vacuum CPs below that are found or missed depending on where seeds land (LRC case 40_Li+: kept set sums to 1, full set to 0); both sums go in `_meta`. Originally: check Poincare-Hopf on the full CP set first, then drop CPs with rho < 1e-5 and flag rho < 1e-3 in `_meta` (list of CP keys; the per-CP schema is unchanged). Whether flagged CPs become graph edges is a converter setting. Local data (97 jobs, 6,563 CPs): none below 1e-5, 141 (2.1%) between 1e-5 and 1e-3 |
 | 11 | esp_nuc, esp_total, delta_g_hirsh at nuclear CPs | Keep, for parity, although they are set by where the search stopped near the nucleus |
 
+## Decisions (2026-11-13, QTAIM P4)
+
+| # | Question | Decision |
+|---|---|---|
+| 12 | Where ring and cage CPs, non-nuclear attractors (NNAs) and unpaired BCPs go (QTAIM plan D3) | A sidecar, `qtaim_cp.json`, written next to qtaim.json from CPprop.txt (Multiwfn's or the engine's); qtaim.json is unchanged. json-to-lmdb does not read it yet |
+| 13 | BCPs whose bond path ends at a vacuum NNA | Unpaired, as before, and flagged: the engine `_meta` lists every unpaired BCP with the CPs its two paths ended at (`bcp_unpaired`), the NNAs (`nna`) and the vacuum ones (`nna_vacuum`, rho below 1e-3) |
+| 14 | QTAIM on a wavefunction with an ECP atom that has no EDF core density | Permanent skip (`qtaim`, reason `ecp_without_edf`, by `qtaim_engine`) in provenance.json; validation and the restart pre-check then need no qtaim.json. Not seen in local data: 651 wfx, 112 with ECPs, 31 (Z, ncore) pairs, all in the EDF library |
+
 Production ESP at CPs comes from Multiwfn's old `eleesp1` routine, not libreta: the QTAIM
 stdin never initializes libreta, so `eleesp` falls back (MW/function.f90:4269-4280).
 Verified locally: iESPcode 1 and 2 give byte-identical CPprop.txt.
@@ -146,6 +154,10 @@ change sign), the polarity index by 2.0e-2 eV and the skewness by 4.0e-2. With M
 code (iESPcode=1, eleesp1) and the engine on Multiwfn's Boys function, both fixtures agree on
 every field at print precision; the attribution of the larger set's differences to libreta rests
 on those two and the earlier measurement [I] (validation_ledger.md section 3).
+
+QTAIM with an ECP atom that has no EDF core density (decision 14): Multiwfn runs on the
+valence-only density, which loses that atom's nuclear CP and its bond paths (a local uranium
+ECP job without EDF had every bond unpaired); the engine records a permanent skip instead.
 
 ### Parity across levels of theory
 

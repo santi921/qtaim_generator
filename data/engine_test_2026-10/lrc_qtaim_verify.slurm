@@ -15,10 +15,13 @@
 # of LIST and writes $WORK/<job name>_<task>.jsonl; a requeued task skips the jobs
 # already in its file. CONTROL=1 adds --control (fresh Multiwfn QTAIM on the
 # regenerated wfx; slow on large jobs, use N=1). ENGINE=1 adds --engine (the engine's
-# whole QTAIM step in two modes against the stored CPs, pairs and qtaim.json).
+# whole QTAIM step in two modes against the stored CPs, pairs and qtaim.json). ADJUDICATE=1 adds
+# --adjudicate (implies ENGINE: a Multiwfn search, and with CRITIC2=<critic2 path> a critic2 search,
+# started at every engine-only CP; the rounding check of Laplacian and esp_total differences).
 #   sbatch -J qverify  --export=ALL,LIST=$WORK/sample_all.txt,N=25 --array=0-59 lrc_qtaim_verify.slurm
 #   sbatch -J qcontrol --export=ALL,LIST=$WORK/control_all.txt,N=1,CONTROL=1 --array=0-14 lrc_qtaim_verify.slurm
 #   sbatch -J qengine  --export=ALL,LIST=$WORK/sample_all.txt,N=25,ENGINE=1 --array=0-59 lrc_qtaim_verify.slurm
+#   sbatch -J qadj     --export=ALL,LIST=$WORK/adjudicate.txt,N=5,ADJUDICATE=1 --array=0-11 lrc_qtaim_verify.slurm
 
 # never on a blau recharge account, whatever the header or command line says
 case "${SLURM_JOB_ACCOUNT:-}" in *blau*) echo "refusing to run on account $SLURM_JOB_ACCOUNT"; exit 1 ;; esac
@@ -27,7 +30,7 @@ module load gcc
 conda activate ${CONDA_ENV:-qtaim_engine}
 export PYTHONUNBUFFERED=1
 export PYTHONNOUSERSITE=1
-Q=${Q:-/global/scratch/users/santiagovargas/qtaim_generator_qtaim}   # feat/qtaim-engine worktree
+Q=${Q:-/global/scratch/users/santiagovargas/qtaim_generator_qtaimp4}   # feat/qtaim-p4 clone
 export PYTHONPATH=$Q
 
 SRC=/global/scratch/users/santiagovargas/OMol4M_raw
@@ -49,6 +52,8 @@ fi
 EXTRA=""
 [ "${CONTROL:-0}" = 1 ] && EXTRA="--control"
 [ "${ENGINE:-0}" = 1 ] && EXTRA="$EXTRA --engine"
+[ "${ADJUDICATE:-0}" = 1 ] && EXTRA="$EXTRA --adjudicate"
+[ -n "${CRITIC2:-}" ] && EXTRA="$EXTRA --critic2_cmd $CRITIC2"
 python $Q/scripts/qtaim_verify_stored.py --job_file $SLICE --out $WORK/${SLURM_JOB_NAME}_${ID}.jsonl \
     --root_omol_inputs $SRC/ --root_omol_results $RES/ --orca_2mkl_cmd $ORCA_2MKL --multiwfn_cmd $MULTIWFN \
     --n_threads $SLURM_CPUS_PER_TASK --tmp_dir ${TMPDIR:-/tmp} $EXTRA

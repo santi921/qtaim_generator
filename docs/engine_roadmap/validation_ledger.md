@@ -185,6 +185,9 @@ Angstrom^2).
 | 2026-10-13 | Multiwfn parity | 156 actinide nitrates (actinide at the origin) | identical CP sets, Poincare-Hopf 1, properties at print precision | `data/actinide_dev/work` |
 | 2026-10-22 | stored Multiwfn data, LRC (qeng2) | 1498 jobs | Poincare-Hopf (kept set) 1 in 1494 vs 1455 for stored Multiwfn; 0 missing non-weak CPs; every CP-set difference is an extra engine CP on a job where stored Multiwfn fails Poincare-Hopf; properties within 2e-9 rel except esp_total (4.6e-2 rel, likely cancellation, unchecked) | `data/engine_test_2026-10/qverify_results/qeng2_*.jsonl` |
 | 2026-10-25 | Multiwfn parity, NERSC | openac 419 | identical atom and bond sets in 327; engine-only bonds in 92, Multiwfn-only in 0; 74 of the 92 involve the actinide, 68 of them far from the origin with Multiwfn Poincare-Hopf failing | `prod_l1_audit.tsv` |
+| 2026-11-13 | determinism across thread counts (criterion E), engine defaults | 8 local ladder jobs, 12-274 atoms (25-779 CPs; ECP, lanthanide, open shell) | CP arrays, CPprop.txt and qtaim.out byte-identical at 1, 4 and 8 threads on all 8; 274 atoms: 395 / 190 / 172 s | `data/engine_test_2026-11/qtaim_p4/determinism.jsonl` |
+| 2026-11-13 | Multiwfn and critic2 searches started at the engine-only CPs (`qtaim_verify_stored.py --adjudicate`) | 3 local LRC jobs with NNAs (`data/engine_test_2026-10/ph_fail`: MOBH32_Pt2, MOR16_Ir4, ROST59_Ir3) | 5 engine-only CPs (3 RCPs at rho 2.4e-5 to 2.8e-5, 2 vacuum NNAs at rho 1.5e-5, 6.9-7.4 Bohr from any nucleus): all 5 confirmed by both programs (same type within 1e-4 Bohr) | `data/engine_test_2026-11/qtaim_p4/adj.jsonl` |
+| 2026-11-13 | rounding check at the stored positions (`qtaim_compare_props.rounding_check`) | same 3 jobs | every Laplacian difference within the 1e-12 Bohr position spread plus half the last printed digit (NCP up to 4.3e-10 rel); esp_total differences 4.4e-9 to 9.8e-9 of abs(esp_e), the exact vs Fmch Boys function difference (decision 9), large relative to esp_total only where it nearly cancels | same |
 
 ## 4b. Wavefunction converter (`core/wavefunction.py`, `--native_convert`)
 
@@ -243,11 +246,10 @@ Current behaviours without a validation on current code, and checks not yet done
 | gap | why it matters | suggested check |
 |---|---|---|
 | converged MBIS has one independent reference (HORTON, one 3d cluster) | it is the production default and moves actinide charges by up to 0.38 e from Multiwfn's rule | HORTON MBIS (horton-part) on the 87 wfx_pull + nitrates |
-| engine-only CPs not confirmed by critic2 | 92 openac jobs and the qeng2 extras rest on Poincare-Hopf alone | critic2 on the engine's CP positions (QTAIM P4) |
+| engine-only CPs not confirmed by critic2 | 92 openac jobs and the qeng2 extras rest on Poincare-Hopf alone; 5 CPs on 3 local jobs confirmed (section 4b, 2026-11-13) | `--adjudicate` on the 57 LRC and the openac jobs (QTAIM P4) |
 | NERSC ALIE 3.4e-5 rel | larger than every other ALIE comparison | rerun Multiwfn and the engine on a few openac jobs locally |
-| qeng2 esp_total 4.6e-2 rel | unchecked | 80-bit or gbasis ESP at those CPs |
-| tier 2 3 BCP Laplacians (up to 1.5e-7 rel) | unconfirmed as position rounding | evaluate at perturbed positions |
-| determinism across thread counts (QTAIM criterion E) | not recorded | run 1, 4, 8 threads on the ladder |
+| qeng2 esp_total 4.6e-2 rel | on 3 local jobs the esp_total differences are the Boys function difference (4.4e-9 to 9.8e-9 of abs(esp_e)), large relative to esp_total only where it cancels (section 4b, 2026-11-13); the 4.6e-2 job itself is on LRC | `--adjudicate` rounding check on the 5 largest qeng2 cases |
+| tier 2 3 BCP Laplacians (up to 1.5e-7 rel) | unconfirmed as position rounding; on 3 other local jobs all Laplacian differences are rounding (section 4b, 2026-11-13) | `--adjudicate` rounding check on those 3 LRC jobs |
 | level-of-theory matrix | double hybrids, HF, Cartesian basis sets, ROKS beyond one radical, ORCA 5 vs ORCA 6 not covered | tier 3 supplementary set |
 | results recorded on older code | the 87-job, 18-reference and 16-reference local sets predate the threading fixes (#63-#65) and the converged MBIS default | rerun the local sets on current code; they take minutes |
 | full_set 2 routines | still Multiwfn (bader, laplacian_bond) | when engines exist |

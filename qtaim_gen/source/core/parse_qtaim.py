@@ -26,20 +26,23 @@ def parse_cp(lines, verbose=True):
     cp_bond, cp_atom = False, False
     cp_name = "null"
     cp_dict = {}
+    # bond, ring and cage CPs share the field set; the name suffix tells them apart
+    suffix = {"(3,-1)": "bond", "(3,+1)": "ring", "(3,+3)": "cage"}
+    kind = next((suffix[t] for t in suffix if t in lines_split[0]), None)
     if "(3,-3)" in lines_split[0]:
         cp_atom = True
         if verbose:
             print("atom cp")
 
-    elif "(3,-1)" in lines_split[0]:
+    elif kind is not None:
         cp_bond = True
         if verbose:
-            print("bond cp")
+            print(f"{kind} cp")
 
     else:
         if verbose:
-            print("ring critical bond not implemented")
-        return "ring", cp_dict
+            print("unknown CP type")
+        return "null", cp_dict
 
     cp_atom_conditionals = {
         "cp_num": ["----------------"],
@@ -110,7 +113,8 @@ def parse_cp(lines, verbose=True):
 
                     elif k == "ele_info":
                         if i[2] == "Unknown":
-                            cp_name = str(unknown_id) + "_Unknown"
+                            # a non-nuclear attractor, named by its CP number (unique per file)
+                            cp_name = str(cp_dict.get("cp_num", unknown_id)) + "_Unknown"
                             cp_dict["number"] = "Unknown"
                             cp_dict["ele"] = "Unknown"
                             unknown_id += 1
@@ -145,7 +149,7 @@ def parse_cp(lines, verbose=True):
                 if all(x in i for x in v):
                     if k == "cp_num":
                         cp_dict[k] = int(i[2][:-1])
-                        cp_name = str(cp_dict[k]) + "_bond"
+                        cp_name = str(cp_dict[k]) + "_" + kind
                     elif k == "connected_bond_paths":
                         list_raw = [x for x in i[2:]]
                         # save only items that contain a number
@@ -173,18 +177,17 @@ def parse_cp(lines, verbose=True):
 
                     break
 
-    else:
-        print("error - ring and cage critical points not implemented")
-
     return cp_name, cp_dict
 
 
-def get_qtaim_descs(file="./CPprop_1157_1118_1158.txt", verbose=False):
+def get_qtaim_descs(file="./CPprop_1157_1118_1158.txt", verbose=False, keep_all=False):
     """
     helper function to parse CPprop file from multiwfn.
     Takes
         file (str): path to CPprop file
         verbose(bool): prints dictionary of descriptors
+        keep_all(bool): keep ring ("<n>_ring") and cage ("<n>_cage") CPs, which
+            qtaim.json leaves out (they go to the qtaim_cp.json sidecar)
     returns: dictionary of descriptors
     """
     cp_dict, ret_dict = {}, {}
@@ -210,8 +213,8 @@ def get_qtaim_descs(file="./CPprop_1157_1118_1158.txt", verbose=False):
         ind_atom, cp_dict = parse_cp(v, verbose=verbose)
         ret_dict[ind_atom] = cp_dict
 
-    # remove keys-value pairs that are "ring"
-    ret_dict = {k: v for k, v in ret_dict.items() if "ring" not in k}
+    if not keep_all:
+        ret_dict = {k: v for k, v in ret_dict.items() if not k.endswith(("_ring", "_cage"))}
     return ret_dict
 
 
@@ -285,6 +288,56 @@ def load_cpprop_full(path: str) -> list:
             i += 1
         cps.append(cp)
     return cps
+
+
+QTAIM_CP_FILE = "qtaim_cp.json"
+# a non-nuclear attractor below this density is a far-field maximum, not a bonding
+# attractor; the same value as cp_search.WEAK_FLAG (used when no engine record gives it)
+NNA_VACUUM_RHO = 1e-3
+_SIDECAR_NEAREST = {"ring": 3, "cage": 4, "nna": 3, "unpaired_bcp": 2}
+
+
+def qtaim_cp_sidecar(cprop_file: str, inp_loc: str, orca_tf: bool = False,
+                     engine_meta: "dict | None" = None) -> dict:
+    """The CPs qtaim.json leaves out, for qtaim_cp.json: ring and cage CPs,
+    non-nuclear attractors (nna) and BCPs whose paths do not end at two atoms
+    (unpaired_bcp), each keyed by its CPprop.txt CP number, with the same fields as
+    qtaim.json plus nearest_atoms (0-based, input order) and nearest_dist_ang.
+    NNAs carry vacuum (density below the vacuum threshold); unpaired BCPs carry
+    path_ends ([end 1, end 2] CP numbers, 0 for none) when engine_meta (the QTAIM
+    engine's qtaim.out record) lists them. Works on Multiwfn's CPprop.txt too."""
+    descs = get_qtaim_descs(cprop_file, keep_all=True)
+    atoms = orca_inp_to_dict(inp_loc) if orca_tf else dft_inp_to_dict(inp_loc)
+    coords = np.array([a["pos"] for a in atoms.values()], dtype=float)
+    vacuum_rho = (engine_meta or {}).get("weak_below_rho", NNA_VACUUM_RHO)
+    ends = {int(b): [int(e1), int(e2)] for b, e1, e2 in (engine_meta or {}).get("bcp_unpaired", [])}
+    out = {"ring": {}, "cage": {}, "nna": {}, "unpaired_bcp": {}}
+    for key, cp in descs.items():
+        kind = key.split("_", 1)[1] if "_" in key else None
+        if kind == "Unknown":
+            section = "nna"
+        elif kind in ("ring", "cage"):
+            section = kind
+        elif kind == "bond" and "connected_bond_paths" not in cp:
+            section = "unpaired_bcp"
+        else:
+            continue
+        entry = {k: v for k, v in cp.items() if k not in ("number", "ele")}
+        d = np.linalg.norm(coords - np.asarray(cp["pos_ang"]), axis=1)
+        near = np.argsort(d, kind="stable")[: _SIDECAR_NEAREST[section]]
+        entry["nearest_atoms"] = [int(i) for i in near]
+        entry["nearest_dist_ang"] = [float(d[i]) for i in near]
+        if section == "nna":
+            entry["vacuum"] = bool(cp["density_all"] < vacuum_rho)
+        if section == "unpaired_bcp" and cp["cp_num"] in ends:
+            entry["path_ends"] = ends[cp["cp_num"]]
+        out[section][str(cp["cp_num"])] = entry
+    out["_meta"] = {
+        "source": "qtaim_engine" if engine_meta else "cpprop",
+        "nna_vacuum_below_rho": vacuum_rho,
+        "counts": {k: len(out[k]) for k in _SIDECAR_NEAREST},
+    }
+    return out
 
 
 def poincare_hopf(cps: list) -> int:

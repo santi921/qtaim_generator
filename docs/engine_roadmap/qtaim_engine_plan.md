@@ -409,9 +409,9 @@ validation of the repair, critic2 adjudication of extra CPs.
 
 - D1. RESOLVED 2026-10-08: robust superset. Every CP Multiwfn finds plus the ones it misses, flagged; divergences go in the release changelog (README.md).
 - D2. RESOLVED 2026-10-12: drop delta_g_promolecular.
-- D3. RESOLVED 2026-10-08 for ring and cage CPs: keep them, found mathematically, as a phase-two QTAIM task. Storage (qtaim.json or sidecar), NNAs and duplicate same-pair BCPs still open. The regeneration campaign is saving CPprop.txt now, so Multiwfn's RCP/CCP can be reparsed for validation.
+- D3. RESOLVED 2026-10-08 for ring and cage CPs: keep them, found mathematically, as a phase-two QTAIM task. Storage and NNAs RESOLVED 2026-11-13: the `qtaim_cp.json` sidecar (section 6f, README decision 12). Duplicate same-pair BCPs still open. The regeneration campaign is saving CPprop.txt now, so Multiwfn's RCP/CCP can be reparsed for validation.
 - D4. RESOLVED 2026-10-12: keep the ESP fields.
-- D5. Pending: the user is asking Tian Lu whether Multiwfn's EDF tables may be redistributed. Until then, wfx files keep supplying the EDF.
+- D5. Pending: the user is asking Tian Lu whether Multiwfn's EDF tables may be redistributed. Until then, wfx files keep supplying the EDF. Since 2026-11-03 the native converter supplies the EDF from `data/multiwfn_edf.py`. A wavefunction with an ECP atom the library lacks is a permanent QTAIM skip (2026-11-13, README decision 14).
 - D6. RESOLVED 2026-10-12: Poincare-Hopf on the full set, then drop rho < 1e-5 and flag rho < 1e-3 in `_meta` (README decision 10).
 - D7. Invest in GPU, and on which clusters?
 - D8. Is the `_meta` block enough provenance for --require_qtaim_provenance?
@@ -453,3 +453,49 @@ Branch feat/qtaim-engine-wiring, on integration/nersc-actinide with feat/qtaim-c
   - MR_169236 and MOBH32_Pt2 (kept-set sum 2 by design, full set 1) validate under
     `--enforce_poincare_hopf`, and two restarts neither rerun nor escalate them.
 - **Not wired.** full-runner and full-runner-parsl (they have no `--charge_engine` either).
+
+## 6f. P4 status (2026-11-13)
+
+Branch feat/qtaim-p4. Open items as of 2026-11-12: non-nuclear attractors, the EDF policy,
+`_meta` flags (done in P5, section 6e), LRC validation of the repair, critic2 adjudication of
+extra CPs, determinism across thread counts. [V] unless marked.
+
+- **Repair on LRC (qeng2, 1500 jobs).** The kept-set Poincare-Hopf sum is 1 on 1496. On the
+  other 4 the full set sums to 1 and the kept set fails only through CPs below rho 1e-5
+  (decision 10). No non-weak Multiwfn CP is missing; no BCP pair differs.
+- **NNAs.** 9 of the 1500 qeng2 jobs have NCPs Multiwfn could not assign to a nucleus, and 28
+  BCPs both codes leave unpaired. The 3 available locally (Pt2, Ir3, Ir4, anions) are vacuum
+  maxima: rho 4.6e-6 to 4.1e-5, 7.1 to 7.9 Bohr from the nearest nucleus. qtaim.json never
+  held them: `only_atom_cps` drops "Unknown" NCPs, and BCPs without "Connected atoms" are
+  dropped by `merge_qtaim_inds`.
+  - The engine `_meta` lists `nna`, `nna_vacuum` (rho below `WEAK_FLAG`, 1e-3) and
+    `bcp_unpaired` ([bcp, end 1, end 2], the CPs its paths ended at; 0 for none).
+    `analyze` returns `bcp_ends`.
+  - `parse_cp` names NNAs by CP number (`<n>_Unknown`; before, every NNA was `0_Unknown` and
+    a second one overwrote the first in the intermediate dict) and parses ring and cage CPs
+    (`<n>_ring`, `<n>_cage`), which `get_qtaim_descs` keeps only with `keep_all=True`.
+  - `qtaim_cp.json` (parse_qtaim.qtaim_cp_sidecar): sections `ring`, `cage`, `nna`,
+    `unpaired_bcp` keyed by CP number, with qtaim.json's field names plus `nearest_atoms`
+    (0-based, input order) and `nearest_dist_ang`; NNAs carry `vacuum`, unpaired BCPs
+    `path_ends` from the engine record. Written by the CPprop.txt parse step, moved and
+    replaced with qtaim.json, discarded with the wavefunction.
+- **EDF policy.** `point_properties` already refused an ECP atom without EDF; the QTAIM step
+  now records that as a permanent skip, and validation and `check_results_exist` honour it.
+- **Adjudication.** `scripts/qtaim_verify_stored.py --adjudicate` starts a Multiwfn search
+  (topology option 1-4, points file) and, with `--critic2_cmd`, a critic2 search
+  (`auto seed point x0 ...`; seeds and the cpreport positions plus the centering vector are
+  in the wfx frame) at every engine CP the stored set lacks, and records whether each
+  converges to a CP of the same type within 1e-4 Bohr. critic2 does not use the EDF block, so
+  CPs within 1 Bohr of an ECP nucleus get no critic2 verdict. Locally on the 3 jobs above:
+  5 engine-only CPs (3 RCPs at rho 2.4e-5 to 2.8e-5, 2 vacuum NNAs at 1.5e-5), all 5
+  confirmed by both programs.
+- **Determinism (criterion E).** On 8 ladder jobs (12-274 atoms, 25-779 CPs) the CP arrays,
+  CPprop.txt and qtaim.out are byte-identical at 1, 4 and 8 threads.
+- **Rounding check** (`qtaim_compare_props.rounding_check`, also under `--adjudicate`): at the
+  stored positions, the difference against the engine's change when the position moves
+  1e-12 Bohr plus half the last printed digit (E18.10: 5e-11 to 5e-10 relative). On the same
+  3 jobs every Laplacian difference is within it (NCP Laplacians up to 4.3e-10 relative). The
+  esp_total differences are not rounding: 4.4e-9 to 9.8e-9 of |esp_e|, the recorded exact vs
+  Fmch Boys function difference (decision 9); they look large relative to esp_total only where
+  esp_nuc and esp_e nearly cancel.
+
