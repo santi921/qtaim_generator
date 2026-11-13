@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from qtaim_gen.source.utils.fuzzy_recheck import (
+    _electron_count,
     fuzzy_value_failures,
     hirsh_density_from_charges,
     out_electron_counts,
@@ -75,6 +76,105 @@ class TestValueChecks:
         assert out_electron_counts(FUZZY_BOND_WFX) == (95.0, 48.0, 47.0)
         assert out_electron_counts(FUZZY_BOND_ALL_ALPHA) == (95.0, 95.0, 0.0)
         assert out_electron_counts("no banner") is None
+
+
+def _summing_to(total, rest=1.0):
+    """A 12-atom table whose atom values sum to `total`."""
+    return _table([total - 11 * rest] + [rest] * 11)
+
+
+def _fuzzy_out(values):
+    """A Multiwfn fuzzy integration table for ATOMS, as parse_fuzzy_real_space reads it."""
+    rows = [f"    {a.split('_')[0]}({a.split('_')[1]})      {v:.10E}    0.0    0.0" for a, v in zip(ATOMS, values)]
+    return ("   Atomic space        Value                % of sum            % of sum abs\n" + "\n".join(rows)
+            + f"\n Summing up above values:    {sum(values):.10E}"
+            + f"\n Summing up absolute value of above values:    {sum(abs(v) for v in values):.10E}\n\n")
+
+
+class TestGridAlphaLoss:
+    """Spin falling short of mult - 1 by the same amount as the density misses its integer: grid loss of
+    a diffuse alpha electron (LRC tm_react dianions, 2026-10-19), accepted; everything else still flagged."""
+
+    # measured: MOR21_Au3 mult 3 (spin 1.733, density 357.733 of 358), MOR21_Fe3 mult 6 (4.76, 238.76 of 239)
+    AU3 = (3, 1.733, 357.733)
+    FE3 = (6, 4.760, 238.760)
+
+    def test_measured_dianions_accepted(self):
+        for mult, spin, dens in (self.AU3, self.FE3):
+            fz = {"becke_fuzzy_density": _summing_to(dens), "hirsh_fuzzy_density": _summing_to(dens),
+                  "becke_fuzzy_spin": _summing_to(spin, 0.01), "hirsh_fuzzy_spin": _summing_to(spin, 0.01)}
+            assert fuzzy_value_failures(fz, mult=mult) == []
+
+    def test_any_partition_density_counts(self):
+        # a hirsh density rebuilt from charges is an exact integer; the becke integral shows the loss
+        mult, spin, dens = self.AU3
+        fz = {"becke_fuzzy_density": _summing_to(dens), "hirsh_fuzzy_density": _summing_to(358.0),
+              "hirsh_fuzzy_spin": _summing_to(spin, 0.01)}
+        assert fuzzy_value_failures(fz, mult=mult) == []
+
+    def test_spin_equal_to_density_still_flagged(self):
+        # the #28 defect (Cu2 / Cr2 pattern): spin integrates to the whole density
+        fz = {"becke_fuzzy_density": _summing_to(357.0), "becke_fuzzy_spin": _summing_to(357.0)}
+        assert fuzzy_value_failures(fz, mult=2) == ["becke_fuzzy_spin"]
+
+    def test_shortfall_without_density_loss_flagged(self):
+        fz = {"becke_fuzzy_density": _summing_to(358.0), "becke_fuzzy_spin": _summing_to(1.733, 0.01)}
+        assert fuzzy_value_failures(fz, mult=3) == ["becke_fuzzy_spin"]
+
+    def test_shortfall_beyond_limit_flagged(self):
+        fz = {"becke_fuzzy_density": _summing_to(357.3), "becke_fuzzy_spin": _summing_to(1.3, 0.01)}
+        assert fuzzy_value_failures(fz, mult=3) == ["becke_fuzzy_spin"]
+
+    def test_excess_spin_flagged(self):
+        fz = {"becke_fuzzy_density": _summing_to(358.267), "becke_fuzzy_spin": _summing_to(2.267, 0.01)}
+        assert fuzzy_value_failures(fz, mult=3) == ["becke_fuzzy_spin"]
+
+    def test_spin_without_density_flagged(self):
+        # nothing to compare the shortfall with, so no exemption
+        assert fuzzy_value_failures({"becke_fuzzy_spin": _summing_to(1.733, 0.01)}, mult=3) == ["becke_fuzzy_spin"]
+
+    def test_zero_density_cannot_vouch(self):
+        fz = {"hirsh_fuzzy_density": ZEROS, "becke_fuzzy_spin": _summing_to(1.733, 0.01)}
+        assert sorted(fuzzy_value_failures(fz, mult=3)) == ["becke_fuzzy_spin", "hirsh_fuzzy_density"]
+
+    def test_electron_count_pins_the_match(self):
+        # density 1.267 e short of N = 358, spin 0.267 e short: near an integer, but not the electron count
+        fz = {"becke_fuzzy_density": _summing_to(356.733), "becke_fuzzy_spin": _summing_to(1.733, 0.01)}
+        assert fuzzy_value_failures(fz, mult=3) == []
+        assert fuzzy_value_failures(fz, mult=3, n_electrons=358) == ["becke_fuzzy_spin"]
+        fz["becke_fuzzy_density"] = _summing_to(357.733)
+        assert fuzzy_value_failures(fz, mult=3, n_electrons=358) == []
+
+    def test_electron_count_from_input(self, tmp_path):
+        # orca5 fixture: 118 atoms, sum of Z 645, charge -2
+        assert _electron_count(str(Path(__file__).parent / "test_files" / "lmdb_tests" / "orca5")) == 647
+        assert _electron_count(str(tmp_path)) is None
+
+    def test_recheck_leaves_grid_loss_folder_alone(self, tmp_path):
+        mult, spin, dens = self.FE3
+        job = _job(tmp_path, {"becke_fuzzy_density": _summing_to(dens), "hirsh_fuzzy_density": _summing_to(dens),
+                              "becke_fuzzy_spin": _summing_to(spin, 0.01), "hirsh_fuzzy_spin": _summing_to(spin, 0.01)})
+        rep = recheck_fuzzy(str(job), mult=mult, dry_run=True)
+        assert rep["reparse"] == [] and rep["rerun"] == []
+
+    def test_reparsed_grid_loss_spin_accepted(self, tmp_path):
+        # stored spin is the #28 defect; the archived .wfx-era output carries the grid loss and is reparsed
+        mult, spin, dens = self.AU3
+        good = [spin - 11 * 0.01] + [0.01] * 11
+        job = _job(tmp_path, {"becke_fuzzy_density": _summing_to(dens), "becke_fuzzy_spin": _summing_to(dens)},
+                   outs={"becke_fuzzy_spin.out": _fuzzy_out(good)})
+        rep = recheck_fuzzy(str(job), mult=mult, dry_run=True)
+        assert rep["reparse"] == ["becke_fuzzy_spin"] and rep["rerun"] == []
+
+    def test_input_read_only_when_spin_off(self, tmp_path, monkeypatch):
+        import qtaim_gen.source.utils.fuzzy_recheck as fr
+        calls = []
+        monkeypatch.setattr(fr, "_electron_count", lambda folder: calls.append(folder))
+        job = _job(tmp_path, {"becke_fuzzy_density": GOOD_DENSITY, "becke_fuzzy_spin": GOOD_SPIN})
+        fr.plan_recheck(str(job), 2)
+        assert calls == []
+        fr.plan_recheck(str(job), 3)
+        assert calls == [str(job)]
 
 
 class TestRecheck:

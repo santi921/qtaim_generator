@@ -6,10 +6,12 @@ and at full_set 1 vdd, mbis, chelpg); fuzzy spin summing to mult - 1; fuzzy dens
 the charge engine's grid summing to the all-electron count (mbis_fuzzy_* included);
 Poincare-Hopf (kept and full set); an NCP on every actinide; the nucleus-frame and
 precision-limited counts; far-from-origin heavy nuclei; routines recorded as permanently
-skipped; from charge_engine_meta.json, the MBIS selection, whether the selected fit
-converged, degenerate fits, merged shells, the number of solutions and the cycle counts
-(flags: mbis_unconverged, mbis_degenerate). With --ref, for folders validated in both trees: the
-largest per-atom difference per charge and fuzzy scheme, fuzzy_bond and the ALIE values,
+skipped; from the charge engine's record in provenance.json, the MBIS selection, whether
+the selected fit converged, degenerate fits, merged shells, the number of solutions and
+the cycle counts (flags: mbis_unconverged, mbis_degenerate). With --ref, for folders
+validated in both trees: the largest per-atom difference per charge and fuzzy scheme
+(elf_fuzzy and the level-2 fuzzy integrals included), fuzzy_bond and the ALIE values,
+the charge-engine version,
 whether the QTAIM atom and bond sets are the same, and on the shared CPs the largest
 change in density and Laplacian (relative), Laplacian and spin density (absolute) and
 position (all CPs, and the CPs on or bonded to an actinide). A NaN on either side counts
@@ -27,12 +29,17 @@ import re
 
 import numpy as np
 
-from qtaim_gen.source.utils.validation import all_electron_count, get_charge_spin_n_atoms_from_folder
+from qtaim_gen.source.utils import provenance
+from qtaim_gen.source.utils.validation import (
+    all_electron_count, get_charge_spin_n_atoms_from_folder,
+)
 
 ACT = {"Ac", "Th", "Pa", "U", "Np", "Pu", "Am", "Cm", "Bk", "Cf", "Es", "Fm", "Md", "No", "Lr"}
 CHARGES = ("hirshfeld", "adch", "cm5", "becke", "vdd", "mbis", "chelpg")
 FUZZY_DENSITY = ("hirsh_fuzzy_density", "becke_fuzzy_density", "mbis_fuzzy_density")
 FUZZY_SPIN = ("hirsh_fuzzy_spin", "becke_fuzzy_spin", "mbis_fuzzy_spin")
+# charge-engine version 2 (full_set 1: elf_fuzzy; full_set 2: the gradient-norm and Laplacian integrals)
+FUZZY_FIELD = ("elf_fuzzy", "grad_norm_rho_fuzzy", "laplacian_rho_fuzzy")
 NELEC = re.compile(r"nelec grid ([0-9.]+) of")
 # acceptance for engine vs Multiwfn (docs/plans/2026-10-04-feat-one-pass-charge-engine-plan.md)
 MAX_DIFF_E = 0.03
@@ -133,12 +140,12 @@ def audit(folder):
         rec["flags"].append("actinide_ncp")
     rec["ncp_missing"] = sum(str(i) not in qt for i in mol)
 
-    timings = load(gen(folder, "timings.json")) or {}
-    skipped = timings.get("_skipped_routines") or {}
+    prov = provenance.load(folder)
+    skipped = prov["skipped"]
     rec["skipped"] = sorted(f"{r}:{v.get('reason')}" for r, v in skipped.items())
-    rec["charge_engine_s"] = timings.get("charge_engine")
+    rec["charge_engine_s"] = (load(gen(folder, "timings.json")) or {}).get("charge_engine")
 
-    meta = load(gen(folder, "charge_engine_meta.json")) or {}
+    meta = prov["engines"].get("charge_engine") or {}
     sel = meta.get("mbis_selection")
     if sel:
         rec["mbis_selected"] = sel["selected"]
@@ -168,7 +175,7 @@ def compare(new_folder, ref_folder, actinide_atoms=()):
     """Largest per-atom (per-pair) difference of each scheme present in both trees,
     relative differences of the ALIE values, and QTAIM key-set agreement."""
     out = {}
-    for name, schemes, sub in (("charge.json", CHARGES, "charge"), ("fuzzy_full.json", FUZZY_DENSITY + FUZZY_SPIN, None),
+    for name, schemes, sub in (("charge.json", CHARGES, "charge"), ("fuzzy_full.json", FUZZY_DENSITY + FUZZY_SPIN + FUZZY_FIELD, None),
                                ("bond.json", ("fuzzy_bond",), None)):
         a, b = load(gen(new_folder, name)) or {}, load(gen(ref_folder, name)) or {}
         for s in schemes:
@@ -205,6 +212,7 @@ def compare(new_folder, ref_folder, actinide_atoms=()):
             for key, v in diffs.items():
                 out[f"{key}_{t}"] = max(out.get(f"{key}_{t}", 0.0), v)
     out["ph_ref"] = (qb.get("_meta") or {}).get("poincare_hopf")
+    out["engine_versions"] = ",".join(map(str, provenance.engine_versions(provenance.load(new_folder)))) or "none"
     return out
 
 
@@ -268,7 +276,7 @@ def main():
     if mb:
         cyc = np.array([r["mbis_cycles"] for r in mb if "mbis_cycles" in r])
         t = np.array([r["charge_engine_s"] for r in mb if r.get("charge_engine_s")])
-        print(f"\nMBIS (charge_engine_meta.json, {len(mb)} folders): selected "
+        print(f"\nMBIS (provenance.json engines.charge_engine, {len(mb)} folders): selected "
               f"{dict(collections.Counter(r['mbis_selected'] for r in mb))}; selected fit unconverged "
               f"{sum(not r['mbis_converged'] for r in mb)}; all 3 guesses converged "
               f"{sum(r['mbis_guesses_converged'] == 3 for r in mb)}; degenerate {sum('mbis_degenerate' in r['flags'] for r in mb)}; "
@@ -281,9 +289,11 @@ def main():
     if args.ref:
         both = [r for r in done if r.get("ref_validated")]
         print(f"\nvs {args.ref}: {len(both)} folders validated in both (max per-atom |diff|, e; acceptance max {MAX_DIFF_E})")
+        print(f"engine versions of the engine routines, per folder: {dict(collections.Counter(r.get('engine_versions') for r in both))}; "
+              f"elf_fuzzy and the level-2 fuzzy rows are in their own units (ELF, a.u.)")
         print("| scheme | n | median | p99 | max | over max |")
         print("| --- | --- | --- | --- | --- | --- |")
-        for key in [f"d_{s}" for s in CHARGES + FUZZY_DENSITY + FUZZY_SPIN + ("fuzzy_bond",)] + ["rel_alie"]:
+        for key in [f"d_{s}" for s in CHARGES + FUZZY_DENSITY + FUZZY_SPIN + FUZZY_FIELD + ("fuzzy_bond",)] + ["rel_alie"]:
             x = np.array([r[key] for r in both if key in r])
             if len(x):
                 over = int((x > MAX_DIFF_E).sum()) if key != "rel_alie" else "-"

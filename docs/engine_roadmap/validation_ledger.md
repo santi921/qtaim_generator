@@ -4,7 +4,7 @@ Every validation run of the native engines (charge, surface, QTAIM) against Mult
 gbasis, critic2, extended precision or physical invariants. One row per run, with the
 reference, the data, the result and where the raw output lives.
 
-State as of 2026-11-02, branch `feat/charge-engine` (098e2ab). Companion documents:
+State as of 2026-11-11, branch `feat/charge-engine` (c309d2a), plus `feat/engine-esp-surface`. Companion documents:
 `README.md` (decisions, divergence changelog), `qtaim_verification_campaign.md` (QTAIM
 tiers 1-3), `mbis_converged.md` (MBIS).
 
@@ -20,7 +20,9 @@ tiers 1-3), `mbis_converged.md` (MBIS).
   - *Invariants*: physical checks that need no reference (charge and spin sums, electron
     count on the grid, Poincare-Hopf, an NCP on every nucleus).
 - **Engine version.** Results are only as current as the code they ran on. The column
-  "code" gives the branch or commit where it was recorded. Section 7 lists which current
+  "code" gives the branch or commit where it was recorded. Since 2026-11-11 each job
+  folder's provenance.json records the ENGINE_VERSION of every engine routine (README.md,
+  "Engine versions and provenance"). Section 7 lists which current
   behaviours have no validation on current code.
 - **Numbers** are the largest per-atom (or per-point) absolute difference unless marked
   relative ("rel"). Charges and populations are in e, positions in Bohr, planarity in
@@ -33,7 +35,10 @@ tiers 1-3), `mbis_converged.md` (MBIS).
 - **Charge and fuzzy routines** (full_set 0 and 1) match Multiwfn at print precision on
   every set run so far: 6 to 419 jobs per set, up to 342 atoms, ECP with EDF, lanthanides,
   actinides (X2C and ECP), open shells up to multiplicity 11. The largest charge
-  difference seen anywhere is 1.12e-6 e (ADC-Becke, LRC full_set 1).
+  difference seen anywhere is 1.12e-6 e (ADC-Becke, LRC full_set 1). The ELF, gradient
+  norm and Laplacian fuzzy integrals (full_set 1 and 2) match at print precision too, apart
+  from Laplacian values on ECP heavy atoms, which agree to 2.3e-11 of their integrand scale
+  (on a cluster: ELF on 70 LRC tm_react jobs, gradient and Laplacian on 9).
 - **QTAIM kernels** agree with gbasis to a median 7.5e-14 rel (rho) on 100
   wavefunctions; where they differ more, 80-bit evaluation sides with the engine. The CP
   search reproduces Multiwfn's CP sets exactly in its Multiwfn-compatible mode. In engine
@@ -44,11 +49,27 @@ tiers 1-3), `mbis_converged.md` (MBIS).
   yet confirmed by critic2; no run covers double hybrids, HF, Cartesian basis sets or a
   systematic ORCA 5 vs 6 comparison.
 
+## Runs in progress
+
+Cluster runs submitted but not finished. When a run ends, its result becomes a row in the
+section it validates and its entry here is removed; an abandoned run is removed with a note
+in its row or in section 7.
+
+LRC `fz1` (27525266) and `ref2`/`fz2` (27527328/27527329) ended at the 12 h limit on
+2026-11-04 and were not resubmitted; their results are rows in section 2 (and the ESP row in
+section 3 on `feat/engine-esp-surface`).
+
+LRC `ncref`/`ncfix` (27498703/27498704) hit the 12 h limit and were not continued: fresh
+trees `nc_ref_l1b`/`nc_fixed_l1b` replaced them so no tree mixes MBIS versions. The NERSC
+level 1/2 batches and the LRC `l1b` pair are done (rows in section 4b, 2026-11-12).
+
+No runs in progress (last checked 2026-11-13).
+
 ## 2. Charge engine (`core/charge_engine.py`)
 
 Routines: hirshfeld, adch, cm5, becke (Multiwfn's ADC-corrected Becke), hirsh and becke
-fuzzy density and spin, fuzzy_bond (full_set 0); vdd, mbis, mbis fuzzy density and spin
-(full_set 1).
+fuzzy density and spin, fuzzy_bond (full_set 0); vdd, mbis, mbis fuzzy density and spin,
+elf_fuzzy (full_set 1); grad_norm_rho_fuzzy, laplacian_rho_fuzzy (full_set 2).
 
 | date | reference | data | result | code | raw output |
 |---|---|---|---|---|---|
@@ -60,6 +81,18 @@ fuzzy density and spin, fuzzy_bond (full_set 0); vdd, mbis, mbis fuzzy density a
 | 2026-10-12 | Multiwfn parity, LRC, full_set 1 | tm_react, 191 of 200 jobs (113 open shell; 9 lost to preemption stale locks) | 13 schemes + 8 ALIE fields pass; max 5.03e-9 e except adch 4.73e-7, becke 1.12e-6, fuzzy_bond 5e-7; non-engine data changed in 0 | 568d6ad | LRC trees `ref_l1`, `scratch_l1c` |
 | 2026-10-13 | Multiwfn parity, local | 156 actinide nitrates (`data/actinide_dev/nitrates_dev`): Th, U, Np, Pu; 8 functionals x X2C-SVP/TZVP/TZVPPall + wB97M-V def2-SVP/TZVPD (ECP); ORCA 6.1 | charges within 1.3e-8 e (Pu ADCH/Becke), fuzzy_bond 5e-7, full_set 1 | fix/engine-mixed-records | `data/actinide_dev/work/{multiwfn,engine}` |
 | 2026-10-25 | Multiwfn parity, NERSC | openac: the 419 jobs with a Multiwfn-mode run (`mwfn_l0`, 440-job sample) | all charge and fuzzy schemes within 7.4e-8 e (median 5e-9), fuzzy_bond 5e-7 | feat/charge-engine, PRs #63-#68 | NERSC `actinide_test/prod_l1_audit.tsv` (`audit_prod.py --ref`) |
+| 2026-11-02 | Multiwfn parity, local, fresh Multiwfn | 2 fixtures (open shell; Xe ECP + EDF): elf_fuzzy, grad_norm_rho_fuzzy, laplacian_rho_fuzzy | ELF 4.8e-9, gradient norm 4.8e-9, Laplacian 2.2e-8 (Xe, value -114.9) | feat/engine-fuzzy-elf | `tests/test_files/charge_engine/*/multiwfn_reference_level{1,2}.json` |
+| 2026-11-02 | stored Multiwfn data (production `elf_fuzzy.out`), local | 156 actinide nitrates (as the 2026-10-13 row; open shells spin-polarized) | elf_fuzzy within 5.0e-9 on every atom of all 156 (Multiwfn prints 8 decimals); engine derivative pass median 14.4 s (4 threads) vs stored Multiwfn elf_fuzzy median 39.0 s | same | `data/engine_test_2026-11/fuzzy_elf/nitrates_elf.jsonl` |
+| 2026-11-02 | Multiwfn parity, local, fresh Multiwfn | 87 wfx_pull jobs (as the 2026-10-04 row) | elf_fuzzy within 5.0e-9 and grad_norm_rho_fuzzy within 5.3e-9 on all 87. laplacian_rho_fuzzy: 63 jobs within 1e-8; 24 jobs exceed it, every one on an ECP + EDF heavy atom (Xe, I, Te, Sb, Hf, Tl, Au, Ir, In, lanthanides; max 1.08e-6 on Hf, value 25712.9, 4.2e-11 rel). All 24 are within 2.3e-11 of the atom's integral of abs(integrand); summation order alone moves the result by about 1e-11. Read as per-point roundoff of the Laplacian near the core [I], not checked against 80-bit | same | `data/engine_test_2026-11/fuzzy_elf/` (`wfx_pull_fuzzy.txt`, `lapl_rel.py`, `refs_wfx_pull/`) |
+| 2026-11-03 | internal consistency | 2 fixtures, 400 random points each | `density_derivatives(elf_only=True)` (the full_set 1 ELF pass) gives values identical bit for bit to the full call, and `hessian=False` agrees within 1e-12 rel; elf_only takes 0.34 s vs 0.59 s per atom grid on MOR22 (tm_react) and 0.73 s vs 1.05 s on a TZVPPall Np nitrate (4 threads), so the 14.4 s nitrate median above is now lower | feat/engine-fuzzy-elf (review fixes) | `tests/test_qtaim_engine.py` |
+| 2026-11-03 | invariant scan | 552 local orca.wfx (85 with ECP) | the per-ECP-atom EDF rule (charge engine version 2) decides every skip as the molecule-wide rule did | same | `data/engine_test_2026-11/fuzzy_elf/edf_scan.py` |
+| 2026-11-03 | Multiwfn parity, LRC, full_set 1, charge engine version 2 | tm_react, 70 of 200 jobs compared (73 finished before the 12 h limit; not resubmitted), 43 open shell; engine on native-converted wfx (`multiwfn_h`, per its timings.json), reference on Multiwfn's | elf_fuzzy within 5.00e-9 (median 2.51e-9) over 5097 atoms; hirshfeld, cm5, vdd, Becke and Hirshfeld fuzzy within 5.0e-9 e, adch 7.8e-8, becke 8.11e-8, fuzzy_bond 5e-7; ALIE as the 2026-10-12 row; no routine missing. Non-engine data (first 34 jobs): chelpg within 2.0e-10 e (Multiwfn's last printed digit, as in section 4b); the `other.json` flags are the planarity fields (mpp, sdp within 5e-7 Angstrom, print precision), which `compare_engine_merge.py` does not yet exempt as engine output; ORCA Mulliken charges identical (the Ru4 step27 flag on the ORCA charge entries and qtaim.json is in another field, not yet identified). MBIS: mbis and mbis_fuzzy_density up to 0.71 e (median 3.6e-4), mbis_fuzzy_spin 3.4e-2, from Multiwfn's stopping rule: on MOBH12_V4 (mult 2, the 0.71 e job) `--mbis_mode multiwfn` reproduces Multiwfn exactly (85 cycles, V +1.50) and the converged fit (139 cycles, V +0.79) is the one fixed point of all three guesses (local rerun, `data/engine_test_2026-11/mbis_lrc/`). Speed: median 4.6x, p10 0.4x, aggregate 1.2x; the slow jobs spend their time in converged MBIS (MOBH10_Ag1Nb5 step0, one Ag and one Nb: 8362 s in the charge engine on LRC; locally 6057 plain-fallback cycles with the outer Ag shells merged, vs 137 cycles in multiwfn mode), handed to the MBIS work (`mbis_lrc/mbis_handoff.md`) | 59ac8ef | LRC `engine_test/fz_l1` vs `ref_l1`, `report_fz_l1.json` |
+| 2026-11-04 | Multiwfn parity, LRC, full_set 2 (full runner) | tm_react, 9 of the first 20 jobs of `jobs_ref.txt` compared (Re, Ag + Nb, Ti, Pt, Pd, Hf; 4 open shell; 16 of 20 finished in `ref_l2`, 10 in `fz_l2` before the 12 h limit) | grad_norm_rho_fuzzy within 4.99e-9 (median 2.44e-9); laplacian_rho_fuzzy median 2.68e-9, max 1.08e-6 (the size of the local Hf ECP-core case; atom not checked); elf_fuzzy 5.00e-9; every other non-MBIS scheme within 5.1e-9 e, fuzzy_bond 5e-7; MBIS up to 0.43 e (as in the full_set 1 row). Multiwfn's own bader on our wfx differs by 1e-6 to 2.9e-4 e (not yet tested whether Multiwfn's bader varies by that much run to run); chelpg 1e-10 e. Time: the level-2 derivative pass adds 0 to 33 s (charge engine at full_set 1 vs 2 on the 2 jobs in both trees: 4140 vs 4103 s, 194 vs 227 s); the charge engine's 3500-17600 s on 7 of the 9 jobs is the converged-MBIS cost of the full_set 1 row (inferred from that overlap and the local profile, `_meta` not written by this code). Multiwfn's bader alone takes 2200-11500 s per job and has no engine | `feat/engine-esp-surface` (qtaim_generator_esp clone) | LRC `engine_test/ref_l2` vs `fz_l2`, `report_fz_l2.json` |
+
+`scripts/compare_engine_merge.py` takes the routines a tree's engine covers from its
+version stamp. From charge engine version 2 its Multiwfn baseline time
+(`mwfn_engine_routines_s`) includes elf_fuzzy and the level-2 fuzzy timings, so speedups
+from it are not comparable with the 2026-10 rows above.
 
 **MBIS** (`mbis_converged.md`, 2026-10-15). The default (`MBIS_MODE = "converged"`)
 deliberately diverges from Multiwfn, which stops when no charge moves by 1e-4 e in a cycle.
@@ -76,8 +109,12 @@ deliberately diverges from Multiwfn, which stops when no charge moves by 1e-4 e 
 | HORTON MBIS (horton-part, own grid and guess) vs converged engine, 2026-11-04 | MOBH12_V4 (tm_react, 54 atoms, V, mult 2; converged vs Multiwfn's rule differ by 0.71 e) | max 0.0083 e, median 0.0011 e (vs Multiwfn's rule 0.706 e): the first independent reference for converged MBIS |
 | every-atom selection objective + MBIS_TIE_REL 1e-8 + stalled-check continuation + fuzzy refit from the charge fit (2026-11-04, perf/mbis-converged 337370c) vs b9d9d30 | 112 jobs (as above) | 111 identical; omol ThN6O18 def2-TZVPD moves to another of its 3 solutions (0.026 e); the old objective (atmrhocut cutoff) reversed rankings on a Pu nitrate (mbis_converged.md) |
 | fused map kernel + pair cache (2026-11-04, perf/mbis-kernel) vs perf/mbis-converged | 112 jobs | charges within 2.5e-7 e (median 3.2e-13), selection and solution counts identical on all 112; evaluation counts ratio 0.64-1.31 (last-digit exp shifts where accelerated fits stop); MBIS selection 2836 s to 2184 s on a loaded workstation |
+| MBIS between the Multiwfn-convert and native trees, NERSC (2026-11-12, f66f277) | openac 440-job sample, full_set 1 | 2 of 440 differ: NpN6O18 PBE X2C-SVPall 0.163 e (one tree's x1.5 stalled and merged to a worse point), PuN3O11 R2SCAN X2C-SVPall 0.297 e (one tree's x1.5 stalled and was dropped). Locally PuN3O11 reproduces and NpN6O18 does not; both fixed points exist on both wavefunctions (within 0.0012 e of each other), so the flip is a search miss; a third, better fixed point on NpN6O18 at x2.5 (mbis_converged.md) |
+| MBIS between the Multiwfn-convert and native trees, LRC (2026-11-12, f66f277) | tm_react, 200 jobs, full_set 1 | mbis within 1.4e-6 e, mbis_fuzzy_density 1.3e-6, mbis_fuzzy_spin 3.6e-8; no flips. 7 select an unconverged fit (same in both trees); the tie rule below moves 3 to a converged fit on the same point (up to 2.5e-4 e); 4 (Ta, Re) never converge on the selected point |
+| ties within MBIS_TIE_REL go to a converged fit (2026-11-12, perf/mbis-kernel 7b9f0f5) | unit test with the openac PuN3O11 objectives (unconverged default and converged x0.6 2.8e-9 relative apart) | converged fit selected; with both converged the earlier guess stays |
+| second accelerated window for a stalled fit (tested, not adopted) | the 4 wavefunctions of the two NERSC flips, locally | PuN3O11 native stalls again and falls back to the same point (+1000 evaluations); the other 3 unchanged |
 
-## 3. Surface engine (`core/surface_engine.py`, other_alie and other_geometry)
+## 3. Surface engine (`core/surface_engine.py`, other_alie, other_geometry and other_esp)
 
 **Planarity** (other_geometry: MPP and SDP for all atoms and for heavy atoms, Angstrom).
 
@@ -104,6 +141,20 @@ No local molecule outside these test geometries has a non-trivial exact tie.
 
 The NERSC difference is larger than the local and LRC runs. Its cause (print rounding of
 the statistics, the mesh, or the Multiwfn build) has not been checked.
+
+| date | reference | data | result | code | raw output |
+|---|---|---|---|---|---|
+| 2026-11-03 | refactor guard (shared mesh builder for ALIE and ESP) | 2 fixtures + 10 wfx_pull jobs | ALIE values and mesh counts bit-identical before and after | feat/engine-esp-surface | `data/engine_test_2026-11/esp_surface/alie_baseline.json`, `alie_check.py` |
+
+**ESP surface** (other_esp, full_set 2; 20 parsed values: extremes in kcal/mol, areas in
+Bohr^2, averages, variances and Pi in a.u., polarity index in eV, polar and nonpolar areas in
+Angstrom^2).
+
+| date | reference | data | result | code | raw output |
+|---|---|---|---|---|---|
+| 2026-11-03 | Multiwfn parity, exact ESP (iESPcode=1, eleesp1; engine with Multiwfn's Fmch Boys function) | 2 fixtures (open shell; Xe ECP + EDF) | identical mesh (counts before and after elimination); all 20 values within print precision | feat/engine-esp-surface | `tests/test_files/charge_engine/*/multiwfn_reference_esp.json` |
+| 2026-11-03 | production Multiwfn (libreta, iESPcode=2) vs engine (exact ESP) | 99 jobs: 87 wfx_pull (7 OMol verticals, 25 ECP) + 12 actinide nitrates (Th, U, Np, Pu; X2C and ECP) | mesh identical in 99/99; volume, total area, density within print precision. ESP fields (median / p90 / max): extremes 2.2e-3 / 7.9e-2 / 0.47 kcal/mol (min) and 3.8e-3 / 9.9e-2 / 0.49 (max), average 4.1e-6 / 1.3e-4 / 7.4e-4 a.u., positive area 2.4e-6 / 0.33 / 3.7 Bohr^2, polarity index 7.0e-5 / 2.7e-3 / 2.0e-2 eV, skewness 5.0e-5 / 2.8e-3 / 4.0e-2; nitrates alone at most 0.048 kcal/mol. A divergence by design (README changelog); attributed to libreta [I], with exact-code parity shown on the 2 fixtures only (the 27-job eleesp1 run was stopped). Engine median 2.8x faster than Multiwfn (0.97-12.1x; nitrates 9.8x) | same | `data/engine_test_2026-11/esp_surface/` (`esp_vs_libreta.jsonl`, `refs_esp_libreta/`) |
+| 2026-11-04 | production Multiwfn (libreta), LRC full runner at full_set 2 | tm_react, 9 jobs (Re, Ag + Nb, Ti, Pt, Pd, Hf; `ref_l2` vs `fz_l2`) | extremes within 0.067 kcal/mol (maximum) and 0.027 (minimum); positive and negative areas 5.8e-2 Bohr^2, polar and nonpolar 3.1e-2 Angstrom^2; overall average 6.2e-5 a.u., polarity index 1.7e-3 eV, skewness 1.1e-4; volume, total area and density within print precision (4.9e-6). All inside the range of the 99-job row. Surface engine 114-741 s vs Multiwfn other_esp 133-1292 s (1.2-2.9x) | `feat/engine-esp-surface` (qtaim_generator_esp clone) | LRC `engine_test/ref_l2`, `fz_l2` |
 
 ## 4. QTAIM engine (`core/qtaim_engine.py`, `cp_search.py`, `esp.py`)
 
@@ -156,9 +207,11 @@ the runner's default; `--native_convert off` runs Multiwfn's convert step instea
 | 2026-11-02 | NERSC openac sample, full runner, `--native_convert multiwfn_h` vs `prod_l1` | 440 jobs (all families, bases, functionals; ORCA 6.1; molden-only families included) | charges and fuzzy within 2.6e-12 e; QTAIM sets identical 440/440, density, Laplacian and positions identical; spin density 8.6e-6 a.u. at heavy nuclei (1e-11 of rho) | NERSC `actinide_test/nc_compat_audit.tsv` |
 | 2026-11-02 | NERSC openac sample, `--native_convert fixed` vs `prod_l1` | 440 jobs | only open-shell X2C jobs change: charges median 3.7e-6, max 9.8e-4 e; CP density max 6.4e-3 rel, Laplacian 0.10 rel (with a 1e-2 a.u. floor) and 1.9e-2 a.u. absolute at actinide CPs, positions 8.5e-3 Angstrom; CP sets identical; ALIE unchanged. Concentrated in 4 structures (PuN3O11 t, NpC15H13N4O6 t, PuC6H14O8 t, UC32H47ClN d); every other job 5e-5 e or less | NERSC `actinide_test/nc_fixed_audit.tsv` |
 | 2026-11-04 | NERSC openac sample at full_set 1, every engine routine (integration/nersc-l12-batch 5effd0e), `l1_off` (Multiwfn convert) vs `prod_l1` | 440 jobs | every level-0 scheme, ALIE and QTAIM property identical (0 difference): the new code reproduces production | NERSC `actinide_test/l1_off_vs_prod.tsv` |
-| 2026-11-04 | same, `l1_fixed` vs `l1_off` | 440 jobs, all validated, none flagged | charges 9.8e-4 e, vdd 2.4e-3, chelpg 8.2e-3, fuzzy 9.6e-4, fuzzy_bond 8.1e-4, elf_fuzzy 3.4e-2 (ELF units, open-shell X2C carbenes); QTAIM sets identical 440/440; MBIS up to 0.30 e on 3 nitrates from the MBIS selection, not the converter (mbis_converged.md, fixed since) | NERSC `actinide_test/l1_fixed_vs_off.tsv` |
+| 2026-11-04 | same, `l1_fixed` vs `l1_off` | 440 jobs, all validated, none flagged | charges 9.8e-4 e, vdd 2.4e-3, chelpg 8.2e-3, fuzzy 9.6e-4, fuzzy_bond 8.1e-4, elf_fuzzy 3.4e-2 (ELF units, open-shell X2C carbenes); QTAIM sets identical 440/440; MBIS up to 0.30 e on 3 nitrates from the MBIS selection, not the converter (mbis_converged.md); 2 of 440 still differ on the next batch (rows below) | NERSC `actinide_test/l1_fixed_vs_off.tsv` |
 | 2026-11-04 | same at full_set 2, `l2_fixed` vs `l2_off` | 40-job subset, 39 validated (one timed out at 4 h in both trees) | charges 4.0e-4 e, mbis 5.9e-4, grad_norm_rho_fuzzy 6.4e-3, laplacian_rho_fuzzy 1.6e-3 (a.u.); QTAIM sets identical; other_esp not compared | NERSC `actinide_test/l2_fixed_vs_off.tsv` |
-| 2026-11-03 | LRC OMol, full runner at full_set 1, Multiwfn convert vs `--native_convert fixed` | first 18 tm_react jobs validated in both trees (run continuing) | charges, fuzzy, fuzzy_bond, VDD and ALIE within 1.9e-12; MBIS within 3.0e-7 e (iteration noise of the converged fit); QTAIM sets and properties identical; Multiwfn's CHELPG on our wfx within 2e-10 e (its last printed digit) | LRC `engine_test/nc_ref_l1`, `nc_fixed_l1` |
+| 2026-11-03 | LRC OMol, full runner at full_set 1, Multiwfn convert vs `--native_convert fixed` | first 18 tm_react jobs validated in both trees (run not continued; the `l1b` row below replaces it) | charges, fuzzy, fuzzy_bond, VDD and ALIE within 1.9e-12; MBIS within 3.0e-7 e (iteration noise of the converged fit); QTAIM sets and properties identical; Multiwfn's CHELPG on our wfx within 2e-10 e (its last printed digit) | LRC `engine_test/nc_ref_l1`, `nc_fixed_l1` |
+| 2026-11-12 | NERSC openac sample, full_set 1 and 2, every engine routine (integration/nersc-l12-batch2 f66f277: MBIS kernel on the ESP-surface stack), fresh trees `l1b_off`, `l1b_fixed`, `l2b_off`, `l2b_fixed` | 440 jobs at full_set 1, 40 at full_set 2; all 520 validated (the 4 h level-2 timeout of the first batch is gone) | `l1b_off` reproduces `prod_l1`; `l1b_fixed` vs `l1b_off` and the level-2 pair differ as in the 2026-11-04 rows apart from MBIS, which differs on 2 of 440 (section 2); charge-engine time about 19% lower at the median and 55% at the maximum than the first batch | NERSC `actinide_test/l1b_fixed_vs_off.tsv` |
+| 2026-11-12 | LRC OMol, full runner at full_set 1 (f66f277), `nc_ref_l1b` (Multiwfn convert) vs `nc_fixed_l1b` (fixed) | `jobs_ref.txt`, 200 tm_react, 116 open shell; 200 validated in both | every non-MBIS charge and fuzzy scheme, fuzzy_bond and ALIE within 2.9e-12 (chelpg 2.0e-10, Multiwfn's last digit); mbis 1.4e-6 e, mbis_fuzzy_density 1.3e-6; QTAIM key sets identical 200/200, properties identical (spin density 2.0e-11); no routine missing. `compare_engine_merge.py` lists 169 jobs with "non-engine data changed": chelpg and elf_fuzzy at the sizes above, compared exactly | LRC `engine_test/nc_l1b_audit.tsv` |
 | 2026-11-02 | full runner, three trees (Multiwfn convert, multiwfn_h, fixed), engines on | 12 nitrates (open and closed shell, X2C and def2 ECP) | multiwfn_h vs Multiwfn convert: charges and fuzzy within 8.5e-14 e, QTAIM sets and properties identical; fixed vs Multiwfn: changes only on open-shell X2C (charges 5.8e-5 e, BCP rho 2.9e-4 rel); 12/12 validate in each, no Multiwfn convert in the native trees | scratchpad `rehearse/` |
 
 ## 5. Invariant audits (no reference)
@@ -197,20 +250,9 @@ Current behaviours without a validation on current code, and checks not yet done
 | determinism across thread counts (QTAIM criterion E) | not recorded | run 1, 4, 8 threads on the ladder |
 | level-of-theory matrix | double hybrids, HF, Cartesian basis sets, ROKS beyond one radical, ORCA 5 vs ORCA 6 not covered | tier 3 supplementary set |
 | results recorded on older code | the 87-job, 18-reference and 16-reference local sets predate the threading fixes (#63-#65) and the converged MBIS default | rerun the local sets on current code; they take minutes |
-| full_set 2 routines | still Multiwfn (bader, laplacian_bond, other_esp, grad_norm and laplacian fuzzy) | when engines exist |
-
-## 7b. Runs in progress (no results yet)
-
-Cluster runs submitted or planned whose results are not in the tables above. Each moves
-into its section as a row when it is audited.
-
-| cluster | job id | name | what | trees | code | status (2026-11-03) |
-|---|---|---|---|---|---|---|
-| LRC | 27498703, 27498704 | nc_ref, nc_fixed | converter check, full_set 1, `jobs_ref.txt` (200 tm_react) | `engine_test/nc_ref_l1` (`--native_convert off`) vs `nc_fixed_l1` | clone `qtaim_generator_nc`, feat/charge-engine before the MBIS changes | all 8 tasks TIMEOUT at 12 h; 18 of 200 compared (row in 4b). Not continued: the rerun uses fresh trees `nc_ref_l1b`/`nc_fixed_l1b` from perf/mbis-converged, so no tree mixes MBIS versions |
-| LRC | 27525266 | fz1 | elf_fuzzy and level 1 engine vs Multiwfn, full_set 1, `jobs_ref.txt` | `engine_test/fz_l1` (engine) vs `ref_l1`, `compare_engine_merge.py` (`report_fz_l1.json`) | clone `qtaim_generator_fz` (fuzzy-ELF work) | running |
-| LRC | 27527328, 27527329 | ref2, fz2 | level 2 engine vs Multiwfn, full_set 2, `jobs_l2.txt`, 5 jobs per task | `engine_test/ref_l2` (Multiwfn) vs `fz_l2` (engine) | clone `qtaim_generator_fz` or `qtaim_generator_esp`: the submitting session drafted both, which one ran is to be confirmed there | running; an earlier fz2 (27525268) ended after 10 s |
-| NERSC | 60782083 (l2off), 60782086 (l2fix); level-1 ids not recorded | l1_off, l1_fixed, l2_off, l2_fixed | converter at full_set 1 and 2 with every engine routine | `actinide_test/{l1,l2}_{off,fixed}`, 440-job sample (level 2: every 11th job) | integration/nersc-l12-batch 5effd0e | done 2026-11-04, rows in 4b; level-2 slice 2 (AmC72H60N3P6Se6 TZVPall) timed out at 4 h |
-| NERSC, LRC | - | next batch | perf/mbis-kernel (objective, ties, stalled checks, fuzzy refit, map kernel) with the esp-surface stack: NERSC level 1 pair from fresh trees + level-2 slice 2 with 12 h; LRC `nc_ref_l1b`/`nc_fixed_l1b` on `jobs_ref.txt` after maintenance | fresh trees | new integration branch | planned; PR not merged before the LRC run is back |
+| full_set 2 routines | still Multiwfn (bader, laplacian_bond) | when engines exist |
+| ESP surface vs Multiwfn's exact code | exact-code parity on 2 fixtures only; the libreta differences on 99 jobs are attributed, not shown | eleesp1 (iESPcode=1) references on more jobs; slow (about 25x libreta) |
+| fuzzy ELF / gradient / Laplacian on cluster actinides | done on LRC tm_react (ELF 70 jobs, gradient and Laplacian 9 jobs); none on actinides on a cluster; the Laplacian ECP-core differences are read as roundoff, not proven | NERSC: a separate eval that includes these changes (not tracked here yet); 80-bit Laplacian on one Hf or Tl job |
 
 ## 8. Adding a row
 

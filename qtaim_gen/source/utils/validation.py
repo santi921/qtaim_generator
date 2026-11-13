@@ -11,7 +11,7 @@ import zlib
 from typing import Optional
 from qtaim_gen.source.core.parse_qtaim import dft_inp_to_dict, fortran_float
 from qtaim_gen.source.core.parse_orca import ORCA_PARSER_VERSION
-from qtaim_gen.source.data.multiwfn import ENGINE_ROUTINES
+from qtaim_gen.source.utils import provenance
 import numpy as np
 from datetime import datetime
 
@@ -20,20 +20,20 @@ from datetime import datetime
 # patch_timings_from_log in core/omol.py (producer). Keep in sync at one place
 # so a rename of either the marker key or the sentinel is a one-line change.
 TIMINGS_PATCHED_KEY = "_timings_patched"
-# timings.json key recording routines that can never be computed for this
-# wavefunction ({routine: {"reason": ..., "by": "charge_engine" | "multiwfn"}}):
-# validation stops expecting them, so the folder is complete without them
-TIMINGS_SKIPPED_KEY = "_skipped_routines"
-# timings.json key recording which tool wrote the wavefunction: "multiwfn", or
-# "native:<mode>" for core/wavefunction.py (omol.NATIVE_CONVERT_MODES). Kept in
-# timings.json because cleanup removes the wfx itself from finished folders.
-CONVERTER_KEY = "_converter"
+# Which tool produced each routine, at which engine version, the wavefunction converter
+# and permanent skips live in provenance.json (utils/provenance.py), not in timings.json.
 
 
-def skipped_routines(timing_dict) -> set:
-    """Routine names recorded under TIMINGS_SKIPPED_KEY of a timings dict."""
-    rec = (timing_dict or {}).get(TIMINGS_SKIPPED_KEY) if isinstance(timing_dict, dict) else None
-    return set(rec) if isinstance(rec, dict) else set()
+def _job_folder(timing_json_loc: str) -> str:
+    """The job folder of a timings.json path (generator/timings.json or the root's)."""
+    d = os.path.dirname(os.path.abspath(timing_json_loc))
+    return os.path.dirname(d) if os.path.basename(d) == "generator" else d
+
+
+def timing_total(timing_dict) -> float:
+    """Sum of the step timings, leaving out the metadata entries (dicts under the
+    _-prefixed keys)."""
+    return float(sum(v for v in timing_dict.values() if isinstance(v, (int, float)) and not isinstance(v, bool)))
 TIMING_PLACEHOLDER = -1.0
 
 
@@ -161,7 +161,7 @@ def get_val_breakdown_from_folder(
     if os.path.exists(timings_file) and os.path.getsize(timings_file) > 0:
         with open(timings_file, "r") as f:
             timings = json.load(f)
-        total_time = np.array(list(timings.values())).sum()
+        total_time = timing_total(timings)
         info["total_time"] = total_time
 
         for col in timings.keys():
@@ -263,7 +263,9 @@ def get_expected_timing_keys(full_set: int = 0, spin_tf: bool = False) -> tuple:
             "laplacian_bond",
             "grad_norm_rho_fuzzy",
             "laplacian_rho_fuzzy",
-            "ESP_Volume",
+            # the step name run_jobs times (was "ESP_Volume", an other.json field no
+            # timings.json holds, so no full_set 2 folder validated)
+            "other_esp",
         ]
 
     if spin_tf:
@@ -287,20 +289,23 @@ def validate_timing_dict(
     Basic check that the timing json file has the expected structure.
     Check that it has the keys 'total', 'qtaim', 'charge', 'bond', and 'fuzzy_full'.
 
-    A positive 'charge_engine' timing stands in for the per-routine timings of
-    ENGINE_ROUTINES (core/charge_engine.py computed them in one pass), and a
-    positive 'surface_engine' timing for 'other' (core/surface_engine.py computed
-    other_alie). With charge_engine=True both are required, so folders whose
-    charge/fuzzy/bond or ALIE data came from Multiwfn are not counted as done.
-    With native_convert (a mode of omol.NATIVE_CONVERT_MODES), CONVERTER_KEY must
-    record core/wavefunction.py in that mode, so a wavefunction from Multiwfn's
-    convert step or the other mode is not counted as done either.
+    Routines that are current engine output in the job's provenance.json need no step
+    timing, nor do its permanently skipped routines; a positive 'surface_engine'
+    timing stands in for 'other' (core/surface_engine.py computed other_alie). With
+    charge_engine=True the charge_engine and surface_engine timings are required, so
+    folders whose charge/fuzzy/bond or ALIE data came from Multiwfn are not counted as
+    done; with qtaim_engine=True the QTAIM record must be current QTAIM-engine output.
+    With native_convert (a mode of omol.NATIVE_CONVERT_MODES), provenance must record
+    core/wavefunction.py in that mode as the converter, so a wavefunction from
+    Multiwfn's convert step or the other mode is not counted as done either.
     """
     timing_dict = _safe_json_load(timing_json_loc, logger=logger)
     if timing_dict is None:
         return False
-    if native_convert and timing_dict.get(CONVERTER_KEY) != f"native:{native_convert}":
-        msg = (f"Wavefunction converter {timing_dict.get(CONVERTER_KEY)!r}, not native:{native_convert}: "
+    prov = provenance.load(_job_folder(timing_json_loc))
+    converter = provenance.converter_tag(prov)
+    if native_convert and converter != f"native:{native_convert}":
+        msg = (f"Wavefunction converter {converter!r}, not native:{native_convert}: "
                "the data is not from core/wavefunction.py in this mode.")
         if logger:
             logger.error(msg)
@@ -327,17 +332,14 @@ def validate_timing_dict(
         if verbose:
             print(msg)
         return False
-    if engine_done:
-        expected_keys = [k for k in expected_keys if k not in ENGINE_ROUTINES]
-        excepted_spin_keys = [k for k in excepted_spin_keys if k not in ENGINE_ROUTINES]
-    skipped = skipped_routines(timing_dict)
-    expected_keys = [k for k in expected_keys if k not in skipped]
-    excepted_spin_keys = [k for k in excepted_spin_keys if k not in skipped]
-    # a positive qtaim_engine timing stands in for 'qtaim'; with qtaim_engine=True it is
-    # required, so a QTAIM record from Multiwfn is not counted as done
-    qtaim_done = isinstance(timing_dict.get("qtaim_engine"), (int, float)) and timing_dict["qtaim_engine"] > 0
+    # current engine output and permanent skips have no step timing
+    covered = provenance.engine_routines(prov) | provenance.skipped(prov)
+    expected_keys = [k for k in expected_keys if k not in covered]
+    excepted_spin_keys = [k for k in excepted_spin_keys if k not in covered]
+    # with qtaim_engine=True a QTAIM record from Multiwfn is not counted as done
+    qtaim_done = "qtaim" in covered
     if qtaim_engine and not qtaim_done:
-        msg = "No qtaim_engine timing: the QTAIM record is not from the QTAIM engine."
+        msg = "The QTAIM record is not current QTAIM-engine output (provenance.json)."
         if logger:
             logger.error(msg)
         if verbose:
@@ -509,10 +511,12 @@ def validate_fuzzy_dict(
     return True
 
 
-def validate_other_dict(other_dict_loc: str, verbose: bool = False, logger: any = None, full_set: int = 0):
+def validate_other_dict(other_dict_loc: str, verbose: bool = False, logger: any = None, full_set: int = 0,
+                        skipped: Optional[set] = None):
     """
     Basic check that the other json file has the expected structure.
     Check that it has the keys 'atoms', 'bonds', 'charges', and 'fuzzy'.
+    A permanently skipped other_esp (skipped) needs no ESP_* fields.
     """
     other_dict = _safe_json_load(other_dict_loc, logger=logger)
     if other_dict is None:
@@ -532,7 +536,7 @@ def validate_other_dict(other_dict_loc: str, verbose: bool = False, logger: any 
         "ALIE_Negative_surface_area",
         "ALIE_Overall_skewness",
     ]
-    if full_set > 1:
+    if full_set > 1 and "other_esp" not in (skipped or ()):
         expected_keys += [
             "ESP_Volume",
             "ESP_Surface_Density",
@@ -1725,7 +1729,8 @@ def validation_checks(
     # bonding_json_loc = os.path.join(folder, "bonding.json")
     tf_cond = True
 
-    skipped = skipped_routines(_safe_json_load(timing_json_loc, logger=logger))
+    prov = provenance.load(folder)
+    skipped = provenance.skipped(prov)
     if skipped and logger:
         logger.info(f"Routines recorded as permanently skipped in {folder}: {sorted(skipped)}")
 
@@ -1750,7 +1755,7 @@ def validation_checks(
             logger.error(f"Fuzzy json validation failed in folder: {folder}")
         tf_cond = False
 
-    if not validate_other_dict(other_dict_loc, verbose=verbose, logger=logger, full_set=full_set):
+    if not validate_other_dict(other_dict_loc, verbose=verbose, logger=logger, full_set=full_set, skipped=skipped):
         if logger:
             logger.error(f"Other json validation failed in folder: {folder}")
         tf_cond = False
@@ -1840,7 +1845,7 @@ def validation_checks(
         from qtaim_gen.source.utils.fuzzy_recheck import recheck_fuzzy as _recheck
 
         report = _recheck(folder, int(spin), logger=logger, dry_run=True,
-                          skip_routines=(frozenset(ENGINE_ROUTINES) | skipped) if charge_engine
+                          skip_routines=(provenance.engine_routines(prov) | skipped) if charge_engine
                           else (frozenset(skipped) or None))
         if report["reparse"] or report["rerun"]:
             if logger:
@@ -1912,7 +1917,7 @@ def get_information_from_job_folder(folder: str, full_set: int) -> dict:
         if os.path.exists(timings_file) and os.path.getsize(timings_file) > 0:
             with open(timings_file, "r") as f:
                 timings = json.load(f)
-            total_time = float(np.array(list(timings.values())).sum())
+            total_time = timing_total(timings)
             info["total_time"] = total_time
 
             for col in timings.keys():
@@ -1976,7 +1981,7 @@ def get_information_from_job_folder(folder: str, full_set: int) -> dict:
         if os.path.exists(timings_file):
             with open(timings_file, "r") as f:
                 timings = json.load(f)
-            total_time = float(np.array(list(timings.values())).sum())
+            total_time = timing_total(timings)
             info["total_time"] = total_time
 
             for col in timings.keys():

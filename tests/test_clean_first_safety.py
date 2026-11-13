@@ -296,3 +296,26 @@ class TestCheckEcp:
             str(job_file), num_folders=len(folders), pre_validate=True, check_ecp=True, max_workers=1
         )
         assert queued == [folders["ecp_failed"]]
+
+
+def test_carry_forward_keeps_the_provenance_of_carried_steps(tmp_path):
+    """A level-0 --clean_first rerun of a level-1 folder carries mbis back into charge.json;
+    its provenance entry comes with it, and the rerun's own entries win."""
+    import logging
+
+    from qtaim_gen.source.utils import provenance
+
+    stash, gen = tmp_path / "stash", tmp_path / "generator"
+    stash.mkdir()
+    gen.mkdir()
+    old = provenance.empty()
+    old["routines"] = {"hirshfeld": {"by": "charge_engine", "engine_version": 3},
+                       "mbis": {"by": "charge_engine", "engine_version": 3}}
+    new = provenance.empty()
+    new["routines"] = {"hirshfeld": {"by": "charge_engine", "engine_version": 4}}
+    (stash / provenance.PROVENANCE_FILE).write_text(json.dumps(old))
+    (gen / provenance.PROVENANCE_FILE).write_text(json.dumps(new))
+    workflow._carry_forward(str(stash), str(gen), logging.getLogger("t"))
+    got = json.loads((gen / provenance.PROVENANCE_FILE).read_text())["routines"]
+    assert got == {"hirshfeld": {"by": "charge_engine", "engine_version": 4},
+                   "mbis": {"by": "charge_engine", "engine_version": 3}}

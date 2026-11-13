@@ -223,8 +223,8 @@ charges and MBIS fuzzy integrals came from fixed points 0.25 e apart.
 | stalled-check fallback taken | 1: omol PuNO5Cl3 def2-TZVPD, same fixed point, 1249 to 9515 evaluations |
 | rmechdb_750, Ti FBFFF0, Sr 3824 (x1.5 selected) | unchanged: x1.5 is also best by the corrected objective |
 
-The NERSC "better x1.5" folders above were ranked with the biased objective; the next
-NERSC run will show how many remain.
+The NERSC "better x1.5" folders above were ranked with the biased objective. On the next
+NERSC run 2 of 440 still flip between trees (2026-11-12 section below).
 
 ## Independent reference: HORTON MBIS (2026-11-04)
 
@@ -289,6 +289,71 @@ jobs: charges within 2.5e-7 e of perf/mbis-converged (median 3.2e-13), selection
 solution counts identical on all 112, MBIS selection time 2836 s to 2184 s (loaded
 workstation; the per-evaluation table is the cleaner measure).
 
+## Cluster runs of this branch and the remaining flips (2026-11-12)
+
+Both clusters ran integration/nersc-l12-batch2 (f66f277: this branch's MBIS changes on the
+ESP-surface stack), before the tie rule below.
+
+**NERSC openac, 440-job sample, full_set 1 and a 40-job full_set 2 subset.** All 520 jobs
+validated; the Multiwfn-convert tree reproduces production; converter differences are as
+in the first batch; charge-engine time fell about 19% at the median and 55% at the
+maximum against the first batch. MBIS still differs between the Multiwfn-convert and
+native trees on 2 of 440:
+
+| job | tree, selection | other tree, selection | MBIS difference |
+|---|---|---|---|
+| NpN6O18 spin 2 PBE X2C-SVPall | native: x1.5 (295.0707) | Multiwfn convert: default; its x1.5 stalled and the merge fallback ended at 294.911 | 0.163 e |
+| PuN3O11 spin 3 R2SCAN X2C-SVPall | Multiwfn convert: x1.5 (328.8054) | native: default (328.7655); its x1.5 stalled below the default and was dropped | 0.297 e |
+
+**Local reproduction** (both wavefunctions rebuilt from the cluster gbw, kernel branch,
+OPENBLAS 1 thread, numba 8). PuN3O11 reproduces: the native x1.5 fit stalls and ends on
+the default's point after 9035 evaluations. NpN6O18 does not: locally both wavefunctions
+select x1.5, so on NERSC that fit's path differed (platform or thread layout).
+
+Both fixed points exist on both densities. Starting each density from the other's
+converged shells:
+
+| start | first fit | other density from those shells |
+|---|---|---|
+| Multiwfn-convert x1.5 | 328.80543, Pu +2.389 | native 328.80655 in 58 evaluations, Pu +2.390 |
+| native default | 328.76547, Pu +2.092 | Multiwfn convert 328.76437 in 99 evaluations, Pu +2.091 |
+
+The two wavefunctions agree within 0.0012 e on each fixed point, so the PuN3O11 flip is a
+search miss, not a different answer. Accelerated fits (1000-evaluation cap) from the
+default guess with every width scaled by f:
+
+| f | PuN3O11 Multiwfn convert | PuN3O11 native | NpN6O18 (both) |
+|---|---|---|---|
+| 0.6-1.3 | 328.7644 | 328.7655 | 294.9895 |
+| 1.4 | 328.8054 | 328.8065 | 295.0707 |
+| 1.5 | 328.8054 | stalls | 295.0707 |
+| 1.6 | 328.8054 | 328.8065 | 295.0707 |
+| 1.75 | stalls | stalls | 295.0707 |
+| 2.0 | stalls | stalls | stalls |
+| 2.5 | stalls | stalls | 295.1329 (Np +1.957 vs +2.040) |
+
+On the native density only x1.5 itself stalls. NpN6O18 has a third fixed point at
+x2.5 with a higher objective than any of the three guesses reach, so the three-guess
+search does not find the best fixed point there either.
+
+A second accelerated window from a stalled fit's end state (fresh Anderson history)
+before the fallback was tested and rejected: on PuN3O11 native it stalls again, then
+falls back to the same point, at 1000 more evaluations; the other three runs are
+unchanged.
+
+**Ties go to a converged fit.** On an openac PuN3O11 an unconverged default and a
+converged x0.6 fit sat on one fixed point 2.8e-9 relative apart, and the tie kept the
+unconverged default. Within MBIS_TIE_REL a converged fit now wins, then the earlier
+guess.
+
+**LRC tm_react, 200 jobs, full_set 1, Multiwfn convert vs native.** MBIS within 1.4e-6 e,
+MBIS fuzzy density 1.3e-6, no flips. 7 of 200 select an unconverged fit, identically in
+both trees. Under the tie rule 3 of them (Ag1Ta5 step7, Hf4 step9, Ir4 step6) select a
+converged fit on the same fixed point (within 9.1e-9 relative; up to 2.5e-4 e). In the
+other 4 (Ag1Ta5 step14 with Ta; Re4 steps 34, 37, 45) no guess converges on the selected
+point after the full fallback; the only converged fit is x0.6 with a merged Ta or Re
+shell, at a lower objective. These carry `mbis_unconverged` in the audit.
+
 ## ECP atoms
 
 MBIS is defined for all-electron densities (Verstraelen et al., JCTC 2016). For ECP atoms
@@ -327,3 +392,9 @@ The literature review was done in the 2026-10-14 session.
   permanent skips is still to be designed.
 - Stored MBIS values (Multiwfn's rule) differ from converged ones by the amounts above.
   They are not mixed with converged data within a dataset.
+- On jobs with several fixed points the stored charges depend on which guesses converge,
+  which can change with the platform and the thread layout (2 of 440 NERSC actinides, up
+  to 0.30 e), and three guesses can miss the best fixed point (NpN6O18). Open options: on
+  a stalled check, retry at neighbouring widths (f - 0.1 and f + 0.1) before the fallback; add an
+  x2.5 guess. Neither is implemented; both need the 112-job regression first.
+- 4 of 200 LRC tm_react jobs (Ta, Re) select a fit that never converges.

@@ -8,9 +8,14 @@ from scratch) and reports:
   - per engine routine, per-atom / per-pair abs diffs (acceptance: median <= 0.005
     and max <= 0.03, docs/plans/2026-10-04-feat-one-pass-charge-engine-plan.md)
   - whether every other key of charge/bond/fuzzy_full.json, and qtaim.json and
-    other.json, is unchanged (merge mode must not touch them)
-  - for other_alie from the surface engine, the eight ALIE_* values (volume and
-    areas relative, the rest absolute; other.json must be unchanged otherwise)
+    other.json, is unchanged (merge mode must not touch them): numbers within
+    atol 1e-9 + rtol 1e-10 (a printed last digit can flip), NaN equal to NaN; a
+    changed key is reported with its largest difference
+  - for the surface engine's fields of other.json: the eight ALIE_* values of
+    other_alie (volume and areas relative, the rest absolute), the planarity values
+    of other_geometry, and the ESP_* values of other_esp (reported without a pass:
+    the exact ESP differs from Multiwfn's libreta by design); other.json must be
+    unchanged otherwise
   - wall time of the Multiwfn routines the engines cover (original timings.json)
     vs the charge_engine + surface_engine timings (new timings.json) on the same job
   - which original records carry the known Multiwfn fuzzy bugs (tracker #28:
@@ -32,6 +37,7 @@ original: a generator/timings.json).
 
 import argparse
 import json
+import math
 import os
 
 import numpy as np
@@ -39,18 +45,24 @@ from rdkit import Chem
 
 from qtaim_gen.source.core.parse_qtaim import dft_inp_to_dict
 
-from qtaim_gen.source.data.multiwfn import ENGINE_ROUTINES
+from qtaim_gen.source.data.multiwfn import SURFACE_ENGINE_ROUTINES
+from qtaim_gen.source.utils import provenance
 
 MEDIAN_TOL = 0.005
 MAX_TOL = 0.03
 CHARGE = ("hirshfeld", "adch", "cm5", "becke", "vdd", "mbis")
 FUZZY = ("becke_fuzzy_density", "hirsh_fuzzy_density", "becke_fuzzy_spin", "hirsh_fuzzy_spin",
-         "mbis_fuzzy_density", "mbis_fuzzy_spin")
+         "mbis_fuzzy_density", "mbis_fuzzy_spin", "elf_fuzzy", "grad_norm_rho_fuzzy", "laplacian_rho_fuzzy")
 # other_alie (surface engine): relative tolerance for volume/areas, absolute otherwise
 ALIE_TOL = {"ALIE_Volume": ("rel", 1e-4), "ALIE_Overall_surface_area": ("rel", 1e-4),
             "ALIE_Positive_surface_area": ("rel", 1e-4), "ALIE_Negative_surface_area": ("abs", 1e-3),
             "ALIE_Minimal_value": ("abs", 1e-3), "ALIE_Maximal_value": ("abs", 1e-3),
             "ALIE_Overall_skewness": ("abs", 1e-3), "ALIE_Surface_Density": ("abs", 1e-3)}
+# other_geometry (surface engine): planarity, Angstrom
+GEOMETRY_TOL = {k: 1e-5 for k in ("mpp_full", "mpp_heavy", "sdp_full", "sdp_heavy")}
+# other.json fields each surface-engine routine writes
+OTHER_FIELDS = {"other_alie": lambda k: k.startswith("ALIE_"), "other_geometry": lambda k: k in GEOMETRY_TOL,
+                "other_esp": lambda k: k.startswith("ESP_")}
 FILE_OF = {**{s: "charge.json" for s in CHARGE}, **{s: "fuzzy_full.json" for s in FUZZY},
            "fuzzy_bond": "bond.json"}
 PERIODIC_TABLE = Chem.GetPeriodicTable()
@@ -111,6 +123,36 @@ def _leaves(d, prefix=""):
         yield prefix, d
 
 
+def is_num(v):
+    return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+
+def changed_fields(o, n, rtol=1e-10, atol=1e-9):
+    """Leaves of o and n that differ: numbers beyond atol + rtol * max(|a|, |b|), NaN
+    equal to NaN, anything else by ==. Returns (path, abs diff or None) pairs."""
+    lo, ln = dict(_leaves(o)), dict(_leaves(n))
+    out = []
+    for k in set(lo) | set(ln):
+        if k not in lo or k not in ln:
+            out.append((k, None))
+            continue
+        a, b = lo[k], ln[k]
+        if is_num(a) and is_num(b):
+            if math.isnan(a) or math.isnan(b):
+                if not (math.isnan(a) and math.isnan(b)):
+                    out.append((k, None))
+            elif abs(a - b) > atol + rtol * max(abs(a), abs(b)):
+                out.append((k, abs(a - b)))
+        elif a != b:
+            out.append((k, None))
+    return out
+
+
+def largest(fields):
+    """The (path, diff) of fields with the largest diff; a non-numeric change counts as largest."""
+    return max(fields, key=lambda f: math.inf if f[1] is None else f[1])
+
+
 def qtaim_same(o, n, rtol=1e-10, atol=1e-9):
     """Same CP set and every field equal, numbers within rtol/atol: two Multiwfn
     runs of one job differ at ~1e-15 (summation order), and a printed value can
@@ -140,12 +182,18 @@ def qtaim_same(o, n, rtol=1e-10, atol=1e-9):
 
 def compare_job(orig, new):
     rec = {"diffs": {}, "missing": [], "pair_set_changes": 0, "untouched_changed": [],
-           "orig_flags": [], "engine_checks": {}}
+           "untouched_largest": {}, "orig_flags": [], "engine_checks": {}}
     files = {}
     for name in ("charge.json", "bond.json", "fuzzy_full.json", "qtaim.json", "other.json", "timings.json"):
         files[name] = (load(os.path.join(orig, "generator", name)), load(os.path.join(new, "generator", name)))
     o_t, n_t = files["timings.json"]
     rec["charge_engine_s"] = (n_t or {}).get("charge_engine")
+    # the charge- and surface-engine routines of the new tree (its provenance.json): the rest
+    # must be unchanged, and the Multiwfn baseline time covers exactly these (QTAIM is not in
+    # charge_engine_s, so its Multiwfn time is not in the baseline either)
+    prov_n = provenance.load(new)
+    engine_routines = provenance.engine_produced(prov_n) - {"qtaim"}
+    rec["engine_versions"] = ",".join(map(str, provenance.engine_versions(prov_n))) or "none"
     rec["complete"] = bool(o_t) and bool(rec["charge_engine_s"])
     if not rec["complete"]:
         return rec
@@ -207,28 +255,46 @@ def compare_job(orig, new):
             rec["pair_set_changes"] += len(set(o) ^ set(n))
         rec["diffs"][step] = [abs(n[k] - o[k]) for k in keys if isinstance(o[k], (int, float))]
 
+    def untouched(name, o, n):
+        fields = changed_fields(o, n)
+        if fields:
+            rec["untouched_changed"].append(name)
+            rec["untouched_largest"][name] = largest(fields)
+
     for fname in ("charge.json", "bond.json", "fuzzy_full.json"):
         o_all, n_all = files[fname]
-        for k in set(o_all or {}) - ENGINE_ROUTINES:
-            if (n_all or {}).get(k) != o_all[k]:
-                rec["untouched_changed"].append(f"{fname}:{k}")
+        for k in set(o_all or {}) - engine_routines:
+            untouched(f"{fname}:{k}", o_all[k], (n_all or {}).get(k))
     o_q, n_q = files["qtaim.json"]
     if not qtaim_same(o_q, n_q):
         rec["untouched_changed"].append("qtaim.json")
     o_o, n_o = files["other.json"]
-    engine_alie = bool(n_t.get("surface_engine"))
-    if engine_alie:
-        # ALIE_* come from the surface engine; the rest of other.json must be unchanged
-        rec["alie_diffs"] = {}
-        for k, (kind, _) in ALIE_TOL.items():
-            if k in (o_o or {}) and k in (n_o or {}):
-                d = abs(n_o[k] - o_o[k])
-                rec["alie_diffs"][k] = d / abs(o_o[k]) if kind == "rel" and o_o[k] else d
-    strip = (lambda d: {k: v for k, v in (d or {}).items() if not k.startswith("ALIE_")}) if engine_alie else (lambda d: d)
-    if strip(o_o) != strip(n_o):
-        rec["untouched_changed"].append("other.json")
+    o_o, n_o = o_o or {}, n_o or {}
+    # fields the surface engine wrote, for the routines it computed in this folder
+    surface_routines = engine_routines & SURFACE_ENGINE_ROUTINES
 
-    mwfn = [o_t.get(r) for r in ENGINE_ROUTINES if isinstance(o_t.get(r), (int, float)) and o_t.get(r) > 0]
+    def engine_field(k):
+        return any(OTHER_FIELDS[r](k) for r in surface_routines)
+
+    if surface_routines:
+        rec["alie_diffs"], rec["geometry_diffs"], rec["esp_diffs"] = {}, {}, {}
+        for k in set(o_o) & set(n_o):
+            if not (engine_field(k) and is_num(o_o[k]) and is_num(n_o[k])):
+                continue
+            if math.isnan(o_o[k]) and math.isnan(n_o[k]):
+                continue
+            # NaN on one side only (e.g. no negative facets on one side) counts as infinite
+            d = math.inf if math.isnan(o_o[k]) or math.isnan(n_o[k]) else abs(n_o[k] - o_o[k])
+            if k in ALIE_TOL:
+                rec["alie_diffs"][k] = d / abs(o_o[k]) if ALIE_TOL[k][0] == "rel" and o_o[k] else d
+            elif k in GEOMETRY_TOL:
+                rec["geometry_diffs"][k] = d
+            elif k.startswith("ESP_"):
+                rec["esp_diffs"][k] = d
+    untouched("other.json", {k: v for k, v in o_o.items() if not engine_field(k)},
+              {k: v for k, v in n_o.items() if not engine_field(k)})
+
+    mwfn = [o_t.get(r) for r in engine_routines if isinstance(o_t.get(r), (int, float)) and o_t.get(r) > 0]
     rec["mwfn_engine_routines_s"] = sum(mwfn) if mwfn else None
     rec["charge_engine_s"] += n_t.get("surface_engine") or 0.0
     return rec
@@ -286,6 +352,23 @@ def main():
             if vals:
                 print(f"{k} | {len(vals)} | {max(vals):.2e} {kind} | {tol:g} | {max(vals) <= tol}")
 
+    geometry = [r["geometry_diffs"] for r in done.values() if r.get("geometry_diffs")]
+    if geometry:
+        print("\nother_geometry (surface engine), Angstrom | jobs | max diff | tolerance | pass")
+        for k, tol in GEOMETRY_TOL.items():
+            vals = [g[k] for g in geometry if k in g]
+            if vals:
+                print(f"{k} | {len(vals)} | {max(vals):.2e} | {tol:g} | {max(vals) <= tol}")
+
+    esp = {k: r["esp_diffs"] for k, r in done.items() if r.get("esp_diffs")}
+    if esp:
+        print("\nother_esp (surface engine, exact ESP vs the reference; libreta differs by design) "
+              "| jobs | median abs diff | max abs diff | job of the max")
+        for k in sorted({k for e in esp.values() for k in e}):
+            vals = [(e[k], job) for job, e in esp.items() if k in e]
+            d = np.array([v for v, _ in vals])
+            print(f"{k} | {len(d)} | {np.median(d):.2e} | {d.max():.2e} | {max(vals)[1]}")
+
     checks = {}
     for r in done.values():
         for k, v in r["engine_checks"].items():
@@ -299,6 +382,15 @@ def main():
     print(f"jobs missing an engine routine: {missing}")
     print(f"fuzzy_bond pairs on one side only (clean originals): {pairs}")
     print(f"jobs where non-engine data changed: {len(changed)}")
+    by_entry = {}
+    for job, r in done.items():
+        for name, (path, d) in r["untouched_largest"].items():
+            by_entry.setdefault(name, []).append((math.inf if d is None else d, path, job))
+    if by_entry:
+        print("changed entry | jobs | largest diff (inf: not numeric, or present on one side) | field | job")
+        for name, rows in sorted(by_entry.items()):
+            d, path, job = max(rows)
+            print(f"  {name} | {len(rows)} | {d:.2e} | {path} | {job}")
     for k, v in changed[:10]:
         print(f"  {k}: {v[:5]}")
 

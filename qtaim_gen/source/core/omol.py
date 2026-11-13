@@ -27,20 +27,21 @@ from qtaim_gen.source.utils.validation import (
     all_electron_count,
     _FIRST_ECP_Z,
     TIMINGS_PATCHED_KEY,
-    TIMINGS_SKIPPED_KEY,
-    CONVERTER_KEY,
     _safe_json_load,
-    skipped_routines,
     TIMING_PLACEHOLDER,
 )
 
+from qtaim_gen.source.utils import provenance
 from qtaim_gen.source.utils.io import check_results_exist
 from qtaim_gen.source.utils.atomic_write import atomic_json_write
 from qtaim_gen.source.core.horton import run_horton_analysis
 
+from qtaim_gen.source.data.engine_versions import ENGINE_VERSION, ROUTINE_ENGINE
 from qtaim_gen.source.data.multiwfn import (
     ENGINE_LEVEL1_ROUTINES,
+    ENGINE_LEVEL2_ROUTINES,
     ENGINE_ROUTINES,
+    SURFACE_ENGINE_LEVEL2_ROUTINES,
     SURFACE_ENGINE_ROUTINES,
     charge_data,
     charge_data_dict,
@@ -176,6 +177,20 @@ def write_conversion(
 
     st = os.stat(out_file)
     os.chmod(out_file, st.st_mode | stat.S_IEXEC)
+
+
+def _mfwn_binary(mfwn_file: str) -> Optional[str]:
+    """The Multiwfn command a script from write_multiwfn_exe runs (its first word)."""
+    import shlex
+
+    try:
+        with open(mfwn_file) as f:
+            for line in f:
+                if " < " in line:
+                    return shlex.split(line)[0]
+    except (OSError, ValueError, IndexError):
+        pass
+    return None
 
 
 def write_multiwfn_exe(
@@ -826,6 +841,7 @@ def run_jobs(
             continue
 
         step_name = "native convert" if order == "convert" and native_convert else mfwn_file
+        multiwfn_binary = None if order == "convert" and native_convert else _mfwn_binary(mfwn_file)
         logger.info("Running %s", step_name)
         start = time.time()
         step_failure = None
@@ -847,8 +863,13 @@ def run_jobs(
 
         if step_failure is None:
             timings[order] = elapsed
-            if order == "convert":
-                timings[CONVERTER_KEY] = f"native:{native_convert}" if native_convert else "multiwfn"
+            build = provenance.multiwfn_build(os.path.join(folder, f"{order}.out"), multiwfn_binary)
+            if order == "convert" and native_convert:
+                provenance.record_converter(folder, "native", native_convert)
+            elif order == "convert":
+                provenance.record_converter(folder, "multiwfn", build=build)
+            else:
+                provenance.record_routines(folder, [order], "multiwfn", build=build)
             logger.info(f"Completed {order} in {elapsed:.2f} seconds")
         else:
             # A -1 timing fails validate_timing_dict, so the step is redone on
@@ -1420,14 +1441,11 @@ def patch_timings_from_log(
     log_timings = _parse_timings_from_log(log_path)
 
     expected, _ = get_expected_timing_keys(full_set=full_set, spin_tf=spin_tf)
-    # as validate_timing_dict: a charge_engine timing stands in for ENGINE_ROUTINES and a
-    # surface_engine timing for 'other', so their keys are not missing and get no placeholder
-    if isinstance(timings.get("charge_engine"), (int, float)) and timings["charge_engine"] > 0:
-        expected = [k for k in expected if k not in ENGINE_ROUTINES]
-    if isinstance(timings.get("qtaim_engine"), (int, float)) and timings["qtaim_engine"] > 0:
-        expected = [k for k in expected if k != "qtaim"]
-    # permanently skipped routines never ran, so they get no placeholder either
-    expected = [k for k in expected if k not in skipped_routines(timings)]
+    # as validate_timing_dict: routines that are current engine output (provenance.json) and
+    # permanently skipped routines have no step timing, so they get no placeholder; a
+    # surface_engine timing stands in for 'other'
+    prov = provenance.load(folder)
+    expected = [k for k in expected if k not in provenance.engine_routines(prov) | provenance.skipped(prov)]
     surface_done = isinstance(timings.get("surface_engine"), (int, float)) and timings["surface_engine"] > 0
     patched: dict = {}
     for key in expected:
@@ -1509,7 +1527,7 @@ def move_results_to_folder(
         "other.json",
         "orca.json",
         "horton.json",
-        "charge_engine_meta.json",
+        provenance.PROVENANCE_FILE,
     ]
     results_folder = os.path.join(folder, "generator")
 
@@ -1572,6 +1590,10 @@ def move_results_to_folder(
                     if file == "qtaim.json" and isinstance(data_new, dict) and data_new:
                         data_merged = data_new
                         action = "Replaced"
+                    elif file == provenance.PROVENANCE_FILE:
+                        # entry by entry, so a routine this run did not touch keeps its record
+                        data_merged = provenance.merge(data_existing, data_new)
+                        action = "Merged"
                     elif isinstance(data_existing, dict) and isinstance(data_new, dict):
                         data_merged = {**data_existing, **data_new}
                         action = "Merged"
@@ -1699,6 +1721,8 @@ def _engine_routines(full_set: int, spin_tf: bool) -> set:
     routines = set(ENGINE_ROUTINES - SURFACE_ENGINE_ROUTINES)
     if full_set < 1:
         routines -= ENGINE_LEVEL1_ROUTINES
+    if full_set < 2:
+        routines -= ENGINE_LEVEL2_ROUTINES
     if not spin_tf:
         routines -= {"becke_fuzzy_spin", "hirsh_fuzzy_spin", "mbis_fuzzy_spin"}
     return routines
@@ -1706,7 +1730,9 @@ def _engine_routines(full_set: int, spin_tf: bool) -> set:
 
 def _engine_outputs_present(folder: str, spin_tf: bool, full_set: int = 0) -> bool:
     """True when generator/ holds a completed charge-engine run: a positive
-    charge_engine timing and every engine routine in the compiled jsons."""
+    charge_engine timing, every wanted routine current engine output in
+    provenance.json (not Multiwfn's, not from a version that left it out or changed
+    it since), and every engine routine in the compiled jsons."""
     gen = os.path.join(folder, "generator")
     file_of = {
         "hirshfeld": "charge.json", "adch": "charge.json", "cm5": "charge.json",
@@ -1718,8 +1744,12 @@ def _engine_outputs_present(folder: str, spin_tf: bool, full_set: int = 0) -> bo
             timings = json.load(f)
         if not timings.get("charge_engine", 0) > 0:
             return False
+        prov = provenance.load(folder)
+        wanted = _engine_routines(full_set, spin_tf) - provenance.skipped(prov)
+        if not wanted <= provenance.engine_routines(prov):
+            return False
         want = {}
-        for routine in _engine_routines(full_set, spin_tf) - skipped_routines(timings):
+        for routine in wanted:
             want.setdefault(file_of.get(routine, "fuzzy_full.json"), []).append(routine)
         for name, keys in want.items():
             with open(os.path.join(gen, name)) as f:
@@ -1732,20 +1762,8 @@ def _engine_outputs_present(folder: str, spin_tf: bool, full_set: int = 0) -> bo
 
 
 def _record_skipped(folder: str, records: dict, logger: logging.Logger) -> None:
-    """Merge {routine: {"reason", "by"}} into timings.json under TIMINGS_SKIPPED_KEY."""
-    timings_path = os.path.join(folder, "timings.json")
-    timings = {}
-    if os.path.isfile(timings_path) and os.path.getsize(timings_path) > 0:
-        try:
-            with open(timings_path) as f:
-                timings = json.load(f)
-        except json.JSONDecodeError:
-            timings = {}
-    rec = timings.get(TIMINGS_SKIPPED_KEY)
-    rec = rec if isinstance(rec, dict) else {}
-    rec.update(records)
-    timings[TIMINGS_SKIPPED_KEY] = rec
-    atomic_json_write(timings_path, timings)
+    """Record {routine: {"reason", "by"}} as permanently skipped in provenance.json."""
+    provenance.record_skips(folder, records)
     logger.info("recorded permanently skipped routines in %s: %s", folder, records)
 
 
@@ -1834,11 +1852,11 @@ def _run_charge_engine(
         written.append(routine)
 
     if len(written) != len(wanted):
-        # no charge_engine timing for a partial run: validation then fails and the
-        # engine reruns, instead of a missing routine keeping an older (e.g. Multiwfn)
-        # value under a timing that says the engine produced it. A stamp from an
-        # earlier complete run is removed too: move_results merges timings.json, so
-        # it would otherwise survive this run.
+        # no charge_engine timing and no provenance for a partial run: validation then
+        # fails and the engine reruns, instead of a missing routine keeping an older (e.g.
+        # Multiwfn) value under a record that says the engine produced it. Records of an
+        # earlier complete run go too: move_results merges both files, so they would
+        # otherwise survive this run.
         logger.error("charge_engine: wrote %d of %d routines in %s; removing the charge_engine timing",
                      len(written), len(wanted), folder)
         for timings_path in (os.path.join(folder, "timings.json"), os.path.join(folder, "generator", "timings.json")):
@@ -1849,11 +1867,14 @@ def _run_charge_engine(
                 continue
             if isinstance(timings, dict) and timings.pop("charge_engine", None) is not None:
                 atomic_json_write(timings_path, timings)
+        provenance.drop(folder, wanted)
         return False
-    # the engine's own record (MBIS selection, convergence, merged shells, grid electron
-    # count): read by audits, not by validation or the LMDB conversion
-    atomic_json_write(os.path.join(folder, "charge_engine_meta.json"), meta)
     _update_timing(folder, "charge_engine", elapsed, logger)
+    spec = {"grid": meta.get("grid")}
+    for family, extra in ((set(written) - set(MBIS_FAMILY), {}), (set(written) & set(MBIS_FAMILY), {"mbis_mode": meta.get("mbis_mode")})):
+        if family:
+            provenance.record_routines(folder, sorted(family), "charge_engine", ENGINE_VERSION, spec={**spec, **extra})
+    provenance.record_engine(folder, "charge_engine", meta)
     logger.info(
         "charge_engine: %d routines in %.2f s (nelec grid %.4f of %.1f)",
         len(written), elapsed, meta.get("nelec_grid_becke", float("nan")),
@@ -1877,7 +1898,8 @@ def _run_qtaim_engine(folder: str, n_threads: int, logger: logging.Logger, resta
                 break
             except (OSError, json.JSONDecodeError):
                 continue
-        if (timings.get("qtaim_engine") or 0) > 0 and _qtaim_output_complete(folder):
+        if ((timings.get("qtaim_engine") or 0) > 0 and provenance.engine_current(provenance.load(folder), "qtaim")
+                and _qtaim_output_complete(folder)):
             logger.info("qtaim_engine: completed run found - skipping")
             return True
 
@@ -1904,10 +1926,16 @@ def _run_qtaim_engine(folder: str, n_threads: int, logger: logging.Logger, resta
     with open(os.path.join(folder, "qtaim.out"), "w") as f:
         f.write(cp_search.qtaim_engine_out(res, elapsed, settings))
     _update_timing(folder, "qtaim_engine", elapsed, logger)
+    provenance.record_routines(folder, ["qtaim"], "qtaim_engine", ENGINE_VERSION, spec=settings)
     logger.info("qtaim_engine: %d CPs %s, Poincare-Hopf %d (all found %d) in %.2f s",
                 len(res["pos"]), [int((res["type"] == t).sum()) for t in range(4)], res["poincare_hopf"],
                 res["poincare_hopf_full_set"], elapsed)
     return True
+
+
+def _surface_engine_routines(full_set: int) -> frozenset:
+    """The surface-engine routines a folder gets at this full_set level."""
+    return SURFACE_ENGINE_ROUTINES if full_set >= 2 else SURFACE_ENGINE_ROUTINES - SURFACE_ENGINE_LEVEL2_ROUTINES
 
 
 def _run_surface_engine(
@@ -1915,24 +1943,35 @@ def _run_surface_engine(
     n_threads: int,
     logger: logging.Logger,
     restart: bool = False,
+    full_set: int = 0,
 ) -> bool:
-    """other_geometry and other_alie with core/surface_engine.py: writes
-    other_geometry.json and other_alie.json (the flat payloads
-    parse_other_doc_geometry and parse_other_doc_esp produce, compiled into
-    other.json by parse_multiwfn) and a 'surface_engine' timing."""
+    """other_geometry, other_alie and, at full_set >= 2, other_esp with
+    core/surface_engine.py: writes other_geometry.json, other_alie.json and
+    other_esp.json (the flat payloads parse_other_doc_geometry and
+    parse_other_doc_esp produce, compiled into other.json by parse_multiwfn), a
+    'surface_engine' timing, an 'other_esp' timing when it computed the ESP surface,
+    and a provenance entry per routine. On a restart it computes only the wanted
+    routines generator/ lacks: those that are not current engine output (Multiwfn's,
+    or from a version that left them out or changed them since) or whose values are not
+    in other.json; move_results merges the new values into the stored other.json.
+    An ESP surface failure keeps the ALIE and planarity results; the next pass retries
+    it once, and a second failure records other_esp as permanently skipped."""
+    prov = provenance.load(folder)
+    wanted = _surface_engine_routines(full_set) - provenance.skipped(prov)
     gen = os.path.join(folder, "generator")
+    have = frozenset()
     if restart:
         try:
-            with open(os.path.join(gen, "timings.json")) as f:
-                done = json.load(f).get("surface_engine", 0) > 0
             with open(os.path.join(gen, "other.json")) as f:
                 other = json.load(f)
-            done = done and all(other.get(_OTHER_MARKER_KEYS[r]) is not None for r in SURFACE_ENGINE_ROUTINES)
+            have = frozenset(r for r in wanted if provenance.engine_current(prov, r)
+                             and other.get(_OTHER_MARKER_KEYS[r]) is not None)
         except (OSError, json.JSONDecodeError, TypeError, AttributeError):
-            done = False
-        if done:
+            have = frozenset()
+        if wanted <= have:
             logger.info("surface_engine: completed run found in generator/ - skipping")
             return True
+    todo = wanted - have
 
     wf_path = _wavefunction_path(folder)
     if wf_path is None or not wf_path.endswith(".wfx"):
@@ -1944,25 +1983,67 @@ def _run_surface_engine(
 
     numba.set_num_threads(max(1, min(n_threads, numba.config.NUMBA_NUM_THREADS)))
     start = time.time()
-    nuclei = wfx_nuclei(wf_path)
-    if nuclei is None:
-        logger.error("surface_engine: no nuclei in %s", wf_path)
-        return False
+    results, esp_s, esp_error = {}, None, None
     try:
-        geometry = surface_engine.planarity(nuclei[2], nuclei[0])
-        out, meta = surface_engine.alie_surface(wf_path)
+        wf = surface_engine.load_wavefunction(wf_path)
+        if "other_geometry" in todo:
+            results["other_geometry"] = (surface_engine.planarity(wf[0]["coords"], wf[0]["atnums"]), {})
+        if "other_alie" in todo:
+            results["other_alie"] = surface_engine.alie_surface(wf_path, wf=wf)
     except Exception as e:
         logger.error("surface_engine failed on %s: %s", wf_path, e)
         return False
+    if "other_esp" in todo:
+        t0 = time.time()
+        try:
+            results["other_esp"] = surface_engine.esp_surface(wf_path, wf=wf)
+            esp_s = time.time() - t0
+        except Exception as e:
+            esp_error = f"{type(e).__name__}: {e}"
     elapsed = time.time() - start
-    atomic_json_write(os.path.join(folder, "other_geometry.json"), geometry)
-    atomic_json_write(os.path.join(folder, "other_alie.json"), out)
+    for routine, (payload, _) in results.items():
+        atomic_json_write(os.path.join(folder, f"{routine}.json"), payload)
     _update_timing(folder, "surface_engine", elapsed, logger)
+    if esp_s is not None:
+        # the step's own timing, which validation expects at full_set >= 2
+        _update_timing(folder, "other_esp", esp_s, logger)
+    spec = {"other_geometry": {}, "other_alie": {"spacing_bohr": surface_engine.SPACING},
+            "other_esp": {"spacing_bohr": surface_engine.ESP_SPACING, "boys_mode": "exact"}}
+    for routine in sorted(results):
+        provenance.record_routines(folder, [routine], "surface_engine", ENGINE_VERSION, spec=spec[routine])
+
+    prev = (prov.get("engines") or {}).get("surface_engine") or {}
+    failures = dict(prev.get("failures") or {})
+    skip_recorded = False
+    if esp_error:
+        failures["other_esp"] = failures.get("other_esp", 0) + 1
+        if failures["other_esp"] >= 2:
+            _record_skipped(folder, {"other_esp": {"reason": f"esp_surface failed twice: {esp_error}",
+                                                   "by": "surface_engine"}}, logger)
+            skip_recorded = True
+        else:
+            logger.error("surface_engine: esp_surface failed on %s (%s); retried on the next pass",
+                         wf_path, esp_error)
+        # an earlier (e.g. Multiwfn) 'other_esp' timing must not vouch for the ESP fields, nor
+        # its provenance entry: validation then fails until the retry
+        for timings_path in (os.path.join(folder, "timings.json"), os.path.join(gen, "timings.json")):
+            t = _safe_json_load(timings_path)
+            if isinstance(t, dict) and t.pop("other_esp", None) is not None:
+                atomic_json_write(timings_path, t)
+        if not skip_recorded:
+            provenance.drop(folder, ["other_esp"])
+    else:
+        failures.pop("other_esp", None)
+    provenance.record_engine(folder, "surface_engine", {
+        "failures": failures,
+        "surfaces": {**(prev.get("surfaces") or {}), **{r: m for r, (_, m) in results.items() if m}}})
     logger.info(
-        "surface_engine: other_alie in %.2f s (grid %s, V/E/F %s)",
-        elapsed, meta.get("grid"), meta.get("vef_after"),
+        "surface_engine: %s in %.2f s%s%s",
+        sorted(results), elapsed,
+        "".join(f"; {r} grid {m['grid']}, V/E/F {m['vef_after']}" for r, (_, m) in sorted(results.items()) if m),
+        f"; kept {sorted(have & wanted)} from generator/" if have & wanted else "",
     )
-    return True
+    return esp_error is None or skip_recorded
 
 
 def _run_engines(
@@ -1988,7 +2069,7 @@ def _run_engines(
             _run_qtaim_engine(folder, n_threads=n_threads, logger=logger, restart=restart)
         if charge_engine:
             _run_charge_engine(folder, n_threads=n_threads, logger=logger, restart=restart, full_set=full_set)
-            _run_surface_engine(folder, n_threads=n_threads, logger=logger, restart=restart)
+            _run_surface_engine(folder, n_threads=n_threads, logger=logger, restart=restart, full_set=full_set)
         return
 
     import qtaim_gen
@@ -2039,6 +2120,7 @@ def _run_engines(
                     del timings[k]
                 atomic_json_write(timings_path, timings)
                 logger.error("removed engine timings %s from %s", present, timings_path)
+        provenance.drop(folder, [r for r, e in ROUTINE_ENGINE.items() if e in keys])
     else:
         logger.info("engine child finished in %.1f s", time.time() - start)
 
@@ -2142,6 +2224,7 @@ def _run_orca_parse(
         if timings:
             timings["orca_parse"] = elapsed
             atomic_json_write(root_timings, timings)
+        provenance.record_routines(folder, ["orca"], "orca", parser_version=orca_dict.get("orca_parser_version"))
 
         # Delete orca.out AFTER successful parse + merge + timing checkpoint.
         # Always clean up if we extracted it from the archive (archive still has it).
@@ -2396,9 +2479,9 @@ def _wavefunction_electrons(path: str) -> Optional[float]:
     return total if found else None
 
 
-_KEEP_ON_WAVEFUNCTION_DISCARD = {"orca.out", "output.out", "orca.json", "timings.json", "memory.json"}
-_COMPILED_JSONS = ("charge.json", "bond.json", "fuzzy_full.json", "other.json", "qtaim.json", "horton.json",
-                   "charge_engine_meta.json")
+_KEEP_ON_WAVEFUNCTION_DISCARD = {"orca.out", "output.out", "orca.json", "timings.json", "memory.json",
+                                 provenance.PROVENANCE_FILE}
+_COMPILED_JSONS = ("charge.json", "bond.json", "fuzzy_full.json", "other.json", "qtaim.json", "horton.json")
 _DISCARD_SUFFIXES_ROOT = (".wfn", ".wfx", ".molden.input", ".out", ".json")
 _DISCARD_SUFFIXES_GEN = (".wfn", ".wfx", ".out")
 _DISCARD_NAMES_GEN = set(_COMPILED_JSONS) | {"out_files.zip", "CPprop.txt"}
@@ -2408,8 +2491,12 @@ def _discard_wavefunction_derived_outputs(folder: str, logger: logging.Logger) -
     """Remove the wavefunction, the molden it came from, and everything
     computed from it: root `*.out`/`*.json` step files and CPprop.txt, and the
     compiled JSONs plus archived `.out` files in generator/. orca.json and
-    timings.json are ORCA- or bookkeeping-derived and stay."""
+    timings.json are ORCA- or bookkeeping-derived and stay; provenance.json keeps
+    only ORCA's entry."""
     gen = os.path.join(folder, "generator")
+    prov = provenance.load(folder)
+    provenance.drop(folder, (set(prov["routines"]) - {"orca"}) | provenance.skipped(prov), converter=True,
+                    engines=True)
     targets = []
     for name in os.listdir(folder):
         if name in _KEEP_ON_WAVEFUNCTION_DISCARD:
@@ -2513,18 +2600,19 @@ def _reject_wavefunction_from_other_converter(
 ) -> Optional[bool]:
     """With native_convert: a wavefunction, or outputs computed from one, that another
     converter or the other mode produced (Multiwfn's convert step, or an older run with
-    no CONVERTER_KEY) is discarded with everything derived from it, so the folder is
+    no converter record) is discarded with everything derived from it, so the folder is
     reconverted and recomputed instead of mixing converters. The converter is read from
-    timings.json (CONVERTER_KEY) and, when a wfx is on disk, from its <Title>.
+    provenance.json and, when a wfx is on disk, from its <Title>.
     True when outputs were discarded (run every step fresh), False when nothing needed
     doing, None when the folder cannot be redone (no .gbw to reconvert from)."""
     want = f"native:{native_convert}"
     gen = os.path.join(folder, "generator")
     tags = set()
     for base in (folder, gen):
-        t = _safe_json_load(os.path.join(base, "timings.json"))
-        if isinstance(t, dict) and CONVERTER_KEY in t:
-            tags.add(t[CONVERTER_KEY])
+        p = _safe_json_load(os.path.join(base, provenance.PROVENANCE_FILE))
+        tag = provenance.converter_tag(p) if isinstance(p, dict) else None
+        if tag:
+            tags.add(tag)
     wf_path = _wavefunction_path(folder)
     title = None
     if wf_path is not None and wf_path.endswith(".wfx"):
@@ -2534,7 +2622,7 @@ def _reject_wavefunction_from_other_converter(
     has_outputs = any(os.path.isfile(os.path.join(gen, n)) for n in ("charge.json", "qtaim.json", "fuzzy_full.json"))
     problems = []
     if tags - {want}:
-        problems.append(f"timings.json records {sorted(tags - {want})}")
+        problems.append(f"provenance.json records {sorted(tags - {want})}")
     if wf_path is not None and title != NATIVE_WFX_TITLE[native_convert]:
         problems.append(f"{os.path.basename(wf_path)} written by {title!r}")
     if not tags and wf_path is None and has_outputs:
@@ -2548,11 +2636,6 @@ def _reject_wavefunction_from_other_converter(
     logger.warning("%s: %s; discarding the wavefunction and every output derived from it for --native_convert %s",
                    folder, "; ".join(problems), native_convert)
     _discard_wavefunction_derived_outputs(folder, logger)
-    for base in (folder, gen):
-        path = os.path.join(base, "timings.json")
-        t = _safe_json_load(path)
-        if isinstance(t, dict) and t.pop(CONVERTER_KEY, None) is not None:
-            atomic_json_write(path, t)
     return True
 
 

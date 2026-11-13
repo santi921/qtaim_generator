@@ -27,7 +27,7 @@ def _folder(path, mbis_shift=0.0, meta=None):
     (gen / "timings.json").write_text(json.dumps({"charge_engine": 12.5}))
     (gen / "qtaim.json").write_text(json.dumps({"1": {}, "2": {}, "_meta": {"poincare_hopf": 1}}))
     if meta is not None:
-        (gen / "charge_engine_meta.json").write_text(json.dumps(meta))
+        (gen / "provenance.json").write_text(json.dumps({"engines": {"charge_engine": meta}}))
     return str(path)
 
 
@@ -52,7 +52,7 @@ def test_audit_reads_level1_schemes_and_mbis_meta(tmp_path, monkeypatch, capsys)
 
     meta["mbis_selection"]["converged"]["sigma_x1.5"] = False
     meta["mbis_degenerate"]["fuzzy"] = True
-    (tmp_path / "new" / "job" / "generator" / "charge_engine_meta.json").write_text(json.dumps(meta))
+    (tmp_path / "new" / "job" / "generator" / "provenance.json").write_text(json.dumps({"engines": {"charge_engine": meta}}))
     assert set(A.audit(new)["flags"]) == {"mbis_unconverged", "mbis_degenerate"}
 
     ref = _folder(tmp_path / "ref" / "job")
@@ -63,4 +63,4 @@ def test_audit_reads_level1_schemes_and_mbis_meta(tmp_path, monkeypatch, capsys)
     monkeypatch.setattr("sys.argv", ["audit_prod.py", str(tmp_path / "new"), "--ref", str(tmp_path / "ref")])
     A.main()
     printed = capsys.readouterr().out
-    assert "| mbis | 1 |" in printed and "MBIS (charge_engine_meta.json, 1 folders)" in printed
+    assert "| mbis | 1 |" in printed and "MBIS (provenance.json engines.charge_engine, 1 folders)" in printed

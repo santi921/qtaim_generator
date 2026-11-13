@@ -59,11 +59,15 @@ def test_child_process_writes_what_the_in_process_run_writes(tmp_path):
     assert "hirshfeld.json" in names and "other_alie.json" in names, names
     for name in names:
         with open(os.path.join(child, name)) as a, open(os.path.join(inproc, name)) as b:
-            x, y = json.load(a), json.load(b)
-        if name == "charge_engine_meta.json":  # wall-clock fields differ run to run
-            for d in (x, y):
-                d.pop("timings_s"), d.pop("wall_s", None)
-        assert x == y, name
+            got, want = json.load(a), json.load(b)
+        if name == "provenance.json":
+            # the engines' run records carry their stage timings
+            for prov in (got, want):
+                for rec in prov["engines"].values():
+                    rec.pop("timings_s", None)
+                    for surf in (rec.get("surfaces") or {}).values():
+                        surf.pop("timings_s", None)
+        assert got == want, name
 
 
 def test_killed_child_is_logged_and_drops_stale_engine_timings(tmp_path, monkeypatch):
@@ -155,7 +159,7 @@ def test_worker_passes_restart_and_full_set_to_the_engines(monkeypatch):
     monkeypatch.setattr(omol, "setup_logger", lambda folder: logging.getLogger("engine_worker_test"))
     rc = engine_worker.main(["/x", "--qtaim", "--charge", "--n_threads", "6", "--full_set", "1", "--restart"])
     assert rc == engine_worker.STEP_FAILED
-    assert calls == [("qtaim", "/x", True, None, 6), ("charge", "/x", True, 1, 6), ("surface", "/x", True, None, 6)]
+    assert calls == [("qtaim", "/x", True, None, 6), ("charge", "/x", True, 1, 6), ("surface", "/x", True, 1, 6)]
 
 
 def test_restart_skips_a_completed_qtaim_run(tmp_path):

@@ -26,6 +26,9 @@ HAS_NUMBA = importlib.util.find_spec("numba") is not None
 # bond orders with 6, so agreement is bounded by that rounding
 CHARGE_TOL = 1e-7
 BOND_TOL = 1e-6
+# Laplacian fuzzy integrals on ECP heavy atoms reach 1e4 and differ from Multiwfn by
+# roundoff relative to the value (worst seen 2.2e-9 rel, In; 1.1e-6 abs, Hf at 25712.9)
+LAPL_REL_TOL = 5e-9
 
 
 def _load(name, folder=DATA):
@@ -115,7 +118,8 @@ def test_worker_reproduces_multiwfn(tmp_path, name):
         ref = json.load(f)
 
     assert set(ref) <= set(eng), f"engine lacks {set(ref) - set(eng)}"
-    assert not {"vdd", "mbis", "mbis_fuzzy_density", "mbis_fuzzy_spin"} & set(eng), "full_set 0 ran level-1 schemes"
+    assert not {"vdd", "mbis", "mbis_fuzzy_density", "mbis_fuzzy_spin", "elf_fuzzy"} & set(eng), \
+        "full_set 0 ran level-1 schemes"
     for step, ref_d in ref.items():
         if step == "fuzzy_bond":
             assert set(eng[step]) == set(ref_d)
@@ -159,6 +163,87 @@ def test_worker_reproduces_multiwfn_level1(tmp_path, name):
         else:
             for k, v in ref_d[step].items():
                 assert eng[step][step][k] == pytest.approx(v, abs=CHARGE_TOL), (step, k)
+    assert not {"grad_norm_rho_fuzzy", "laplacian_rho_fuzzy"} & set(eng), "full_set 1 ran level-2 schemes"
+
+
+@pytest.mark.skipif(not HAS_NUMBA, reason="numba not installed")
+@pytest.mark.parametrize("name", _fixture_names())
+def test_worker_reproduces_multiwfn_level2(tmp_path, name):
+    """full_set 2 adds the gradient-norm and Laplacian fuzzy integrals (fuzzyana
+    functions 2 and 3, EDF included) from the elf_fuzzy pass."""
+    folder = os.path.join(FIXTURES, name)
+    out = tmp_path / "engine.json"
+    subprocess.run(
+        [sys.executable, "-m", "qtaim_gen.source.core.charge_engine",
+         "--wfx", os.path.join(folder, "orca.wfx"), "--out", str(out), "--nthreads", "2",
+         "--full_set", "2", "--mbis_mode", "multiwfn"],
+        check=True,
+        capture_output=True,
+    )
+    with open(out) as f:
+        eng = json.load(f)
+    with open(os.path.join(folder, "multiwfn_reference_level2.json")) as f:
+        ref = json.load(f)
+
+    assert set(ref) <= set(eng), f"engine lacks {set(ref) - set(eng)}"
+    for step, ref_d in ref.items():
+        rel = LAPL_REL_TOL if step == "laplacian_rho_fuzzy" else None
+        for k, v in ref_d[step].items():
+            assert eng[step][step][k] == pytest.approx(v, abs=CHARGE_TOL, rel=rel), (step, k)
+
+
+def test_engine_routines_by_level():
+    from qtaim_gen.source.core.omol import _engine_routines
+
+    deriv = {"grad_norm_rho_fuzzy", "laplacian_rho_fuzzy"}
+    assert "elf_fuzzy" not in _engine_routines(0, spin_tf=True)
+    assert "elf_fuzzy" in _engine_routines(1, spin_tf=False)
+    assert not deriv & _engine_routines(1, spin_tf=True)
+    assert deriv <= _engine_routines(2, spin_tf=False)
+
+
+@pytest.mark.skipif(not HAS_NUMBA, reason="numba not installed")
+def test_derivative_fuzzy_skipped_without_edf(tmp_path):
+    """An ECP wavefunction without EDF: elf_fuzzy (MOs only) is kept, the
+    EDF-dependent gradient and Laplacian integrals are recorded as skipped."""
+    from qtaim_gen.source.core import charge_engine
+
+    src = os.path.join(FIXTURES, "XeCl4_step2_0_1", "orca.wfx")
+    text = open(src).read()
+    tag = "Additional Electron Density Function (EDF)>"
+    start = text.index("<" + tag)
+    end = text.index("</" + tag) + len(tag) + 2
+    wfx = tmp_path / "orca.wfx"
+    wfx.write_text(text[:start] + text[end:])
+    out = charge_engine.run(str(wfx), full_set=2)
+    assert "elf_fuzzy" in out
+    assert not {"grad_norm_rho_fuzzy", "laplacian_rho_fuzzy"} & set(out)
+    skipped = [s for s in out["_meta"]["skipped"] if s["schemes"] == "derivative fuzzy"]
+    assert skipped and skipped[0]["reason"] == "ecp_without_edf"
+
+
+@pytest.mark.skipif(not HAS_NUMBA, reason="numba not installed")
+def test_ecp_atom_without_edf_skips_even_when_others_have_one(monkeypatch):
+    """The EDF rule is per ECP atom: Xe keeps its EDF, a Cl made to look like an
+    ECP atom has none, so every EDF-dependent family is skipped."""
+    from qtaim_gen.source.core import charge_engine
+
+    read = charge_engine.read_wfx
+
+    def read_with_bare_ecp(path):
+        wfx = read(path)
+        cl = int(next(i for i, z in enumerate(wfx["atnums"]) if z == 17))
+        wfx["zeff"] = wfx["zeff"].copy()
+        wfx["zeff"][cl] -= 10
+        return wfx
+
+    monkeypatch.setattr(charge_engine, "read_wfx", read_with_bare_ecp)
+    out = charge_engine.run(os.path.join(FIXTURES, "XeCl4_step2_0_1", "orca.wfx"), full_set=2)
+    reasons = {s["schemes"]: s["reason"] for s in out["_meta"]["skipped"]}
+    assert reasons == {"hirshfeld family": "ecp_without_edf", "mbis family": "ecp_without_edf",
+                       "derivative fuzzy": "ecp_without_edf"}
+    assert not {"hirshfeld", "mbis", "grad_norm_rho_fuzzy"} & set(out)
+    assert "elf_fuzzy" in out and "becke" in out
 
 
 class TestTimingValidation:
@@ -171,9 +256,21 @@ class TestTimingValidation:
         "becke_fuzzy_density": 1.0, "hirsh_fuzzy_density": 1.0,
     }
 
-    def _write(self, tmp_path, timings):
+    def _write(self, tmp_path, timings, version=None):
+        """timings.json, plus engine provenance for the routines an engine of this version
+        computed when the timings hold a charge_engine timing (default: the current one)."""
+        from qtaim_gen.source.data.engine_versions import ENGINE_VERSION, ROUTINE_ENGINE, last_change, routines_at
+        from qtaim_gen.source.utils import provenance
+
         path = tmp_path / "timings.json"
         path.write_text(json.dumps(timings))
+        prov = provenance.empty()
+        if timings.get("charge_engine"):
+            v = version or ENGINE_VERSION
+            # a routine a later version changed (MBIS at 5) carries that version
+            prov["routines"] = {r: {"by": ROUTINE_ENGINE[r], "engine_version": max(v, last_change(r))}
+                                for r in routines_at(v) - {"qtaim", "convert"}}
+        (tmp_path / provenance.PROVENANCE_FILE).write_text(json.dumps(prov))
         return str(path)
 
     def _validate(self, path, **kw):
@@ -200,13 +297,13 @@ class TestTimingValidation:
     def test_engine_timing_covers_level1_routines(self, tmp_path):
         from qtaim_gen.source.utils.validation import validate_timing_dict
 
-        timings = {**self.BASE, "charge_engine": 2.0, "surface_engine": 1.0,
-                   "chelpg": 1.0, "ibsi_bond": 1.0, "elf_fuzzy": 1.0}
-        path = self._write(tmp_path, timings)
+        # elf_fuzzy comes from the engine (version 2; tests/test_engine_version.py has version 1)
+        timings = {**self.BASE, "charge_engine": 2.0, "surface_engine": 1.0, "chelpg": 1.0, "ibsi_bond": 1.0}
+        path = self._write(tmp_path, timings, version=2)
         assert validate_timing_dict(path, full_set=1, charge_engine=True)
-        # chelpg, ibsi_bond and elf_fuzzy still come from Multiwfn
+        # chelpg and ibsi_bond still come from Multiwfn
         del timings["chelpg"]
-        assert not validate_timing_dict(self._write(tmp_path, timings), full_set=1, charge_engine=True)
+        assert not validate_timing_dict(self._write(tmp_path, timings, version=2), full_set=1, charge_engine=True)
 
     def test_engine_mode_rejects_multiwfn_only(self, tmp_path):
         path = self._write(tmp_path, {**self.BASE, **self.MWFN})
@@ -294,8 +391,15 @@ def test_engine_jsons_compile_like_multiwfn_level1_and_alie(tmp_path, name, monk
     timings = json.loads((tmp_path / "timings.json").read_text())
 
     assert timings["charge_engine"] > 0 and timings["surface_engine"] > 0
-    meta = json.loads((tmp_path / "charge_engine_meta.json").read_text())
-    assert meta["full_set"] == 1 and meta["mbis_mode"] == "multiwfn" and "mbis_merged" in meta
+    from qtaim_gen.source.data.engine_versions import ENGINE_VERSION
+    from qtaim_gen.source.utils import provenance
+
+    prov = provenance.load(str(tmp_path))
+    assert {e["engine_version"] for r, e in prov["routines"].items() if e["by"] == "charge_engine"} == {ENGINE_VERSION}
+    assert prov["routines"]["mbis"]["spec"]["mbis_mode"] == "multiwfn"
+    meta = prov["engines"]["charge_engine"]
+    assert meta["grid"]["nrad"] == 75 and meta["full_set"] == 1 and "mbis_merged" in meta
+    assert not (tmp_path / "charge_engine_meta.json").exists()
     for step in ("vdd", "mbis"):
         for k, v in ref[step]["charge"].items():
             assert charge[step]["charge"][k] == pytest.approx(v, abs=CHARGE_TOL), (step, k)
@@ -589,7 +693,7 @@ def test_run_records_mbis_mode_and_uniqueness():
     assert meta["mbis_degenerate"] == {"charge": False, "fuzzy": False}
     assert meta["mbis_merged"] == {"charge": [], "fuzzy": []}
     assert meta["mbis_beyond_multiwfn"] is False
-    # the pipeline writes _meta to charge_engine_meta.json
+    # the pipeline writes _meta to provenance.json (engines.charge_engine)
     assert json.loads(json.dumps(meta))["mbis_selection"]["selected"] == "default"
 
 

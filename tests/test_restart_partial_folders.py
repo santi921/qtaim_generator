@@ -120,7 +120,7 @@ def _make_timings_dict(full_set=0, spin_tf=False):
             "laplacian_bond": 2.0,
             "grad_norm_rho_fuzzy": 2.0,
             "laplacian_rho_fuzzy": 2.0,
-            "ESP_Volume": 5.0,
+            "other_esp": 5.0,
         })
     return d
 
