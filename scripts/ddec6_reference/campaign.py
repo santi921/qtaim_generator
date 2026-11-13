@@ -125,6 +125,7 @@ def run_job(job, args):
         row["port_s"] = round(time.time() - t0, 2)
         if port is not None:
             row["port_stage_s"] = port["_meta"].get("stage_s")
+            row["threading_layer"] = numba.threading_layer()
             with open(os.path.join(workdir, "ddec6_port.json"), "w") as f:
                 json.dump(port, f)
         if args.skip_chargemol:

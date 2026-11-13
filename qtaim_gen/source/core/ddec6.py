@@ -959,12 +959,14 @@ def _mult(gs, pv):
 
 
 @numba.njit(parallel=True, cache=True)
-def _pass1_parallel(data, pbd, geo, boundary, pv):
+def _pass1_parallel(data, pbd, geo, boundary, pv, order):
     """Phase A: pass-1 numeric overlap sums and the renormalization factors, one block
-    per task (a block's pairs only see its own points, so the order is the serial one)."""
+    per task (a block's pairs only see its own points, so the order is the serial one).
+    Blocks are taken in the given order (see _strided_order)."""
     nb = pbd.shape[0]
     corr = np.zeros(nb)
-    for b in numba.prange(nb):
+    for i in numba.prange(order.shape[0]):
+        b = order[i]
         gs = geo[b, 0]
         if gs == 0 or geo[b, 10] == 0:
             continue
@@ -994,12 +996,14 @@ def _pass1_parallel(data, pbd, geo, boundary, pv):
 
 
 @numba.njit(parallel=True, cache=True)
-def _accumulate_parallel(data, pbd, geo, boundary, nc_tot, pv, spin, val, spn, core, cval, cspn):
-    """Phase B: both passes' contributions, one fine z-plane per task. Every fine or
-    coarse cell is fed by points of a single plane, and each task visits blocks in
-    order, so each cell sums in the serial order."""
+def _accumulate_parallel(data, pbd, geo, boundary, pv, spin, val, spn, core, cval, cspn, plane_order):
+    """Phase B: both passes' contributions, one fine z-plane per task (planes 1-based, in
+    the given order, see _strided_order). Every fine or coarse cell is fed by points of a
+    single plane, and each task visits blocks in order, so each cell sums in the serial
+    order."""
     nb = pbd.shape[0]
-    for kc in numba.prange(1, nc_tot + 1):
+    for i in numba.prange(plane_order.shape[0]):
+        kc = plane_order[i]
         for b in range(nb):
             if geo[b, 10] == 0:
                 continue
@@ -1080,6 +1084,17 @@ def _analytic_spin_occ(data, pbd, geo, center, atom_of_center, boundary, pv, occ
                         occ[1, aj] = occ[1, aj] - sc * pv * wj
 
 
+def _strided_order(n, n_threads):
+    """0..n-1 as 0, t, 2t, ..., 1, 1+t, ... (t = n_threads). prange gives each thread one
+    contiguous share of the iteration space (numba's chunksize does not change that under
+    the omp or workqueue layers), and the work per pair block and per z-plane is very
+    uneven along the natural order: heavy blocks sort together and the central planes
+    hold most points, which left 3-5 of 16 threads busy. In this order each share is
+    spread over the whole range. Blocks and planes write disjoint cells, so the order
+    changes no bit."""
+    return np.concatenate([np.arange(t, n, n_threads, dtype=np.int64) for t in range(n_threads)])
+
+
 def density_grids(prep, grid, pairs, parallel=True):
     """Step 7: valence, spin and analytic-pair core grids before the EDF/core step."""
     na, nb, nc = grid["totnum"]
@@ -1102,10 +1117,12 @@ def density_grids(prep, grid, pairs, parallel=True):
     pbd = pairs["pair_block_data"]
     if parallel:
         geo = _block_geometry(data, pbd, na, nb, nc)
-        corr = _pass1_parallel(data, pbd, geo, grid["boundary"], grid["pixelvolume"])
+        nt = numba.get_num_threads()
+        corr = _pass1_parallel(data, pbd, geo, grid["boundary"], grid["pixelvolume"],
+                               _strided_order(pbd.shape[0], nt))
+        _accumulate_parallel(data, pbd, geo, grid["boundary"], grid["pixelvolume"], spin, val, spn, core,
+                             cval, cspn, _strided_order(nc, nt) + 1)
         max_corr = float(corr.max()) if corr.size else 0.0
-        _accumulate_parallel(data, pbd, geo, grid["boundary"], nc, grid["pixelvolume"], spin, val, spn, core,
-                             cval, cspn)
         if spin:
             _analytic_spin_occ(data, pbd, geo, prep["center"], prep["atom_of_center"], grid["boundary"],
                                grid["pixelvolume"], occ)
