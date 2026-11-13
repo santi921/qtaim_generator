@@ -528,97 +528,75 @@ MBIS_GUESS = "fitted"  # converged mode's initial guess: free-atom fits, or "mul
 MBIS_TOL = 1e-8  # converged mode: largest population change (e) and relative width change per step
 MBIS_MAXCYC = 20000
 MBIS_ANDERSON = 6  # Anderson history length
-MBIS_ANDERSON_MAXCYC = 1000  # map evaluations before an accelerated fit is redone by plain iteration
+MBIS_ANDERSON_MAXCYC = 1000  # map evaluations before an accelerated fit is redone by plain iteration (see mbis_select)
 MBIS_ANDERSON_TRUST = 2.0  # largest factor an extrapolated parameter may differ from the plain step
 MBIS_MERGE_TOL = 1e-3  # shells of one atom whose widths agree this closely (relative) have merged
+MBIS_MERGE_DETECT = 1e-2  # plain fallback: shells this close in width (relative) are merged and refit
+MBIS_MERGE_FIRST = 1000  # plain cycles before the first merge check
+MBIS_MERGE_EVERY = 500  # plain cycles between later merge checks
 MBIS_EMPTY_POP = 1e-6  # e: a shell below this has emptied
 MBIS_CHECK_SIGMAS = (0.6, 1.5)  # width scales of the extra guesses mbis_select fits from
 MBIS_UNIQUE_TOL = 0.005  # e: larger guess spreads mark the MBIS record as not unique
+# relative objective gap below which two fits count as tied (a converged fit, then the earlier guess,
+# kept; on an openac PuN3O11 an unconverged default tied a converged x0.6 at 2.8e-9): fits on one fixed
+# point differ by up to 8.6e-10 relative, distinct fixed points by 2.1e-6 or more (112 local jobs)
+MBIS_TIE_REL = 1e-8
 
 
-@njit(nogil=True, cache=True)
-def _mbis_gather(grel, atcoords, tmpden, cut2, mshell, sig, dmax, dmax_atom2, cand_ptr, cand, p0, p1, cap):
-    """MBIS terms (atom, shell, distance, -d/sigma) of the flat points p0..p1
-    (centre * len(grel) + point) that can reach MBIS_DENCUT; ptr[q] is where
-    point q's terms start. Skipped: points with tmpden <= 1e-14, atoms beyond
-    atmrhocut (ignorefar=1) or beyond every shell's dencut radius, and shells
-    beyond their own (dmax, padded so a skipped term is certainly below it)."""
+@njit(parallel=True, cache=True)
+def _mbis_pair_scan(grel, atcoords, tmpden, cut2, cand_ptr, cand, pptr, pj, pd, fill):
+    """Per flat point (centre * len(grel) + point) with tmpden > 1e-14, the
+    atoms within atmrhocut (ignorefar=1) and their distance. fill False counts
+    them into pptr[1:]; fill True writes them from pptr."""
     m = grel.shape[0]
-    n = p1 - p0
-    tj = np.empty(cap, dtype=np.int64)
-    tk = np.empty(cap, dtype=np.int64)
-    td = np.empty(cap)
-    targ = np.empty(cap)
-    ptr = np.zeros(n + 1, dtype=np.int64)
-    nt = 0
-    for q in range(n):
-        ip = p0 + q
-        c = ip // m
-        i = ip - c * m
-        if tmpden[c, i] > 1e-14:
+    for c in prange(atcoords.shape[0]):
+        for i in range(m):
+            ip = c * m + i
+            if not tmpden[c, i] > 1e-14:
+                continue
             x = grel[i, 0] + atcoords[c, 0]
             y = grel[i, 1] + atcoords[c, 1]
             z = grel[i, 2] + atcoords[c, 2]
+            s = pptr[ip] if fill else 0
             for r in range(cand_ptr[c], cand_ptr[c + 1]):
                 j = cand[r]
                 dx = x - atcoords[j, 0]
                 dy = y - atcoords[j, 1]
                 dz = z - atcoords[j, 2]
                 d2 = dx * dx + dy * dy + dz * dz
-                if d2 > cut2[j] or d2 > dmax_atom2[j]:
+                if d2 > cut2[j]:
                     continue
-                d = np.sqrt(d2)
-                for k in range(mshell[j]):
-                    if d > dmax[j, k]:
-                        continue
-                    tj[nt] = j
-                    tk[nt] = k
-                    td[nt] = d
-                    targ[nt] = -d / sig[j, k]
-                    nt += 1
-        ptr[q + 1] = nt
-    return tj[:nt], tk[:nt], td[:nt], targ[:nt], ptr
+                if fill:
+                    pj[s] = j
+                    pd[s] = np.sqrt(d2)
+                s += 1
+            if not fill:
+                pptr[ip + 1] = s
 
 
-@njit(nogil=True, cache=True)
-def _mbis_accumulate(tmpden, m, p0, amp, tj, tk, td, ex, ptr, nat):
-    """New shell populations and the integral part of the new widths (Eqs.
-    18-19 of the MBIS paper) from the gathered terms; ex holds exp(-d/sigma)."""
-    ppop = np.zeros((nat, MBIS_MAXSHELL))
-    psig = np.zeros((nat, MBIS_MAXSHELL))
-    for q in range(ptr.shape[0] - 1):
-        a, b = ptr[q], ptr[q + 1]
-        if a == b:
-            continue
-        rho0 = 0.0
-        for s in range(a, b):
-            t = amp[tj[s], tk[s]] * ex[s]
-            if t < MBIS_DENCUT:
-                t = 0.0
-            ex[s] = t
-            rho0 += t
-        if rho0 > 0.0:
-            ip = p0 + q
-            c = ip // m
-            w = tmpden[c, ip - c * m]
-            for s in range(a, b):
-                if ex[s] != 0.0:
-                    f = w * ex[s] / rho0
-                    ppop[tj[s], tk[s]] += f
-                    psig[tj[s], tk[s]] += f * td[s]
-    return ppop, psig
+def mbis_pairs(grel, coords, tmpden, atnums):
+    """The (atom, distance) pairs every MBIS map evaluation on this grid reads,
+    built once: point ip's pairs are pj/pd[pptr[ip]:pptr[ip + 1]], atoms in the
+    order of _mbis_setup's candidate lists; the fourth item is the most pairs of
+    any point. About 12 bytes per pair (0.12 GB
+    for 48 atoms, 0.54 GB for 274 atoms on the MBIS charge grid)."""
+    cut2, cand_ptr, cand = _mbis_setup(grel, coords, atnums)
+    pptr = np.zeros(len(coords) * grel.shape[0] + 1, dtype=np.int64)
+    dummy_j, dummy_d = np.empty(0, dtype=np.int32), np.empty(0)
+    _mbis_pair_scan(grel, coords, tmpden, cut2, cand_ptr, cand, pptr, dummy_j, dummy_d, False)
+    pptr = np.cumsum(pptr)
+    pj, pd = np.empty(pptr[-1], dtype=np.int32), np.empty(pptr[-1])
+    _mbis_pair_scan(grel, coords, tmpden, cut2, cand_ptr, cand, pptr, pj, pd, True)
+    return pptr, pj, pd, int(np.diff(pptr).max())
 
 
-def _mbis_cycle(grel, coords, tmpden, cut2, cand_ptr, cand, mshell, pop, sig, block=4096):
-    """One MBIS iteration (MBIS, imode 0). Points are processed in blocks on
-    numba.get_num_threads() worker threads: gather the terms that can matter,
-    one vectorized numpy exp, accumulate."""
-    nat = len(coords)
-    m = grel.shape[0]
-    npts = nat * m
+def _mbis_amp_dmax(mshell, pop, sig):
+    """Each shell's density at the nucleus, pop / (8 pi sigma^3), and the
+    distance beyond which it is below MBIS_DENCUT (padded so a skipped term is
+    certainly below it; -1 for shells that never reach it)."""
     amp = np.zeros_like(pop)
     dmax = np.full(pop.shape, -1.0)
-    for j in range(nat):
+    for j in range(len(mshell)):
         for k in range(mshell[j]):
             sv = sig[j, k]
             if not sv > 0:
@@ -628,27 +606,64 @@ def _mbis_cycle(grel, coords, tmpden, cut2, cand_ptr, cand, mshell, pop, sig, bl
             amp[j, k] = pop[j, k] / sv**3 / 8 / np.pi
             if amp[j, k] > MBIS_DENCUT:
                 dmax[j, k] = sv * np.log(amp[j, k] / MBIS_DENCUT) * (1 + 1e-9) + 1e-12
-    dmax_atom = dmax.max(axis=1)
-    dmax_atom2 = np.where(dmax_atom < 0, -1.0, dmax_atom**2)
-    ncand = np.diff(cand_ptr)
+    return amp, dmax, dmax.max(axis=1)
 
-    def one_block(p0):
-        p1 = min(npts, p0 + block)
-        cap = (p1 - p0) * MBIS_MAXSHELL * int(ncand[p0 // m : (p1 - 1) // m + 1].max())
-        tj, tk, td, targ, ptr = _mbis_gather(
-            grel, coords, tmpden, cut2, mshell, sig, dmax, dmax_atom2, cand_ptr, cand, p0, p1, cap
-        )
-        return _mbis_accumulate(tmpden, m, p0, amp, tj, tk, td, np.exp(targ), ptr, nat)
 
-    starts = range(0, npts, block)
-    nthreads = numba.get_num_threads()
-    if nthreads == 1 or len(starts) == 1:
-        parts = [one_block(p0) for p0 in starts]
-    else:
-        with ThreadPoolExecutor(nthreads) as pool:
-            parts = list(pool.map(one_block, starts))
-    return sum(p[0] for p in parts), sum(p[1] for p in parts)
+@njit(parallel=True, cache=True)
+def _mbis_map_blocks(tmpden, pptr, pj, pd, mshell, amp, sig, dmax, dmax_atom, block, maxterms):
+    """New shell populations and the integral part of the new widths (Eqs.
+    18-19 of the MBIS paper), per block of flat points: each point's shell
+    terms amp exp(-d/sigma) at or above MBIS_DENCUT (atoms and shells beyond
+    their dmax skipped), their sum rho0, then w term / rho0. One partial per
+    block, so the total does not depend on the thread count."""
+    nat, m = tmpden.shape
+    npts = nat * m
+    nb = (npts + block - 1) // block
+    ppop = np.zeros((nb, nat, MBIS_MAXSHELL))
+    psig = np.zeros((nb, nat, MBIS_MAXSHELL))
+    for b in prange(nb):
+        tj = np.empty(maxterms, dtype=np.int64)
+        tk = np.empty(maxterms, dtype=np.int64)
+        tt = np.empty(maxterms)
+        tdd = np.empty(maxterms)
+        for ip in range(b * block, min(npts, (b + 1) * block)):
+            n = 0
+            rho0 = 0.0
+            for s in range(pptr[ip], pptr[ip + 1]):
+                j = pj[s]
+                d = pd[s]
+                if d > dmax_atom[j]:
+                    continue
+                for k in range(mshell[j]):
+                    if d > dmax[j, k]:
+                        continue
+                    t = amp[j, k] * np.exp(-d / sig[j, k])
+                    if t < MBIS_DENCUT:
+                        continue
+                    tj[n] = j
+                    tk[n] = k
+                    tt[n] = t
+                    tdd[n] = d
+                    n += 1
+                    rho0 += t
+            if rho0 > 0.0:
+                c = ip // m
+                w = tmpden[c, ip - c * m]
+                for u in range(n):
+                    f = w * tt[u] / rho0
+                    ppop[b, tj[u], tk[u]] += f
+                    psig[b, tj[u], tk[u]] += f * tdd[u]
+    return ppop, psig
 
+
+def _mbis_cycle(tmpden, pairs, mshell, pop, sig, block=4096):
+    """One MBIS iteration (MBIS, imode 0) on numba.get_num_threads() threads,
+    from the mbis_pairs cache."""
+    pptr, pj, pd, maxpairs = pairs
+    amp, dmax, dmax_atom = _mbis_amp_dmax(mshell, pop, sig)
+    ppop, psig = _mbis_map_blocks(tmpden, pptr, pj, pd, mshell, amp, sig, dmax, dmax_atom, block,
+                                  maxpairs * MBIS_MAXSHELL)
+    return ppop.sum(axis=0), psig.sum(axis=0)
 
 
 # ---------------------------------------------------------------- partitions
@@ -746,21 +761,16 @@ def mbis_fit(grel, coords, tmpden, atnums, qbase, crit=1e-4, maxcyc=500, mode=No
         mshell, pop, sig = mbis_guesses(atnums)[0][1]
     else:
         mshell, pop, sig = mbis_initial_shells(atnums)
-    cut2, cand_ptr, cand = _mbis_setup(grel, coords, atnums)
-    if mode == "converged":
-        step = lambda pp, ss: _mbis_step(grel, coords, tmpden, cut2, cand_ptr, cand, mshell, pp, ss)  # noqa: E731
-        res = _mbis_converged(step, mshell, pop, sig, qbase, maxcyc=MBIS_ANDERSON_MAXCYC)
-        if res[4] >= MBIS_ANDERSON_MAXCYC or mbis_degenerate(res[1], res[2], res[3]):
-            # acceleration can stall, or settle on a merged/emptied-shell fixed point
-            # plain iteration leaves: redo the fit by plain iteration
-            plain = _mbis_converged(step, mshell, pop, sig, qbase, history=0)
-            res = plain[:4] + (res[4] + plain[4],)
-        return res
-    if mode != "multiwfn":
+    if mode not in ("converged", "multiwfn"):
         raise ValueError(f"unknown MBIS mode {mode!r}")
+    pairs = mbis_pairs(grel, coords, tmpden, atnums)
+    if mode == "converged":
+        step = lambda mm, pp, ss: _mbis_step(tmpden, pairs, mm, pp, ss)  # noqa: E731
+        objective = lambda mm, pp, ss: mbis_objective(grel, coords, tmpden, atnums, mm, pp, ss)  # noqa: E731
+        return _mbis_fit_converged(step, mshell, pop, sig, qbase, objective=objective)[0]
     last = np.zeros(len(atnums))
     for icyc in range(1, maxcyc + 1):
-        popnew, signew = _mbis_cycle(grel, coords, tmpden, cut2, cand_ptr, cand, mshell, pop, sig)
+        popnew, signew = _mbis_cycle(tmpden, pairs, mshell, pop, sig)
         pos = popnew > 0
         signew[pos] /= 3 * popnew[pos]
         charge = qbase - popnew.sum(axis=1)
@@ -784,12 +794,86 @@ def _mbis_setup(grel, coords, atnums):
     return cut2, cand_ptr, np.concatenate(cand_lists).astype(np.int64)
 
 
-def _mbis_step(grel, coords, tmpden, cut2, cand_ptr, cand, mshell, pop, sig):
+def _mbis_step(tmpden, pairs, mshell, pop, sig):
     """The MBIS map: new populations and widths from the current ones."""
-    popnew, signew = _mbis_cycle(grel, coords, tmpden, cut2, cand_ptr, cand, mshell, pop, sig)
+    popnew, signew = _mbis_cycle(tmpden, pairs, mshell, pop, sig)
     pos = popnew > 0
     signew[pos] /= 3 * popnew[pos]
     return popnew, signew
+
+
+def mbis_merge_shells(mshell, pop, sig):
+    """Each atom's shells, sorted by width, with adjacent ones whose widths agree
+    within MBIS_MERGE_DETECT (relative) combined into one: populations summed,
+    width population-weighted."""
+    ms, p, s = mshell.copy(), np.zeros_like(pop), np.zeros_like(sig)
+    for a, m in enumerate(mshell):
+        order = np.argsort(sig[a, :m])
+        groups = [[order[0]]] if m else []
+        for k in order[1:]:
+            if abs(np.log(sig[a, k] / sig[a, groups[-1][-1]])) < MBIS_MERGE_DETECT:
+                groups[-1].append(k)
+            else:
+                groups.append([k])
+        for i, g in enumerate(groups):
+            p[a, i] = pop[a, g].sum()
+            s[a, i] = (pop[a, g] * sig[a, g]).sum() / p[a, i]
+        ms[a] = len(groups)
+    return ms, p, s
+
+
+def _mbis_fit_converged(step, mshell, pop, sig, qbase, fallback=True, objective=None, fallback_above=None):
+    """Accelerated fit; with fallback, redone by plain iteration from the guess
+    when acceleration stalls (MBIS_ANDERSON_MAXCYC evaluations) or settles on a
+    merged/emptied-shell fixed point plain iteration leaves. Without fallback,
+    the fallback still runs when fallback_above is given and the failed
+    accelerated fit's objective exceeds it, and then continues from the
+    accelerated fit's end state instead of the guess.
+
+    With objective (mbis_objective of (mshell, pop, sig)), the plain fallback
+    stops after MBIS_MERGE_FIRST and then every MBIS_MERGE_EVERY cycles to merge
+    shells of one atom that have come within MBIS_MERGE_DETECT in width: the
+    valence shell of a cation (K+, Ca2+, Ti, Y, Hf, ...) settles next to the
+    outermost core shell, and plain iteration then moves population between the
+    two by up to 1e-6 e per cycle without converging while the charges stay
+    fixed to 1e-11 e. The merged model is refit with acceleration and kept when
+    it converges, is not degenerate and its objective is not below that of the
+    plain state it came from; otherwise plain iteration continues. step is
+    called as step(mshell, pop, sig). Returns (charge, mshell, pop, sig,
+    evaluations), whether the returned fit met the stopping rule, and whether
+    the fallback ran."""
+    res = _mbis_converged(step, mshell, pop, sig, qbase, maxcyc=MBIS_ANDERSON_MAXCYC)
+    converged = res[4] < MBIS_ANDERSON_MAXCYC
+    if converged and not mbis_degenerate(res[1], res[2], res[3]):
+        return res, converged, False
+    p, s = pop, sig
+    if not fallback:
+        if fallback_above is None or not objective(res[1], res[2], res[3]) > fallback_above:
+            return res, converged, False
+        # plain iteration never lowers the objective (the MBIS update is an EM step), so from the
+        # stalled state it reaches a fixed point better than fallback_above; from the guess, it
+        # slid back to the default's fixed point on 9 local nitrates
+        p, s = res[2], res[3]
+    evals, done = res[4], 0
+    while done < MBIS_MAXCYC:
+        chunk = MBIS_MAXCYC - done
+        if objective is not None:
+            chunk = min(chunk, MBIS_MERGE_FIRST if done == 0 else MBIS_MERGE_EVERY)
+        plain = _mbis_converged(step, mshell, p, s, qbase, maxcyc=chunk, history=0)
+        evals, done, p, s = evals + plain[4], done + plain[4], plain[2], plain[3]
+        if plain[4] < chunk:
+            return plain[:4] + (evals,), True, True
+        if objective is None:
+            break
+        m2, p2, s2 = mbis_merge_shells(mshell, p, s)
+        if (m2 == mshell).all():
+            continue
+        fit = _mbis_converged(step, m2, p2, s2, qbase, maxcyc=MBIS_ANDERSON_MAXCYC)
+        evals += fit[4]
+        if (fit[4] < MBIS_ANDERSON_MAXCYC and not mbis_degenerate(fit[1], fit[2], fit[3])
+                and objective(fit[1], fit[2], fit[3]) >= objective(mshell, p, s)):
+            return fit[:4] + (evals,), True, True
+    return plain[:4] + (evals,), False, True
 
 
 def _mbis_converged(step, mshell, pop, sig, qbase, tol=None, maxcyc=None, history=None):
@@ -813,7 +897,7 @@ def _mbis_converged(step, mshell, pop, sig, qbase, tol=None, maxcyc=None, histor
     xs, gs = [], []
     p, s = pop, sig
     for icyc in range(1, maxcyc + 1):
-        pn, sn = step(p, s)
+        pn, sn = step(mshell, p, s)
         dpop = np.abs(pn - p)[act].max()
         with np.errstate(divide="ignore", invalid="ignore"):
             dsig = np.where(sn[act] > 0, np.abs(sn[act] - s[act]) / sn[act], 0.0).max()
@@ -854,53 +938,59 @@ def mbis_degenerate(mshell, pop, sig):
     return False
 
 
-@njit(nogil=True, cache=True)
-def _mbis_logsum(tmpden, m, p0, amp, tj, tk, ex, ptr):
-    """sum over the block's points of w ln(rho0), rho0 the promolecule density
-    with the map's MBIS_DENCUT truncation; points with rho0 = 0 add w ln(1e-300)."""
-    tot = 0.0
-    for q in range(ptr.shape[0] - 1):
-        ip = p0 + q
-        c = ip // m
-        w = tmpden[c, ip - c * m]
-        if not w > 1e-14:
-            continue
-        rho0 = 0.0
-        for s in range(ptr[q], ptr[q + 1]):
-            t = amp[tj[s], tk[s]] * ex[s]
-            if t >= MBIS_DENCUT:
-                rho0 += t
-        tot += w * np.log(max(rho0, 1e-300))
-    return tot
+@njit(parallel=True, cache=True)
+def _mbis_logsum_all(grel, atcoords, tmpden, mshell, amp, sig, dmax, dmax_atom2, block):
+    """Per block of flat points (centre * len(grel) + point), the sum of
+    w ln(rho0) with rho0 summed over every atom's shells (no atmrhocut), shell
+    terms below MBIS_DENCUT skipped; points with rho0 = 0 add w ln(1e-300)."""
+    nat, m = tmpden.shape
+    npts = nat * m
+    nb = (npts + block - 1) // block
+    part = np.zeros(nb)
+    for b in prange(nb):
+        tot = 0.0
+        for ip in range(b * block, min(npts, (b + 1) * block)):
+            c = ip // m
+            i = ip - c * m
+            w = tmpden[c, i]
+            if not w > 1e-14:
+                continue
+            x = grel[i, 0] + atcoords[c, 0]
+            y = grel[i, 1] + atcoords[c, 1]
+            z = grel[i, 2] + atcoords[c, 2]
+            rho0 = 0.0
+            for j in range(nat):
+                dx = x - atcoords[j, 0]
+                dy = y - atcoords[j, 1]
+                dz = z - atcoords[j, 2]
+                d2 = dx * dx + dy * dy + dz * dz
+                if d2 > dmax_atom2[j]:
+                    continue
+                d = np.sqrt(d2)
+                for k in range(mshell[j]):
+                    if d > dmax[j, k]:
+                        continue
+                    t = amp[j, k] * np.exp(-d / sig[j, k])
+                    if t >= MBIS_DENCUT:
+                        rho0 += t
+            tot += w * np.log(max(rho0, 1e-300))
+        part[b] = tot
+    return part
 
 
 def mbis_objective(grel, coords, tmpden, atnums, mshell, pop, sig, block=4096):
     """sum_i w_i ln rho0(r_i) on the fit's grid: the part of the MBIS
     Kullback-Leibler divergence int rho ln(rho / rho0) that differs between
     fixed points (their total populations all equal the grid's electron count).
-    Larger is a better fit."""
-    cut2, cand_ptr, cand = _mbis_setup(grel, coords, atnums)
-    nat, m = len(coords), grel.shape[0]
-    amp = np.zeros_like(pop)
-    dmax = np.full(pop.shape, -1.0)
-    for j in range(nat):
-        for k in range(mshell[j]):
-            sv = sig[j, k]
-            if sv > 0:
-                amp[j, k] = pop[j, k] / sv**3 / 8 / np.pi
-                if amp[j, k] > MBIS_DENCUT:
-                    dmax[j, k] = sv * np.log(amp[j, k] / MBIS_DENCUT) * (1 + 1e-9) + 1e-12
-    dmax_atom = dmax.max(axis=1)
+    Larger is a better fit. rho0 includes every atom: the map drops atoms beyond
+    atmrhocut (Multiwfn's ignorefar), but an objective with that cutoff is not
+    the divergence the map lowers. On a Pu nitrate it was lower by 0.07 to 1.2
+    depending on the fit, it fell along plain iteration, and it ranked an x1.5
+    stalled state 0.18 e away above the default fixed point, which the full sum
+    ranks first."""
+    amp, dmax, dmax_atom = _mbis_amp_dmax(mshell, pop, sig)
     dmax_atom2 = np.where(dmax_atom < 0, -1.0, dmax_atom**2)
-    ncand = np.diff(cand_ptr)
-    tot = 0.0
-    for p0 in range(0, nat * m, block):
-        p1 = min(nat * m, p0 + block)
-        cap = (p1 - p0) * MBIS_MAXSHELL * int(ncand[p0 // m : (p1 - 1) // m + 1].max())
-        tj, tk, td, targ, ptr = _mbis_gather(
-            grel, coords, tmpden, cut2, mshell, sig, dmax, dmax_atom2, cand_ptr, cand, p0, p1, cap)
-        tot += _mbis_logsum(tmpden, m, p0, amp, tj, tk, np.exp(targ), ptr)
-    return tot
+    return float(_mbis_logsum_all(grel, coords, tmpden, mshell, amp, sig, dmax, dmax_atom2, block).sum())
 
 
 def mbis_fitted_shells(atnums):
@@ -930,30 +1020,64 @@ def mbis_guesses(atnums):
     return [("default", (m0, p0, s0))] + [(f"sigma_x{f:g}", (m0, p0, s0 * f)) for f in MBIS_CHECK_SIGMAS]
 
 
+def mbis_merged_record(atnums, mshell_guess, mshell_fit):
+    """Atoms whose fit has fewer shells than its guess, as {"atom": 1-based
+    index, "z": Z, "shells_guess": n, "shells_fit": m} (the far_heavy_nuclei
+    convention, matching the 1-based charge keys)."""
+    return [{"atom": int(a) + 1, "z": int(atnums[a]), "shells_guess": int(mshell_guess[a]),
+             "shells_fit": int(mshell_fit[a])} for a in np.flatnonzero(mshell_fit < mshell_guess)]
+
+
 def mbis_select(grel, coords, tmpden, atnums, qbase):
     """MBIS can have several fixed points (on 27 local jobs below Rn, 8 had
     another more than 0.005 e away; every actinide tested did, up to 0.9 e).
     Fit from the default guess and from it with every width scaled by each of
     MBIS_CHECK_SIGMAS, keep the fit with the largest mbis_objective (smallest
-    divergence), non-degenerate fits first, ties to the earlier guess. Returns
-    charge, mshell, pop, sig, the total cycles, and a record of the choice."""
+    divergence), non-degenerate fits first, ties to a converged fit, then to
+    the earlier guess. Returns
+    charge, mshell, pop, sig, the total cycles, and a record of the choice.
+
+    The check guesses fall back to plain iteration (with shell merging, see
+    _mbis_fit_converged) when the default fit needed the fallback, or when
+    their failed accelerated fit already has a larger objective than every
+    converged, non-degenerate fit so far; otherwise a check guess whose
+    accelerated fit stalls or ends degenerate is left out of the selection (on
+    Sm3Ir3, tm_react, the two check fallbacks took 515 of 539 s and found
+    nothing; on rmechdb_750, whose default fit needs the fallback, the x1.5
+    fallback gives the fit with the best objective; on 11-15 of 440 NERSC
+    actinide jobs a stalled x1.5 fit was better than the selection by up to
+    5e-3 relative, and whether it converged in MBIS_ANDERSON_MAXCYC evaluations
+    flipped the stored charges by up to 0.3 e between runs). spread and
+    solutions count only converged, non-degenerate fits; merged lists, per
+    guess, the atoms whose shells merged (mbis_merged_record)."""
+    pairs = mbis_pairs(grel, coords, tmpden, atnums)
+    step = lambda mm, pp, ss: _mbis_step(tmpden, pairs, mm, pp, ss)  # noqa: E731
+    objective = lambda mm, pp, ss: mbis_objective(grel, coords, tmpden, atnums, mm, pp, ss)  # noqa: E731
     fits = []
-    for name, g in mbis_guesses(atnums):
-        q, m, p, s, n = mbis_fit(grel, coords, tmpden, atnums, qbase, mode="converged", guess=g)
-        fits.append((name, q, m, p, s, n, mbis_objective(grel, coords, tmpden, atnums, m, p, s),
-                     mbis_degenerate(m, p, s)))
-    tol = 1e-12 * max(abs(f[6]) for f in fits)
+    for i, (name, (m0, p0, s0)) in enumerate(mbis_guesses(atnums)):
+        fallback = i == 0 or fits[0][9]
+        good_so_far = [f[6] for f in fits if f[8] and not f[7]]
+        above = max(good_so_far) + MBIS_TIE_REL * abs(max(good_so_far)) if good_so_far else None
+        (q, m, p, s, n), conv, fell_back = _mbis_fit_converged(step, m0, p0, s0, qbase, fallback=fallback,
+                                                               objective=objective, fallback_above=above)
+        merged = mbis_merged_record(atnums, m0, m)
+        fits.append((name, q, m, p, s, n, objective(m, p, s), mbis_degenerate(m, p, s), conv, fell_back, merged))
+    good = [f for f in fits if f[8] and not f[7]]
+    tol = MBIS_TIE_REL * max(abs(f[6]) for f in fits)
     best = fits[0]
-    for f in fits[1:]:
-        if (best[7] and not f[7]) or (f[7] == best[7] and f[6] > best[6] + tol):
+    for f in good:
+        tied = abs(f[6] - best[6]) <= tol
+        if (best[7] and not f[7]) or (f[7] == best[7] and (f[6] > best[6] + tol or (tied and not best[8]))):
             best = f
+    kept = [best] + [f for f in good if f is not best]
     distinct = []
-    for f in fits:
+    for f in kept:
         if all(np.abs(f[1] - d).max() > MBIS_UNIQUE_TOL for d in distinct):
             distinct.append(f[1])
     info = {"selected": best[0], "objective": {f[0]: f[6] for f in fits},
-            "degenerate": {f[0]: bool(f[7]) for f in fits},
-            "spread": float(max(np.abs(f[1] - best[1]).max() for f in fits)), "solutions": len(distinct)}
+            "degenerate": {f[0]: bool(f[7]) for f in fits}, "converged": {f[0]: bool(f[8]) for f in fits},
+            "merged": {f[0]: f[10] for f in fits},
+            "spread": float(max(np.abs(f[1] - best[1]).max() for f in kept)), "solutions": len(distinct)}
     return best[1], best[2], best[3], best[4], sum(f[5] for f in fits), info
 
 
@@ -1218,13 +1342,18 @@ def run(wfx_path, nrad=75, nang=434, radcut=10.0, bond_nrad=45, bond_nang=170, f
         # radial tables from the fit, then integrate like the Hirshfeld fuzzy steps
         t0 = time.perf_counter()
         if mbis_mode == "converged":
-            # one fit, from the guess the charge-grid selection kept (same density, finer grid)
+            # one fit, from the charge-grid fit's own shells (same density, finer grid), so both
+            # land on the same fixed point: from the raw guess, the refit of an x1.5 selection
+            # could return to the default's fixed point (0.25 e away on a U nitrate)
             guess = dict(mbis_guesses(atnums))[selection["charge"]["selected"]]
             _, mshell, spop, ssig, ncyc_fuzzy = mbis_fit(grid_pts, coords, td_rho, atnums, qbase, mode=mbis_mode,
-                                                        guess=guess)
+                                                        guess=(cm, cp, cs))
         else:
+            guess = mbis_initial_shells(atnums)
             _, mshell, spop, ssig, ncyc_fuzzy = mbis_fit(grid_pts, coords, td_rho, atnums, qbase, mode=mbis_mode)
         degenerate["fuzzy"] = mbis_degenerate(mshell, spop, ssig)
+        merged = {"charge": selection["charge"]["merged"][selection["charge"]["selected"]] if selection else [],
+                  "fuzzy": mbis_merged_record(atnums, guess[0], mshell)}
         mtab = mbis_radial_tables(mshell, spop, ssig)
         fz["md"] = np.zeros(nat)
         fz["ms"] = np.zeros(nat)
@@ -1317,12 +1446,15 @@ def run(wfx_path, nrad=75, nang=434, radcut=10.0, bond_nrad=45, bond_nang=170, f
         "mbis_cycles": {"charge": ncyc_charge, "fuzzy": ncyc_fuzzy} if mbis_ok else None,
         "mbis_mode": mbis_mode if mbis_ok else None,
         # converged mode: which guess's fixed point the charge-grid fit kept and why (mbis_select;
-        # the fuzzy refit starts from that guess); not unique when another guess reached a fixed
-        # point more than MBIS_UNIQUE_TOL away
+        # the fuzzy refit starts from that fit); not unique when another guess reached a fixed
+        # point more than MBIS_UNIQUE_TOL away, None (unknown) when a guess did not converge
         "mbis_selection": selection.get("charge") if mbis_ok else None,
-        "mbis_unique": selection["charge"]["solutions"] == 1 if mbis_ok and selection else None,
+        "mbis_unique": (selection["charge"]["solutions"] == 1 if all(selection["charge"]["converged"].values())
+                        else None) if mbis_ok and selection else None,
         # a merged or emptied shell in the stored fit (see mbis_degenerate)
         "mbis_degenerate": degenerate if mbis_ok else None,
+        # shells the plain fallback merged (mbis_merged_record)
+        "mbis_merged": merged if mbis_ok else None,
         # Multiwfn has no MBIS beyond Rn: these values come from the period-7 guess and grid
         "mbis_beyond_multiwfn": bool(mbis_ok and int(atnums.max()) > 86),
         "skipped": skipped,

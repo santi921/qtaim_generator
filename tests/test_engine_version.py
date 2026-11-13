@@ -5,19 +5,26 @@ import json
 
 import pytest
 
-from qtaim_gen.source.data.engine_versions import ENGINE_VERSION, ROUTINE_ENGINE, routines_at
+from qtaim_gen.source.data.engine_versions import ENGINE_VERSION, ROUTINE_ENGINE, is_current, last_change, routines_at
 from qtaim_gen.source.utils import provenance
 from qtaim_gen.source.utils.validation import TIMINGS_PATCHED_KEY, timing_total, validate_timing_dict
 
 
 def _write_provenance(folder, version, routines=None, generator=True):
-    """Engine entries at this version for every engine routine it computed."""
+    """Engine entries at this version for every engine routine it computed; a routine a
+    later version changed (MBIS at 5) carries that version, as after the restart that
+    recomputed it, so only the routine under test is stale."""
     prov = provenance.empty()
     for r in sorted(routines if routines is not None else routines_at(version)):
-        prov["routines"][r] = {"by": ROUTINE_ENGINE[r], "engine_version": version}
+        prov["routines"][r] = {"by": ROUTINE_ENGINE[r], "engine_version": max(version, last_change(r))}
     path = (folder / "generator") if generator else folder
     path.mkdir(parents=True, exist_ok=True)
     (path / provenance.PROVENANCE_FILE).write_text(json.dumps(prov))
+
+
+def test_mbis_recorded_before_version_5_is_stale():
+    assert not is_current("mbis", 4) and not is_current("mbis_fuzzy_spin", 4)
+    assert is_current("mbis", 5) and is_current("hirshfeld", 4)
 
 
 def test_timing_total_skips_metadata():

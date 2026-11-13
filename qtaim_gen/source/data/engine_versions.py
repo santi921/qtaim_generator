@@ -18,11 +18,12 @@ Stamps only exist since 2026-11-03, so changes before that (converged MBIS as th
 from qtaim_gen.source.data.multiwfn import (
     ENGINE_LEVEL2_ROUTINES,
     ENGINE_ROUTINES,
+    MBIS_FAMILY,
     SURFACE_ENGINE_LEVEL2_ROUTINES,
     SURFACE_ENGINE_ROUTINES,
 )
 
-ENGINE_VERSION = 4
+ENGINE_VERSION = 5
 
 # the sub-engine that produces each engine routine: the "by" of its provenance entry
 ROUTINE_ENGINE = {
@@ -42,6 +43,10 @@ ENGINE_CHANGES = {
         "note": "ESP surface (other_esp, full_set 2) in the surface engine"},
     4: {"added": frozenset(), "changed": frozenset(),
         "note": "one ENGINE_VERSION for all engines; provenance.json replaces the timings.json stamps"},
+    5: {"added": frozenset(), "changed": frozenset(MBIS_FAMILY),
+        "note": "MBIS fixed-point selection: objective over every atom, stalled check fits continue "
+                "from their state, shell merging in the plain fallback, ties within 1e-8 relative "
+                "go to a converged fit"},
 }
 
 

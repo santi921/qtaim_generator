@@ -1,13 +1,17 @@
 """Audit a NERSC actinide result tree: physical checks on each folder and, with --ref,
 agreement with a Multiwfn tree of the same jobs. Reads the trees only.
 
-Per folder: validation; charges summing to the net charge (hirshfeld, adch, cm5, becke);
-fuzzy spin summing to mult - 1; fuzzy density and the charge engine's grid summing to
-the all-electron count; Poincare-Hopf (kept and full set); an NCP on every actinide;
-the nucleus-frame and precision-limited counts; far-from-origin heavy nuclei; routines
-recorded as permanently skipped. With --ref, for folders validated in both trees: the
-largest per-atom difference per charge and fuzzy scheme (elf_fuzzy and the level-2
-fuzzy integrals included), fuzzy_bond and the ALIE values, the charge-engine version,
+Per folder: validation; charges summing to the net charge (hirshfeld, adch, cm5, becke,
+and at full_set 1 vdd, mbis, chelpg); fuzzy spin summing to mult - 1; fuzzy density and
+the charge engine's grid summing to the all-electron count (mbis_fuzzy_* included);
+Poincare-Hopf (kept and full set); an NCP on every actinide; the nucleus-frame and
+precision-limited counts; far-from-origin heavy nuclei; routines recorded as permanently
+skipped; from the charge engine's record in provenance.json, the MBIS selection, whether
+the selected fit converged, degenerate fits, merged shells, the number of solutions and
+the cycle counts (flags: mbis_unconverged, mbis_degenerate). With --ref, for folders
+validated in both trees: the largest per-atom difference per charge and fuzzy scheme
+(elf_fuzzy and the level-2 fuzzy integrals included), fuzzy_bond and the ALIE values,
+the charge-engine version,
 whether the QTAIM atom and bond sets are the same, and on the shared CPs the largest
 change in density and Laplacian (relative), Laplacian and spin density (absolute) and
 position (all CPs, and the CPs on or bonded to an actinide). A NaN on either side counts
@@ -31,9 +35,9 @@ from qtaim_gen.source.utils.validation import (
 )
 
 ACT = {"Ac", "Th", "Pa", "U", "Np", "Pu", "Am", "Cm", "Bk", "Cf", "Es", "Fm", "Md", "No", "Lr"}
-CHARGES = ("hirshfeld", "adch", "cm5", "becke")
-FUZZY_DENSITY = ("hirsh_fuzzy_density", "becke_fuzzy_density")
-FUZZY_SPIN = ("hirsh_fuzzy_spin", "becke_fuzzy_spin")
+CHARGES = ("hirshfeld", "adch", "cm5", "becke", "vdd", "mbis", "chelpg")
+FUZZY_DENSITY = ("hirsh_fuzzy_density", "becke_fuzzy_density", "mbis_fuzzy_density")
+FUZZY_SPIN = ("hirsh_fuzzy_spin", "becke_fuzzy_spin", "mbis_fuzzy_spin")
 # charge-engine version 2 (full_set 1: elf_fuzzy; full_set 2: the gradient-norm and Laplacian integrals)
 FUZZY_FIELD = ("elf_fuzzy", "grad_norm_rho_fuzzy", "laplacian_rho_fuzzy")
 NELEC = re.compile(r"nelec grid ([0-9.]+) of")
@@ -136,8 +140,26 @@ def audit(folder):
         rec["flags"].append("actinide_ncp")
     rec["ncp_missing"] = sum(str(i) not in qt for i in mol)
 
-    skipped = provenance.load(folder)["skipped"]
+    prov = provenance.load(folder)
+    skipped = prov["skipped"]
     rec["skipped"] = sorted(f"{r}:{v.get('reason')}" for r, v in skipped.items())
+    rec["charge_engine_s"] = (load(gen(folder, "timings.json")) or {}).get("charge_engine")
+
+    meta = prov["engines"].get("charge_engine") or {}
+    sel = meta.get("mbis_selection")
+    if sel:
+        rec["mbis_selected"] = sel["selected"]
+        rec["mbis_converged"] = sel["converged"][sel["selected"]]
+        rec["mbis_guesses_converged"] = sum(sel["converged"].values())
+        rec["mbis_solutions"] = sel["solutions"]
+        rec["mbis_spread"] = sel["spread"]
+        if not rec["mbis_converged"]:
+            rec["flags"].append("mbis_unconverged")
+    if meta.get("mbis_merged") is not None:
+        rec["mbis_merged_atoms"] = len(meta["mbis_merged"]["charge"])
+        rec["mbis_cycles"] = meta["mbis_cycles"]["charge"]
+        if any(meta["mbis_degenerate"].values()):
+            rec["flags"].append("mbis_degenerate")
     return rec
 
 
@@ -249,6 +271,20 @@ def main():
     sk = collections.Counter((a, s) for r in done for a in (r["actinides"] or ["-"]) for s in r["skipped"])
     if sk:
         print("  skipped routines (element, routine:reason): " + "; ".join(f"{a} {s} x{n}" for (a, s), n in sk.most_common(12)))
+
+    mb = [r for r in done if "mbis_selected" in r]
+    if mb:
+        cyc = np.array([r["mbis_cycles"] for r in mb if "mbis_cycles" in r])
+        t = np.array([r["charge_engine_s"] for r in mb if r.get("charge_engine_s")])
+        print(f"\nMBIS (provenance.json engines.charge_engine, {len(mb)} folders): selected "
+              f"{dict(collections.Counter(r['mbis_selected'] for r in mb))}; selected fit unconverged "
+              f"{sum(not r['mbis_converged'] for r in mb)}; all 3 guesses converged "
+              f"{sum(r['mbis_guesses_converged'] == 3 for r in mb)}; degenerate {sum('mbis_degenerate' in r['flags'] for r in mb)}; "
+              f"shells merged in {sum(r.get('mbis_merged_atoms', 0) > 0 for r in mb)}; more than one solution "
+              f"{sum(r['mbis_solutions'] > 1 for r in mb)} (max spread {max(r['mbis_spread'] for r in mb):.1e} e)")
+        if len(cyc) and len(t):
+            print(f"  cycles (3 guesses): median {pct(cyc, 50):.0f}, max {cyc.max():.0f}; charge engine time: "
+                  f"median {pct(t, 50):.1f} s, max {t.max():.1f} s")
 
     if args.ref:
         both = [r for r in done if r.get("ref_validated")]

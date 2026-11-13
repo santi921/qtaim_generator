@@ -259,7 +259,7 @@ class TestTimingValidation:
     def _write(self, tmp_path, timings, version=None):
         """timings.json, plus engine provenance for the routines an engine of this version
         computed when the timings hold a charge_engine timing (default: the current one)."""
-        from qtaim_gen.source.data.engine_versions import ENGINE_VERSION, ROUTINE_ENGINE, routines_at
+        from qtaim_gen.source.data.engine_versions import ENGINE_VERSION, ROUTINE_ENGINE, last_change, routines_at
         from qtaim_gen.source.utils import provenance
 
         path = tmp_path / "timings.json"
@@ -267,7 +267,8 @@ class TestTimingValidation:
         prov = provenance.empty()
         if timings.get("charge_engine"):
             v = version or ENGINE_VERSION
-            prov["routines"] = {r: {"by": ROUTINE_ENGINE[r], "engine_version": v}
+            # a routine a later version changed (MBIS at 5) carries that version
+            prov["routines"] = {r: {"by": ROUTINE_ENGINE[r], "engine_version": max(v, last_change(r))}
                                 for r in routines_at(v) - {"qtaim", "convert"}}
         (tmp_path / provenance.PROVENANCE_FILE).write_text(json.dumps(prov))
         return str(path)
@@ -395,7 +396,10 @@ def test_engine_jsons_compile_like_multiwfn_level1_and_alie(tmp_path, name, monk
 
     prov = provenance.load(str(tmp_path))
     assert {e["engine_version"] for r, e in prov["routines"].items() if e["by"] == "charge_engine"} == {ENGINE_VERSION}
-    assert prov["engines"]["charge_engine"]["grid"]["nrad"] == 75
+    assert prov["routines"]["mbis"]["spec"]["mbis_mode"] == "multiwfn"
+    meta = prov["engines"]["charge_engine"]
+    assert meta["grid"]["nrad"] == 75 and meta["full_set"] == 1 and "mbis_merged" in meta
+    assert not (tmp_path / "charge_engine_meta.json").exists()
     for step in ("vdd", "mbis"):
         for k, v in ref[step]["charge"].items():
             assert charge[step]["charge"][k] == pytest.approx(v, abs=CHARGE_TOL), (step, k)
@@ -461,6 +465,205 @@ def test_mbis_degenerate_detects_merged_and_empty_shells():
     assert mbis_degenerate(mshell, empty, sig)
 
 
+def test_mbis_fallback_only_when_asked(monkeypatch):
+    """A stalled accelerated fit is redone by plain iteration only with fallback;
+    either way a fit that never meets the stopping rule reports converged False."""
+    import numpy as np
+
+    from qtaim_gen.source.core import charge_engine as CE
+
+    monkeypatch.setattr(CE, "MBIS_ANDERSON_MAXCYC", 5)
+    monkeypatch.setattr(CE, "MBIS_MAXCYC", 7)
+    calls = []
+
+    def drifting(m, p, s):
+        calls.append(1)
+        return p * 1.01, s
+
+    mshell, pop, sig = np.array([1]), np.array([[1.0]]), np.array([[0.5]])
+    (_, _, _, _, n), conv, fell = CE._mbis_fit_converged(drifting, mshell, pop, sig, np.array([1.0]), fallback=False)
+    assert (len(calls), n, conv, fell) == (5, 5, False, False)
+    calls.clear()
+    (_, _, _, _, n), conv, fell = CE._mbis_fit_converged(drifting, mshell, pop, sig, np.array([1.0]))
+    assert (len(calls), n, conv, fell) == (12, 12, False, True)
+    calls.clear()
+    (_, _, _, _, n), conv, fell = CE._mbis_fit_converged(lambda m, p, s: (p, s), mshell, pop, sig, np.array([1.0]))
+    assert (n, conv, fell) == (1, True, False)
+
+    # without fallback, a failed fit still falls back when its objective beats fallback_above,
+    # continuing from the accelerated end state (1.01**5) rather than from the guess
+    for above, want, end_pop in ((2.0, (5, False), 1.01**5), (0.5, (12, True), 1.01**12)):
+        calls.clear()
+        (_, _, p, _, n), conv, fell = CE._mbis_fit_converged(drifting, mshell, pop, sig, np.array([1.0]),
+                                                             fallback=False, objective=lambda m, p, s: 1.0,
+                                                             fallback_above=above)
+        assert (n, fell) == want and conv is False and np.isclose(p[0, 0], end_pop)
+
+
+def test_mbis_objective_sums_every_atom():
+    """The selection objective is sum w ln rho0 over every atom's shells, also
+    atoms far beyond atmrhocut of a point, with terms below MBIS_DENCUT left out."""
+    import numpy as np
+
+    from qtaim_gen.source.core import charge_engine as CE
+
+    rng = np.random.default_rng(3)
+    grel = rng.normal(scale=1.5, size=(40, 3))
+    coords = np.array([[0.0, 0.0, 0.0], [1.4, 0.0, 0.0], [30.0, 0.0, 0.0]])
+    tmpden = rng.uniform(1e-3, 1.0, size=(3, 40))
+    mshell = np.array([2, 1, 1])
+    pop = np.array([[2.0, 4.0], [1.0, 0.0], [1.0, 0.0]])
+    sig = np.array([[0.1, 0.5], [0.6, 0.0], [8.0, 0.0]])
+    want = 0.0
+    for c in range(3):
+        for i in range(40):
+            d = np.linalg.norm(grel[i] + coords[c] - coords, axis=1)
+            terms = [pop[j, k] / sig[j, k] ** 3 / 8 / np.pi * np.exp(-d[j] / sig[j, k])
+                     for j in range(3) for k in range(mshell[j])]
+            want += tmpden[c, i] * np.log(max(sum(t for t in terms if t >= CE.MBIS_DENCUT), 1e-300))
+    got = CE.mbis_objective(grel, coords, tmpden, np.array([8, 1, 1]), mshell, pop, sig, block=16)
+    assert got == pytest.approx(want, rel=1e-13)
+
+
+def test_mbis_merge_shells_combines_equal_widths():
+    import numpy as np
+
+    from qtaim_gen.source.core.charge_engine import mbis_merge_shells
+
+    mshell = np.array([3, 2])
+    pop = np.array([[2.0, 8.0, 0.5], [1.0, 3.0, 0.0]])
+    sig = np.array([[0.02, 0.400, 0.402], [0.05, 0.5, 0.0]])
+    m, p, s = mbis_merge_shells(mshell, pop, sig)
+    assert m.tolist() == [2, 2]
+    assert np.allclose(p[0], [2.0, 8.5, 0.0]) and np.allclose(p.sum(axis=1), pop.sum(axis=1))
+    assert np.isclose(s[0, 1], (8.0 * 0.400 + 0.5 * 0.402) / 8.5) and s[0, 2] == 0.0
+    assert np.array_equal(p[1], pop[1]) and np.array_equal(s[1], sig[1])
+
+
+def test_mbis_fallback_merges_a_stalled_shell_pair(monkeypatch):
+    """Plain iteration that moves population between two shells of equal width
+    without converging: the merged one-shell model is kept when its objective is
+    not worse, and plain iteration runs on to MBIS_MAXCYC when it is."""
+    import numpy as np
+
+    from qtaim_gen.source.core import charge_engine as CE
+
+    monkeypatch.setattr(CE, "MBIS_ANDERSON_MAXCYC", 5)
+    monkeypatch.setattr(CE, "MBIS_MAXCYC", 7)
+    monkeypatch.setattr(CE, "MBIS_MERGE_FIRST", 3)
+    monkeypatch.setattr(CE, "MBIS_MERGE_EVERY", 2)
+
+    def step(m, p, s):  # two shells: population drifts from the second to the first; one shell: fixed
+        return (p * np.array([[1.001, 0.999]]), s) if m[0] == 2 else (p, s)
+
+    mshell, pop, sig = np.array([2]), np.array([[1.0, 1.0]]), np.array([[0.5, 0.501]])
+    (q, m, p, s, n), conv, fell = CE._mbis_fit_converged(step, mshell, pop, sig, np.array([2.0]),
+                                                         objective=lambda mm, pp, ss: -float(mm[0]))
+    assert (m.tolist(), conv, fell, n) == ([1], True, True, 5 + 3 + 1)
+    assert np.isclose(p[0, 0], 1.001**3 + 0.999**3) and q[0] == 2.0 - p[0, 0]
+
+    (q, m, p, s, n), conv, fell = CE._mbis_fit_converged(step, mshell, pop, sig, np.array([2.0]),
+                                                         objective=lambda mm, pp, ss: float(mm[0]))
+    assert (m.tolist(), conv, fell, n) == ([2], False, True, 5 + 7 + 3)
+
+
+def test_mbis_chunked_fallback_matches_plain_without_merges(monkeypatch):
+    """With nothing to merge, the chunked plain fallback returns exactly what
+    one uninterrupted plain run does."""
+    import numpy as np
+
+    from qtaim_gen.source.core import charge_engine as CE
+
+    monkeypatch.setattr(CE, "MBIS_ANDERSON_MAXCYC", 1)
+    monkeypatch.setattr(CE, "MBIS_MERGE_FIRST", 3)
+    monkeypatch.setattr(CE, "MBIS_MERGE_EVERY", 2)
+    target = np.array([[1.5, 0.5]])
+
+    def step(m, p, s):
+        return target + 0.6 * (p - target), s
+
+    mshell, pop, sig = np.array([2]), np.array([[1.0, 1.0]]), np.array([[0.1, 0.5]])
+    plain = CE._mbis_fit_converged(step, mshell, pop, sig, np.array([2.0]))
+    chunked = CE._mbis_fit_converged(step, mshell, pop, sig, np.array([2.0]), objective=lambda mm, pp, ss: 0.0)
+    assert plain[1:] == chunked[1:] == (True, True)
+    # 1 accelerated evaluation, then plain convergence inside a chunk (chunks end at 3, 5, 7, ...)
+    assert plain[0][4] == chunked[0][4] and (plain[0][4] - 1) % 2 == 0
+    assert all(np.array_equal(a, b) for a, b in zip(plain[0][:4], chunked[0][:4]))
+
+
+def test_mbis_select_drops_failed_check_guesses(monkeypatch):
+    """A check guess that stalls or ends degenerate cannot be selected, even
+    with a better objective, and does not count as another solution."""
+    import numpy as np
+
+    from qtaim_gen.source.core import charge_engine as CE
+
+    m = np.array([2, 1])
+    p = np.array([[0.5, 0.5], [1.0, 0.0]])
+    s = np.array([[0.5, 0.6], [0.5, 0.0]])
+    guesses = [("default", (m, p, s)), ("sigma_x0.6", (m, p, s * 0.6)), ("sigma_x1.5", (m, p, s * 1.5))]
+    results = {  # (fit, converged, objective, degenerate, fell back); default: converged; x0.6: stalled;
+        # x1.5: converged but degenerate
+        0.5: ((np.array([0.1, -0.1]), m, p, s, 40), True, 1.0, False, False),
+        0.3: ((np.array([0.6, -0.6]), m, p, s * 0.6, 5), False, 9.0, False, False),
+        0.75: ((np.array([0.4, -0.4]), m, p, s * 1.5, 30), True, 5.0, True, False),
+    }
+    seen = []
+
+    above = []
+
+    def fake_fit(step, mshell, pop, sig, qbase, fallback=True, objective=None, fallback_above=None):
+        seen.append(fallback)
+        above.append(fallback_above)
+        r = results[round(float(sig[0, 0]), 2)]
+        return r[0], r[1], r[4]
+
+    monkeypatch.setattr(CE, "mbis_guesses", lambda atnums: guesses)
+    monkeypatch.setattr(CE, "mbis_pairs", lambda *a: None)
+    monkeypatch.setattr(CE, "_mbis_fit_converged", fake_fit)
+    monkeypatch.setattr(CE, "mbis_objective", lambda g, c, t, a, mm, pp, ss: results[round(float(ss[0, 0]), 2)][2])
+    monkeypatch.setattr(CE, "mbis_degenerate", lambda mm, pp, ss: results[round(float(ss[0, 0]), 2)][3])
+    q, *_, ncyc, info = CE.mbis_select(None, None, None, np.array([1, 1]), np.array([1.0, 1.0]))
+    assert seen == [True, False, False]
+    # the check guesses fall back when their failed fit beats the best converged one (the default's 1.0)
+    assert above[0] is None and above[1] == above[2] == pytest.approx(1.0)
+    assert info["selected"] == "default" and np.allclose(q, [0.1, -0.1])
+    assert info["converged"] == {"default": True, "sigma_x0.6": False, "sigma_x1.5": True}
+    assert info["solutions"] == 1 and info["spread"] == 0.0
+    assert info["merged"] == {"default": [], "sigma_x0.6": [], "sigma_x1.5": []}
+    assert ncyc == 75
+
+    # default fit degenerate: the check guesses get the fallback, and a converged,
+    # non-degenerate check fit wins over it
+    seen.clear()
+    results[0.5] = ((np.array([0.1, -0.1]), m, p, s, 21000), False, 1.0, True, True)
+    results[0.75] = ((np.array([0.4, -0.4]), m, p, s * 1.5, 1519), True, 5.0, False, True)
+    q, *_, info = CE.mbis_select(None, None, None, np.array([1, 1]), np.array([1.0, 1.0]))
+    assert seen == [True, True, True]
+    assert info["selected"] == "sigma_x1.5" and np.allclose(q, [0.4, -0.4])
+    assert info["solutions"] == 1
+
+    # default fit converged only after the fallback merged a shell pair of atom 0: the check
+    # guesses still get the fallback (rmechdb_750), and the merge is recorded
+    seen.clear()
+    results[0.5] = ((np.array([0.1, -0.1]), np.array([1, 1]), p, s, 2010), True, 1.0, False, True)
+    q, *_, info = CE.mbis_select(None, None, None, np.array([1, 1]), np.array([1.0, 1.0]))
+    assert seen == [True, True, True]
+    assert info["merged"]["default"] == [{"atom": 1, "z": 1, "shells_guess": 2, "shells_fit": 1}] and info["selected"] == "sigma_x1.5"
+
+    # objectives within MBIS_TIE_REL: a converged fit wins a tie over an unconverged default
+    # (openac PuN3O11 def2-TZVPD: default unconverged after the fallback, x0.6 converged 2.8e-9
+    # relative above it on the same fixed point); with both converged the earlier guess stays
+    results[0.5] = ((np.array([0.1, -0.1]), m, p, s, 20000), False, 325.9688976126, False, True)
+    results[0.3] = ((np.array([0.1001, -0.1001]), m, p, s * 0.6, 900), True, 325.9688985146, False, True)
+    results[0.75] = ((np.array([0.3, -0.3]), m, p, s * 1.5, 20000), False, 325.9650200332, False, True)
+    q, *_, info = CE.mbis_select(None, None, None, np.array([1, 1]), np.array([1.0, 1.0]))
+    assert info["selected"] == "sigma_x0.6" and np.allclose(q, [0.1001, -0.1001])
+    results[0.5] = ((np.array([0.1, -0.1]), m, p, s, 400), True, 325.9688976126, False, False)
+    q, *_, info = CE.mbis_select(None, None, None, np.array([1, 1]), np.array([1.0, 1.0]))
+    assert info["selected"] == "default" and info["solutions"] == 1
+
+
 def test_mbis_guess_beyond_rn_keeps_six_shells():
     """Period 7 uses Multiwfn's Rn rule: 6 shells, valence Z - 54."""
     import numpy as np
@@ -485,9 +688,13 @@ def test_run_records_mbis_mode_and_uniqueness():
     assert meta["mbis_mode"] == "converged"
     assert meta["mbis_selection"]["selected"] == "default"
     assert set(meta["mbis_selection"]["objective"]) == {"default", "sigma_x0.6", "sigma_x1.5"}
+    assert meta["mbis_selection"]["converged"] == {"default": True, "sigma_x0.6": True, "sigma_x1.5": True}
     assert meta["mbis_unique"] is True
     assert meta["mbis_degenerate"] == {"charge": False, "fuzzy": False}
+    assert meta["mbis_merged"] == {"charge": [], "fuzzy": []}
     assert meta["mbis_beyond_multiwfn"] is False
+    # the pipeline writes _meta to provenance.json (engines.charge_engine)
+    assert json.loads(json.dumps(meta))["mbis_selection"]["selected"] == "default"
 
 
 def test_mbis_fitted_guess_covers_the_proatom_range():
