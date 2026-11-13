@@ -1,0 +1,118 @@
+diff -ru a/module_compute_atomic_radial_moments.f08 b/module_compute_atomic_radial_moments.f08
+--- a/module_compute_atomic_radial_moments.f08	2026-11-04 00:15:28.510010930 -0500
++++ b/module_compute_atomic_radial_moments.f08	2026-11-04 00:17:11.830602991 -0500
+@@ -91,7 +91,7 @@
+  DO j = 1,natoms
+    z = nint(final_result(j,2))
+    CALL atomic_number_to_symbol(z,output_fid,atomic_symbol)
+-   WRITE(radial_moment_FID,'(i4,3a,f13.6,a,f13.6,a,f13.6,a,f13.6)') j,' ',atomic_symbol,'',final_result(j,3)/bohrperangstrom,'',&
++   WRITE(radial_moment_FID,'(i4,3a,3(f13.6,a),es25.16e3)') j,' ',atomic_symbol,'',final_result(j,3)/bohrperangstrom,'',&
+    final_result(j,4)/bohrperangstrom,'',final_result(j,5)/bohrperangstrom,'',Rsquared_moment(j)
+    FLUSH(radial_moment_FID)
+  END DO
+@@ -128,7 +128,7 @@
+  DO j = 1,natoms
+    z = nint(final_result(j,2))
+    CALL atomic_number_to_symbol(z,output_fid,atomic_symbol)
+-   WRITE(radial_moment_FID,'(i4,3a,f13.6,a,f13.6,a,f13.6,a,f13.6)') j,' ',atomic_symbol,'',final_result(j,3)/bohrperangstrom,'',&
++   WRITE(radial_moment_FID,'(i4,3a,3(f13.6,a),es25.16e3)') j,' ',atomic_symbol,'',final_result(j,3)/bohrperangstrom,'',&
+    final_result(j,4)/bohrperangstrom,'',final_result(j,5)/bohrperangstrom,'',Rcubed_moment(j)
+    FLUSH(radial_moment_FID)
+  END DO
+@@ -165,7 +165,7 @@
+  DO j = 1,natoms
+    z = nint(final_result(j,2))
+    CALL atomic_number_to_symbol(z,output_fid,atomic_symbol)
+-   WRITE(radial_moment_FID,'(i4,3a,f13.6,a,f13.6,a,f13.6,a,f13.6)') j,' ',atomic_symbol,'',final_result(j,3)/bohrperangstrom,'',&
++   WRITE(radial_moment_FID,'(i4,3a,3(f13.6,a),es25.16e3)') j,' ',atomic_symbol,'',final_result(j,3)/bohrperangstrom,'',&
+    final_result(j,4)/bohrperangstrom,'',final_result(j,5)/bohrperangstrom,'',Rfourth_moment(j)
+    FLUSH(radial_moment_FID)
+  END DO
+diff -ru a/module_generate_atomic_spin_moment_file.f08 b/module_generate_atomic_spin_moment_file.f08
+--- a/module_generate_atomic_spin_moment_file.f08	2026-11-04 00:15:28.510376835 -0500
++++ b/module_generate_atomic_spin_moment_file.f08	2026-11-04 00:15:28.515584167 -0500
+@@ -109,7 +109,7 @@
+    IF (.not. spin_available) THEN
+      z = nint(final_result(i,2))
+      CALL atomic_number_to_symbol(z,output_FID,atomic_symbol)
+-     WRITE(spin_file_FID,'(i5,a,a,3f11.6)') i,' ',atomic_symbol,final_result(i,3)/bohrperangstrom,final_result(i,4)/&
++     WRITE(spin_file_FID,'(i5,a,a,3es25.16e3)') i,' ',atomic_symbol,final_result(i,3)/bohrperangstrom,final_result(i,4)/&
+      bohrperangstrom,final_result(i,5)/bohrperangstrom
+      FLUSH(output_FID)
+    END IF
+@@ -117,14 +117,14 @@
+      IF (non_collinear) THEN  
+        z = nint(final_result(i,2))
+        CALL atomic_number_to_symbol(z,output_FID,atomic_symbol)
+-       WRITE(spin_file_FID,'(i5,a,a,7f11.6)')i,' ',atomic_symbol,final_result(i,3)/bohrperangstrom,final_result(i,4)/&
++       WRITE(spin_file_FID,'(i5,a,a,7es25.16e3)')i,' ',atomic_symbol,final_result(i,3)/bohrperangstrom,final_result(i,4)/&
+        bohrperangstrom,final_result(i,5)/bohrperangstrom,sqrt(spin_population_vector(1,i)**2 + spin_population_vector(2,i)**2 + &
+        &spin_population_vector(3,i)**2),spin_population_vector(1,i),spin_population_vector(2,i),spin_population_vector(3,i)
+        FLUSH(output_FID)
+      ELSE
+        z = nint(final_result(i,2))
+        CALL atomic_number_to_symbol(z,output_FID,atomic_symbol)
+-       WRITE(spin_file_FID,'(i5,a,a,4f11.6)') i,' ',atomic_symbol,final_result(i,3)/bohrperangstrom,final_result(i,4)/&
++       WRITE(spin_file_FID,'(i5,a,a,4es25.16e3)') i,' ',atomic_symbol,final_result(i,3)/bohrperangstrom,final_result(i,4)/&
+        bohrperangstrom,final_result(i,5)/bohrperangstrom,spin_population(i) 
+        FLUSH(spin_file_FID)
+       END IF
+diff -ru a/module_generate_bond_order_file.f08 b/module_generate_bond_order_file.f08
+--- a/module_generate_bond_order_file.f08	2026-11-04 00:15:28.510396913 -0500
++++ b/module_generate_bond_order_file.f08	2026-11-04 00:15:28.516487776 -0500
+@@ -33,7 +33,7 @@
+  DO i = 1,natoms
+    z = nint(final_result(i,2))
+    CALL atomic_number_to_symbol(z,output_FID,atomic_symbol)
+-   WRITE(BO_FID,'(2a,f13.6,a,f13.6,a,f13.6,f15.6)')atomic_symbol,' ',final_result&
++   WRITE(BO_FID,'(2a,f13.6,a,f13.6,a,f13.6,es25.16e3)')atomic_symbol,' ',final_result&
+    (i,3)/bohrperangstrom,' ',final_result(i,4)/bohrperangstrom,' ',final_result(i,5)/bohrperangstrom,atomic_summed_BO(i)
+  END DO
+  !Print information at the bottom of the file
+@@ -67,7 +67,7 @@
+        translation_x = nint(bond_pair_matrix(3,current_pair))
+        translation_y = nint(bond_pair_matrix(4,current_pair))
+        translation_z = nint(bond_pair_matrix(5,current_pair))
+-       WRITE(BO_FID,'(3(a,i3),a,i5,3a,f10.4,a,f10.4)')' Bonded to the (',translation_x,', ',&
++       WRITE(BO_FID,'(3(a,i3),a,i5,3a,es25.16e3,a,es25.16e3)')' Bonded to the (',translation_x,', ',&
+        translation_y,', ',translation_z,') translated image of atom number ',other_atom,' ( ',atomic_symbol, &
+        ' ) with bond order = ', bond_pair_matrix(BO_column,current_pair), &
+        '    The average spin polarization of this bonding = ',&
+@@ -80,14 +80,14 @@
+        translation_x = -(nint(bond_pair_matrix(3,current_pair)))
+        translation_y = -(nint(bond_pair_matrix(4,current_pair)))
+        translation_z = -(nint(bond_pair_matrix(5,current_pair)))
+-       WRITE(BO_FID,'(3(a,i3),a,i5,3a,f10.4,a,f10.4)')' Bonded to the (',translation_x,', ',&
++       WRITE(BO_FID,'(3(a,i3),a,i5,3a,es25.16e3,a,es25.16e3)')' Bonded to the (',translation_x,', ',&
+        translation_y,', ',translation_z,') translated image of atom number ',other_atom,' ( ',atomic_symbol, &
+        ' ) with bond order = ', bond_pair_matrix(BO_column,current_pair), &
+        '    The average spin polarization of this bonding = ',&
+        sqrt(  max( (bond_pair_matrix(13,current_pair)/bond_pair_matrix(12,current_pair) - 1.00), 0.00_dp )  )
+      END IF
+    END DO
+-   WRITE(BO_FID,'(a,f13.6)')' The sum of bond orders for this atom is S&
++   WRITE(BO_FID,'(a,es25.16e3)')' The sum of bond orders for this atom is S&
+    &BO =   ',atomic_summed_BO(i)
+  END DO
+  WRITE(BO_FID,*)'   '
+diff -ru a/module_generate_net_atomic_charge_file.f08 b/module_generate_net_atomic_charge_file.f08
+--- a/module_generate_net_atomic_charge_file.f08	2026-11-04 00:15:28.510443582 -0500
++++ b/module_generate_net_atomic_charge_file.f08	2026-11-04 00:16:40.750344400 -0500
+@@ -87,7 +87,7 @@
+  DO i = 1,natoms
+    z = nint(final_result(i,2))
+    CALL atomic_number_to_symbol(z,output_fid,atomic_symbol)
+-   WRITE(charge_fid,'(i5,a,a,16(a,f13.6))') i,' ',atomic_symbol,'',final_result(i,3)/bohrperangstrom,'',final_result(i,4)/&
++   WRITE(charge_fid,'(i5,a,a,16(a,es25.16e3))') i,' ',atomic_symbol,'',final_result(i,3)/bohrperangstrom,'',final_result(i,4)/&
+    bohrperangstrom,'',final_result(i,5)/bohrperangstrom,'',final_result(i,6),'',final_result(i,7),'',final_result(i,8),'',&
+    final_result(i,9),'',final_result(i,10),'',final_result(i,11),'',final_result(i,12),'',final_result(i,13),'',final_result&
+    (i,14),'',final_result(i,15),'',final_result(i,16),'',final_result(i,17),'',final_result(i,18)
+@@ -103,7 +103,7 @@
+  DO i = 1,natoms
+    z = nint(final_result(i,2))
+    CALL atomic_number_to_symbol(z,output_fid,atomic_symbol)
+-   WRITE(charge_fid,'(i5,a,a,6(a,f13.6))')i,' ',atomic_symbol,'',final_result(i,3)/bohrperangstrom,'',final_result(i,4)/&
++   WRITE(charge_fid,'(i5,a,a,6(a,es25.16e3))')i,' ',atomic_symbol,'',final_result(i,3)/bohrperangstrom,'',final_result(i,4)/&
+    bohrperangstrom,'',final_result(i,5)/bohrperangstrom,'',fitted_tail_intercept(i),'',-fitted_tail_slope(i),'',&
+    fitted_tail_Rsquared(i)
+    FLUSH(charge_fid)

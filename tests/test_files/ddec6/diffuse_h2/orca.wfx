@@ -1,0 +1,86 @@
+<Title>
+ synthetic diffuse H2+ (DDEC6 port 12x coarse-grid test; not a physical wavefunction)
+</Title>
+<Keywords>
+GTO
+</Keywords>
+<Number of Nuclei>
+ 2
+</Number of Nuclei>
+<Number of Occupied Molecular Orbitals>
+ 1
+</Number of Occupied Molecular Orbitals>
+<Number of Perturbations>
+ 0
+</Number of Perturbations>
+<Net Charge>
+ 1
+</Net Charge>
+<Number of Electrons>
+ 1
+</Number of Electrons>
+<Number of Alpha Electrons>
+ 1
+</Number of Alpha Electrons>
+<Number of Beta Electrons>
+ 0
+</Number of Beta Electrons>
+<Electronic Spin Multiplicity>
+ 2
+</Electronic Spin Multiplicity>
+<Number of Core Electrons>
+ 0
+</Number of Core Electrons>
+<Nuclear Names>
+ H1
+ H2
+</Nuclear Names>
+<Atomic Numbers>
+ 1
+ 1
+</Atomic Numbers>
+<Nuclear Charges>
+ 1.000000000000E+00
+ 1.000000000000E+00
+</Nuclear Charges>
+<Nuclear Cartesian Coordinates>
+ 0.000000000000E+00  0.000000000000E+00 -7.000000000000E-01
+ 0.000000000000E+00  0.000000000000E+00  7.000000000000E-01
+</Nuclear Cartesian Coordinates>
+<Number of Primitives>
+ 6
+</Number of Primitives>
+<Primitive Centers>
+1 1 1 2 2
+2
+</Primitive Centers>
+<Primitive Types>
+1 1 2 1 1
+2
+</Primitive Types>
+<Primitive Exponents>
+ 1.200000000000E+00  4.000000000000E-03  3.000000000000E-01  1.200000000000E+00  4.000000000000E-03
+ 3.000000000000E-01
+</Primitive Exponents>
+<Molecular Orbital Occupation Numbers>
+ 1.000000000000E+00
+</Molecular Orbital Occupation Numbers>
+<Molecular Orbital Energies>
+-5.000000000000E-01
+</Molecular Orbital Energies>
+<Molecular Orbital Spin Types>
+ Alpha
+</Molecular Orbital Spin Types>
+<Molecular Orbital Primitive Coefficients>
+<MO Number>
+ 1
+</MO Number>
+ 6.6960956459077639E-02  5.5800797049231372E-03  2.2320318819692549E-02  6.6960956459077639E-02  5.5800797049231372E-03
+-2.2320318819692549E-02
+</Molecular Orbital Primitive Coefficients>
+<Energy>
+-5.000000000000E-01
+</Energy>
+<Virial Ratio (-V/T)>
+ 2.000000000000E+00
+</Virial Ratio (-V/T)>
