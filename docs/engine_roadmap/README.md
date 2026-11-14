@@ -84,6 +84,7 @@ of their own (converged MBIS as the default, 2026-10-15; planarity in the surfac
 | 3 | adds other_esp (full_set 2, surface engine, exact ESP kernel) |
 | 4 | one ENGINE_VERSION and provenance.json; no routine values change. An ESP surface failure keeps ALIE and planarity, is retried once, then recorded as a permanent skip |
 | 5 | changes mbis, mbis_fuzzy_density, mbis_fuzzy_spin: MBIS selection objective over every atom, stalled check fits continue from their state, shell merging in the plain fallback, ties within 1e-8 relative go to a converged fit, fuzzy refit from the charge fit (mbis_converged.md) |
+| 6 | adds chelpg (full_set 1, charge engine): Multiwfn's fitting points, radii and constrained fit, exact ESP kernel. Engine trees at versions 2-5 run at full_set >= 1 rerun the charge engine on restart to add it |
 
 ## Cross-cutting requirements
 
@@ -146,6 +147,20 @@ change sign), the polarity index by 2.0e-2 eV and the skewness by 4.0e-2. With M
 code (iESPcode=1, eleesp1) and the engine on Multiwfn's Boys function, both fixtures agree on
 every field at print precision; the attribution of the larger set's differences to libreta rests
 on those two and the earlier measurement [I] (validation_ledger.md section 3).
+CHELPG (chelpg, full_set 1, core/chelpg.py; engine version 6): the fitting points (setCHELPGpt,
+population.f90:3345), radii (setESPfitvdwr: Breneman-Wiberg to Ar, UFF/1.2 above under ispecial=1,
+every radius from chelpg_radii.txt when an actinide is present) and the total-charge-constrained
+least squares follow Multiwfn; the fit is solved by LU where Multiwfn inverts the bordered matrix.
+The one intended difference is the ESP: production Multiwfn uses libreta (iESPcode=2), the engine
+the exact kernel. On 99 local jobs (87 OMol wfx_pull, 12 nitrates) the point count is identical
+99 of 99 and the charges move by a median 9.7e-5 e per job, 90th percentile 2.6e-3, at most
+1.89e-2 e (mo_hydrides 5383, a Cl at q 0.61); 17 jobs exceed 1e-3 e. Multiwfn's own exact code
+(iESPcode=1) differs from its libreta run by the same amount on the same atom on all 33 jobs where
+both were run (ratio median 1.00), so the difference is libreta's, measured, not inferred. With
+Multiwfn's Boys function the engine reproduces iESPcode=1 to 2.0e-10 e on those 33 (print
+precision); with the exact Boys function it differs from iESPcode=1 by a median 1.3e-6 e per job,
+at most 1.0e-5 e (heaviest on Pu, S, Cl). The fit's condition number (1e4 to 1e6) does not predict
+the size of the libreta difference (log-log correlation 0.11 on the 99) (validation_ledger.md section 2).
 
 ### Parity across levels of theory
 

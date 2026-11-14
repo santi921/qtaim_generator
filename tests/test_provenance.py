@@ -18,14 +18,15 @@ def test_version_table():
     added = [r for c in ENGINE_CHANGES.values() for r in c["added"]]
     assert len(added) == len(set(added))
     assert last_change("elf_fuzzy") == 2 and last_change("other_esp") == 3 and last_change("hirshfeld") == 1
-    assert last_change("chelpg") == 0
+    assert last_change("chelpg") == 6 and last_change("bader") == 0
     assert "other_esp" not in routines_at(2) and "elf_fuzzy" in routines_at(2)
 
 
 def test_is_current():
     assert is_current("other_esp", 3) and is_current("other_esp", ENGINE_VERSION)
     assert not is_current("other_esp", 2)
-    assert not is_current("chelpg", ENGINE_VERSION)  # not an engine routine
+    assert not is_current("bader", ENGINE_VERSION)  # not an engine routine
+    assert not is_current("chelpg", 5)
     assert not is_current("hirshfeld", None)
 
 
