@@ -1,7 +1,7 @@
 # Engine validation ledger
 
-Every validation run of the native engines (charge, surface, QTAIM) against Multiwfn, HORTON,
-gbasis, critic2, extended precision or physical invariants. One row per run, with the
+Every validation run of the native engines (charge, surface, QTAIM, DDEC6) against Multiwfn,
+Chargemol, HORTON, gbasis, critic2, extended precision or physical invariants. One row per run, with the
 reference, the data, the result and where the raw output lives.
 
 State as of 2026-11-11, branch `feat/charge-engine` (c309d2a), plus `feat/engine-esp-surface`. Companion documents:
@@ -13,6 +13,10 @@ tiers 1-3), `mbis_converged.md` (MBIS).
 - **Reference kinds.**
   - *Multiwfn parity*: the engine reproduces Multiwfn 3.8 on the same wavefunction. The
     bar is Multiwfn's print precision, since Multiwfn's output is text.
+  - *Chargemol parity*: the DDEC6 port reproduces Chargemol 09_26_2017 on the same
+    wavefunction. Locally the reference is a serial -O2 build that prints es25.16 and dumps
+    its grids, so the bar is bitwise; on the clusters it is the OpenMP build, whose summation
+    order differs (about 1e-10).
   - *Independent code*: HORTON 3 (gbasis, horton-part), critic2. Checks the kernels or
     the method, not the parity.
   - *Extended precision*: an 80-bit long-double evaluation, used to decide which code is
@@ -44,6 +48,11 @@ tiers 1-3), `mbis_converged.md` (MBIS).
   search reproduces Multiwfn's CP sets exactly in its Multiwfn-compatible mode. In engine
   mode it finds every CP Multiwfn finds (0 missing on 1498 LRC jobs and 419 actinide
   jobs) plus CPs Multiwfn misses.
+- **DDEC6** (opt-in, up to 120 atoms) is bitwise identical to serial Chargemol on the 3
+  dump fixtures (grids, charges, iteration count, multipoles, spin) and within 1.0e-10 of
+  the OpenMP build on 79 openac actinide jobs and 76 OMol jobs, with equal iteration counts
+  everywhere. Since the density-kernel work the port takes a median 0.37 of Chargemol's time
+  on openac and 0.83-0.89 on OMol.
 - **Gaps:** converged MBIS (the current default) has no independent reference; the ALIE
   difference on the NERSC actinides (3.4e-5 rel) is unexplained; engine-only CPs are not
   yet confirmed by critic2; no run covers double hybrids, HF, Cartesian basis sets or a
@@ -224,6 +233,20 @@ the runner's default; `--native_convert off` runs Multiwfn's convert step instea
 | 2026-11-12 | LRC OMol, full runner at full_set 1 (f66f277), `nc_ref_l1b` (Multiwfn convert) vs `nc_fixed_l1b` (fixed) | `jobs_ref.txt`, 200 tm_react, 116 open shell; 200 validated in both | every non-MBIS charge and fuzzy scheme, fuzzy_bond and ALIE within 2.9e-12 (chelpg 2.0e-10, Multiwfn's last digit); mbis 1.4e-6 e, mbis_fuzzy_density 1.3e-6; QTAIM key sets identical 200/200, properties identical (spin density 2.0e-11); no routine missing. `compare_engine_merge.py` lists 169 jobs with "non-engine data changed": chelpg and elf_fuzzy at the sizes above, compared exactly | LRC `engine_test/nc_l1b_audit.tsv` |
 | 2026-11-02 | full runner, three trees (Multiwfn convert, multiwfn_h, fixed), engines on | 12 nitrates (open and closed shell, X2C and def2 ECP) | multiwfn_h vs Multiwfn convert: charges and fuzzy within 8.5e-14 e, QTAIM sets and properties identical; fixed vs Multiwfn: changes only on open-shell X2C (charges 5.8e-5 e, BCP rho 2.9e-4 rel); 12/12 validate in each, no Multiwfn convert in the native trees | scratchpad `rehearse/` |
 
+## 4c. DDEC6 (`core/ddec6.py`, opt-in `--ddec6`)
+
+A port of Chargemol 09_26_2017 (DDEC6 charges, spin, atomic dipoles and quadrupoles, tail
+fits), not a Multiwfn routine. Molecules above 120 atoms are skipped (permanent skip in
+provenance.json). Atomic dipoles and quadrupoles in atomic units. Speed ratios are port
+wall time over Chargemol's with the same thread count.
+
+| date | reference | data | result | code | raw output |
+|---|---|---|---|---|---|
+| 2026-11-05 | Chargemol parity, local, serial -O2 build with grid dumps | rmechdb_652_step10_0_2 (open shell), XeCl4_step2_0_1 (ECP), synthetic diffuse_h2 (12x) | pair data, valence/core/spin grids, charges, iteration count, multipoles, tail fits and spin moments bitwise identical; re-run after every density-kernel change since (last 0af383c) | 78de148, 2a75f16, 02aabc8 | `tests/test_ddec6.py` (DDEC6_SLOW=1), `data/ddec6_ref/dumps/` |
+| 2026-11-12 | Chargemol parity, NERSC, OpenMP precise build | openac, 96 jobs from `actinide_test/sample.txt` (8 per node at 16 threads each) | 79 compared, 13 skipped above 120 atoms, 4 without `orca.gbw` (chalcogenides TZVP, Pu/U with Se6/Te6); 0 Chargemol stops; charges within 7.60e-11 e, atomic dipoles 2.97e-11, quadrupoles 1.61e-10, spin moments 2.70e-12 (53 open shell); iteration counts equal 79/79. Port 1.76x Chargemol's time (median, 1.26-2.00); a local profile put 98% of the port's time in the density grids | b24bc06 | NERSC `actinide_test/ddec6/ddec6_*.jsonl`, local copy `data/ddec6_ref/nersc_campaign/` |
+| 2026-11-13 | same run, port only | 16 of the 96 (13 compared, 3 above 120 atoms), debug queue | `ddec6_port.json` identical to the 2026-11-12 run on 13/13 after the strided kernel order (56462a8), the fused accumulate steps (8ff3f19) and the per-point power tables (0af383c). Port over Chargemol median 0.37, total 0.46; slowest relative job omol def2-TZVPD at 0.99 (few rows per point, so the power tables do not help) | 0af383c | NERSC `actinide_test/ddec6_fused/` |
+| 2026-11-15 | Chargemol parity, LRC lr7, OpenMP precise build | OMol, 90 jobs (30 each tm_react, 5A_elytes, rgd_uks) from `ddec6_test/ddec6_sample.txt`, one job at a time on 16 cores | 76 compared, 14 skipped above 120 atoms (all 5A_elytes), 0 errors or Chargemol stops; charges within 5.59e-11 e, atomic dipoles 3.09e-11, quadrupoles 9.45e-11, spin moments 3.60e-12; iteration counts equal 76/76. Port over Chargemol median 0.89 (5A_elytes), 0.83 (rgd_uks), 0.89 (tm_react) | 0af383c | LRC `ddec6_test/ddec6_*.jsonl` |
+
 ## 5. Invariant audits (no reference)
 
 `scripts/nersc/audit_prod.py`: charge sums, spin sums, fuzzy populations and grid electron
@@ -259,6 +282,7 @@ Current behaviours without a validation on current code, and checks not yet done
 | full_set 2 routines | still Multiwfn (bader, laplacian_bond) | when engines exist |
 | ESP surface vs Multiwfn's exact code | exact-code parity on 2 fixtures only; the libreta differences on 99 jobs are attributed, not shown | eleesp1 (iESPcode=1) references on more jobs; slow (about 25x libreta) |
 | chelpg engine on a cluster | local only (99 + 33 jobs, 2 fixtures); not yet run through the full runner or on cluster actinides | LRC `nc_fixed_l1b`-style tm_react run plus an NERSC openac `prod_l1` sample, in one batch |
+| ddec6 through the full runner on a cluster | the cluster runs called the port from `scripts/ddec6_reference/campaign.py`; `--ddec6` in the runner (sidecar, merge into charge.json, provenance, restart) is covered by unit tests only | `--ddec6 --restart` on a copy of a finished tree, e.g. LRC `nc_fixed_l1b` |
 | fuzzy ELF / gradient / Laplacian on cluster actinides | done on LRC tm_react (ELF 70 jobs, gradient and Laplacian 9 jobs); none on actinides on a cluster; the Laplacian ECP-core differences are read as roundoff, not proven | NERSC: a separate eval that includes these changes (not tracked here yet); 80-bit Laplacian on one Hf or Tl job |
 
 ## 8. Adding a row
