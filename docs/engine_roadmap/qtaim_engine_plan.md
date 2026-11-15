@@ -498,4 +498,10 @@ extra CPs, determinism across thread counts. [V] unless marked.
   esp_total differences are not rounding: 4.4e-9 to 9.8e-9 of |esp_e|, the recorded exact vs
   Fmch Boys function difference (decision 9); they look large relative to esp_total only where
   esp_nuc and esp_e nearly cancel.
+- **Cluster adjudication (2026-11-14, validation_ledger.md section 4b).** LRC, 57 qeng2 jobs:
+  48 engine-only CPs, all confirmed by Multiwfn and critic2. NERSC, 92 openac jobs: 73
+  actinide NCPs confirmed by critic2 (Multiwfn's search fails at those nuclei), 16 other CPs
+  by both. Across both, no non-weak Multiwfn CP is missing and no BCP pair differs; every
+  Laplacian difference is rounding. Open: the Sn2 job's NNAs are not classified (6, which
+  neither code maps to a nucleus), and its esp_total differs by up to 1.0e-7 of |esp_e|.
 

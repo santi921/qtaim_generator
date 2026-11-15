@@ -63,13 +63,7 @@ LRC `ncref`/`ncfix` (27498703/27498704) hit the 12 h limit and were not continue
 trees `nc_ref_l1b`/`nc_fixed_l1b` replaced them so no tree mixes MBIS versions. The NERSC
 level 1/2 batches and the LRC `l1b` pair are done (rows in section 4b, 2026-11-12).
 
-QTAIM P4 adjudication (`qtaim_verify_stored.py --adjudicate`, feat/qtaim-p4 45ba764, critic2 694cb1ee
-built from source on both clusters), submitted 2026-11-13:
-- LRC `qadj` (27826590, 12 tasks): the 57 qeng2 jobs in `data/engine_test_2026-10/qtaim_adjudicate_jobs.txt`
-  (42 with engine-only CPs, 9 with NNAs, 4 with kept-set Poincare-Hopf 2, the 3 tier-2 Laplacian
-  outliers, the 5 largest esp_total cases); output `engine_test/qverify/qadj_*.jsonl`.
-- NERSC (61245039): the 92 openac folders with engine-only QTAIM keys in `prod_l1_audit.tsv`, against
-  the stored CPprop.txt of `mwfn_l0`; output `actinide_test/qtaim_adj/adj_*.jsonl`.
+No runs in progress (last checked 2026-11-14).
 
 ## 2. Charge engine (`core/charge_engine.py`)
 
@@ -194,6 +188,8 @@ Angstrom^2).
 | 2026-11-13 | determinism across thread counts (criterion E), engine defaults | 8 local ladder jobs, 12-274 atoms (25-779 CPs; ECP, lanthanide, open shell) | CP arrays, CPprop.txt and qtaim.out byte-identical at 1, 4 and 8 threads on all 8; 274 atoms: 395 / 190 / 172 s | `data/engine_test_2026-11/qtaim_p4/determinism.jsonl` |
 | 2026-11-13 | Multiwfn and critic2 searches started at the engine-only CPs (`qtaim_verify_stored.py --adjudicate`) | 3 local LRC jobs with NNAs (`data/engine_test_2026-10/ph_fail`: MOBH32_Pt2, MOR16_Ir4, ROST59_Ir3) | 5 engine-only CPs (3 RCPs at rho 2.4e-5 to 2.8e-5, 2 vacuum NNAs at rho 1.5e-5, 6.9-7.4 Bohr from any nucleus): all 5 confirmed by both programs (same type within 1e-4 Bohr) | `data/engine_test_2026-11/qtaim_p4/adj.jsonl` |
 | 2026-11-13 | rounding check at the stored positions (`qtaim_compare_props.rounding_check`) | same 3 jobs | every Laplacian difference within the 1e-12 Bohr position spread plus half the last printed digit (NCP up to 4.3e-10 rel); esp_total differences 4.4e-9 to 9.8e-9 of abs(esp_e), the exact vs Fmch Boys function difference (decision 9), large relative to esp_total only where it nearly cancels | same |
+| 2026-11-14 | Multiwfn and critic2 (694cb1ee, built on the cluster) searches started at the engine-only CPs, LRC (`qadj`, 27826590, feat/qtaim-p4 45ba764) | 57 qeng2 jobs: 42 with engine-only CPs, 9 with NNAs in the stored set, 4 with kept-set Poincare-Hopf 2, the 3 tier-2 Laplacian outliers, the 5 largest esp_total cases | 48 engine-only CPs (18 BCP, 21 RCP, 7 CCP, 2 NNA; 23 below rho 1e-3): all 48 confirmed by both programs. NNA jobs: the engine has the stored NCP count in all 9 (Sn2 job: 6 NNAs, 14 BCPs unpaired by both codes); in 2 a stored NNA below 1e-5 is dropped and another weak NNA found. No non-weak Multiwfn CP missing; kept-set Poincare-Hopf 1 on 53, 2 on the 4 known (full set 1). Laplacian: every difference within position and print rounding, the tier-2 outliers included (worst 1.45e-7 rel). esp_total: at most 9.8e-9 of abs(esp_e) (Boys function, decision 9) except MOBH8_Sn2 (Sn ECP): 2.8e-8 to 1.0e-7 at 3 CPs, not explained yet | `data/engine_test_2026-11/qtaim_p4/lrc/` |
+| 2026-11-14 | same, NERSC (61245039) against the stored CPprop.txt of `mwfn_l0` | 92 openac folders with engine-only QTAIM keys in `prod_l1_audit.tsv` | 89 engine-only CPs: 73 actinide NCPs (one per job, within 3.5e-11 Bohr of the nucleus) confirmed by critic2 73/73 and by Multiwfn 0/73 (its search fails at those nuclei even when started on them; the origin-distance loss, section 4b 2026-10-13/16), 14 RCPs and 2 BCPs confirmed by both. BCP pairs: 6116 same, 0 differ, 592 engine-only (the 73 jobs with the lost actinide NCP, and 17 jobs with no extra CP where Multiwfn's paths failed), 0 Multiwfn-only. No non-weak Multiwfn CP missing; Poincare-Hopf 1 on 92. Laplacian within rounding (worst 1.5e-8 rel); esp_total at most 6.1e-9 of abs(esp_e) | `data/engine_test_2026-11/qtaim_p4/nersc/` |
 
 ## 4b. Wavefunction converter (`core/wavefunction.py`, `--native_convert`)
 
@@ -252,10 +248,8 @@ Current behaviours without a validation on current code, and checks not yet done
 | gap | why it matters | suggested check |
 |---|---|---|
 | converged MBIS has one independent reference (HORTON, one 3d cluster) | it is the production default and moves actinide charges by up to 0.38 e from Multiwfn's rule | HORTON MBIS (horton-part) on the 87 wfx_pull + nitrates |
-| engine-only CPs not confirmed by critic2 | 92 openac jobs and the qeng2 extras rest on Poincare-Hopf alone; 5 CPs on 3 local jobs confirmed (section 4b, 2026-11-13) | `--adjudicate` on the 57 LRC and the openac jobs (QTAIM P4) |
 | NERSC ALIE 3.4e-5 rel | larger than every other ALIE comparison | rerun Multiwfn and the engine on a few openac jobs locally |
-| qeng2 esp_total 4.6e-2 rel | on 3 local jobs the esp_total differences are the Boys function difference (4.4e-9 to 9.8e-9 of abs(esp_e)), large relative to esp_total only where it cancels (section 4b, 2026-11-13); the 4.6e-2 job itself is on LRC | `--adjudicate` rounding check on the 5 largest qeng2 cases |
-| tier 2 3 BCP Laplacians (up to 1.5e-7 rel) | unconfirmed as position rounding; on 3 other local jobs all Laplacian differences are rounding (section 4b, 2026-11-13) | `--adjudicate` rounding check on those 3 LRC jobs |
+| esp_total at 3 CPs of MOBH8_Sn2 (LRC) | 2.8e-8 to 1.0e-7 of abs(esp_e), 3-10x the Boys function difference seen everywhere else (149 cluster jobs, section 4b 2026-11-14); the qeng2 4.6e-2 rel cases are that difference where esp_total cancels | rerun those CPs with `boys_mode="multiwfn"` on the Sn2 wavefunction |
 | level-of-theory matrix | double hybrids, HF, Cartesian basis sets, ROKS beyond one radical, ORCA 5 vs ORCA 6 not covered | tier 3 supplementary set |
 | results recorded on older code | the 87-job, 18-reference and 16-reference local sets predate the threading fixes (#63-#65) and the converged MBIS default | rerun the local sets on current code; they take minutes |
 | full_set 2 routines | still Multiwfn (bader, laplacian_bond) | when engines exist |
