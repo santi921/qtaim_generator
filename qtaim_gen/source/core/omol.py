@@ -1736,7 +1736,7 @@ def _engine_outputs_present(folder: str, spin_tf: bool, full_set: int = 0) -> bo
     gen = os.path.join(folder, "generator")
     file_of = {
         "hirshfeld": "charge.json", "adch": "charge.json", "cm5": "charge.json",
-        "becke": "charge.json", "vdd": "charge.json", "mbis": "charge.json",
+        "becke": "charge.json", "vdd": "charge.json", "mbis": "charge.json", "chelpg": "charge.json",
         "fuzzy_bond": "bond.json",
     }
     try:

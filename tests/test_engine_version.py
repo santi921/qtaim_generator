@@ -64,7 +64,7 @@ def _engine_folder(tmp_path, version):
     gen.mkdir(parents=True)
     (gen / "timings.json").write_text(json.dumps({"charge_engine": 2.0}))
     routines = _engine_routines(2, spin_tf=True)
-    charge = {r: {"charge": {"1_H": 0.1}} for r in ("hirshfeld", "adch", "cm5", "becke", "vdd", "mbis")}
+    charge = {r: {"charge": {"1_H": 0.1}} for r in ("hirshfeld", "adch", "cm5", "becke", "vdd", "mbis", "chelpg")}
     (gen / "charge.json").write_text(json.dumps(charge))
     (gen / "bond.json").write_text(json.dumps({"fuzzy_bond": {"1_H_to_2_H": 1.0}}))
     fuzzy = {r: {"1_H": 1.0} for r in routines if r not in charge and r != "fuzzy_bond"}
@@ -77,12 +77,16 @@ def test_restart_reruns_an_older_engine_only_where_it_left_routines_to_multiwfn(
     from qtaim_gen.source.core.omol import _engine_outputs_present
 
     old = _engine_folder(tmp_path / "v1", version=1)
-    new = _engine_folder(tmp_path / "v2", version=2)
+    v2 = _engine_folder(tmp_path / "v2", version=2)
+    new = _engine_folder(tmp_path / "v6", version=6)
     # full_set 0: version 1 computed every level-0 routine
     assert _engine_outputs_present(old, spin_tf=True, full_set=0)
     # full_set 1 and 2: version 1 left elf_fuzzy (and the level-2 fuzzy) to Multiwfn
     assert not _engine_outputs_present(old, spin_tf=True, full_set=1)
     assert not _engine_outputs_present(old, spin_tf=True, full_set=2)
+    # versions 2-5 left chelpg (full_set 1) to Multiwfn
+    assert _engine_outputs_present(v2, spin_tf=True, full_set=0)
+    assert not _engine_outputs_present(v2, spin_tf=True, full_set=1)
     assert _engine_outputs_present(new, spin_tf=True, full_set=2)
 
 

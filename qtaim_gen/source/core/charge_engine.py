@@ -11,8 +11,9 @@ fuzzy-bond quantity from that pass (plus one coarser grid for bond orders):
     fuzzy_bond                                                 bond schema
 
 With full_set >= 1 it adds vdd (same grid pass), mbis (its own 30-60 x 302 grid,
-as MBIS_wrapper), mbis_fuzzy_density/spin (MBIS refit on the main grid) and
-elf_fuzzy (Becke fuzzy integral of ELF, same grid pass); full_set >= 2 adds the
+as MBIS_wrapper), mbis_fuzzy_density/spin (MBIS refit on the main grid),
+elf_fuzzy (Becke fuzzy integral of ELF, same grid pass) and chelpg (ESP fit on
+Multiwfn's CHELPG points, core/chelpg.py); full_set >= 2 adds the
 grad_norm_rho_fuzzy and laplacian_rho_fuzzy integrals from that pass.
 
     charge-engine --wfx orca.wfx --out engine.json [--full_set 1]
@@ -1366,8 +1367,15 @@ def run(wfx_path, nrad=75, nang=434, radcut=10.0, bond_nrad=45, bond_nang=170, f
                 fz["ms"] += h.T @ td_spin[b]
         t["mbis_fuzzy"] = time.perf_counter() - t0
 
+    if level1:
+        from qtaim_gen.source.core.chelpg import chelpg
+
+        t0 = time.perf_counter()
+        q_chelpg, chelpg_meta = chelpg(wfx, basis)
+        t["chelpg"] = time.perf_counter() - t0
+
     t0 = time.perf_counter()
-    labels = [f"{i + 1}_{T_SYMBOL[z]}" for i, z in enumerate(atnums)]
+    labels =[f"{i + 1}_{T_SYMBOL[z]}" for i, z in enumerate(atnums)]
 
     def chg(q):
         return {k: float(v) for k, v in zip(labels, q)}
@@ -1424,6 +1432,7 @@ def run(wfx_path, nrad=75, nang=434, radcut=10.0, bond_nrad=45, bond_nang=170, f
             out["mbis_fuzzy_spin"] = fuzzy("mbis_fuzzy_spin", fz["ms"])
     if level1:
         out["elf_fuzzy"] = fuzzy("elf_fuzzy", fz["elf"])
+        out["chelpg"] = {"charge": chg(q_chelpg)}
     if deriv_fuzzy:
         out["grad_norm_rho_fuzzy"] = fuzzy("grad_norm_rho_fuzzy", fz["grad"])
         out["laplacian_rho_fuzzy"] = fuzzy("laplacian_rho_fuzzy", fz["lapl"])
@@ -1457,6 +1466,8 @@ def run(wfx_path, nrad=75, nang=434, radcut=10.0, bond_nrad=45, bond_nang=170, f
         "mbis_merged": merged if mbis_ok else None,
         # Multiwfn has no MBIS beyond Rn: these values come from the period-7 guess and grid
         "mbis_beyond_multiwfn": bool(mbis_ok and int(atnums.max()) > 86),
+        # fitting points, RMSE / RRMSE as Multiwfn prints them, condition number of the fit
+        "chelpg": chelpg_meta if level1 else None,
         "skipped": skipped,
         "timings_s": {k: round(v, 3) for k, v in t.items()},
     }
@@ -1482,7 +1493,7 @@ def main(argv=None):
     p.add_argument("--bond_nrad", type=int, default=45, help="fuzzy_bond radial points (Multiwfn: 45)")
     p.add_argument("--bond_nang", type=int, default=170, help="fuzzy_bond Lebedev points (Multiwfn: 170)")
     p.add_argument("--nthreads", type=int, default=None)
-    p.add_argument("--full_set", type=int, default=0, help="1 adds vdd, mbis, mbis_fuzzy_density/spin, elf_fuzzy; 2 adds grad_norm/laplacian_rho_fuzzy")
+    p.add_argument("--full_set", type=int, default=0, help="1 adds vdd, mbis, mbis_fuzzy_density/spin, elf_fuzzy, chelpg; 2 adds grad_norm/laplacian_rho_fuzzy")
     p.add_argument("--mbis_mode", choices=("converged", "multiwfn"), default=None,
                    help="MBIS stopping: converged fixed point (default) or Multiwfn's rule (parity checks)")
     p.add_argument("--no_mbis_ecp", action="store_true",
