@@ -772,11 +772,15 @@ def check_results_exist(folder: str, move_results: bool) -> bool:
     Returns:
         bool: True if results files exist, False otherwise
     """
+    from qtaim_gen.source.utils import provenance
+
+    # a permanently skipped QTAIM step (an ECP atom without EDF core density) leaves no qtaim.json
+    qtaim_skipped = "qtaim" in provenance.skipped(provenance.load(folder))
     if move_results:
         folder = os.path.join(folder, "generator")
     required_files = [
         "timings.json",
-        "qtaim.json",
+        *([] if qtaim_skipped else ["qtaim.json"]),
         "other.json",
         "fuzzy_full.json",
         "charge.json",

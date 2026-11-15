@@ -1687,6 +1687,12 @@ def validation_checks(
     else:
         folder_check_res = folder
 
+    prov = provenance.load(folder)
+    skipped = provenance.skipped(prov)
+    # a permanently skipped QTAIM step (an ECP atom without EDF core density) leaves no qtaim.json
+    if "qtaim" in skipped:
+        required_files = [f for f in required_files if f != "qtaim.json"]
+
     for file in required_files:
         if not os.path.exists(os.path.join(folder_check_res, file)):
             if logger:
@@ -1729,8 +1735,6 @@ def validation_checks(
     # bonding_json_loc = os.path.join(folder, "bonding.json")
     tf_cond = True
 
-    prov = provenance.load(folder)
-    skipped = provenance.skipped(prov)
     if skipped and logger:
         logger.info(f"Routines recorded as permanently skipped in {folder}: {sorted(skipped)}")
 
@@ -1767,7 +1771,9 @@ def validation_checks(
             logger.error(f"Charge json validation failed in folder: {folder}")
         tf_cond = False
 
-    if not validate_qtaim_dict(
+    if "qtaim" in skipped:
+        pass  # no qtaim.json, so none of the QTAIM checks below apply
+    elif not validate_qtaim_dict(
         qtaim_json_loc,
         n_atoms=n_atoms,
         verbose=verbose,

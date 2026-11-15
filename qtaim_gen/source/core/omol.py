@@ -75,7 +75,9 @@ from qtaim_gen.source.core.parse_multiwfn import (
     parse_charge_chelpg,
     parse_fuzzy_real_space,
 )
-from qtaim_gen.source.core.parse_qtaim import dft_inp_to_dict, get_qtaim_descs, only_atom_cps
+from qtaim_gen.source.core.parse_qtaim import (
+    QTAIM_CP_FILE, dft_inp_to_dict, get_qtaim_descs, only_atom_cps, qtaim_cp_sidecar,
+)
 
 from qtaim_gen.source.utils.io import (
     pull_ecp_dict,
@@ -1091,6 +1093,19 @@ def parse_multiwfn(
                 # if return_dicts:
                 #    compiled_dicts["qtaim"] = qtaim_dict
                 logger.info(f"Parsed qtaim output to {json_file}")
+                # the CPs qtaim.json leaves out (rings, cages, NNAs, unpaired BCPs)
+                try:
+                    sidecar = qtaim_cp_sidecar(cp_prop_path, inp_loc, orca_tf=inp_orca,
+                                               engine_meta=meta.get("qtaim_engine"))
+                    atomic_json_write(os.path.join(folder, QTAIM_CP_FILE), sidecar)
+                    if sidecar["nna"] or sidecar["unpaired_bcp"]:
+                        logger.warning(
+                            f"QTAIM: {len(sidecar['nna'])} non-nuclear attractor(s) "
+                            f"({sum(v['vacuum'] for v in sidecar['nna'].values())} vacuum), "
+                            f"{len(sidecar['unpaired_bcp'])} unpaired BCP(s), in {QTAIM_CP_FILE}: {folder}"
+                        )
+                except Exception as e:
+                    logger.error(f"Error writing {QTAIM_CP_FILE}: {e}")
 
             except Exception as e:
                 logger.error(f"Error parsing qtaim: {e}")
@@ -1524,6 +1539,7 @@ def move_results_to_folder(
         "bond.json",
         "fuzzy_full.json",
         "qtaim.json",
+        QTAIM_CP_FILE,
         "other.json",
         "orca.json",
         "horton.json",
@@ -1540,8 +1556,8 @@ def move_results_to_folder(
             new_path = os.path.join(folder, file)
             if os.path.exists(existing_path):
                 try:
-                    if file == "qtaim.json":
-                        # A root qtaim.json is only this run's result when the CPprop.txt it
+                    if file in ("qtaim.json", QTAIM_CP_FILE):
+                        # A root qtaim.json (or its sidecar) is only this run's result when the CPprop.txt it
                         # was parsed from is newer than the generator/ record and intact.
                         # Otherwise it is a leftover (clean=False keeps the root copy and
                         # CPprop.txt, and every pass re-parses them; parse_multiwfn refuses a
@@ -1587,7 +1603,7 @@ def move_results_to_folder(
                     # qtaim.json is keyed by critical point, not by step: a fresh root copy
                     # is the full CP set of this run's CPprop.txt, and merging it would keep
                     # CPs (or mislabeled atom pairs) that only the old record had
-                    if file == "qtaim.json" and isinstance(data_new, dict) and data_new:
+                    if file in ("qtaim.json", QTAIM_CP_FILE) and isinstance(data_new, dict) and data_new:
                         data_merged = data_new
                         action = "Replaced"
                     elif file == provenance.PROVENANCE_FILE:
@@ -1888,7 +1904,12 @@ def _run_qtaim_engine(folder: str, n_threads: int, logger: logging.Logger, resta
     reseeding on a failing Poincare-Hopf sum, engine bond paths, exact Boys function)
     instead of Multiwfn. Writes CPprop.txt in Multiwfn's format, which parse_multiwfn
     and the CPprop integrity gates read unchanged, a qtaim.out with the engine banner
-    and metadata (validation.qtaim_engine_meta), and a 'qtaim_engine' timing."""
+    and metadata (validation.qtaim_engine_meta), and a 'qtaim_engine' timing.
+    A wavefunction with an ECP atom that has no EDF core density is recorded as a
+    permanent QTAIM skip (its density, nuclear CPs and bond paths would be wrong)."""
+    if "qtaim" in provenance.skipped(provenance.load(folder)):
+        logger.info("qtaim_engine: QTAIM recorded as permanently skipped - not run")
+        return True
     if restart:
         timings = {}
         for base in (os.path.join(folder, "generator"), folder):
@@ -1910,13 +1931,18 @@ def _run_qtaim_engine(folder: str, n_threads: int, logger: logging.Logger, resta
 
     import numba
     from qtaim_gen.source.core import cp_search
-    from qtaim_gen.source.core.charge_engine import prepare_basis, read_wfx
+    from qtaim_gen.source.core.charge_engine import ecp_atoms_without_edf, prepare_basis, read_wfx
 
     numba.set_num_threads(max(1, min(n_threads, numba.config.NUMBA_NUM_THREADS)))
     settings = {"seeds": "superset", "paths": "engine", "boys_mode": "exact"}
     start = time.time()
     try:
         wfx = read_wfx(wf_path)
+        missing = ecp_atoms_without_edf(wfx)
+        if missing:
+            _record_skipped(folder, {"qtaim": {"reason": "ecp_without_edf", "by": "qtaim_engine",
+                                               "atoms": [int(a) + 1 for a in missing]}}, logger)
+            return True
         res = cp_search.analyze(wfx, prepare_basis(wfx), **settings)
         cp_search.write_cpprop(os.path.join(folder, "CPprop.txt"), res, wfx)
     except Exception as e:
@@ -2481,7 +2507,8 @@ def _wavefunction_electrons(path: str) -> Optional[float]:
 
 _KEEP_ON_WAVEFUNCTION_DISCARD = {"orca.out", "output.out", "orca.json", "timings.json", "memory.json",
                                  provenance.PROVENANCE_FILE}
-_COMPILED_JSONS = ("charge.json", "bond.json", "fuzzy_full.json", "other.json", "qtaim.json", "horton.json")
+_COMPILED_JSONS = ("charge.json", "bond.json", "fuzzy_full.json", "other.json", "qtaim.json", QTAIM_CP_FILE,
+                   "horton.json")
 _DISCARD_SUFFIXES_ROOT = (".wfn", ".wfx", ".molden.input", ".out", ".json")
 _DISCARD_SUFFIXES_GEN = (".wfn", ".wfx", ".out")
 _DISCARD_NAMES_GEN = set(_COMPILED_JSONS) | {"out_files.zip", "CPprop.txt"}

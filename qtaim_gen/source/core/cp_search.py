@@ -573,9 +573,15 @@ def analyze(wfx, basis, seeds="superset", paths="engine", boys_mode="exact", res
         cps, bp["ncp_atom"], bp["atoms"], bp["bcp"], wfx["coords"])
     pair = np.full((len(keep), 2), -1, dtype=np.int64)
     pair[bp["bcp"]] = bp["atoms"]
+    # the CP each BCP's two paths ended at (-1: none), as indices in the output order
+    new_index = np.empty(len(order), dtype=np.int64)
+    new_index[order] = np.arange(len(order))
+    ends = np.full((len(keep), 2), -1, dtype=np.int64)
+    ends[bp["bcp"]] = bp["ends"]
+    ends = np.where(ends >= 0, new_index[np.maximum(ends, 0)], -1)[order]
     return {
         "pos": cps["pos"][order], "type": cps["type"][order], "props": {k: v[order] for k, v in props.items()},
-        "ncp_atom": bp["ncp_atom"][order], "bcp_atoms": pair[order],
+        "ncp_atom": bp["ncp_atom"][order], "bcp_atoms": pair[order], "bcp_ends": ends,
         "weak": np.flatnonzero(props["rho"][order] < WEAK_FLAG),
         "near_pairs": _near_pairs(cps["pos"][order]),
         "poincare_hopf": ph_kept, "poincare_hopf_full_set": ph, "dropped": int(counts.sum() - len(keep)),
@@ -675,6 +681,8 @@ def qtaim_engine_out(res, seconds, settings):
 
     counts = np.bincount(res["type"], minlength=4)
     nuc = next((st for st in res["stats"] if st["stage"] == "nuclei"), {})
+    nna = np.flatnonzero((res["type"] == 0) & (res["ncp_atom"] < 0))
+    unpaired = np.flatnonzero((res["type"] == 1) & (res["bcp_atoms"][:, 0] < 0))
     meta = {
         "version": ENGINE_VERSION,
         **settings,
@@ -686,6 +694,12 @@ def qtaim_engine_out(res, seconds, settings):
         "weak_below_rho": WEAK_FLAG,
         "weak_cps": [int(i) + 1 for i in res["weak"]],
         "near_pairs": [[int(i) + 1, int(j) + 1] for i, j in res["near_pairs"]],
+        # non-nuclear attractors; the vacuum ones (rho below weak_below_rho) are far-field
+        # maxima, not bonding attractors
+        "nna": [int(i) + 1 for i in nna],
+        "nna_vacuum": [int(i) + 1 for i in nna if res["props"]["rho"][i] < WEAK_FLAG],
+        # [bcp, end 1, end 2]: the CPs an unpaired BCP's two paths ended at (0: none)
+        "bcp_unpaired": [[int(b) + 1, *(int(e) + 1 for e in res["bcp_ends"][b])] for b in unpaired],
         "nucleus_frame": int(nuc.get("nucleus_frame", 0)),
         "precision_limited": int(nuc.get("precision_limited", 0)),
         "reseed_rounds": [st["stage"] for st in res["stats"] if st["stage"].startswith("sphere")],
