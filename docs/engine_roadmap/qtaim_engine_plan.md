@@ -502,6 +502,7 @@ extra CPs, determinism across thread counts. [V] unless marked.
   48 engine-only CPs, all confirmed by Multiwfn and critic2. NERSC, 92 openac jobs: 73
   actinide NCPs confirmed by critic2 (Multiwfn's search fails at those nuclei), 16 other CPs
   by both. Across both, no non-weak Multiwfn CP is missing and no BCP pair differs; every
-  Laplacian difference is rounding. Open: the Sn2 job's NNAs are not classified (6, which
-  neither code maps to a nucleus), and its esp_total differs by up to 1.0e-7 of |esp_e|.
+  Laplacian difference is rounding. The Sn2 job (6 NNAs, esp_total up to 1.0e-7 of |esp_e|):
+  the NNAs are vacuum maxima near H atoms of a dianion, and the esp_total gap vanishes with
+  Multiwfn's Boys function (2.1e-12). Nothing from the P4 list is open.
 
