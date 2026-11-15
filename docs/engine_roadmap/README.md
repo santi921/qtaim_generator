@@ -46,6 +46,14 @@ another way are discarded and recomputed when a gbw is there. With `--wfn` the d
 | 10 | Weak CPs (QTAIM plan D6) | Revised 2026-10-12: Poincare-Hopf is checked (and reseeding triggered) on the CPs with rho >= 1e-5, because near-vacuum CPs below that are found or missed depending on where seeds land (LRC case 40_Li+: kept set sums to 1, full set to 0); both sums go in `_meta`. Originally: check Poincare-Hopf on the full CP set first, then drop CPs with rho < 1e-5 and flag rho < 1e-3 in `_meta` (list of CP keys; the per-CP schema is unchanged). Whether flagged CPs become graph edges is a converter setting. Local data (97 jobs, 6,563 CPs): none below 1e-5, 141 (2.1%) between 1e-5 and 1e-3 |
 | 11 | esp_nuc, esp_total, delta_g_hirsh at nuclear CPs | Keep, for parity, although they are set by where the search stopped near the nucleus |
 
+## Decisions (2026-11-13, QTAIM P4)
+
+| # | Question | Decision |
+|---|---|---|
+| 12 | Where ring and cage CPs, non-nuclear attractors (NNAs) and unpaired BCPs go (QTAIM plan D3) | A sidecar, `qtaim_cp.json`, written next to qtaim.json from CPprop.txt (Multiwfn's or the engine's); qtaim.json is unchanged. json-to-lmdb does not read it yet |
+| 13 | BCPs whose bond path ends at a vacuum NNA | Unpaired, as before, and flagged: the engine `_meta` lists every unpaired BCP with the CPs its two paths ended at (`bcp_unpaired`), the NNAs (`nna`) and the vacuum ones (`nna_vacuum`, rho below 1e-3) |
+| 14 | QTAIM on a wavefunction with an ECP atom that has no EDF core density | Permanent skip (`qtaim`, reason `ecp_without_edf`, by `qtaim_engine`) in provenance.json; validation and the restart pre-check then need no qtaim.json. Not seen in local data: 651 wfx, 112 with ECPs, 31 (Z, ncore) pairs, all in the EDF library |
+
 Production ESP at CPs comes from Multiwfn's old `eleesp1` routine, not libreta: the QTAIM
 stdin never initializes libreta, so `eleesp` falls back (MW/function.f90:4269-4280).
 Verified locally: iESPcode 1 and 2 give byte-identical CPprop.txt.
@@ -83,7 +91,9 @@ of their own (converged MBIS as the default, 2026-10-15; planarity in the surfac
 | 2 | adds elf_fuzzy (full_set 1), grad_norm_rho_fuzzy and laplacian_rho_fuzzy (full_set 2); EDF-dependent schemes skipped when any ECP atom lacks EDF (was: when the wavefunction has no EDF at all; no local wavefunction differs, 552 checked) |
 | 3 | adds other_esp (full_set 2, surface engine, exact ESP kernel) |
 | 4 | one ENGINE_VERSION and provenance.json; no routine values change. An ESP surface failure keeps ALIE and planarity, is retried once, then recorded as a permanent skip |
-| 5 | adds ddec6 (opt-in `--ddec6`, a port of Chargemol 09_26_2017; molecules above 120 atoms skipped) |
+| 5 | changes mbis, mbis_fuzzy_density, mbis_fuzzy_spin: MBIS selection objective over every atom, stalled check fits continue from their state, shell merging in the plain fallback, ties within 1e-8 relative go to a converged fit, fuzzy refit from the charge fit (mbis_converged.md) |
+| 6 | adds chelpg (full_set 1, charge engine): Multiwfn's fitting points, radii and constrained fit, exact ESP kernel. Engine trees at versions 2-5 run at full_set >= 1 rerun the charge engine on restart to add it |
+| 7 | adds ddec6 (opt-in `--ddec6`, a port of Chargemol 09_26_2017; molecules above 120 atoms skipped) |
 
 ## Cross-cutting requirements
 
@@ -117,8 +127,10 @@ it through the nucleus frame, with Poincare-Hopf 1 and every actinide BCP paired
 MBIS (mbis_converged.md): converged to the fixed point instead of Multiwfn's 1e-4 e per-cycle
 stop (population.f90 MBIS loop; 3 of 27 local jobs moved by more than 0.03 e, actinides
 0.03-0.38 e); initial guess from a free-atom table fitted to the Hirshfeld proatoms instead of
-Multiwfn's shell rule; of several fixed points, the one with the smallest KL divergence over
-three guesses; Z 87-118 supported (6 shells), where Multiwfn refuses beyond Rn.
+Multiwfn's shell rule; of several fixed points, the one with the smallest KL divergence among
+the converged, non-degenerate fits from three guesses; an atom's shells that stall at nearly
+equal widths are merged and the smaller model refit, so such atoms report fewer shells
+(cations and electropositive metals); Z 87-118 supported (6 shells), where Multiwfn refuses beyond Rn.
 Planarity (other_geometry, surface_engine.planarity): a molecule with no heavy atoms gets
 mpp_heavy = sdp_heavy = 0; Multiwfn fits a plane to an empty selection and prints MPP NaN
 and SDP 0 (otherfunc.f90 calcMPP). Values otherwise match Multiwfn at print precision
@@ -144,6 +156,24 @@ change sign), the polarity index by 2.0e-2 eV and the skewness by 4.0e-2. With M
 code (iESPcode=1, eleesp1) and the engine on Multiwfn's Boys function, both fixtures agree on
 every field at print precision; the attribution of the larger set's differences to libreta rests
 on those two and the earlier measurement [I] (validation_ledger.md section 3).
+CHELPG (chelpg, full_set 1, core/chelpg.py; engine version 6): the fitting points (setCHELPGpt,
+population.f90:3345), radii (setESPfitvdwr: Breneman-Wiberg to Ar, UFF/1.2 above under ispecial=1,
+every radius from chelpg_radii.txt when an actinide is present) and the total-charge-constrained
+least squares follow Multiwfn; the fit is solved by LU where Multiwfn inverts the bordered matrix.
+The one intended difference is the ESP: production Multiwfn uses libreta (iESPcode=2), the engine
+the exact kernel. On 99 local jobs (87 OMol wfx_pull, 12 nitrates) the point count is identical
+99 of 99 and the charges move by a median 9.7e-5 e per job, 90th percentile 2.6e-3, at most
+1.89e-2 e (mo_hydrides 5383, a Cl at q 0.61); 17 jobs exceed 1e-3 e. Multiwfn's own exact code
+(iESPcode=1) differs from its libreta run by the same amount on the same atom on all 33 jobs where
+both were run (ratio median 1.00), so the difference is libreta's, measured, not inferred. With
+Multiwfn's Boys function the engine reproduces iESPcode=1 to 2.0e-10 e on those 33 (print
+precision); with the exact Boys function it differs from iESPcode=1 by a median 1.3e-6 e per job,
+at most 1.0e-5 e (heaviest on Pu, S, Cl). The fit's condition number (1e4 to 1e6) does not predict
+the size of the libreta difference (log-log correlation 0.11 on the 99) (validation_ledger.md section 2).
+
+QTAIM with an ECP atom that has no EDF core density (decision 14): Multiwfn runs on the
+valence-only density, which loses that atom's nuclear CP and its bond paths (a local uranium
+ECP job without EDF had every bond unpaired); the engine records a permanent skip instead.
 
 ### Parity across levels of theory
 

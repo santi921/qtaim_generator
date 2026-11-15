@@ -326,7 +326,7 @@ core/engine_worker.py) and on _run_orca_parse's additive merge into charge.json.
    - both merged additively with atomic_json_write into the generator/ or root copy,
      whichever exists (as _run_orca_parse does);
    - timings.json: `ddec6` seconds; provenance.json: a `ddec6` routine entry (by `ddec6`,
-     ENGINE_VERSION 5, spec with the Chargemol release, grid spacing and atom cap) and the
+     ENGINE_VERSION 7, spec with the Chargemol release, grid spacing and atom cap) and the
      run's `_meta` under `engines.ddec6` (rebased onto provenance 2026-11-12; was
      `_engine_versions.ddec6 = DDEC6_VERSION`, now dropped).
 5. **Validation (utils/validation.py).** When ddec6 is requested, `ddec6` must be in

@@ -64,8 +64,9 @@ def test_parse_cp_test():
 
     cp_ring = get_critical_point_ring()
     cp_ring_dict = parse_cp(cp_ring, verbose=True)
-    assert cp_ring_dict[0] == "ring", "ring cp wrongly parsed"
-    assert cp_ring_dict[1] == {}, "ring cp wrongly parsed"
+    # ring CPs are parsed for the qtaim_cp.json sidecar, named "<cp number>_ring"
+    assert cp_ring_dict[0].split("_")[0].isdigit() and cp_ring_dict[0].endswith("_ring")
+    assert "density_all" in cp_ring_dict[1] and "connected_bond_paths" not in cp_ring_dict[1]
 
 
 def test_parse_full_cp():

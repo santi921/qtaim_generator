@@ -182,7 +182,7 @@ def test_restart_at_full_set_2_adds_only_the_esp_surface_and_validates(tmp_path)
     import logging
 
     from qtaim_gen.source.core.omol import _run_surface_engine, move_results_to_folder, parse_multiwfn
-    from qtaim_gen.source.data.engine_versions import ENGINE_VERSION, ROUTINE_ENGINE, routines_at
+    from qtaim_gen.source.data.engine_versions import ENGINE_VERSION, ROUTINE_ENGINE, last_change, routines_at
     from qtaim_gen.source.data.multiwfn import ENGINE_ROUTINES
     from qtaim_gen.source.utils import provenance
     from qtaim_gen.source.utils.validation import get_expected_timing_keys, validate_timing_dict
@@ -194,7 +194,9 @@ def test_restart_at_full_set_2_adds_only_the_esp_surface_and_validates(tmp_path)
     v2 = routines_at(2) - {"qtaim", "convert"}
     timings = {k: 1.0 for k in keys if k not in v2 and k != "other_esp"}
     timings.update({"charge_engine": 1.0, "surface_engine": 1.0})
-    folder = _restart_folder(tmp_path, stored, {r: {"by": ROUTINE_ENGINE[r], "engine_version": 2} for r in v2},
+    # MBIS at the version that last changed it (5), so only other_esp is missing
+    folder = _restart_folder(tmp_path, stored,
+                             {r: {"by": ROUTINE_ENGINE[r], "engine_version": max(2, last_change(r))} for r in v2},
                              timings)
     gen = folder / "generator"
     assert not validate_timing_dict(str(gen / "timings.json"), full_set=2, charge_engine=True)

@@ -18,11 +18,12 @@ Stamps only exist since 2026-11-03, so changes before that (converged MBIS as th
 from qtaim_gen.source.data.multiwfn import (
     ENGINE_LEVEL2_ROUTINES,
     ENGINE_ROUTINES,
+    MBIS_FAMILY,
     SURFACE_ENGINE_LEVEL2_ROUTINES,
     SURFACE_ENGINE_ROUTINES,
 )
 
-ENGINE_VERSION = 5
+ENGINE_VERSION = 7
 
 # the sub-engine that produces each engine routine: the "by" of its provenance entry
 ROUTINE_ENGINE = {
@@ -34,8 +35,9 @@ ROUTINE_ENGINE = {
 ENGINES = frozenset(ROUTINE_ENGINE.values())
 
 _V2 = ENGINE_LEVEL2_ROUTINES | {"elf_fuzzy"}
+_V6 = frozenset({"chelpg"})
 ENGINE_CHANGES = {
-    1: {"added": frozenset(ROUTINE_ENGINE) - _V2 - SURFACE_ENGINE_LEVEL2_ROUTINES - {"ddec6"}, "changed": frozenset(),
+    1: {"added": frozenset(ROUTINE_ENGINE) - _V2 - SURFACE_ENGINE_LEVEL2_ROUTINES - _V6 - {"ddec6"}, "changed": frozenset(),
         "note": "charge and surface engines, QTAIM engine (before version stamps)"},
     2: {"added": _V2, "changed": frozenset(),
         "note": "elf_fuzzy (full_set 1), gradient-norm and Laplacian fuzzy integrals (full_set 2)"},
@@ -43,7 +45,13 @@ ENGINE_CHANGES = {
         "note": "ESP surface (other_esp, full_set 2) in the surface engine"},
     4: {"added": frozenset(), "changed": frozenset(),
         "note": "one ENGINE_VERSION for all engines; provenance.json replaces the timings.json stamps"},
-    5: {"added": frozenset({"ddec6"}), "changed": frozenset(),
+    5: {"added": frozenset(), "changed": frozenset(MBIS_FAMILY),
+        "note": "MBIS fixed-point selection: objective over every atom, stalled check fits continue "
+                "from their state, shell merging in the plain fallback, ties within 1e-8 relative "
+                "go to a converged fit"},
+    6: {"added": _V6, "changed": frozenset(),
+        "note": "CHELPG (full_set 1) in the charge engine: Multiwfn's points, radii and fit, exact ESP"},
+    7: {"added": frozenset({"ddec6"}), "changed": frozenset(),
         "note": "DDEC6 (core/ddec6.py, a port of Chargemol 09_26_2017), opt-in with --ddec6"},
 }
 

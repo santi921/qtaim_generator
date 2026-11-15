@@ -99,6 +99,58 @@ def compare_cps(cps, wfx, basis, boys_mode="multiwfn"):
     return out
 
 
+POSITION_STEP = 1e-12  # Bohr: Multiwfn prints CP positions with 12 decimals
+
+
+def _half_ulp(v):
+    """Half the last printed digit of E18.10 (0.dddddddddd E+xx): 5e-11 to 5e-10 relative."""
+    v = np.abs(np.asarray(v, dtype=float))
+    with np.errstate(divide="ignore"):
+        e = np.floor(np.log10(np.where(v > 0, v, 1.0))) + 1
+    return np.where(v > 0, 0.5 * 10.0 ** (e - 10), 0.0)
+
+
+def rounding_check(cps, wfx, basis, keys=("laplacian", "esp_total"), boys_mode="exact"):
+    """Whether rounding explains the differences at Multiwfn's printed positions.
+    Per CP type and property: the CP with the largest relative difference (its
+    absolute difference, reference value, and spread: the largest change of the
+    engine value when the position moves by POSITION_STEP along each axis), and
+    unexplained, the number of CPs whose difference exceeds spread plus half the last
+    printed digit of ref (E18.10).
+    For esp_total also abs_over_esp_e, the difference relative to |esp_e| (the
+    term that nearly cancels esp_nuc)."""
+    name_of = {v: k for k, v in SCALARS.items()}
+    pts = np.array([c["pos_bohr"] for c in cps])
+    n = len(pts)
+    shifts = np.vstack([np.eye(3), -np.eye(3)]) * POSITION_STEP
+    ev = point_properties(np.concatenate([pts] + [pts + s for s in shifts]), wfx, basis, esp=True,
+                          boys_mode=boys_mode)
+    out = {}
+    for lab in ("NCP", "BCP", "RCP", "CCP"):
+        idx = np.array([i for i, c in enumerate(cps) if c["label"] == lab], dtype=np.int64)
+        if not len(idx):
+            continue
+        res = {}
+        for key in keys:
+            if lab == "NCP" and key in NCP_POSITION_LIMITED:
+                continue
+            ref = np.array([cps[i]["props"].get(name_of[key], np.nan) for i in idx])
+            val = ev[key][idx]
+            spread = np.max([np.abs(ev[key][idx + (j + 1) * n] - val) for j in range(len(shifts))], axis=0)
+            diff = np.abs(val - ref)
+            rel = diff / np.maximum(np.abs(ref), 1e-300)
+            k = int(np.argmax(np.nan_to_num(rel, nan=np.inf)))
+            r = {"cp": cps[idx[k]]["index"], "rel": float(rel[k]), "abs": float(diff[k]), "ref": float(ref[k]),
+                 "spread": float(spread[k]),
+                 "unexplained": int((~(diff <= spread + _half_ulp(ref))).sum())}
+            if key == "esp_total":
+                esp_e = cps[idx[k]]["props"].get(name_of["esp_e"], np.nan)
+                r["abs_over_esp_e"] = float(diff[k] / max(abs(esp_e), 1e-300))
+            res[key] = r
+        out[lab] = res
+    return out
+
+
 def compare(cpprop, wfx_path):
     wfx = read_wfx(wfx_path)
     return compare_cps(load_cpprop_full(cpprop), wfx, prepare_basis(wfx))
