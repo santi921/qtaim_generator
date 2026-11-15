@@ -12,10 +12,11 @@
 # jobs (campaign.py). Each array task takes N lines of $LIST, one job at a time with all
 # the task's cores. A requeued task resumes from its results JSONL.
 #
-#   sbatch -J ddec6 --export=ALL,CODE=$CODE,LIST=$WORK/ddec6_sample.txt --array=0-17 lrc_ddec6.slurm
+#   sbatch -J ddec6 --export=ALL,CODE=$CODE,DDEC6_WORK=$DDEC6_WORK,LIST=$DDEC6_WORK/ddec6_sample.txt --array=0-17 lrc_ddec6.slurm
 #
 # Optional: N (lines per task, default 5), CONDA_ENV (default qtaim_engine), SRC, CHARGEMOL,
-# DENSITIES, ORCA_2MKL, SKIP_CHARGEMOL=1 (port timings only).
+# DENSITIES, ORCA_2MKL, SKIP_CHARGEMOL=1 (port timings only), DDEC6_WORK (campaign
+# directory; not WORK, which ~/.bashrc may export and this script sources).
 
 case "${SLURM_JOB_ACCOUNT:-}" in *blau*) echo "refusing to run on a blau account (${SLURM_JOB_ACCOUNT})"; exit 1 ;; esac
 # batch shells start without conda: ~/.bashrc sets it up, as in the other LRC scripts
@@ -33,9 +34,9 @@ export OMP_STACKSIZE=1G
 ulimit -s unlimited
 
 SRC=${SRC:-/global/scratch/users/santiagovargas/OMol4M_raw}
-WORK=${WORK:-/global/scratch/users/santiagovargas/ddec6_test}
-CHARGEMOL=${CHARGEMOL:-$WORK/chargemol/bin/chargemol_omp_precise}
-DENSITIES=${DENSITIES:-$WORK/chargemol/chargemol_09_26_2017/atomic_densities/}
+DDEC6_WORK=${DDEC6_WORK:-/global/scratch/users/santiagovargas/ddec6_test}
+CHARGEMOL=${CHARGEMOL:-$DDEC6_WORK/chargemol/bin/chargemol_omp_precise}
+DENSITIES=${DENSITIES:-$DDEC6_WORK/chargemol/chargemol_09_26_2017/atomic_densities/}
 ORCA_2MKL=${ORCA_2MKL:-/global/scratch/users/santiagovargas/orca_6_0_1_linux_x86-64_shared_openmpi416/orca_2mkl}
 N=${N:-5}
 THREADS=${SLURM_CPUS_PER_TASK:-16}
@@ -49,8 +50,8 @@ echo "branch: $(git -C $CODE rev-parse --abbrev-ref HEAD) $(git -C $CODE rev-par
 [ -x "$ORCA_2MKL" ] || { echo "missing $ORCA_2MKL"; exit 1; }
 [ -n "$EXTRA" ] || [ -x "$CHARGEMOL" ] || { echo "missing $CHARGEMOL"; exit 1; }
 
-mkdir -p $WORK/slices $WORK/logs
-SLICE=$WORK/slices/${SLURM_JOB_NAME}_${ID}.txt
+mkdir -p $DDEC6_WORK/slices $DDEC6_WORK/logs
+SLICE=$DDEC6_WORK/slices/${SLURM_JOB_NAME}_${ID}.txt
 sed -n "$(( ID * N + 1 )),$(( (ID + 1) * N ))p" $LIST > $SLICE
 if [ ! -s $SLICE ]; then
   echo "task $ID: empty slice, nothing to do"
@@ -59,6 +60,6 @@ fi
 
 export NUMBA_NUM_THREADS=$THREADS
 python $CODE/scripts/ddec6_reference/campaign.py \
-  --job_file $SLICE --root_omol_inputs $SRC/ --work $WORK/work --out $WORK/${SLURM_JOB_NAME}_${ID}.jsonl \
+  --job_file $SLICE --root_omol_inputs $SRC/ --work $DDEC6_WORK/work --out $DDEC6_WORK/${SLURM_JOB_NAME}_${ID}.jsonl \
   --orca_2mkl_cmd $ORCA_2MKL --chargemol_bin $CHARGEMOL --atomic_densities $DENSITIES \
   --workers 1 --threads $THREADS $EXTRA

@@ -3,11 +3,12 @@
 # OpenActinides jobs (campaign.py). Each array task takes N lines of $LIST and runs
 # WORKERS jobs at a time with THREADS threads each on one CPU node.
 #
-#   sbatch -J ddec6 --export=ALL,CODE=$CODE,LIST=$WORK/ddec6_sample.txt --array=0-11 nersc_ddec6.slurm
+#   sbatch -J ddec6 --export=ALL,CODE=$CODE,DDEC6_WORK=$DDEC6_WORK,LIST=$DDEC6_WORK/ddec6_sample.txt --array=0-11 nersc_ddec6.slurm
 #
 # Optional: N (lines per task, default 8), WORKERS (default 8), THREADS (default 16),
 # SRC (input root the list is under), CHARGEMOL (binary), DENSITIES (atomic_densities/),
-# ORCA_2MKL, OUT (results JSONL directory), SKIP_CHARGEMOL=1 (port timings only).
+# ORCA_2MKL, OUT (results JSONL directory), SKIP_CHARGEMOL=1 (port timings only),
+# DDEC6_WORK (campaign directory; not WORK, which login environments often export).
 #SBATCH -A m3278
 #SBATCH -C cpu
 #SBATCH -q regular
@@ -32,11 +33,11 @@ export OMP_STACKSIZE=1G
 ulimit -s unlimited
 
 SRC=${SRC:-/pscratch/sd/s/santiago}
-WORK=${WORK:-/pscratch/sd/s/santiago/actinide_test}
+DDEC6_WORK=${DDEC6_WORK:-/pscratch/sd/s/santiago/actinide_test}
 CHARGEMOL=${CHARGEMOL:-/pscratch/sd/s/santiago/chargemol/bin/chargemol_omp_precise}
 DENSITIES=${DENSITIES:-/pscratch/sd/s/santiago/chargemol/chargemol_09_26_2017/atomic_densities/}
 ORCA_2MKL=${ORCA_2MKL:-/pscratch/sd/s/santiago/orca_6_1_1_linux_x86-64_shared_openmpi418_nodmrg/orca_2mkl}
-OUT=${OUT:-$WORK/ddec6}
+OUT=${OUT:-$DDEC6_WORK/ddec6}
 N=${N:-8}
 WORKERS=${WORKERS:-8}
 THREADS=${THREADS:-16}
