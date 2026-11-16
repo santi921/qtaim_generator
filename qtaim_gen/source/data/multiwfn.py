@@ -21,6 +21,24 @@ ENGINE_ROUTINES = frozenset({
     "becke_fuzzy_spin", "hirsh_fuzzy_spin",
     "fuzzy_bond",
 }) | ENGINE_LEVEL1_ROUTINES | ENGINE_LEVEL2_ROUTINES | SURFACE_ENGINE_ROUTINES
+
+
+def charge_engine_routines(full_set: int, spin_tf: bool) -> frozenset:
+    """The charge-engine routines (core/charge_engine.py) a folder gets at this
+    full_set level; spin integrals only for open shells (check_spin)."""
+    routines = ENGINE_ROUTINES - SURFACE_ENGINE_ROUTINES
+    if full_set < 1:
+        routines -= ENGINE_LEVEL1_ROUTINES
+    if full_set < 2:
+        routines -= ENGINE_LEVEL2_ROUTINES
+    if not spin_tf:
+        routines -= {"becke_fuzzy_spin", "hirsh_fuzzy_spin", "mbis_fuzzy_spin"}
+    return routines
+
+
+def surface_engine_routines(full_set: int) -> frozenset:
+    """The surface-engine routines (core/surface_engine.py) a folder gets at this full_set level."""
+    return SURFACE_ENGINE_ROUTINES if full_set >= 2 else SURFACE_ENGINE_ROUTINES - SURFACE_ENGINE_LEVEL2_ROUTINES
 # versions of the engine and what each changed: data/engine_versions.py
 
 

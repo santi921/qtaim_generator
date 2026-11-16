@@ -297,13 +297,14 @@ class TestTimingValidation:
     def test_engine_timing_covers_level1_routines(self, tmp_path):
         from qtaim_gen.source.utils.validation import validate_timing_dict
 
-        # elf_fuzzy comes from the engine (version 2; tests/test_engine_version.py has version 1)
-        timings = {**self.BASE, "charge_engine": 2.0, "surface_engine": 1.0, "chelpg": 1.0, "ibsi_bond": 1.0}
-        path = self._write(tmp_path, timings, version=2)
+        # elf_fuzzy and chelpg come from the engine (versions 2 and 6; older versions in
+        # tests/test_engine_version.py)
+        timings = {**self.BASE, "charge_engine": 2.0, "surface_engine": 1.0, "ibsi_bond": 1.0}
+        path = self._write(tmp_path, timings)
         assert validate_timing_dict(path, full_set=1, charge_engine=True)
-        # chelpg and ibsi_bond still come from Multiwfn
-        del timings["chelpg"]
-        assert not validate_timing_dict(self._write(tmp_path, timings, version=2), full_set=1, charge_engine=True)
+        # ibsi_bond still comes from Multiwfn
+        del timings["ibsi_bond"]
+        assert not validate_timing_dict(self._write(tmp_path, timings), full_set=1, charge_engine=True)
 
     def test_engine_mode_rejects_multiwfn_only(self, tmp_path):
         path = self._write(tmp_path, {**self.BASE, **self.MWFN})

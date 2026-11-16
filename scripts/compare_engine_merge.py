@@ -50,7 +50,7 @@ from qtaim_gen.source.utils import provenance
 
 MEDIAN_TOL = 0.005
 MAX_TOL = 0.03
-CHARGE = ("hirshfeld", "adch", "cm5", "becke", "vdd", "mbis")
+CHARGE = ("hirshfeld", "adch", "cm5", "becke", "vdd", "mbis", "chelpg")
 FUZZY = ("becke_fuzzy_density", "hirsh_fuzzy_density", "becke_fuzzy_spin", "hirsh_fuzzy_spin",
          "mbis_fuzzy_density", "mbis_fuzzy_spin", "elf_fuzzy", "grad_norm_rho_fuzzy", "laplacian_rho_fuzzy")
 # other_alie (surface engine): relative tolerance for volume/areas, absolute otherwise
