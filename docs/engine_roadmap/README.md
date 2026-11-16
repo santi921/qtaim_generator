@@ -21,6 +21,7 @@ another way are discarded and recomputed when a gbw is there. With `--wfn` the d
 | qtaim_engine_plan.md | QTAIM engine: CP search, properties, bond paths, ESP, validation, phases |
 | remaining_routines_plan.md | every other Multiwfn / orca_2mkl step, by cost; wavefunction reader; EDF tables |
 | descriptor_engine_vision.md | descriptors Multiwfn has that we do not use, descriptors beyond Multiwfn, standalone engine sketch, shortlist |
+| ibsi_lbo_plan.md | IBSI and Laplacian bond order in the charge engine: Multiwfn algorithms, design, validation, decisions 15-18 |
 | validation_ledger.md | every engine validation run: reference, data, worst difference, code, raw output; known gaps |
 
 ## Decisions (2026-10-08)
@@ -53,6 +54,15 @@ another way are discarded and recomputed when a gbw is there. With `--wfn` the d
 | 12 | Where ring and cage CPs, non-nuclear attractors (NNAs) and unpaired BCPs go (QTAIM plan D3) | A sidecar, `qtaim_cp.json`, written next to qtaim.json from CPprop.txt (Multiwfn's or the engine's); qtaim.json is unchanged. json-to-lmdb does not read it yet |
 | 13 | BCPs whose bond path ends at a vacuum NNA | Unpaired, as before, and flagged: the engine `_meta` lists every unpaired BCP with the CPs its two paths ended at (`bcp_unpaired`), the NNAs (`nna`) and the vacuum ones (`nna_vacuum`, rho below 1e-3) |
 | 14 | QTAIM on a wavefunction with an ECP atom that has no EDF core density | Permanent skip (`qtaim`, reason `ecp_without_edf`, by `qtaim_engine`) in provenance.json; validation and the restart pre-check then need no qtaim.json. Not seen in local data: 651 wfx, 112 with ECPs, 31 (Z, ncore) pairs, all in the EDF library |
+
+## Decisions (2026-11-16, IBSI and Laplacian bond order; ibsi_lbo_plan.md)
+
+| # | Question | Decision |
+|---|---|---|
+| 15 | IBSI grid | 75 x 434, shared with the full_set 1 main pass; reference = Multiwfn IBSI grid option 4 |
+| 16 | Laplacian bond order grid | Multiwfn's 45 x 302 (parity) |
+| 17 | calcatmpairdg's shortcuts (centre skip, 8 Bohr free-atom cut) | Keep both; the centre skip turns out never to apply with every atom in the list |
+| 18 | The LBO parser's two-letter-element bug | Fixed in the same branch (feat/engine-ibsi-lbo, engine version 8) |
 
 Production ESP at CPs comes from Multiwfn's old `eleesp1` routine, not libreta: the QTAIM
 stdin never initializes libreta, so `eleesp` falls back (MW/function.f90:4269-4280).
@@ -174,6 +184,23 @@ the size of the libreta difference (log-log correlation 0.11 on the 99) (validat
 QTAIM with an ECP atom that has no EDF core density (decision 14): Multiwfn runs on the
 valence-only density, which loses that atom's nuclear CP and its bond paths (a local uranium
 ECP job without EDF had every bond unpaired); the engine records a permanent skip instead.
+IBSI (ibsi_bond, full_set 1; engine version 8): production asks Multiwfn for IBSI grid option 1,
+30 x 110 (visweak.f90:996-1006), which Multiwfn's own prompt marks as too coarse for IGMH; the
+engine integrates on the 75 x 434 main grid (option 4, decision 1). Everything else follows
+calcatmpairdg, including the 8 Bohr free-atom cut; its other shortcut, skipping grid centres far
+from every close pair, never applies when every atom is in the list (each atom pairs with
+itself at distance 0) and is not coded. On 99 local jobs the grid change moves IBSI by up to
+2.3e-2, relative up to 18% and a median 4.1% over pairs with IBSI >= 0.05 (worst on a U nitrate).
+The H2 reference value is build-dependent: Multiwfn 3.8(dev) 2024-Oct-6 divides by 0.500791,
+the 2025-Jun-26 build and the 2026 sources (bondorder.f90:845) by 0.566653, so IBSI from the two
+builds differs by 13% on any grid. The engine uses 0.566653 (`qtaim_engine.IBSI_REF`, recorded
+in `_meta.ibsi`); with the 2024 build's value it reproduces every IBSI that build printed on the
+99 jobs, and Int(dg_pair) matches at print precision (validation_ledger.md section 2).
+Laplacian bond order (laplacian_bond, full_set 2; engine version 8): Multiwfn's grid (45 x 302),
+partition and threshold, at print precision on the same 99 jobs. Not a Multiwfn divergence but a
+parser fix that changes stored data: parse_bond_order_laplace split on whitespace, so every pair
+with a two-letter element ("1(Ru)") was stored under a garbled key (`1_Ru)_to_):`); stored
+full_set 2 trees need an audit for keys containing ")".
 
 ### Parity across levels of theory
 

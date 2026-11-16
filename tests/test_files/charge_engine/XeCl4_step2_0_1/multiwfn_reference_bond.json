@@ -1,0 +1,39 @@
+{
+ "_source": "Multiwfn 3.8(dev) 2024-Oct-6, production settings.ini; IBSI menu 9-10 with grid option 4 (75 x 434) and option 1 (30 x 110, production); LBO menu 9-8 (45 x 302). ibsi_int is Int(dg_pair) (f8.5), independent of the H2 reference value, which is 0.500791 in this build",
+ "ibsi_int_grid4": {
+  "1_Xe_to_2_Cl": 0.48864,
+  "1_Xe_to_3_Cl": 0.48864,
+  "1_Xe_to_4_Cl": 0.48864,
+  "1_Xe_to_5_Cl": 0.48864,
+  "2_Cl_to_3_Cl": 0.0651,
+  "2_Cl_to_5_Cl": 0.0651,
+  "3_Cl_to_4_Cl": 0.0651,
+  "4_Cl_to_5_Cl": 0.0651
+ },
+ "ibsi_grid4": {
+  "1_Xe_to_2_Cl": 0.16624,
+  "1_Xe_to_3_Cl": 0.16624,
+  "1_Xe_to_4_Cl": 0.16624,
+  "1_Xe_to_5_Cl": 0.16624,
+  "2_Cl_to_3_Cl": 0.01107,
+  "2_Cl_to_5_Cl": 0.01107,
+  "3_Cl_to_4_Cl": 0.01107,
+  "4_Cl_to_5_Cl": 0.01107
+ },
+ "ibsi_grid1": {
+  "1_Xe_to_2_Cl": 0.16385,
+  "1_Xe_to_3_Cl": 0.16385,
+  "1_Xe_to_4_Cl": 0.16385,
+  "1_Xe_to_5_Cl": 0.16385,
+  "2_Cl_to_3_Cl": 0.01176,
+  "2_Cl_to_5_Cl": 0.01176,
+  "3_Cl_to_4_Cl": 0.01176,
+  "4_Cl_to_5_Cl": 0.01176
+ },
+ "laplacian_bond": {
+  "1_Xe_to_2_Cl": 0.273271,
+  "1_Xe_to_3_Cl": 0.273271,
+  "1_Xe_to_4_Cl": 0.273271,
+  "1_Xe_to_5_Cl": 0.273271
+ }
+}

@@ -1184,6 +1184,34 @@ def fuzzy_bond_orders(basis, coords, rinv, aij, radcut, labels, nrad=45, nang=17
     return bonds
 
 
+LBO_NRAD = 45  # fuzzyana iwork=2 with iautointgrid=1 (MW/fuzzy.f90:419-424)
+LBO_NANG = 302
+LBO_THRESHOLD = 0.05  # bndordthres (MW/define.f90:478)
+
+
+def laplacian_bond_orders(wfx, basis, coords, rinv, aij, radcut, labels, nrad=LBO_NRAD, nang=LBO_NANG,
+                          threshold=LBO_THRESHOLD):
+    """Laplacian bond order (fuzzyana iwork=2, MW/fuzzy.f90:749-771, 2051-2072): on each
+    atom's grid, t = P_a lapl(rho) w (MOs + EDF); where t <= 0 every pair gets P_i P_j t;
+    LBO_ij = -10 x that sum, reported for i < j at or above the threshold."""
+    from qtaim_gen.source.core.qtaim_engine import density_derivatives
+
+    pts0, wts0 = multiwfn_atom_grid(nrad, nang, radcut)
+    nat = len(coords)
+    m = np.zeros((nat, nat))
+    for a in range(nat):
+        pts = pts0 + coords[a]
+        lapl = np.trace(density_derivatives(pts, wfx, basis)["hessian"], axis1=1, axis2=2)
+        p = _becke(pts, coords, rinv, aij, BECKE_TOL)
+        t = p[:, a] * wts0 * lapl
+        neg = t <= 0.0
+        pn = p[neg]
+        m += (pn * t[neg, None]).T @ pn
+    lbo = -10.0 * m
+    return {f"{labels[i]}_to_{labels[j]}": float(lbo[i, j])
+            for i in range(nat) for j in range(i + 1, nat) if lbo[i, j] >= threshold}
+
+
 def normalize(charge, zeff, nelec):
     """normalize_atmchg: scale atomic populations to the electron count."""
     pop = zeff - charge
@@ -1278,6 +1306,15 @@ def run(wfx_path, nrad=75, nang=434, radcut=10.0, bond_nrad=45, bond_nang=170, f
         reason = (f"z_above_{MBIS_MAX_Z}" if int(atnums.max()) > MBIS_MAX_Z
                   else "ecp_without_edf" if edf_missing else "ecp_disabled")
         skipped.append({"schemes": "mbis family", "reason": reason, "routines": list(MBIS_FAMILY)})
+    # IBSI (IGMH) partitions with the built-in free-atom densities, as the Hirshfeld family
+    ibsi_ok = level1 and pro is not None
+    if level1 and not ibsi_ok:
+        skipped.append({"schemes": "ibsi", "reason": "no_builtin_proatom" if missing else "ecp_without_edf",
+                        "routines": ["ibsi_bond"]})
+    # the Laplacian includes the EDF core density, as Multiwfn's flapl
+    lbo_ok = level2 and not edf_missing
+    if level2 and not lbo_ok:
+        skipped.append({"schemes": "laplacian bond order", "reason": "ecp_without_edf", "routines": ["laplacian_bond"]})
     if mbis_ok:
         td_rho = np.zeros((nat, len(grid_wts)))
         td_spin = np.zeros((nat, len(grid_wts))) if open_shell else None
@@ -1291,9 +1328,14 @@ def run(wfx_path, nrad=75, nang=434, radcut=10.0, bond_nrad=45, bond_nang=170, f
     t.update({"density": 0.0, "becke": 0.0, "hirshfeld": 0.0, "accumulate": 0.0})
     if level1:
         # qtaim_engine imports this module
-        from qtaim_gen.source.core.qtaim_engine import density_derivatives, elf_lol
+        from qtaim_gen.source.core.qtaim_engine import IBSI_REF, _ibsi_accumulate, density_derivatives, elf_lol, ibsi_pairs
 
         t["derivatives"] = 0.0
+    if ibsi_ok:
+        # IBSI on the main grid, from the derivative pass's rho and gradient (MOs + EDF)
+        ibsi_ptr, ibsi_j, ibsi_i, ibsi_dist = ibsi_pairs(coords, B2A)
+        ibsi_int = np.zeros(len(ibsi_j))
+        t["ibsi"] = 0.0
     nelec_grid = 0.0
 
     for b in range(nat):
@@ -1330,6 +1372,10 @@ def run(wfx_path, nrad=75, nang=434, radcut=10.0, bond_nrad=45, bond_nang=170, f
                 fz["grad"] += w.T @ (wb * np.sqrt((d["gradient"] ** 2).sum(axis=1)))
                 fz["lapl"] += w.T @ (wb * np.trace(d["hessian"], axis1=1, axis2=2))
             t["derivatives"] += time.perf_counter() - t0
+            if ibsi_ok:
+                t0 = time.perf_counter()
+                ibsi_int += _ibsi_accumulate(pts, wb, d["rho"], d["gradient"], coords, *pro, ibsi_ptr, ibsi_j)
+                t["ibsi"] += time.perf_counter() - t0
 
         if pro is not None:
             t0 = time.perf_counter()
@@ -1460,16 +1506,26 @@ def run(wfx_path, nrad=75, nang=434, radcut=10.0, bond_nrad=45, bond_nang=170, f
     if deriv_fuzzy:
         out["grad_norm_rho_fuzzy"] = fuzzy("grad_norm_rho_fuzzy", fz["grad"])
         out["laplacian_rho_fuzzy"] = fuzzy("laplacian_rho_fuzzy", fz["lapl"])
+    if ibsi_ok:
+        # IBSI = Int(dg_pair) / d^2 (Angstrom) / reference (MW/bondorder.f90:921)
+        out["ibsi_bond"] = {f"{labels[i]}_to_{labels[j]}": float(v / dd ** 2 / IBSI_REF)
+                            for i, j, dd, v in zip(ibsi_i, ibsi_j, ibsi_dist, ibsi_int)}
     t["corrections"] = time.perf_counter() - t0
 
     t0 = time.perf_counter()
     out["fuzzy_bond"] = fuzzy_bond_orders(basis, coords, rinv, aij, radcut, labels, bond_nrad, bond_nang)
     t["fuzzy_bond"] = time.perf_counter() - t0
+    if lbo_ok:
+        t0 = time.perf_counter()
+        out["laplacian_bond"] = laplacian_bond_orders(wfx, basis, coords, rinv, aij, radcut, labels)
+        t["laplacian_bond"] = time.perf_counter() - t0
 
     out["_meta"] = {
         "engine": "charge_engine_worker",
         "grid": {"nrad": nrad, "nang": nang, "radcut": radcut, "points_per_atom": int(len(grid_wts)),
-                 "bond_nrad": bond_nrad, "bond_nang": bond_nang},
+                 "bond_nrad": bond_nrad, "bond_nang": bond_nang, "lbo_nrad": LBO_NRAD, "lbo_nang": LBO_NANG},
+        # IBSI on the main grid: pairs up to IBSI_PRINT_DIST Angstrom, H2 reference value used
+        "ibsi": {"pairs": int(len(ibsi_j)), "reference": IBSI_REF} if ibsi_ok else None,
         "nelec_wfx": nelec,
         "nelec_grid_becke": float(nelec_grid),
         "edf_electrons": float((atnums - zeff).sum()) if has_edf else 0.0,

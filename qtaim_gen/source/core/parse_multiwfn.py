@@ -681,6 +681,9 @@ def parse_bond_order_laplace(bond_order_txt):
     laplace_trigger = "The bond orders >=  0.050000"
     laplace_bool = False
     laplace_bond_dict = {}
+    # " #    1:    1(C )    2(Ru):  0.273271"; a two-letter symbol leaves no space before ")",
+    # so whitespace splitting misplaces the fields
+    row = re.compile(r"#\s*\d+:\s*(\d+)\((\w+)\s*\)\s*(\d+)\((\w+)\s*\):\s*(\S+)")
 
     with open(bond_order_txt, "r") as f:
         for line in f:
@@ -688,13 +691,8 @@ def parse_bond_order_laplace(bond_order_txt):
                 if line.strip() == "":
                     laplace_bool = False
                 else:
-                    split_list = line.split()
-                    a, b, order = (
-                        split_list[2].replace("(", "_"),
-                        split_list[4].replace("(", "_"),
-                        float(split_list[-1]),
-                    )
-                    laplace_bond_dict["{}_to_{}".format(a, b)] = order
+                    m = row.search(line)
+                    laplace_bond_dict[f"{m[1]}_{m[2]}_to_{m[3]}_{m[4]}"] = float(m[5])
 
             if laplace_trigger in line:
                 laplace_bool = True

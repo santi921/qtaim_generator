@@ -1755,7 +1755,7 @@ def _engine_outputs_present(folder: str, spin_tf: bool, full_set: int = 0) -> bo
     file_of = {
         "hirshfeld": "charge.json", "adch": "charge.json", "cm5": "charge.json",
         "becke": "charge.json", "vdd": "charge.json", "mbis": "charge.json", "chelpg": "charge.json",
-        "fuzzy_bond": "bond.json",
+        "fuzzy_bond": "bond.json", "ibsi_bond": "bond.json", "laplacian_bond": "bond.json",
     }
     try:
         with open(os.path.join(gen, "timings.json")) as f:
@@ -1772,7 +1772,9 @@ def _engine_outputs_present(folder: str, spin_tf: bool, full_set: int = 0) -> bo
         for name, keys in want.items():
             with open(os.path.join(gen, name)) as f:
                 data = json.load(f)
-            if not all(data.get(k) for k in keys):
+            # a bond routine may have no pair to report (one atom; no LBO above threshold), so an
+            # empty bond entry is a complete one, as validate_bond_dict treats it
+            if not all(isinstance(data.get(k), dict) if name == "bond.json" else data.get(k) for k in keys):
                 return False
     except (OSError, json.JSONDecodeError, TypeError):
         return False

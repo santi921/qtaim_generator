@@ -66,8 +66,9 @@ def _engine_folder(tmp_path, version):
     routines = _engine_routines(2, spin_tf=True)
     charge = {r: {"charge": {"1_H": 0.1}} for r in ("hirshfeld", "adch", "cm5", "becke", "vdd", "mbis", "chelpg")}
     (gen / "charge.json").write_text(json.dumps(charge))
-    (gen / "bond.json").write_text(json.dumps({"fuzzy_bond": {"1_H_to_2_H": 1.0}}))
-    fuzzy = {r: {"1_H": 1.0} for r in routines if r not in charge and r != "fuzzy_bond"}
+    bond = {"fuzzy_bond": {"1_H_to_2_H": 1.0}, "ibsi_bond": {"1_H_to_2_H": 1.0}, "laplacian_bond": {}}
+    (gen / "bond.json").write_text(json.dumps(bond))
+    fuzzy = {r: {"1_H": 1.0} for r in routines if r not in charge and r not in bond}
     (gen / "fuzzy_full.json").write_text(json.dumps(fuzzy))
     _write_provenance(tmp_path, version, routines_at(version) & routines)
     return str(tmp_path)
@@ -78,7 +79,8 @@ def test_restart_reruns_an_older_engine_only_where_it_left_routines_to_multiwfn(
 
     old = _engine_folder(tmp_path / "v1", version=1)
     v2 = _engine_folder(tmp_path / "v2", version=2)
-    new = _engine_folder(tmp_path / "v6", version=6)
+    v6 = _engine_folder(tmp_path / "v6", version=6)
+    new = _engine_folder(tmp_path / "v8", version=8)
     # full_set 0: version 1 computed every level-0 routine
     assert _engine_outputs_present(old, spin_tf=True, full_set=0)
     # full_set 1 and 2: version 1 left elf_fuzzy (and the level-2 fuzzy) to Multiwfn
@@ -87,6 +89,11 @@ def test_restart_reruns_an_older_engine_only_where_it_left_routines_to_multiwfn(
     # versions 2-5 left chelpg (full_set 1) to Multiwfn
     assert _engine_outputs_present(v2, spin_tf=True, full_set=0)
     assert not _engine_outputs_present(v2, spin_tf=True, full_set=1)
+    # versions up to 7 left ibsi_bond (full_set 1) and laplacian_bond (full_set 2) to Multiwfn
+    assert _engine_outputs_present(v6, spin_tf=True, full_set=0)
+    assert not _engine_outputs_present(v6, spin_tf=True, full_set=1)
+    assert not _engine_outputs_present(v6, spin_tf=True, full_set=2)
+    # version 8: everything, an empty laplacian_bond entry included (no pair above threshold)
     assert _engine_outputs_present(new, spin_tf=True, full_set=2)
 
 
