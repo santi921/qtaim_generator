@@ -742,11 +742,12 @@ def mbis_initial_shells(atnums):
     return mshell, pop, sig
 
 
-def mbis_fit(grel, coords, tmpden, atnums, qbase, crit=1e-4, maxcyc=500, mode=None, guess=None):
+def mbis_fit(grel, coords, tmpden, atnums, qbase, crit=1e-4, maxcyc=500, mode=None, guess=None, *, status=False):
     """MBIS shell fit from one guess (run() uses mbis_select in converged mode);
     returns the charges (qbase - population; not normalized,
     as printed for imode 0), the shell parameters the radial tables are built
-    from, and the number of cycles.
+    from, and the number of cycles. With status=True returns (that tuple,
+    whether the fit met the mode's stopping rule rather than its cycle cap).
 
     mode "multiwfn": Multiwfn's loop, until no charge moves by crit in a cycle or
     maxcyc; the shell parameters returned are those of the previous cycle (the
@@ -768,7 +769,8 @@ def mbis_fit(grel, coords, tmpden, atnums, qbase, crit=1e-4, maxcyc=500, mode=No
     if mode == "converged":
         step = lambda mm, pp, ss: _mbis_step(tmpden, pairs, mm, pp, ss)  # noqa: E731
         objective = lambda mm, pp, ss: mbis_objective(grel, coords, tmpden, atnums, mm, pp, ss)  # noqa: E731
-        return _mbis_fit_converged(step, mshell, pop, sig, qbase, objective=objective)[0]
+        res, converged, _ = _mbis_fit_converged(step, mshell, pop, sig, qbase, objective=objective)
+        return (res, converged) if status else res
     last = np.zeros(len(atnums))
     for icyc in range(1, maxcyc + 1):
         popnew, signew = _mbis_cycle(tmpden, pairs, mshell, pop, sig)
@@ -777,7 +779,8 @@ def mbis_fit(grel, coords, tmpden, atnums, qbase, crit=1e-4, maxcyc=500, mode=No
         charge = qbase - popnew.sum(axis=1)
         varmax = np.abs(charge - last).max()
         if varmax < crit or icyc == maxcyc:
-            return charge, mshell, pop, sig, icyc
+            res = (charge, mshell, pop, sig, icyc)
+            return (res, bool(varmax < crit)) if status else res
         last = charge
         pop, sig = popnew, signew
 
@@ -1362,8 +1365,11 @@ def run(wfx_path, nrad=75, nang=434, radcut=10.0, bond_nrad=45, bond_nang=170, f
         selection = {}
         if mbis_mode == "converged":
             q_mbis, cm, cp, cs, ncyc_charge, selection["charge"] = mbis_select(mgrid_pts, coords, td_m, atnums, qbase)
+            mbis_converged = {"charge": selection["charge"]["converged"][selection["charge"]["selected"]]}
         else:
-            q_mbis, cm, cp, cs, ncyc_charge = mbis_fit(mgrid_pts, coords, td_m, atnums, qbase, mode=mbis_mode)
+            (q_mbis, cm, cp, cs, ncyc_charge), conv = mbis_fit(mgrid_pts, coords, td_m, atnums, qbase, mode=mbis_mode,
+                                                               status=True)
+            mbis_converged = {"charge": conv}
         degenerate = {"charge": mbis_degenerate(cm, cp, cs)}
         del td_m
         t["mbis_charge"] = time.perf_counter() - t0
@@ -1375,11 +1381,12 @@ def run(wfx_path, nrad=75, nang=434, radcut=10.0, bond_nrad=45, bond_nang=170, f
             # land on the same fixed point: from the raw guess, the refit of an x1.5 selection
             # could return to the default's fixed point (0.25 e away on a U nitrate)
             guess = dict(mbis_guesses(atnums))[selection["charge"]["selected"]]
-            _, mshell, spop, ssig, ncyc_fuzzy = mbis_fit(grid_pts, coords, td_rho, atnums, qbase, mode=mbis_mode,
-                                                        guess=(cm, cp, cs))
+            (_, mshell, spop, ssig, ncyc_fuzzy), mbis_converged["fuzzy"] = mbis_fit(
+                grid_pts, coords, td_rho, atnums, qbase, mode=mbis_mode, guess=(cm, cp, cs), status=True)
         else:
             guess = mbis_initial_shells(atnums)
-            _, mshell, spop, ssig, ncyc_fuzzy = mbis_fit(grid_pts, coords, td_rho, atnums, qbase, mode=mbis_mode)
+            (_, mshell, spop, ssig, ncyc_fuzzy), mbis_converged["fuzzy"] = mbis_fit(
+                grid_pts, coords, td_rho, atnums, qbase, mode=mbis_mode, status=True)
         degenerate["fuzzy"] = mbis_degenerate(mshell, spop, ssig)
         merged = {"charge": selection["charge"]["merged"][selection["charge"]["selected"]] if selection else [],
                   "fuzzy": mbis_merged_record(atnums, guess[0], mshell)}
@@ -1470,6 +1477,9 @@ def run(wfx_path, nrad=75, nang=434, radcut=10.0, bond_nrad=45, bond_nang=170, f
         "has_ecp": has_ecp,
         "full_set": full_set,
         "mbis_cycles": {"charge": ncyc_charge, "fuzzy": ncyc_fuzzy} if mbis_ok else None,
+        # whether the stored charge fit (the selected one in converged mode) and the fuzzy refit
+        # met the mode's stopping rule rather than the cycle cap
+        "mbis_converged": mbis_converged if mbis_ok else None,
         "mbis_mode": mbis_mode if mbis_ok else None,
         # converged mode: which guess's fixed point the charge-grid fit kept and why (mbis_select;
         # the fuzzy refit starts from that fit); not unique when another guess reached a fixed
