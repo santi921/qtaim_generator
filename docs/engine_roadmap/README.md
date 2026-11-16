@@ -161,6 +161,13 @@ Multiwfn's Boys function the engine reproduces iESPcode=1 to 2.0e-10 e on those 
 precision); with the exact Boys function it differs from iESPcode=1 by a median 1.3e-6 e per job,
 at most 1.0e-5 e (heaviest on Pu, S, Cl). The fit's condition number (1e4 to 1e6) does not predict
 the size of the libreta difference (log-log correlation 0.11 on the 99) (validation_ledger.md section 2).
+On clusters the engine differs from stored libreta chelpg by at most 4.5e-3 e on 200 LRC tm_react
+jobs and 3.26e-2 e on 440 NERSC openac jobs (2 above 0.03 e, both actinide complexes of 118-211
+atoms). On the four jobs checked (the three largest, and PuNO5Cl3 at 10 atoms with 1.35e-2 e on Pu),
+libreta's ESP at the fitting points carries a near-constant offset of 2.4e-4 to 8.4e-4 a.u. that
+the charge constraint pushes onto buried atoms; refitting libreta's ESP reproduces Multiwfn to 5e-8
+e, and on U and Pu the engine matches iESPcode=1 to 8e-10 e. The offset does not track molecule
+size and needs no ill-conditioning (Pu: cond 1.8e5); what sets it is not known.
 
 ### Parity across levels of theory
 
