@@ -20,6 +20,7 @@ Implemented so far (docs/engine_roadmap/ddec6_port_plan.md, P2 map):
 """
 
 import math
+import os
 import time
 
 import numba
@@ -186,6 +187,8 @@ def _sort_order(center, exps):
 def prepare(wfx):
     """Chargemol's view of a read_wfx dict: primitives sorted and grouped into single
     blocks, alpha/beta occupations, atoms (centres with charge > 0.5)."""
+    if int(np.max(wfx["prim_type"])) > len(WFX_LXYZ):
+        raise ChargemolStop("primitives above h shells (L=5); Chargemol supports up to h")
     center = wfx["prim_center"].astype(np.int64)  # 0-based
     perm = _sort_order(center, wfx["prim_exp"].astype(np.float64))
     center = center[perm]
@@ -274,10 +277,6 @@ def _dot(a, b):
     return s
 
 
-def _nint(x):
-    return math.floor(x + 0.5) if x >= 0.0 else -math.floor(-x + 0.5)
-
-
 def _center_positions(atom_xyz, boundary, origin):
     """charge_center_positions: pixel index of each atom and its shift (Bohr)."""
     t = [[boundary[j][i] for j in range(3)] for i in range(3)]
@@ -285,7 +284,7 @@ def _center_positions(atom_xyz, boundary, origin):
     nabc, shift = [], []
     for xyz in atom_xyz:
         tv = _matvec(inv_b, [xyz[k] - origin[k] for k in range(3)])
-        n = [_nint(v) for v in tv]
+        n = [nint(v) for v in tv]
         nabc.append(n)
         shift.append(_matvec(t, [tv[k] - n[k] for k in range(3)]))
     return inv_b, nabc, shift
@@ -876,16 +875,7 @@ def _block_geometry(data, pbd, na_tot, nb_tot, nc_tot):
         for ax in range(3):
             dn = nint(data[start, 19 + ax])
             cen = nint(data[start, 25 + ax])
-            lo = dn
-            hi = -dn
-            for n in range(-dn, dn + 1):
-                k = n + cen + 1
-                if k < 1 or k > tots[ax]:
-                    continue
-                if gs > 1 and k % gs != gs - 1:
-                    continue
-                lo = min(lo, n)
-                hi = max(hi, n)
+            _, lo, hi = _axis_points(dn, cen, gs, tots[ax])
             geo[b, 1 + 2 * ax] = lo
             geo[b, 2 + 2 * ax] = hi
             geo[b, 7 + ax] = cen
@@ -1313,7 +1303,7 @@ def core_grids(prep, grid, grids):
         ncen, shift = [], []
         for p in xyz:
             tv = _matvec(inv_b.tolist(), [p[k] - origin[k] for k in range(3)])
-            n = [_nint(v) for v in tv]
+            n = [nint(v) for v in tv]
             ncen.append(n)
             shift.append(_matvec(boundary.T.tolist(), [tv[k] - n[k] for k in range(3)]))
         _edf_core(core, np.array(ncen, dtype=np.int64), np.array(shift), xyz, wfx["edf_exp"].astype(np.float64),
@@ -1992,6 +1982,7 @@ def ddec6_valence_iterator(state):
     wsad = np.zeros((NSHELLS, natoms))
     tpseudo = np.zeros(total.shape, order="F")
     n_iter = 0
+    converged = False  # Chargemol ends at iteration 500 either way and prints the result
     for it in range(4, 501):
         n_iter = it
         tpseudo[...] = 0.0
@@ -2034,13 +2025,15 @@ def ddec6_valence_iterator(state):
         else:
             completed += 1
             if completed == 7:
+                converged = True
                 break
             w = pts * pv
             partial = wsad.copy()
             for j in range(natoms):
                 partial[:, j], _ = reshape_profile(wsad[:, j].copy(), w[:, j].astype(np.float64), fe[:, j].copy(),
                                                    se[:, j].copy(), True)
-    state.update(net_atomic_charge=net, hirshfeld_net_atomic_charge=hirshfeld, n_iterations=n_iter, normalization=norm,
+    state.update(net_atomic_charge=net, hirshfeld_net_atomic_charge=hirshfeld, n_iterations=n_iter, converged=converged,
+                 normalization=norm,
                  partial_density=partial, total_pseudodensity=tpseudo, total_density=total, tau=tau,
                  sum_points=pts, valence_population=vpop, spherical_average_density=sad)
     return state
@@ -2156,12 +2149,20 @@ def cloud_penetration(state):
             sy = sy + y
             syy = syy + y * y
             n = n + 1
-        slope = (n * sxy - sx * sy) / (n * sxx - sx * sx)
-        intercept = (sy - slope * sx) / n
-        r2 = (n * sxy - sx * sy) * (n * sxy - sx * sy) / ((n * sxx - sx * sx) * (n * syy - sy * sy))
+        slope = _ieee_div(n * sxy - sx * sy, n * sxx - sx * sx)
+        intercept = _ieee_div(sy - slope * sx, n)
+        r2 = _ieee_div((n * sxy - sx * sy) * (n * sxy - sx * sy), (n * sxx - sx * sx) * (n * syy - sy * sy))
         out[j] = [intercept, -slope, r2]
     state["tail_fit"] = out
     return state
+
+
+def _ieee_div(a, b):
+    """a / b with IEEE semantics, as the Fortran gives it: an atom with fewer than two
+    shells above the density floor gets NaN tail fits instead of a ZeroDivisionError.
+    The same double division as Python's otherwise."""
+    with np.errstate(divide="ignore", invalid="ignore"):
+        return float(np.float64(a) / np.float64(b))
 
 
 # ---------------------------------------------------------------------------------
@@ -2357,6 +2358,7 @@ def spin_moments(state):
     trial = np.zeros(total.shape, order="F")
     spin_pop = np.zeros(natoms)
     n_iter = 0
+    converged = False
     for it in range(1, 501):
         n_iter = it
         ssd, pts = _spin_atom_sums(it, partial, total, tpseudo, spin, sad, saas, ups, omega, trial, xi, inv, *args)
@@ -2372,17 +2374,61 @@ def spin_moments(state):
         max_change = float(np.max(np.abs(spin_pop - old)))
         if ((max_change < SPIN_CONVERGENCE_TOLERANCE and it > 6)
                 or (max(float(np.max(np.abs(spin_pop))), max_change) < SPIN_CONVERGENCE_TOLERANCE and it > 1)):
+            converged = True
             break
         omega[...] = 0.0
         _spin_omega(partial, total, tpseudo, spin, sad, saas, xi, *args, omega)
-    state.update(spin_moment=spin_pop, spin_iterations=n_iter, total_spin_moment=_seq_sum(spin_pop))
+    state.update(spin_moment=spin_pop, spin_iterations=n_iter, spin_converged=converged,
+                 total_spin_moment=_seq_sum(spin_pop))
     return state
 
 
-def run(wfx_path, parallel=True):
-    """DDEC6 analysis of one wfx: net atomic charges, atomic multipoles, cloud
-    penetration fits and (open shell) atomic spin moments. state["stage_s"] holds the
-    wall time of each stage (numba compilation included on a cold cache)."""
+# Peak resident memory of run(), measured with 16 numba threads (validation_ledger.md,
+# section 4c): a fixed part, bytes per fine grid point (more grids for open shells: the
+# spin density and the spin iterator's), and the pair list, which density_grids copies.
+PEAK_BASE_BYTES = 0.3e9
+PEAK_BYTES_PER_POINT = {False: 48.0, True: 96.0}
+
+
+def estimate_peak_bytes(grid, pairs, spin):
+    """Estimated peak memory of run() once the grid and pair list are known."""
+    n = int(grid["totnum"][0]) * int(grid["totnum"][1]) * int(grid["totnum"][2])
+    return PEAK_BASE_BYTES + n * PEAK_BYTES_PER_POINT[bool(spin)] + 2 * pairs["included_primitive_data"].nbytes
+
+
+def memory_limit_bytes():
+    """Memory this process may use: the smallest finite memory limit of its cgroup and
+    the cgroups above it (where Slurm enforces --mem), else the physical memory."""
+    limits = []
+    try:
+        with open("/proc/self/cgroup") as f:
+            entries = [line.strip().split(":", 2) for line in f if line.count(":") >= 2]
+    except OSError:
+        entries = []
+    for _, controllers, path in entries:
+        if controllers == "":
+            root, name = "/sys/fs/cgroup", "memory.max"
+        elif "memory" in controllers.split(","):
+            root, name = "/sys/fs/cgroup/memory", "memory.limit_in_bytes"
+        else:
+            continue
+        parts = [p for p in path.split("/") if p]
+        for k in range(len(parts), -1, -1):
+            try:
+                with open(os.path.join(root, *parts[:k], name)) as f:
+                    value = f.read().strip()
+            except OSError:
+                continue
+            if value.isdigit() and int(value) < 2 ** 60:
+                limits.append(int(value))
+    return min(limits) if limits else os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
+
+
+def run(wfx, parallel=True, logger=None):
+    """DDEC6 analysis of one wfx (a path, or a read_wfx dict): net atomic charges, atomic
+    multipoles, cloud penetration fits and (open shell) atomic spin moments.
+    state["stage_s"] holds the wall time of each stage (numba compilation included on a
+    cold cache), state["est_peak_gb"] the memory estimate logged before the grids."""
     stage_s = {}
     clock = [time.perf_counter()]
 
@@ -2391,11 +2437,22 @@ def run(wfx_path, parallel=True):
         stage_s[name] = round(now - clock[0], 3)
         clock[0] = now
 
-    prep = load(wfx_path)
+    prep = load(wfx)
     lap("load")
     grid = grid_setup(prep["atom_xyz"])
     pairs = pair_data(prep, grid)
     lap("pair_data")
+    est = estimate_peak_bytes(grid, pairs, prep["spin_available"])
+    if logger is not None:
+        limit = memory_limit_bytes()
+        msg = (f"ddec6: grid {'x'.join(str(int(n)) for n in grid['totnum'])}, "
+               f"{pairs['included_primitive_data'].shape[0]} pair rows, estimated peak memory {est / 1e9:.1f} GB "
+               f"(limit {limit / 1e9:.1f} GB)")
+        if est > limit:
+            logger.warning(msg + ": likely to be killed for memory; give the job more memory, fewer workers "
+                           "per node, or leave this molecule out of --ddec6")
+        else:
+            logger.info(msg)
     dens = density_grids(prep, grid, pairs, parallel=parallel)
     lap("density_grids")
     grids = core_grids(prep, grid, dens)
@@ -2429,50 +2486,45 @@ def run(wfx_path, parallel=True):
         state = spin_moments(state)
         lap("spin")
     state["stage_s"] = stage_s
+    state["est_peak_gb"] = round(est / 1e9, 2)
     return state
 
 
-def analyze(wfx_path, parallel=True):
-    """DDEC6 for one wfx in qtaim_generator's layout: the charge.json entry (charges,
-    spin moments for open shells, the molecular point-charge dipole about the origin as
-    charge_engine's schemes give it, atomic dipoles and quadrupoles in atomic units, and
-    the eigenvalues Chargemol reports), the fuzzy_full.json per-atom features, and _meta.
-    Raises ChargemolStop where Chargemol would stop."""
-    from qtaim_gen.source.core.charge_engine import T_SYMBOL
+def analyze(wfx, parallel=True, logger=None):
+    """DDEC6 for one wfx (a path, or a read_wfx dict) in qtaim_generator's layout: the
+    charge.json entry (charges, spin moments for open shells, the molecular point-charge
+    dipole about the origin as charge_engine's schemes give it, atomic dipoles and
+    quadrupoles in atomic units, and the eigenvalues Chargemol reports), the
+    fuzzy_full.json per-atom features, and _meta (iteration counts and whether each
+    iterator converged before Chargemol's cap of 500). Raises ChargemolStop where
+    Chargemol would stop."""
+    from qtaim_gen.source.core.charge_engine import atom_labels, fuzzy_entry, per_atom, point_dipole
 
-    st = run(wfx_path, parallel=parallel)
-    labels = [f"{i + 1}_{T_SYMBOL[int(z)]}" for i, z in enumerate(st["atom_z"])]
-
-    def per_atom(vals):
-        return {k: (float(v) if np.ndim(v) == 0 else [float(x) for x in v]) for k, v in zip(labels, vals)}
-
-    def fuzzy(vals):
-        d = per_atom(vals)
-        d["sum"] = float(np.sum(vals))
-        d["abs_sum"] = float(np.sum(np.abs(vals)))
-        return d
-
+    st = run(wfx, parallel=parallel, logger=logger)
+    labels = atom_labels(st["atom_z"])
     q = st["net_atomic_charge"]
-    dip = (np.asarray(st["atom_xyz"]) * q[:, None]).sum(0)
     quad = st["atomic_quadrupole"]  # Qxy, Qxz, Qyz, Q(x2-y2), Q(3z2-r2)
     qmag = []
     for qxy, qxz, qyz, qx2y2, q3z2 in quad:
         t = np.array([[0.5 * (qx2y2 - q3z2 / 3.0), qxy, qxz], [qxy, 0.5 * (-qx2y2 - q3z2 / 3.0), qyz],
                       [qxz, qyz, q3z2 / 3.0]])
         qmag.append(math.sqrt(float((t * t).sum())))
-    entry = {"charge": per_atom(q), "dipole": {"mag": float(np.linalg.norm(dip)), "xyz": [float(x) for x in dip]},
-             "atomic_dipole": per_atom(st["atomic_dipole"]), "atomic_quadrupole": per_atom(quad),
-             "atomic_quadrupole_eigenvalues": per_atom(st["quadrupole_eigenvalues"])}
-    meta = {"n_iterations": int(st["n_iterations"]), "natoms": len(labels), "stage_s": st["stage_s"]}
+    entry = {"charge": per_atom(labels, q), "dipole": point_dipole(np.asarray(st["atom_xyz"]), q),
+             "atomic_dipole": per_atom(labels, st["atomic_dipole"]), "atomic_quadrupole": per_atom(labels, quad),
+             "atomic_quadrupole_eigenvalues": per_atom(labels, st["quadrupole_eigenvalues"])}
+    meta = {"n_iterations": int(st["n_iterations"]), "converged": bool(st["converged"]), "natoms": len(labels),
+            "est_peak_gb": st["est_peak_gb"], "stage_s": st["stage_s"]}
     if st["spin_available"]:
-        entry["spin"] = per_atom(st["spin_moment"])
+        entry["spin"] = per_atom(labels, st["spin_moment"])
         meta["spin_iterations"] = int(st["spin_iterations"])
+        meta["spin_converged"] = bool(st["spin_converged"])
         meta["total_spin_moment"] = float(st["total_spin_moment"])
-    feats = {"ddec6_atomic_dipole_mag": fuzzy(st["atomic_dipole_mag"]),
-             "ddec6_quadrupole_mag": fuzzy(np.array(qmag)),
-             "ddec6_tail_decay": fuzzy(st["tail_fit"][:, 1])}
+    feats = {"ddec6_atomic_dipole_mag": fuzzy_entry(labels, np.asarray(st["atomic_dipole_mag"])),
+             "ddec6_quadrupole_mag": fuzzy_entry(labels, np.array(qmag)),
+             "ddec6_tail_decay": fuzzy_entry(labels, st["tail_fit"][:, 1])}
     return {"ddec6": entry, "fuzzy": feats, "_meta": meta}
 
 
-def load(wfx_path):
-    return prepare(read_wfx(wfx_path))
+def load(wfx):
+    """prepare() of a wfx path or of an already read read_wfx dict."""
+    return prepare(wfx if isinstance(wfx, dict) else read_wfx(wfx))

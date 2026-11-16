@@ -25,7 +25,7 @@ def _fake_result():
     feats = {name: {**{k: 0.1 for k in LABELS}, "sum": 0.4, "abs_sum": 0.4}
              for name in ("ddec6_atomic_dipole_mag", "ddec6_quadrupole_mag", "ddec6_tail_decay")}
     return {"ddec6": {"charge": q, "dipole": {"mag": 0.0, "xyz": [0.0, 0.0, 0.0]}}, "fuzzy": feats,
-            "_meta": {"n_iterations": 7, "natoms": 4}}
+            "_meta": {"n_iterations": 7, "converged": True, "natoms": 4}}
 
 
 @pytest.fixture
@@ -41,7 +41,7 @@ def _timings(folder):
 
 def test_run_writes_result_timing_and_version(folder, monkeypatch):
     calls = []
-    monkeypatch.setattr(ddec6, "analyze", lambda path: calls.append(path) or _fake_result())
+    monkeypatch.setattr(ddec6, "analyze", lambda wfx, **kw: calls.append(wfx) or _fake_result())
     assert omol._run_ddec6(folder, n_threads=1, logger=LOG)
     with open(os.path.join(folder, omol.DDEC6_JSON)) as f:
         assert json.load(f)["ddec6"]["charge"]["1_Br"] == 0.15
@@ -50,7 +50,7 @@ def test_run_writes_result_timing_and_version(folder, monkeypatch):
     entry = prov["routines"]["ddec6"]
     assert entry["by"] == "ddec6" and entry["engine_version"] == ENGINE_VERSION
     assert entry["spec"] == {"chargemol": "09_26_2017", "grid_spacing_bohr": 0.14, "max_atoms": ddec6.MAX_ATOMS}
-    assert prov["engines"]["ddec6"] == {"n_iterations": 7, "natoms": 4}
+    assert prov["engines"]["ddec6"] == {"n_iterations": 7, "converged": True, "natoms": 4}
     # restart finds the completed run and does not recompute
     assert omol._run_ddec6(folder, n_threads=1, logger=LOG, restart=True)
     assert len(calls) == 1
@@ -58,7 +58,7 @@ def test_run_writes_result_timing_and_version(folder, monkeypatch):
 
 def test_restart_recomputes_a_result_from_an_older_version(folder, monkeypatch):
     calls = []
-    monkeypatch.setattr(ddec6, "analyze", lambda path: calls.append(path) or _fake_result())
+    monkeypatch.setattr(ddec6, "analyze", lambda wfx, **kw: calls.append(wfx) or _fake_result())
     assert omol._run_ddec6(folder, n_threads=1, logger=LOG)
     provenance.record_routines(folder, ["ddec6"], "ddec6", ENGINE_VERSION - 1)
     assert omol._run_ddec6(folder, n_threads=1, logger=LOG, restart=True)
@@ -68,7 +68,7 @@ def test_restart_recomputes_a_result_from_an_older_version(folder, monkeypatch):
 
 def test_size_cap_is_a_permanent_skip(folder, monkeypatch):
     monkeypatch.setattr(ddec6, "MAX_ATOMS", 3)
-    monkeypatch.setattr(ddec6, "analyze", lambda path: pytest.fail("analyze must not run above the cap"))
+    monkeypatch.setattr(ddec6, "analyze", lambda wfx, **kw: pytest.fail("analyze must not run above the cap"))
     assert omol._run_ddec6(folder, n_threads=1, logger=LOG)
     assert provenance.load(folder)["skipped"]["ddec6"]["reason"] == "natoms_above_3"
     # a recorded skip is final: later passes do nothing
@@ -76,7 +76,7 @@ def test_size_cap_is_a_permanent_skip(folder, monkeypatch):
 
 
 def test_chargemol_stop_is_a_permanent_skip(folder, monkeypatch):
-    def stop(path):
+    def stop(wfx, **kw):
         raise ddec6.ChargemolStop("grid spacing check failed")
     monkeypatch.setattr(ddec6, "analyze", stop)
     assert omol._run_ddec6(folder, n_threads=1, logger=LOG)
@@ -85,7 +85,7 @@ def test_chargemol_stop_is_a_permanent_skip(folder, monkeypatch):
 
 
 def test_other_errors_fail_without_a_skip(folder, monkeypatch):
-    def boom(path):
+    def boom(wfx, **kw):
         raise RuntimeError("numba exploded")
     monkeypatch.setattr(ddec6, "analyze", boom)
     assert not omol._run_ddec6(folder, n_threads=1, logger=LOG)
@@ -102,6 +102,7 @@ def test_merge_into_generator_copy_and_idempotent(folder):
             json.dump(data, f)
     with open(os.path.join(folder, omol.DDEC6_JSON), "w") as f:
         json.dump(_fake_result(), f)
+    provenance.record_routines(folder, ["ddec6"], "ddec6", ENGINE_VERSION)
     for _ in range(2):
         omol._merge_ddec6(folder, move_results=True, logger=LOG)
     with open(os.path.join(gen, "charge.json")) as f:
@@ -119,9 +120,66 @@ def test_merge_into_root_without_generator(folder):
         json.dump({}, f)
     with open(os.path.join(folder, omol.DDEC6_JSON), "w") as f:
         json.dump(_fake_result(), f)
+    provenance.record_routines(folder, ["ddec6"], "ddec6", ENGINE_VERSION)
     omol._merge_ddec6(folder, move_results=True, logger=LOG)
     with open(os.path.join(folder, "charge.json")) as f:
         assert "ddec6" in json.load(f)
+
+
+def test_merge_skips_a_result_provenance_does_not_vouch_for(folder):
+    with open(os.path.join(folder, "charge.json"), "w") as f:
+        json.dump({"cm5": {"charge": {}}}, f)
+    with open(os.path.join(folder, "fuzzy_full.json"), "w") as f:
+        json.dump({}, f)
+    with open(os.path.join(folder, omol.DDEC6_JSON), "w") as f:
+        json.dump(_fake_result(), f)
+    omol._merge_ddec6(folder, move_results=True, logger=LOG)  # no provenance entry
+    provenance.record_routines(folder, ["ddec6"], "ddec6", ENGINE_VERSION - 1)
+    omol._merge_ddec6(folder, move_results=True, logger=LOG)  # an older version
+    with open(os.path.join(folder, "charge.json")) as f:
+        assert "ddec6" not in json.load(f)
+
+
+def test_failed_recompute_removes_the_earlier_result(folder, monkeypatch):
+    monkeypatch.setattr(ddec6, "analyze", lambda wfx, **kw: _fake_result())
+    assert omol._run_ddec6(folder, n_threads=1, logger=LOG)
+    gen = os.path.join(folder, "generator")
+    os.makedirs(gen)
+    shutil.copy(os.path.join(folder, omol.DDEC6_JSON), os.path.join(gen, omol.DDEC6_JSON))
+    shutil.copy(os.path.join(folder, "timings.json"), os.path.join(gen, "timings.json"))
+
+    def boom(wfx, **kw):
+        raise RuntimeError("new wavefunction, new failure")
+    monkeypatch.setattr(ddec6, "analyze", boom)
+    assert not omol._run_ddec6(folder, n_threads=1, logger=LOG)
+    assert omol._ddec6_result_path(folder) is None
+    for base in (folder, gen):
+        with open(os.path.join(base, "timings.json")) as f:
+            assert "ddec6" not in json.load(f)
+    assert "ddec6" not in provenance.load(folder)["routines"]
+
+
+def test_unconverged_result_is_stored_with_a_warning(folder, monkeypatch, caplog):
+    res = _fake_result()
+    res["_meta"].update(converged=False, n_iterations=500)
+    monkeypatch.setattr(ddec6, "analyze", lambda wfx, **kw: res)
+    with caplog.at_level(logging.WARNING, logger=LOG.name):
+        assert omol._run_ddec6(folder, n_threads=1, logger=LOG)
+    assert "without convergence" in caplog.text
+    assert provenance.load(folder)["engines"]["ddec6"]["converged"] is False
+
+
+def test_ddec6_forces_restart(tmp_path, monkeypatch, caplog):
+    class Reached(Exception):
+        pass
+
+    def reached(*a, **k):
+        raise Reached
+    monkeypatch.setattr(omol, "check_results_exist", reached)
+    with caplog.at_level(logging.INFO, logger=LOG.name), pytest.raises(Reached):
+        omol.gbw_analysis(str(tmp_path), "Multiwfn", "orca_2mkl", parse_only=True, overwrite=False, logger=LOG,
+                          ddec6=True)
+    assert "forcing restart" in caplog.text
 
 
 def test_ddec6_json_moves_to_generator(folder):
@@ -161,7 +219,9 @@ def test_analyze_layout():
         feats = out["fuzzy"][name]
         assert set(feats) == set(LABELS) | {"sum", "abs_sum"}
         assert feats["sum"] == pytest.approx(sum(feats[k] for k in LABELS))
-    assert out["_meta"]["n_iterations"] == 7 and out["_meta"]["natoms"] == 4
+    meta = out["_meta"]
+    assert meta["n_iterations"] == 7 and meta["natoms"] == 4
+    assert meta["converged"] is True and meta["spin_converged"] is True and meta["est_peak_gb"] > 0
 
 
 def test_killed_child_drops_the_ddec6_timing(folder, monkeypatch):

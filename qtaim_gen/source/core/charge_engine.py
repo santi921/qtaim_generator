@@ -1187,6 +1187,34 @@ def normalize(charge, zeff, nelec):
     return zeff - nelec / pop.sum() * pop
 
 
+# ---------------------------------------------------------------- output layout
+# charge.json / fuzzy_full.json entries, shared with core/ddec6.py
+
+
+def atom_labels(atnums):
+    """'1_C', '2_H', ...: the per-atom keys of charge.json and fuzzy_full.json."""
+    return [f"{i + 1}_{T_SYMBOL[int(z)]}" for i, z in enumerate(atnums)]
+
+
+def per_atom(labels, vals):
+    """{label: value} for per-atom scalars, {label: [components]} for per-atom vectors."""
+    return {k: (float(v) if np.ndim(v) == 0 else [float(x) for x in v]) for k, v in zip(labels, vals)}
+
+
+def fuzzy_entry(labels, vals):
+    """A fuzzy_full.json feature: the per-atom values plus 'sum' and 'abs_sum'."""
+    d = per_atom(labels, vals)
+    d["sum"] = float(vals.sum())
+    d["abs_sum"] = float(np.abs(vals).sum())
+    return d
+
+
+def point_dipole(coords, q):
+    """Point-charge dipole about the origin, as charge.json's 'dipole' entries."""
+    v = (coords * q[:, None]).sum(0)
+    return {"mag": float(np.linalg.norm(v)), "xyz": [float(x) for x in v]}
+
+
 # ---------------------------------------------------------------- driver
 
 
@@ -1375,23 +1403,12 @@ def run(wfx_path, nrad=75, nang=434, radcut=10.0, bond_nrad=45, bond_nang=170, f
         t["chelpg"] = time.perf_counter() - t0
 
     t0 = time.perf_counter()
-    labels =[f"{i + 1}_{T_SYMBOL[z]}" for i, z in enumerate(atnums)]
-
-    def chg(q):
-        return {k: float(v) for k, v in zip(labels, q)}
-
-    def atomic_dip(d):
-        return {k: [float(x) for x in v] for k, v in zip(labels, d)}
-
-    def mol_dip(q):
-        v = (coords * q[:, None]).sum(0)
-        return {"mag": float(np.linalg.norm(v)), "xyz": [float(x) for x in v]}
+    labels = atom_labels(atnums)
+    chg = atomic_dip = functools.partial(per_atom, labels)
+    mol_dip = functools.partial(point_dipole, coords)
 
     def fuzzy(name, vals):
-        d = chg(vals)
-        d["sum"] = float(vals.sum())
-        d["abs_sum"] = float(np.abs(vals).sum())
-        return {name: d}
+        return {name: fuzzy_entry(labels, vals)}
 
     nelec = basis["nelec"]
     out = {}

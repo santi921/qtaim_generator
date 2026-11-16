@@ -1,6 +1,7 @@
 from pathlib import Path
 import os, stat, json, time, logging, re
 from typing import Optional, Dict, Any, List
+import signal
 import subprocess
 import sys
 
@@ -1941,7 +1942,12 @@ def _run_ddec6(folder: str, n_threads: int, logger: logging.Logger, restart: boo
     import numba
     from qtaim_gen.source.core.charge_engine import read_wfx
 
-    natoms = int((read_wfx(wf_path)["zeff"] > 0.5).sum())
+    # a recompute replaces the earlier result: its sidecar, timing and provenance entry go
+    # first, so a failure below leaves nothing that would merge or validate as current
+    _drop_ddec6(folder, logger)
+
+    wfx = read_wfx(wf_path)
+    natoms = int((wfx["zeff"] > 0.5).sum())
     if natoms > ddec6.MAX_ATOMS:
         _record_skipped(folder, {"ddec6": {"reason": f"natoms_above_{ddec6.MAX_ATOMS}", "by": "ddec6"}}, logger)
         return True
@@ -1949,7 +1955,7 @@ def _run_ddec6(folder: str, n_threads: int, logger: logging.Logger, restart: boo
     numba.set_num_threads(max(1, min(n_threads, numba.config.NUMBA_NUM_THREADS)))
     start = time.time()
     try:
-        out = ddec6.analyze(wf_path)
+        out = ddec6.analyze(wfx, logger=logger)
     except ddec6.ChargemolStop as e:
         logger.warning("ddec6: Chargemol would stop on %s (%s); recording a permanent skip", wf_path, e)
         _record_skipped(folder, {"ddec6": {"reason": f"chargemol_stop: {e}", "by": "ddec6"}}, logger)
@@ -1964,17 +1970,49 @@ def _run_ddec6(folder: str, n_threads: int, logger: logging.Logger, restart: boo
         "chargemol": ddec6.CHARGEMOL_RELEASE, "grid_spacing_bohr": ddec6.PREFERRED_GRID_SPACING,
         "max_atoms": ddec6.MAX_ATOMS})
     provenance.record_engine(folder, "ddec6", out["_meta"])
-    logger.info("ddec6: %d atoms, %d iterations in %.2f s", natoms, out["_meta"]["n_iterations"], elapsed)
+    meta = out["_meta"]
+    logger.info("ddec6: %d atoms, %d iterations in %.2f s", natoms, meta["n_iterations"], elapsed)
+    if not meta["converged"] or not meta.get("spin_converged", True):
+        logger.warning("ddec6: iteration cap reached without convergence in %s (valence %d, spin %s iterations); "
+                       "stored with _meta.converged / spin_converged false, as Chargemol would print it",
+                       folder, meta["n_iterations"], meta.get("spin_iterations"))
     return True
+
+
+def _drop_ddec6(folder: str, logger: logging.Logger) -> None:
+    """Remove a DDEC6 result: ddec6.json, the 'ddec6' timing (root and generator/, which
+    move_results merges) and the provenance entry."""
+    removed = []
+    for base in (folder, os.path.join(folder, "generator")):
+        path = os.path.join(base, DDEC6_JSON)
+        if os.path.isfile(path):
+            os.remove(path)
+            removed.append(path)
+        timings_path = os.path.join(base, "timings.json")
+        try:
+            with open(timings_path) as f:
+                timings = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            continue
+        if isinstance(timings, dict) and timings.pop("ddec6", None) is not None:
+            atomic_json_write(timings_path, timings)
+            removed.append(f"{timings_path}:ddec6")
+    provenance.drop(folder, ["ddec6"])
+    if removed:
+        logger.info("ddec6: removed the earlier result before recomputing: %s", removed)
 
 
 def _merge_ddec6(folder: str, move_results: bool, logger: logging.Logger) -> None:
     """Merge ddec6.json into charge.json (the 'ddec6' scheme) and fuzzy_full.json (the
     ddec6_* features), in generator/ when move_results and present there, else in the
     root (as _run_orca_parse does). Additive and idempotent: parse_multiwfn rewrites
-    charge.json from the per-step jsons, so this runs after every parse."""
+    charge.json from the per-step jsons, so this runs after every parse. Only a result
+    that provenance.json records as current DDEC6 output is merged."""
     src = _ddec6_result_path(folder)
     if src is None:
+        return
+    if not provenance.engine_current(provenance.load(folder), "ddec6"):
+        logger.warning("ddec6: %s is not recorded as current DDEC6 output in provenance.json; not merged", src)
         return
     with open(src) as f:
         result = json.load(f)
@@ -2235,6 +2273,10 @@ def _run_engines(
         # one from an earlier run would otherwise vouch for outputs the child half-wrote.
         logger.error("engine child exited with status %d after %.1f s; stderr tail:\n%s",
                      proc.returncode, time.time() - start, proc.stderr[-3000:])
+        if proc.returncode == -signal.SIGKILL:
+            logger.error("engine child was killed by SIGKILL, usually the out-of-memory killer (kernel or the "
+                         "Slurm cgroup)%s", "; DDEC6 logs its estimated peak memory before its density grids"
+                         if ddec6 else "")
         keys = ((["qtaim_engine"] if qtaim_engine else []) + (["charge_engine", "surface_engine"] if charge_engine else [])
                 + (["ddec6"] if ddec6 else []))
         for timings_path in (os.path.join(folder, "timings.json"), os.path.join(folder, "generator", "timings.json")):
@@ -3577,12 +3619,13 @@ def gbw_analysis(
         logger.warning("--enforce_poincare_hopf has no effect with parse_only; ignored")
         enforce_poincare_hopf = False
 
-    if (recheck_fuzzy or recheck_allalpha_qtaim or recheck_cp_labels or enforce_poincare_hopf) \
+    if (recheck_fuzzy or recheck_allalpha_qtaim or recheck_cp_labels or enforce_poincare_hopf or ddec6) \
             and not restart and not overwrite:
         # data presence drives the per-step skip; without restart every step
-        # reruns. --overwrite asks for exactly that, so it is left alone.
+        # reruns. --overwrite asks for exactly that, so it is left alone. --ddec6 on a
+        # finished folder fails validation only for its missing ddec6 entry.
         restart = True
-        logger.info("recheck_fuzzy: forcing restart so only invalidated steps rerun")
+        logger.info("recheck/ddec6: forcing restart so only invalidated or missing steps rerun")
 
     # check if output already exists
     if not overwrite:

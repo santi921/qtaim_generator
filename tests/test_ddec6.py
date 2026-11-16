@@ -104,13 +104,19 @@ def test_density_and_core_grids_12x_match_chargemol_bitwise():
     _check_grids("diffuse_h2")
 
 
+def test_serial_point_loop_12x_matches_chargemol_bitwise():
+    # density_grids(parallel=False): Chargemol's own loop order, which the parallel
+    # kernels share _axis_points with
+    _check_grids("diffuse_h2", parallel=False)
+
+
 @pytest.mark.skipif(not os.environ.get("DDEC6_SLOW"), reason="several minutes per fixture; set DDEC6_SLOW=1")
 @pytest.mark.parametrize("name", ["rmechdb_652_step10_0_2", "XeCl4_step2_0_1"])
 def test_density_and_core_grids_match_chargemol_bitwise(name):
     _check_grids(name)
 
 
-def _check_grids(name):
+def _check_grids(name, parallel=True):
     dump_dir = os.path.join(DUMPS, name)
     if not os.path.exists(os.path.join(dump_dir, "dump_step7.bin")):
         pytest.skip("Chargemol validation dumps not available")
@@ -119,7 +125,7 @@ def _check_grids(name):
     s7 = R.read_step7(os.path.join(dump_dir, "dump_step7.bin"), ref["n_pairs"], ref["natoms"])
     prep = ddec6.load(_wfx(name))
     grid = ddec6.grid_setup(prep["atom_xyz"])
-    g = ddec6.density_grids(prep, grid, ddec6.pair_data(prep, grid))
+    g = ddec6.density_grids(prep, grid, ddec6.pair_data(prep, grid), parallel=parallel)
     assert g["max_pair_correction"] == s7["max_pair_correction"]
     assert np.array_equal(g["included_primitive_data"], s7["included_primitive_data"])
     assert np.array_equal(g["occupancy_correction"], s7["occupancy_correction"])
@@ -155,3 +161,32 @@ def test_outputs_match_chargemol_bitwise(name):
     assert st["tail_fit"].tolist() == [r["tail_fit"][k] for k in keys]
     if "spin" in r:
         assert st["spin_moment"].tolist() == [r["spin"][k] for k in keys]
+
+
+def test_primitives_above_h_stop_like_chargemol():
+    from qtaim_gen.source.core.charge_engine import read_wfx
+    wfx = read_wfx(_wfx("diffuse_h2"))
+    wfx["prim_type"] = wfx["prim_type"].copy()
+    wfx["prim_type"][0] = len(ddec6.WFX_LXYZ) + 1  # first i-type primitive
+    with pytest.raises(ddec6.ChargemolStop, match="above h"):
+        ddec6.prepare(wfx)
+
+
+def test_tail_fit_with_too_few_shells_is_nan_like_fortran():
+    sad = np.zeros((ddec6.NSHELLS, 3))
+    r = (np.arange(ddec6.NSHELLS) + 0.5) * (ddec6.CUTOFF_RADIUS * ddec6.BOHRPERANGSTROM / (100.0 * ddec6.NSHELLS))
+    sad[:, 0] = np.exp(-2.0 * r)  # a clean exponential tail
+    kmin = int(math.ceil(200.0 * ddec6.NSHELLS / ddec6.CUTOFF_RADIUS))
+    sad[kmin, 1] = 1e-3  # one shell above the floor: 0/0
+    fit = ddec6.cloud_penetration({"spherical_average_density": sad})["tail_fit"]
+    assert fit[0, 1] == pytest.approx(2.0) and fit[0, 2] == pytest.approx(1.0)
+    assert np.isnan(fit[1]).all() and np.isnan(fit[2]).all()  # column 2: no shell at all
+
+
+def test_memory_estimate_and_limit():
+    grid = {"totnum": (100, 200, 300)}
+    pairs = {"included_primitive_data": np.zeros((1000, 40))}
+    n = 100 * 200 * 300
+    assert ddec6.estimate_peak_bytes(grid, pairs, False) == ddec6.PEAK_BASE_BYTES + 48.0 * n + 2 * 320000
+    assert ddec6.estimate_peak_bytes(grid, pairs, True) == ddec6.PEAK_BASE_BYTES + 96.0 * n + 2 * 320000
+    assert ddec6.memory_limit_bytes() > 0
