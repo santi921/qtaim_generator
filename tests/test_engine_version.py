@@ -7,7 +7,8 @@ import pytest
 
 from qtaim_gen.source.data.engine_versions import ENGINE_VERSION, ROUTINE_ENGINE, is_current, last_change, routines_at
 from qtaim_gen.source.utils import provenance
-from qtaim_gen.source.utils.validation import TIMINGS_PATCHED_KEY, timing_total, validate_timing_dict
+from qtaim_gen.source.utils.validation import (TIMINGS_PATCHED_KEY, get_expected_timing_keys, timing_total,
+                                                 validate_timing_dict)
 
 
 def _write_provenance(folder, version, routines=None, generator=True):
@@ -32,18 +33,38 @@ def test_timing_total_skips_metadata():
     assert timing_total(timings) == 5.0
 
 
-@pytest.mark.parametrize("version, needs_elf_timing", [(1, True), (2, False), (ENGINE_VERSION, False)])
-def test_validation_expects_elf_timing_from_a_v1_engine(tmp_path, version, needs_elf_timing):
-    """A version-1 engine left elf_fuzzy to Multiwfn, so its folders still need the
-    elf_fuzzy timing; version 2 and later computed it."""
-    timings = {"qtaim": 5.0, "other": 3.0, "charge_engine": 2.0, "surface_engine": 1.0,
-               "chelpg": 1.0, "ibsi_bond": 1.0}
+def _timings_folder(tmp_path, version, full_set):
+    """generator/ with every step timing of the level (as Multiwfn would leave them),
+    both engine timings and provenance from this engine version."""
+    keys, spin_keys = get_expected_timing_keys(full_set=full_set, spin_tf=False)
+    timings = {k: 1.0 for k in list(keys) + list(spin_keys)}
+    timings.update({"charge_engine": 2.0, "surface_engine": 1.0})
     _write_provenance(tmp_path, version, routines_at(version) - {"qtaim"})
     path = tmp_path / "generator" / "timings.json"
     path.write_text(json.dumps(timings))
-    assert validate_timing_dict(str(path), full_set=1, charge_engine=True) is not needs_elf_timing
-    timings["elf_fuzzy"] = 1.0
-    path.write_text(json.dumps(timings))
+    return path
+
+
+@pytest.mark.parametrize("version, full_set, done", [
+    (1, 0, True), (1, 1, False),                    # version 1 left elf_fuzzy to Multiwfn
+    (2, 0, True), (2, 1, False), (5, 1, False),     # versions 2-5 left chelpg to Multiwfn
+    (2, 2, False),                                  # version 2 left other_esp to Multiwfn
+    (ENGINE_VERSION, 1, True), (ENGINE_VERSION, 2, True),
+])
+def test_engine_validation_requires_current_engine_output(tmp_path, version, full_set, done):
+    """With charge_engine=True a folder is done only when every charge- and surface-engine
+    routine of its level is current engine output: Multiwfn's timing for a routine an
+    older engine version left out does not count, so the restart recomputes it."""
+    path = _timings_folder(tmp_path, version, full_set)
+    assert validate_timing_dict(str(path), full_set=full_set, charge_engine=True) is done
+    # the stock runner (charge_engine=False) still accepts Multiwfn's timings
+    assert validate_timing_dict(str(path), full_set=full_set)
+
+
+def test_engine_validation_accepts_permanently_skipped_routines(tmp_path):
+    path = _timings_folder(tmp_path, 5, full_set=1)
+    assert not validate_timing_dict(str(path), full_set=1, charge_engine=True)
+    provenance.record_skips(str(tmp_path), {"chelpg": {"reason": "test", "by": "charge_engine"}})
     assert validate_timing_dict(str(path), full_set=1, charge_engine=True)
 
 

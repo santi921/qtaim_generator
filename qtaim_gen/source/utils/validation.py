@@ -11,6 +11,7 @@ import zlib
 from typing import Optional
 from qtaim_gen.source.core.parse_qtaim import dft_inp_to_dict, fortran_float
 from qtaim_gen.source.core.parse_orca import ORCA_PARSER_VERSION
+from qtaim_gen.source.data.multiwfn import charge_engine_routines, surface_engine_routines
 from qtaim_gen.source.utils import provenance
 import numpy as np
 from datetime import datetime
@@ -332,6 +333,18 @@ def validate_timing_dict(
         if verbose:
             print(msg)
         return False
+    if charge_engine:
+        # Multiwfn's values for a routine an older engine version left out, or values a
+        # later version changed, do not count as done: the restart recomputes them
+        stale = ((charge_engine_routines(full_set, spin_tf) | surface_engine_routines(full_set))
+                 - provenance.engine_routines(prov) - provenance.skipped(prov))
+        if stale:
+            msg = f"Not current engine output (provenance.json): {sorted(stale)}"
+            if logger:
+                logger.error(msg)
+            if verbose:
+                print(msg)
+            return False
     # current engine output and permanent skips have no step timing
     covered = provenance.engine_routines(prov) | provenance.skipped(prov)
     expected_keys = [k for k in expected_keys if k not in covered]

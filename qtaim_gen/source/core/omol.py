@@ -38,11 +38,7 @@ from qtaim_gen.source.core.horton import run_horton_analysis
 
 from qtaim_gen.source.data.engine_versions import ENGINE_VERSION, ROUTINE_ENGINE
 from qtaim_gen.source.data.multiwfn import (
-    ENGINE_LEVEL1_ROUTINES,
-    ENGINE_LEVEL2_ROUTINES,
     ENGINE_ROUTINES,
-    SURFACE_ENGINE_LEVEL2_ROUTINES,
-    SURFACE_ENGINE_ROUTINES,
     charge_data,
     charge_data_dict,
     bond_order_data,
@@ -56,6 +52,8 @@ from qtaim_gen.source.data.multiwfn import (
     chelpg_radii_file,
     MBIS_FAMILY,
     MULTIWFN_MBIS_MAX_Z,
+    charge_engine_routines as _engine_routines,
+    surface_engine_routines as _surface_engine_routines,
 )
 from qtaim_gen.source.core.parse_multiwfn import (
     parse_charge_doc,
@@ -1715,19 +1713,6 @@ def _extract_orca_out_from_archive(folder: str, logger: logging.Logger) -> bool:
                 logger.warning("Could not remove intermediate orca.tar: %s", e)
 
 
-def _engine_routines(full_set: int, spin_tf: bool) -> set:
-    """The charge-engine routines (core/charge_engine.py) a folder gets at this
-    full_set level; spin integrals only for open shells (check_spin)."""
-    routines = set(ENGINE_ROUTINES - SURFACE_ENGINE_ROUTINES)
-    if full_set < 1:
-        routines -= ENGINE_LEVEL1_ROUTINES
-    if full_set < 2:
-        routines -= ENGINE_LEVEL2_ROUTINES
-    if not spin_tf:
-        routines -= {"becke_fuzzy_spin", "hirsh_fuzzy_spin", "mbis_fuzzy_spin"}
-    return routines
-
-
 def _engine_outputs_present(folder: str, spin_tf: bool, full_set: int = 0) -> bool:
     """True when generator/ holds a completed charge-engine run: a positive
     charge_engine timing, every wanted routine current engine output in
@@ -1931,11 +1916,6 @@ def _run_qtaim_engine(folder: str, n_threads: int, logger: logging.Logger, resta
                 len(res["pos"]), [int((res["type"] == t).sum()) for t in range(4)], res["poincare_hopf"],
                 res["poincare_hopf_full_set"], elapsed)
     return True
-
-
-def _surface_engine_routines(full_set: int) -> frozenset:
-    """The surface-engine routines a folder gets at this full_set level."""
-    return SURFACE_ENGINE_ROUTINES if full_set >= 2 else SURFACE_ENGINE_ROUTINES - SURFACE_ENGINE_LEVEL2_ROUTINES
 
 
 def _run_surface_engine(
