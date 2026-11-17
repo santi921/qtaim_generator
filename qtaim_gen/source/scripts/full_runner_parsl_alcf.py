@@ -391,6 +391,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         parser.error("--clean_first requires --move_results (without it the results sit in the job folder and would be deleted)")
     if args.native_convert in ("fixed", "multiwfn_h") and not args.wfx:
         parser.error("--native_convert writes orca.wfx; it cannot be combined with --wfn (use --native_convert off)")
+    if args.ddec6 and not args.wfx:
+        parser.error("--ddec6 reads orca.wfx; it cannot be combined with --wfn")
     if args.native_convert is None:
         args.native_convert = "fixed" if args.wfx else "off"
     if args.native_convert == "off":

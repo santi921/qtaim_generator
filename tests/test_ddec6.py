@@ -190,3 +190,10 @@ def test_memory_estimate_and_limit():
     assert ddec6.estimate_peak_bytes(grid, pairs, False) == ddec6.PEAK_BASE_BYTES + 48.0 * n + 2 * 320000
     assert ddec6.estimate_peak_bytes(grid, pairs, True) == ddec6.PEAK_BASE_BYTES + 96.0 * n + 2 * 320000
     assert ddec6.memory_limit_bytes() > 0
+
+
+def test_run_stops_before_the_grids_when_the_estimate_is_above_the_limit(monkeypatch):
+    monkeypatch.setattr(ddec6, "memory_limit_bytes", lambda: 1)
+    monkeypatch.setattr(ddec6, "density_grids", lambda *a, **kw: pytest.fail("grids allocated above the limit"))
+    with pytest.raises(ddec6.PeakMemoryAboveLimit, match=r"estimated peak .* GB > limit 0.0 GB"):
+        ddec6.run(os.path.join(FIXTURES, "rmechdb_652_step10_0_2", "orca.wfx"))

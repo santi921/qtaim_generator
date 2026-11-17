@@ -177,8 +177,7 @@ def test_ddec6_forces_restart(tmp_path, monkeypatch, caplog):
         raise Reached
     monkeypatch.setattr(omol, "check_results_exist", reached)
     with caplog.at_level(logging.INFO, logger=LOG.name), pytest.raises(Reached):
-        omol.gbw_analysis(str(tmp_path), "Multiwfn", "orca_2mkl", parse_only=True, overwrite=False, logger=LOG,
-                          ddec6=True)
+        omol.gbw_analysis(str(tmp_path), "Multiwfn", "orca_2mkl", overwrite=False, logger=LOG, ddec6=True)
     assert "forcing restart" in caplog.text
 
 
@@ -199,10 +198,78 @@ def test_validate_ddec6(tmp_path):
         json.dump({"ddec6": 12.5}, f)
     assert validate_ddec6(charge, timings, n_atoms=4)
     assert not validate_ddec6(charge, timings, n_atoms=5)
+    assert not validate_ddec6(charge, timings, n_atoms=4, current=False)  # e.g. an older engine version
     with open(timings, "w") as f:
         json.dump({}, f)
     assert not validate_ddec6(charge, timings, n_atoms=4)
     assert validate_ddec6(charge, timings, n_atoms=4, skipped={"ddec6"})
+
+
+def test_validation_checks_requires_current_ddec6(folder, monkeypatch):
+    from qtaim_gen.source.utils import validation
+
+    seen = {}
+    os.makedirs(os.path.join(folder, "generator"))
+    for name in ("timings", "fuzzy_full", "other", "charge", "qtaim", "bond"):
+        with open(os.path.join(folder, "generator", f"{name}.json"), "w") as f:
+            f.write("{}")
+    for check in ("validate_timing_dict", "validate_fuzzy_dict", "validate_other_dict", "validate_charge_dict",
+                  "validate_qtaim_dict", "validate_bond_dict"):
+        monkeypatch.setattr(validation, check, lambda *a, **k: True)
+    monkeypatch.setattr(validation, "get_charge_spin_n_atoms_from_folder",
+                        lambda *a, **k: {"mol": LABELS, "charge": 0, "spin": 1})
+    monkeypatch.setattr(validation, "validate_ddec6", lambda *a, **k: seen.update(k) or True)
+    validation.validation_checks(folder, ddec6=True, logger=LOG)
+    assert seen["current"] is False  # no provenance entry
+    provenance.record_routines(folder, ["ddec6"], "ddec6", ENGINE_VERSION)
+    validation.validation_checks(folder, ddec6=True, logger=LOG)
+    assert seen["current"] is True
+
+
+def _gbw_stubbed(monkeypatch, folder, **kwargs):
+    seen = {"merge": 0}
+    monkeypatch.setattr(omol, "create_jobs", lambda *a, **k: None)
+    monkeypatch.setattr(omol, "run_jobs", lambda *a, **k: None)
+    monkeypatch.setattr(omol, "parse_multiwfn", lambda *a, **k: None)
+    monkeypatch.setattr(omol, "_run_orca_parse", lambda *a, **k: None)
+    monkeypatch.setattr(omol, "_run_engines", lambda *a, **k: seen.update(engines=k))
+    monkeypatch.setattr(omol, "validation_checks", lambda *a, **k: seen.update(validate=k) or False)
+    monkeypatch.setattr(omol, "_merge_ddec6", lambda *a, **k: seen.update(merge=seen["merge"] + 1))
+    omol.gbw_analysis(folder, multiwfn_cmd="x", orca_2mkl_cmd="y", restart=False, overwrite=False, logger=LOG,
+                      move_results=True, **kwargs)
+    return seen
+
+
+def test_parse_merges_ddec6_without_the_flag(folder, monkeypatch):
+    # parse_multiwfn rewrites charge.json; a current ddec6.json must be merged back either way
+    seen = _gbw_stubbed(monkeypatch, folder)
+    assert seen["merge"] >= 1 and seen["engines"]["ddec6"] is False
+
+
+def test_parse_only_does_not_require_ddec6(folder, monkeypatch, caplog):
+    with caplog.at_level(logging.WARNING, logger=LOG.name):
+        seen = _gbw_stubbed(monkeypatch, folder, parse_only=True, ddec6=True)
+    assert seen["validate"]["ddec6"] is False and seen["merge"] >= 1
+    assert "computes nothing with parse_only" in caplog.text
+
+
+def test_ddec6_reads_generator_wfx_behind_a_root_wfn(folder, monkeypatch):
+    gen = os.path.join(folder, "generator")
+    os.makedirs(gen)
+    shutil.move(os.path.join(folder, "orca.wfx"), os.path.join(gen, "orca.wfx"))
+    with open(os.path.join(folder, "orca.wfn"), "w") as f:
+        f.write("wfn")
+    seen = []
+    monkeypatch.setattr(ddec6, "analyze", lambda wfx, **kw: seen.append(1) or _fake_result())
+    assert omol._run_ddec6(folder, n_threads=1, logger=LOG)
+    assert seen == [1]
+
+
+def test_runner_refuses_ddec6_with_wfn(tmp_path):
+    from qtaim_gen.source.scripts.full_runner_parsl_alcf import main
+
+    with pytest.raises(SystemExit):
+        main(["--ddec6", "--wfn", "--job_file", str(tmp_path / "jobs.txt")])
 
 
 @pytest.mark.skipif(not os.environ.get("DDEC6_SLOW"), reason="about a minute; set DDEC6_SLOW=1")
@@ -244,6 +311,65 @@ def test_killed_child_drops_the_ddec6_timing(folder, monkeypatch):
         with open(path) as f:
             assert json.load(f) == {"other_geometry": 0.2}
     assert "ddec6" not in provenance.load(folder)["routines"]
+
+
+def test_killed_ddec6_child_keeps_the_other_engines(folder, monkeypatch):
+    import stat
+    import sys
+
+    from qtaim_gen.source.data.engine_versions import ROUTINE_ENGINE
+
+    old = {"charge_engine": 5.0, "surface_engine": 2.0, "ddec6": 9.0}
+    with open(os.path.join(folder, "timings.json"), "w") as f:
+        json.dump(old, f)
+    fake = os.path.join(folder, "python_killed_in_ddec6")
+    with open(fake, "w") as f:
+        f.write('#!/bin/sh\ncase "$*" in *--ddec6*) kill -9 $$ ;; esac\nexit 0\n')
+    os.chmod(fake, os.stat(fake).st_mode | stat.S_IEXEC)
+    monkeypatch.setattr(sys, "executable", fake)
+    charge_routine = next(r for r, e in ROUTINE_ENGINE.items() if e == "charge_engine")
+    provenance.record_routines(folder, [charge_routine], "charge_engine", ENGINE_VERSION)
+    provenance.record_routines(folder, ["ddec6"], "ddec6", ENGINE_VERSION)
+    omol._run_engines(folder, n_threads=1, logger=LOG, charge_engine=True, ddec6=True)
+    assert _timings(folder) == {"charge_engine": 5.0, "surface_engine": 2.0}
+    routines = provenance.load(folder)["routines"]
+    assert charge_routine in routines and "ddec6" not in routines
+
+
+def test_peak_memory_above_limit_is_a_permanent_skip(folder, monkeypatch):
+    def too_big(wfx, **kw):
+        raise ddec6.PeakMemoryAboveLimit("estimated peak 30.0 GB > limit 16.0 GB")
+    monkeypatch.setattr(ddec6, "analyze", too_big)
+    assert omol._run_ddec6(folder, n_threads=1, logger=LOG)
+    rec = provenance.load(folder)["skipped"]["ddec6"]
+    assert rec == {"reason": "est_peak_above_limit: estimated peak 30.0 GB > limit 16.0 GB", "by": "ddec6"}
+    assert validate_ddec6(os.path.join(folder, "charge.json"), os.path.join(folder, "timings.json"), 4,
+                          skipped=provenance.skipped(provenance.load(folder)))
+
+
+def test_skip_on_recompute_removes_merged_ddec6_data(folder, monkeypatch):
+    monkeypatch.setattr(ddec6, "analyze", lambda wfx, **kw: _fake_result())
+    assert omol._run_ddec6(folder, n_threads=1, logger=LOG)
+    gen = os.path.join(folder, "generator")
+    os.makedirs(gen)
+    for base in (folder, gen):
+        for name, data in (("charge.json", {"hirshfeld": {"charge": {k: 0.0 for k in LABELS}}}),
+                           ("fuzzy_full.json", {"becke_fuzzy_density": {"1_Br": 35.0}})):
+            with open(os.path.join(base, name), "w") as f:
+                json.dump(data, f)
+    shutil.move(os.path.join(folder, omol.DDEC6_JSON), os.path.join(gen, omol.DDEC6_JSON))
+    omol._merge_ddec6(folder, move_results=True, logger=LOG)
+    omol._merge_ddec6(folder, move_results=False, logger=LOG)
+    monkeypatch.setattr(ddec6, "MAX_ATOMS", 3)
+    assert omol._run_ddec6(folder, n_threads=1, logger=LOG)
+    for base in (folder, gen):
+        with open(os.path.join(base, "charge.json")) as f:
+            assert set(json.load(f)) == {"hirshfeld"}
+        with open(os.path.join(base, "fuzzy_full.json")) as f:
+            assert set(json.load(f)) == {"becke_fuzzy_density"}
+    assert provenance.load(folder)["skipped"]["ddec6"]["reason"] == "natoms_above_3"
+    assert validate_ddec6(os.path.join(folder, "charge.json"), os.path.join(folder, "timings.json"), 4,
+                          skipped=provenance.skipped(provenance.load(folder)))
 
 
 @pytest.mark.skipif(not os.environ.get("DDEC6_SLOW"), reason="a few minutes; set DDEC6_SLOW=1")

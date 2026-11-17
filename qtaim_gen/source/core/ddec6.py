@@ -38,6 +38,13 @@ class ChargemolStop(ValueError):
     on the wavefunction, so the runner records it as a permanent skip."""
 
 
+class PeakMemoryAboveLimit(RuntimeError):
+    """The estimated peak memory of run() is above what this process may use, raised
+    before the density grids are allocated. The runner records it as a permanent skip
+    (the reason names both numbers): the out-of-memory kill it replaces would repeat on
+    every pass."""
+
+
 # module_global_parameters.f08
 NSHELLS = 100
 CUTOFF_RADIUS = 500.0  # pm
@@ -2443,16 +2450,13 @@ def run(wfx, parallel=True, logger=None):
     pairs = pair_data(prep, grid)
     lap("pair_data")
     est = estimate_peak_bytes(grid, pairs, prep["spin_available"])
+    limit = memory_limit_bytes()
     if logger is not None:
-        limit = memory_limit_bytes()
-        msg = (f"ddec6: grid {'x'.join(str(int(n)) for n in grid['totnum'])}, "
-               f"{pairs['included_primitive_data'].shape[0]} pair rows, estimated peak memory {est / 1e9:.1f} GB "
-               f"(limit {limit / 1e9:.1f} GB)")
-        if est > limit:
-            logger.warning(msg + ": likely to be killed for memory; give the job more memory, fewer workers "
-                           "per node, or leave this molecule out of --ddec6")
-        else:
-            logger.info(msg)
+        logger.info(f"ddec6: grid {'x'.join(str(int(n)) for n in grid['totnum'])}, "
+                    f"{pairs['included_primitive_data'].shape[0]} pair rows, estimated peak memory "
+                    f"{est / 1e9:.1f} GB (limit {limit / 1e9:.1f} GB)")
+    if est > limit:
+        raise PeakMemoryAboveLimit(f"estimated peak {est / 1e9:.1f} GB > limit {limit / 1e9:.1f} GB")
     dens = density_grids(prep, grid, pairs, parallel=parallel)
     lap("density_grids")
     grids = core_grids(prep, grid, dens)
