@@ -27,8 +27,10 @@ def main():
     for r in rows.values():
         key = r["job"].split("/")[0] if args.by == "vertical" else r["job"].rstrip("/").split("_")[-1]
         groups[key].append(r)
+    bo_cols = ("max_dbo", "max_dsbo", "max_dr2", "max_dr3", "max_dr4", "max_doverlap")
     print("group\tn\tok\tskipped\tchargemol_stop\terrors\titer_mismatch\tmax_dq\tmax_ddipole\tmax_dquadrupole\tmax_dspin"
-          "\tmedian_atoms\tmedian_port_s\tmedian_chargemol_s\tmedian_port/chargemol")
+          "\tmedian_atoms\tmedian_port_s\tmedian_chargemol_s\tmedian_port/chargemol\tbond_set_mismatch\t"
+          + "\t".join(bo_cols))
     for key in sorted(groups):
         g = groups[key]
         ok = [r for r in g if "max_dq" in r]
@@ -39,10 +41,13 @@ def main():
             key, len(g), len(ok), sum("skipped" in r for r in g), sum("port_chargemol_stop" in r for r in g),
             sum("error" in r for r in g), sum(r.get("iter_port") != r.get("iter_chargemol") for r in ok),
             mx("max_dq"), mx("max_ddipole"), mx("max_dquadrupole"), mx("max_dspin"), med("natoms"), med("port_s"), med("chargemol_s"),
-            f"{st.median(ratio):.2f}" if ratio else "")))
+            f"{st.median(ratio):.2f}" if ratio else "",
+            sum(r.get("bond_set_equal") is False for r in ok), *(mx(k) for k in bo_cols))))
     for r in rows.values():
         if "error" in r:
             print("ERROR", r["job"], r["error"])
+        if r.get("bond_set_equal") is False:
+            print("BOND SET", r["job"], "port only", r["bond_only_port"], "chargemol only", r["bond_only_chargemol"])
 
 
 if __name__ == "__main__":

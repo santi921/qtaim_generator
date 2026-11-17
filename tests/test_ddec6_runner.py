@@ -18,13 +18,15 @@ from qtaim_gen.source.utils.validation import validate_ddec6
 FIXTURE = os.path.join(os.path.dirname(__file__), "test_files", "charge_engine", "rmechdb_652_step10_0_2")
 LABELS = ["1_Br", "2_O", "3_O", "4_O"]
 LOG = logging.getLogger("test_ddec6_runner")
+DDEC6_FUZZY = ("ddec6_atomic_dipole_mag", "ddec6_quadrupole_mag", "ddec6_tail_decay", "ddec6_sbo", "ddec6_r2",
+               "ddec6_r3", "ddec6_r4")
 
 
 def _fake_result():
     q = {k: v for k, v in zip(LABELS, (0.15, -0.14, 0.13, -0.14))}
-    feats = {name: {**{k: 0.1 for k in LABELS}, "sum": 0.4, "abs_sum": 0.4}
-             for name in ("ddec6_atomic_dipole_mag", "ddec6_quadrupole_mag", "ddec6_tail_decay")}
-    return {"ddec6": {"charge": q, "dipole": {"mag": 0.0, "xyz": [0.0, 0.0, 0.0]}}, "fuzzy": feats,
+    feats = {name: {**{k: 0.1 for k in LABELS}, "sum": 0.4, "abs_sum": 0.4} for name in DDEC6_FUZZY}
+    bonds = {"ddec6_bond": {"1_Br_to_2_O": 0.82}, "ddec6_overlap_population": {"1_Br_to_2_O": 0.54}}
+    return {"ddec6": {"charge": q, "dipole": {"mag": 0.0, "xyz": [0.0, 0.0, 0.0]}}, "fuzzy": feats, "bond": bonds,
             "_meta": {"n_iterations": 7, "converged": True, "natoms": 4}}
 
 
@@ -97,7 +99,8 @@ def test_merge_into_generator_copy_and_idempotent(folder):
     gen = os.path.join(folder, "generator")
     os.makedirs(gen)
     for name, data in (("charge.json", {"hirshfeld": {"charge": {k: 0.0 for k in LABELS}}}),
-                       ("fuzzy_full.json", {"becke_fuzzy_density": {"1_Br": 35.0}})):
+                       ("fuzzy_full.json", {"becke_fuzzy_density": {"1_Br": 35.0}}),
+                       ("bond.json", {"fuzzy_bond": {"1_Br_to_2_O": 1.1}})):
         with open(os.path.join(gen, name), "w") as f:
             json.dump(data, f)
     with open(os.path.join(folder, omol.DDEC6_JSON), "w") as f:
@@ -109,8 +112,11 @@ def test_merge_into_generator_copy_and_idempotent(folder):
         charge = json.load(f)
     with open(os.path.join(gen, "fuzzy_full.json")) as f:
         fuzzy = json.load(f)
+    with open(os.path.join(gen, "bond.json")) as f:
+        bond = json.load(f)
     assert set(charge) == {"hirshfeld", "ddec6"} and charge["ddec6"]["charge"]["2_O"] == -0.14
-    assert set(fuzzy) == {"becke_fuzzy_density", "ddec6_atomic_dipole_mag", "ddec6_quadrupole_mag", "ddec6_tail_decay"}
+    assert set(fuzzy) == {"becke_fuzzy_density", *DDEC6_FUZZY}
+    assert bond == {"fuzzy_bond": {"1_Br_to_2_O": 1.1}, **_fake_result()["bond"]}
 
 
 def test_merge_into_root_without_generator(folder):
@@ -198,6 +204,13 @@ def test_validate_ddec6(tmp_path):
         json.dump({"ddec6": 12.5}, f)
     assert validate_ddec6(charge, timings, n_atoms=4)
     assert not validate_ddec6(charge, timings, n_atoms=5)
+    bond = str(tmp_path / "bond.json")
+    with open(bond, "w") as f:
+        json.dump({"fuzzy_bond": {}}, f)
+    assert not validate_ddec6(charge, timings, n_atoms=4, bond_json_loc=bond)
+    with open(bond, "w") as f:
+        json.dump({"fuzzy_bond": {}, "ddec6_bond": {}}, f)  # empty: no pair at or above the print cutoff
+    assert validate_ddec6(charge, timings, n_atoms=4, bond_json_loc=bond)
     assert not validate_ddec6(charge, timings, n_atoms=4, current=False)  # e.g. an older engine version
     with open(timings, "w") as f:
         json.dump({}, f)
@@ -221,6 +234,7 @@ def test_validation_checks_requires_current_ddec6(folder, monkeypatch):
     monkeypatch.setattr(validation, "validate_ddec6", lambda *a, **k: seen.update(k) or True)
     validation.validation_checks(folder, ddec6=True, logger=LOG)
     assert seen["current"] is False  # no provenance entry
+    assert seen["bond_json_loc"] == os.path.join(folder, "generator", "bond.json")
     provenance.record_routines(folder, ["ddec6"], "ddec6", ENGINE_VERSION)
     validation.validation_checks(folder, ddec6=True, logger=LOG)
     assert seen["current"] is True
@@ -282,13 +296,19 @@ def test_analyze_layout():
     assert all(len(v) == 3 for v in d["atomic_dipole"].values())
     assert all(len(v) == 5 for v in d["atomic_quadrupole"].values())
     assert abs(sum(d["charge"].values())) < 1e-12
-    for name in ("ddec6_atomic_dipole_mag", "ddec6_quadrupole_mag", "ddec6_tail_decay"):
-        feats = out["fuzzy"][name]
+    assert set(out["fuzzy"]) == set(DDEC6_FUZZY)
+    for feats in out["fuzzy"].values():
         assert set(feats) == set(LABELS) | {"sum", "abs_sum"}
         assert feats["sum"] == pytest.approx(sum(feats[k] for k in LABELS))
+    bond = out["bond"]
+    assert set(bond) == {"ddec6_bond", "ddec6_overlap_population"}
+    assert set(bond["ddec6_bond"]) == set(bond["ddec6_overlap_population"])
+    assert len(bond["ddec6_bond"]) == 5 and min(bond["ddec6_bond"].values()) >= ddec6.BO_PRINT_CUTOFF
     meta = out["_meta"]
     assert meta["n_iterations"] == 7 and meta["natoms"] == 4
     assert meta["converged"] is True and meta["spin_converged"] is True and meta["est_peak_gb"] > 0
+    assert meta["n_bond_pairs"] == 6 and meta["bo_prep_passes"] >= 1
+    assert meta["summed_contact_exchange_error"] < 1e-10
 
 
 def test_killed_child_drops_the_ddec6_timing(folder, monkeypatch):
@@ -354,7 +374,8 @@ def test_skip_on_recompute_removes_merged_ddec6_data(folder, monkeypatch):
     os.makedirs(gen)
     for base in (folder, gen):
         for name, data in (("charge.json", {"hirshfeld": {"charge": {k: 0.0 for k in LABELS}}}),
-                           ("fuzzy_full.json", {"becke_fuzzy_density": {"1_Br": 35.0}})):
+                           ("fuzzy_full.json", {"becke_fuzzy_density": {"1_Br": 35.0}}),
+                           ("bond.json", {"fuzzy_bond": {"1_Br_to_2_O": 1.1}})):
             with open(os.path.join(base, name), "w") as f:
                 json.dump(data, f)
     shutil.move(os.path.join(folder, omol.DDEC6_JSON), os.path.join(gen, omol.DDEC6_JSON))
@@ -367,6 +388,8 @@ def test_skip_on_recompute_removes_merged_ddec6_data(folder, monkeypatch):
             assert set(json.load(f)) == {"hirshfeld"}
         with open(os.path.join(base, "fuzzy_full.json")) as f:
             assert set(json.load(f)) == {"becke_fuzzy_density"}
+        with open(os.path.join(base, "bond.json")) as f:
+            assert set(json.load(f)) == {"fuzzy_bond"}
     assert provenance.load(folder)["skipped"]["ddec6"]["reason"] == "natoms_above_3"
     assert validate_ddec6(os.path.join(folder, "charge.json"), os.path.join(folder, "timings.json"), 4,
                           skipped=provenance.skipped(provenance.load(folder)))

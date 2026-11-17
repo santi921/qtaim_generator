@@ -23,7 +23,7 @@ from qtaim_gen.source.data.multiwfn import (
     SURFACE_ENGINE_ROUTINES,
 )
 
-ENGINE_VERSION = 8
+ENGINE_VERSION = 9
 
 # the sub-engine that produces each engine routine: the "by" of its provenance entry
 ROUTINE_ENGINE = {
@@ -58,6 +58,9 @@ ENGINE_CHANGES = {
     8: {"added": _V8, "changed": frozenset(),
         "note": "IBSI (full_set 1, IGMH on the 75 x 434 grid) and the Laplacian bond order (full_set 2, "
                 "Multiwfn's 45 x 302 grid) in the charge engine"},
+    9: {"added": frozenset(), "changed": frozenset({"ddec6"}),
+        "note": "DDEC6 bond orders, overlap populations, SBOs and r^2-r^4 radial moments (Chargemol's "
+                "bond order analysis) added to the ddec6 output"},
 }
 
 

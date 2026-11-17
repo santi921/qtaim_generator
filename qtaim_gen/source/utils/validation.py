@@ -582,21 +582,25 @@ def validate_other_dict(other_dict_loc: str, verbose: bool = False, logger: any 
 
 
 def validate_ddec6(charge_json_loc, timing_json_loc, n_atoms, skipped=None, current=True, verbose=False,
-                   logger=None) -> bool:
+                   logger=None, bond_json_loc=None) -> bool:
     """True when DDEC6 is recorded as permanently skipped, or charge.json holds a 'ddec6'
     scheme with a charge for each of the n_atoms atoms, timings.json a positive 'ddec6'
-    timing (omol._run_ddec6, merged by omol._merge_ddec6) and current is True
-    (validation_checks passes whether provenance.json records the result as current
-    DDEC6 output, so an older engine version's result is recomputed)."""
+    timing (omol._run_ddec6, merged by omol._merge_ddec6), bond.json a 'ddec6_bond' entry
+    when bond_json_loc is given (it may be empty: no pair at or above the print cutoff),
+    and current is True (validation_checks passes whether provenance.json records the
+    result as current DDEC6 output, so an older engine version's result is recomputed)."""
     if "ddec6" in (skipped or ()):
         return True
     timings = _safe_json_load(timing_json_loc, logger=logger) or {}
     charges = ((_safe_json_load(charge_json_loc, logger=logger) or {}).get("ddec6") or {}).get("charge") or {}
+    has_bonds = (bond_json_loc is None
+                 or isinstance((_safe_json_load(bond_json_loc, logger=logger) or {}).get("ddec6_bond"), dict))
     ok = (current and isinstance(timings.get("ddec6"), (int, float)) and timings["ddec6"] > 0
-          and len(charges) == n_atoms)
+          and len(charges) == n_atoms and has_bonds)
     if not ok:
         msg = (f"DDEC6 missing, incomplete or not current: timing {timings.get('ddec6')!r}, "
-               f"{len(charges)} of {n_atoms} charges, current in provenance.json {current}")
+               f"{len(charges)} of {n_atoms} charges, ddec6_bond in bond.json {has_bonds}, "
+               f"current in provenance.json {current}")
         if verbose:
             print(msg)
         if logger:
@@ -1817,7 +1821,8 @@ def validation_checks(
 
     if ddec6 and not validate_ddec6(
         charge_json_loc, timing_json_loc, n_atoms=n_atoms, skipped=skipped,
-        current=provenance.engine_current(prov, "ddec6"), verbose=verbose, logger=logger
+        current=provenance.engine_current(prov, "ddec6"), verbose=verbose, logger=logger,
+        bond_json_loc=bond_json_loc,
     ):
         if logger:
             logger.error(f"DDEC6 validation failed in folder: {folder}")

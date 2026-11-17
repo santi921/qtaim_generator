@@ -14,7 +14,9 @@ def test_version_table():
     assert max(ENGINE_CHANGES) == ENGINE_VERSION
     assert routines_at(ENGINE_VERSION) == frozenset(ROUTINE_ENGINE)
     assert set(ROUTINE_ENGINE) == ENGINE_ROUTINES | {"qtaim", "ddec6"}
-    assert last_change("ddec6") == 7 and "ddec6" not in routines_at(6)
+    # ddec6 was added at 7 and changed at 9 (bond orders)
+    assert last_change("ddec6") == 9 and "ddec6" in routines_at(7) and "ddec6" not in routines_at(6)
+    assert not is_current("ddec6", 8) and is_current("ddec6", 9)
     # every routine was added exactly once
     added = [r for c in ENGINE_CHANGES.values() for r in c["added"]]
     assert len(added) == len(set(added))
