@@ -243,6 +243,7 @@ def process_folder(
     qtaim_engine: bool = False,
     engine_subprocess: bool = True,
     native_convert: Optional[str] = None,
+    ddec6: bool = False,
 ) -> Dict[str, Any]:
     """Process a single folder and return a small status dict.
 
@@ -311,6 +312,7 @@ def process_folder(
                     charge_engine=charge_engine,
                     qtaim_engine=qtaim_engine,
                     native_convert=native_convert,
+                    ddec6=ddec6,
                     recheck_allalpha_qtaim=recheck_allalpha_qtaim,
                     recheck_cp_labels=recheck_cp_labels,
                     enforce_poincare_hopf=enforce_poincare_hopf,
@@ -368,6 +370,7 @@ def process_folder(
             qtaim_engine=qtaim_engine,
             engine_subprocess=engine_subprocess,
             native_convert=native_convert,
+            ddec6=ddec6,
         )
         t1: float = time.time()
         rerun_ok = bool(tf_validation)
@@ -459,6 +462,7 @@ def process_folder_alcf(
     qtaim_engine: bool = False,
     engine_subprocess: bool = True,
     native_convert: Optional[str] = None,
+    ddec6: bool = False,
 ) -> Dict[str, Any]:
     """Process a single folder and return a small status dict.
 
@@ -585,6 +589,7 @@ def process_folder_alcf(
                 charge_engine=charge_engine,
                 qtaim_engine=qtaim_engine,
                 native_convert=native_convert,
+                ddec6=ddec6,
             )
 
             if not overwrite and tf_validation:
@@ -672,6 +677,7 @@ def process_folder_alcf(
             qtaim_engine=qtaim_engine,
             engine_subprocess=engine_subprocess,
             native_convert=native_convert,
+            ddec6=ddec6,
         )
         t1: float = time.time()
         rerun_ok = bool(tf_validation)

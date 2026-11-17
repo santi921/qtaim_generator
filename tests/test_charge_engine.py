@@ -442,8 +442,11 @@ def test_mbis_converged_mode_reaches_the_plain_fixed_point(name):
 
     args = _mbis_grid_density(os.path.join(FIXTURES, name, "orca.wfx"))
     q_plain = CE.mbis_fit(*args, crit=1e-10, maxcyc=30000, mode="multiwfn")[0]
-    q_conv, m, p, s, ncyc = CE.mbis_fit(*args, mode="converged")
-    assert np.abs(q_conv - q_plain).max() < 1e-6
+    (q_conv, m, p, s, ncyc), converged = CE.mbis_fit(*args, mode="converged", status=True)
+    assert converged is True and np.abs(q_conv - q_plain).max() < 1e-6
+    # multiwfn mode: met its stopping rule, or ran into the cycle cap
+    assert CE.mbis_fit(*args, mode="multiwfn", status=True)[1] is True
+    assert CE.mbis_fit(*args, crit=1e-30, maxcyc=3, mode="multiwfn", status=True)[1] is False
     assert not CE.mbis_degenerate(m, p, s)
     q_sel, *_, info = CE.mbis_select(*args)
     assert info["solutions"] == 1 and np.abs(q_sel - q_conv).max() < 1e-6
@@ -691,6 +694,7 @@ def test_run_records_mbis_mode_and_uniqueness():
     assert set(meta["mbis_selection"]["objective"]) == {"default", "sigma_x0.6", "sigma_x1.5"}
     assert meta["mbis_selection"]["converged"] == {"default": True, "sigma_x0.6": True, "sigma_x1.5": True}
     assert meta["mbis_unique"] is True
+    assert meta["mbis_converged"] == {"charge": True, "fuzzy": True}
     assert meta["mbis_degenerate"] == {"charge": False, "fuzzy": False}
     assert meta["mbis_merged"] == {"charge": [], "fuzzy": []}
     assert meta["mbis_beyond_multiwfn"] is False

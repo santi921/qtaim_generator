@@ -27,6 +27,10 @@ engine = ["numba>=0.60", "threadpoolctl>=3"]
 # Auto-discover packages in the repository
 packages = { find = {} }
 
+[tool.setuptools.package-data]
+# Chargemol reference densities for the DDEC6 port (scripts/gen_chargemol_data.py)
+"qtaim_gen.source.data" = ["chargemol_refs.npz"]
+
 [project.scripts]
 # LMDB conversion
 json-to-lmdb = "qtaim_gen.source.scripts.json_to_lmdb:main"

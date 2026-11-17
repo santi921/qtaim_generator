@@ -1,0 +1,79 @@
+diff -ru a/chargemol.f08 b/chargemol.f08
+--- a/chargemol.f08	2026-11-04 00:19:41.133970800 -0500
++++ b/chargemol.f08	2026-11-04 15:06:58.409898899 -0500
+@@ -35,7 +35,7 @@
+  
+  IMPLICIT NONE
+ 
+- INTEGER :: k
++ INTEGER :: k,dump_fid
+  INTEGER :: clock_count,clock_count_rate,clock_count_max,clock_count2
+  LOGICAl :: file_was_selected
+  
+@@ -151,6 +151,12 @@
+    CALL DDEC6_valence_iterator()
+  END IF
+  
++ ! ddec6 port validation dump: inputs of the final multipole analysis
++ OPEN(NEWUNIT=dump_fid,FILE='dump_mpole.bin',ACCESS='stream',FORM='unformatted',STATUS='replace')
++ WRITE(dump_fid) totnumA,totnumB,totnumC,natoms
++ WRITE(dump_fid) normalization,partial_density,partial_core_density,core_population
++ WRITE(dump_fid) core_density,core_pseudodensity,total_pseudodensity,total_density
++ CLOSE(dump_fid)
+  CALL local_multipole_moment_analysis()
+  DEALLOCATE(core_pseudodensity)
+  DEALLOCATE(core_density)
+diff -ru a/module_gen_dens_grids_from_gaussian_basis_set_coeff.f08 b/module_gen_dens_grids_from_gaussian_basis_set_coeff.f08
+--- a/module_gen_dens_grids_from_gaussian_basis_set_coeff.f08	2026-11-04 00:19:41.136477780 -0500
++++ b/module_gen_dens_grids_from_gaussian_basis_set_coeff.f08	2026-11-04 12:22:33.678424423 -0500
+@@ -41,6 +41,7 @@
+  k6c_upper,k4a_lower,k4a_upper,k4b_lower,k4b_upper,k4c_lower,k4c_upper,k3a_lower,k3a_upper,k3b_lower,k3b_upper,k3c_lower,k3c_upper&
+  ,k2a_lower,k2a_upper,k2b_lower,k2b_upper,k2c_lower,k2c_upper
+  INTEGER :: clock_count,clock_count_rate,clock_count_max,clock_count2 
++ INTEGER :: dump_fid
+  INTEGER, ALLOCATABLE, DIMENSION (:) :: included_primitive_pairs
+  REAL(kind=dp), ALLOCATABLE, DIMENSION(:,:) :: alpha_1PDM,beta_1PDM,included_primitive_data,pair_block_data
+  REAL(kind=dp), ALLOCATABLE, DIMENSION (:) :: vector_length, pair_overlap,MO_normalization_check
+@@ -873,6 +874,13 @@
+  WRITE(output_FID,*)' '
+  FLUSH(output_FID) 
+  
++ ! ddec6 port validation dump: pair data after Step 6 (column-major, native endian)
++ OPEN(NEWUNIT=dump_fid,FILE='dump_pairs.bin',ACCESS='stream',FORM='unformatted',STATUS='replace')
++ WRITE(dump_fid) num_included_primitive_pairs,num_analytic_primitive_pairs,num_numeric_primitive_pairs
++ WRITE(dump_fid) num_pair_blocks,max_grid_spacing,natoms,nsingleblocks
++ WRITE(dump_fid) check_included_electrons,included_electrons
++ WRITE(dump_fid) pair_block_data,included_primitive_data,occupancy_correction,core_electrons
++ CLOSE(dump_fid)
+  !----------------------------------------------------------------------------------
+  ! Step 7:  Compute the valence_density and spin_density values at each grid point
+  !The first iteration computes the pairwise normalization factor, which is
+@@ -2492,6 +2500,14 @@
+  WRITE(output_FID,*)' '
+  FLUSH(output_FID)
+ 
++ ! ddec6 port validation dump: grids after Step 7 and interpolation, before the core grid
++ OPEN(NEWUNIT=dump_fid,FILE='dump_step7.bin',ACCESS='stream',FORM='unformatted',STATUS='replace')
++ WRITE(dump_fid) totnumA,totnumB,totnumC,merge(1,0,spin_available)
++ WRITE(dump_fid) origin,boundary,pixelvolume,max_pair_correction
++ WRITE(dump_fid) included_primitive_data,occupancy_correction,core_electrons
++ WRITE(dump_fid) valence_density,core_density
++ IF (spin_available) WRITE(dump_fid) spin_density
++ CLOSE(dump_fid)
+  !----------------------------------------------------------------------------------
+  ! Step 8:  Generate the core density grid
+  !---------------------------------------------------------------------------------- 
+@@ -2599,6 +2615,13 @@
+  FLUSH(output_FID)
+  CALL add_missing_core_density()
+  CALL initialize_atomic_densities()
++ ! ddec6 port validation dump: final grids after the core fill
++ OPEN(NEWUNIT=dump_fid,FILE='dump_final.bin',ACCESS='stream',FORM='unformatted',STATUS='replace')
++ WRITE(dump_fid) totnumA,totnumB,totnumC,merge(1,0,spin_available)
++ WRITE(dump_fid) occupancy_correction,core_electrons,missing_core
++ WRITE(dump_fid) valence_density,core_density
++ IF (spin_available) WRITE(dump_fid) spin_density
++ CLOSE(dump_fid)
+  
+  sum_negative_density=0.0_dp
+  

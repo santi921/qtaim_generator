@@ -317,6 +317,17 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
 
     parser.add_argument(
+        "--ddec6",
+        action="store_true",
+        help=(
+            "also compute DDEC6 charges, spin moments and atomic multipoles (core/ddec6.py, a port "
+            "of Chargemol) in the engine step, merged into charge.json ('ddec6') and fuzzy_full.json. "
+            "Needs .wfx. Molecules above 120 atoms and wavefunctions on which Chargemol stops are "
+            "recorded as permanently skipped. Prevalidation then treats folders without DDEC6 as not done"
+        ),
+    )
+
+    parser.add_argument(
         "--recheck_fuzzy",
         action="store_true",
         help=(
@@ -380,6 +391,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         parser.error("--clean_first requires --move_results (without it the results sit in the job folder and would be deleted)")
     if args.native_convert in ("fixed", "multiwfn_h") and not args.wfx:
         parser.error("--native_convert writes orca.wfx; it cannot be combined with --wfn (use --native_convert off)")
+    if args.ddec6 and not args.wfx:
+        parser.error("--ddec6 reads orca.wfx; it cannot be combined with --wfn")
     if args.native_convert is None:
         args.native_convert = "fixed" if args.wfx else "off"
     if args.native_convert == "off":
@@ -426,6 +439,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     recheck_fuzzy = bool(getattr(args, "recheck_fuzzy", False))
     charge_engine = bool(getattr(args, "charge_engine", False))
     qtaim_engine = bool(getattr(args, "qtaim_engine", False))
+    ddec6 = bool(getattr(args, "ddec6", False))
     native_convert = getattr(args, "native_convert", None)
 
     # parsl args
@@ -470,7 +484,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     # --engine_in_process in local mode runs the engines as threads of this process: load
     # their libraries and pin BLAS to one thread here, before parsl starts any thread
     # (core/charge_engine.py)
-    if type_runner == "local" and not engine_subprocess and (charge_engine or qtaim_engine):
+    if type_runner == "local" and not engine_subprocess and (charge_engine or qtaim_engine or ddec6):
         import scipy.stats  # noqa: F401  (cp_search.sphere_seeds imports it lazily)
         from qtaim_gen.source.core import cp_search, surface_engine  # noqa: F401
         from qtaim_gen.source.core.charge_engine import pin_blas_single_thread
@@ -523,6 +537,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         charge_engine=charge_engine,
         qtaim_engine=qtaim_engine,
         native_convert=native_convert,
+        ddec6=ddec6,
     )
 
     if not folders_run:
@@ -575,6 +590,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             qtaim_engine=qtaim_engine,
             engine_subprocess=engine_subprocess,
             native_convert=native_convert,
+            ddec6=ddec6,
         )
         for f in folders_run
     ]

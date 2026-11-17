@@ -1,0 +1,57 @@
+diff -ru a/module_gen_dens_grids_from_gaussian_basis_set_coeff.f08 b/module_gen_dens_grids_from_gaussian_basis_set_coeff.f08
+--- a/module_gen_dens_grids_from_gaussian_basis_set_coeff.f08	2026-11-04 00:15:28.510501232 -0500
++++ b/module_gen_dens_grids_from_gaussian_basis_set_coeff.f08	2026-11-04 00:19:41.136477780 -0500
+@@ -1028,7 +1028,7 @@
+        Apoints(delta_na_block + na + 1) = ka
+        IF ((ka < 1) .or. (ka > totnumA)) THEN
+          CYCLE
+-       ELSE IF ((gridspacing > 1) .and. (modulo(ka,gridspacing) /= (gridspacing - 1))) THEN
++       ELSE IF ((gridspacing > 1) .and. (modulo(ka,max(gridspacing,1)) /= (gridspacing - 1))) THEN
+          CYCLE
+        ELSE
+          min_na = min(min_na,na)
+@@ -1047,7 +1047,7 @@
+        Bpoints(delta_nb_block + nb + 1) = kb
+        IF ((kb < 1) .or. (kb > totnumB)) THEN
+          CYCLE
+-       ELSE IF ((gridspacing > 1) .and. (modulo(kb,gridspacing) /= (gridspacing - 1))) THEN
++       ELSE IF ((gridspacing > 1) .and. (modulo(kb,max(gridspacing,1)) /= (gridspacing - 1))) THEN
+          CYCLE
+        ELSE
+          min_nb = min(min_nb,nb)
+@@ -1066,7 +1066,7 @@
+        Cpoints(delta_nc_block + nc + 1) = kc
+        IF ((kc < 1) .or. (kc > totnumC)) THEN
+          CYCLE
+-       ELSE IF ((gridspacing > 1) .and. (modulo(kc,gridspacing) /= (gridspacing - 1))) THEN
++       ELSE IF ((gridspacing > 1) .and. (modulo(kc,max(gridspacing,1)) /= (gridspacing - 1))) THEN
+          CYCLE
+        ELSE
+          min_nc = min(min_nc,nc)
+@@ -1849,7 +1849,7 @@
+        Apoints(delta_na_block + na + 1) = ka
+        IF ((ka < 1) .or. (ka > totnumA)) THEN
+          CYCLE
+-       ELSE IF ((gridspacing > 1) .and. (modulo(ka,gridspacing) /= (gridspacing - 1))) THEN
++       ELSE IF ((gridspacing > 1) .and. (modulo(ka,max(gridspacing,1)) /= (gridspacing - 1))) THEN
+          CYCLE
+        ELSE
+          min_na = min(min_na,na)
+@@ -1868,7 +1868,7 @@
+        Bpoints(delta_nb_block + nb + 1) = kb
+        IF ((kb < 1) .or. (kb > totnumB)) THEN
+          CYCLE
+-       ELSE IF ((gridspacing > 1) .and. (modulo(kb,gridspacing) /= (gridspacing - 1))) THEN
++       ELSE IF ((gridspacing > 1) .and. (modulo(kb,max(gridspacing,1)) /= (gridspacing - 1))) THEN
+          CYCLE
+        ELSE
+          min_nb = min(min_nb,nb)
+@@ -1887,7 +1887,7 @@
+        Cpoints(delta_nc_block + nc + 1) = kc
+        IF ((kc < 1) .or. (kc > totnumC)) THEN
+          CYCLE
+-       ELSE IF ((gridspacing > 1) .and. (modulo(kc,gridspacing) /= (gridspacing - 1))) THEN
++       ELSE IF ((gridspacing > 1) .and. (modulo(kc,max(gridspacing,1)) /= (gridspacing - 1))) THEN
+          CYCLE
+        ELSE
+          min_nc = min(min_nc,nc)

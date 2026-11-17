@@ -93,6 +93,7 @@ of their own (converged MBIS as the default, 2026-10-15; planarity in the surfac
 | 4 | one ENGINE_VERSION and provenance.json; no routine values change. An ESP surface failure keeps ALIE and planarity, is retried once, then recorded as a permanent skip |
 | 5 | changes mbis, mbis_fuzzy_density, mbis_fuzzy_spin: MBIS selection objective over every atom, stalled check fits continue from their state, shell merging in the plain fallback, ties within 1e-8 relative go to a converged fit, fuzzy refit from the charge fit (mbis_converged.md) |
 | 6 | adds chelpg (full_set 1, charge engine): Multiwfn's fitting points, radii and constrained fit, exact ESP kernel. Engine trees at versions 2-5 run at full_set >= 1 rerun the charge engine on restart to add it |
+| 7 | adds ddec6 (opt-in `--ddec6`, a port of Chargemol 09_26_2017; molecules above 120 atoms skipped) |
 
 ## Cross-cutting requirements
 

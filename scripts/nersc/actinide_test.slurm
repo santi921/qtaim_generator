@@ -10,7 +10,8 @@
 # node, default 16), THREADS (per job, default 8), SRC (input root the list is under),
 # MULTIWFN and ORCA_2MKL (tool paths, defaults below), NATIVE_CONVERT (the runner's default is
 # fixed, core/wavefunction.py; multiwfn_h for parity checks; off runs Multiwfn's convert step,
-# needed to continue a tree Multiwfn converted, e.g. prod_l1).
+# needed to continue a tree Multiwfn converted, e.g. prod_l1), FLAGS (extra runner flags, e.g.
+# "--restart" on a copy of a finished tree).
 #SBATCH -A m3278
 #SBATCH -C cpu
 #SBATCH -q regular
@@ -51,6 +52,7 @@ EXTRA=""
 [ "${ENGINE:-0}" = "1" ] && EXTRA="--charge_engine"
 [ "${QTAIM_ENGINE:-0}" = "1" ] && EXTRA="$EXTRA --qtaim_engine"
 [ -n "${NATIVE_CONVERT:-}" ] && EXTRA="$EXTRA --native_convert $NATIVE_CONVERT"
+EXTRA="$EXTRA ${FLAGS:-}"
 
 python -c "import qtaim_gen, sys; print('qtaim_gen from', qtaim_gen.__file__); assert qtaim_gen.__file__.startswith('$CODE')"
 if [ "${ENGINE:-0}" = "1" ] || [ "${QTAIM_ENGINE:-0}" = "1" ]; then
