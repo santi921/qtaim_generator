@@ -192,12 +192,91 @@ def test_worker_reproduces_multiwfn_level2(tmp_path, name):
             assert eng[step][step][k] == pytest.approx(v, abs=CHARGE_TOL, rel=rel), (step, k)
 
 
+# Multiwfn prints Int(dg_pair) with 5 decimals and the Laplacian bond order with 6
+IBSI_INT_TOL = 5e-6 + 1e-9
+LBO_TOL = 5e-7 + 1e-9
+
+
+@pytest.mark.skipif(not HAS_NUMBA, reason="numba not installed")
+@pytest.mark.parametrize("name", _fixture_names())
+def test_bond_orders_reproduce_multiwfn(name):
+    """IBSI on the 75 x 434 grid against Multiwfn's IBSI grid option 4, compared on
+    Int(dg_pair) so the H2 reference value drops out, and the Laplacian bond order on
+    Multiwfn's 45 x 302 grid."""
+    import numpy as np
+
+    from qtaim_gen.source.core import charge_engine
+    from qtaim_gen.source.core.qtaim_engine import IBSI_REF
+
+    folder = os.path.join(FIXTURES, name)
+    with open(os.path.join(folder, "multiwfn_reference_bond.json")) as f:
+        ref = json.load(f)
+    wfx = charge_engine.read_wfx(os.path.join(folder, "orca.wfx"))
+    out = charge_engine.run(os.path.join(folder, "orca.wfx"), full_set=2, mbis_mode="multiwfn")
+    idx = {lab: i for i, lab in enumerate(charge_engine.atom_labels(wfx["atnums"]))}
+
+    assert set(out["ibsi_bond"]) == set(ref["ibsi_int_grid4"])
+    for k, v in ref["ibsi_int_grid4"].items():
+        a, b = (idx[s] for s in k.split("_to_"))
+        d = np.linalg.norm(wfx["coords"][a] - wfx["coords"][b]) * charge_engine.B2A
+        assert out["ibsi_bond"][k] * IBSI_REF * d ** 2 == pytest.approx(v, abs=IBSI_INT_TOL), k
+    assert set(out["laplacian_bond"]) == set(ref["laplacian_bond"])
+    for k, v in ref["laplacian_bond"].items():
+        assert out["laplacian_bond"][k] == pytest.approx(v, abs=LBO_TOL), k
+    assert out["_meta"]["ibsi"] == {"pairs": len(ref["ibsi_int_grid4"]), "reference": IBSI_REF}
+
+
+@pytest.mark.skipif(not HAS_NUMBA, reason="numba not installed")
+def test_ibsi_kernel_independent_of_threads():
+    """Fixed point blocks reduced in block order: 1 and 4 threads give the same bits."""
+    import numba
+    import numpy as np
+
+    from qtaim_gen.source.core import charge_engine as ce
+    from qtaim_gen.source.core import qtaim_engine as qe
+
+    wfx = ce.read_wfx(os.path.join(FIXTURES, "rmechdb_652_step10_0_2", "orca.wfx"))
+    basis = ce.prepare_basis(wfx)
+    coords = wfx["coords"]
+    pro, _ = ce.mwfn_proatom_tables(wfx["atnums"])
+    ptr, pj, _, _ = qe.ibsi_pairs(coords, ce.B2A)
+    pts0, wts = ce.multiwfn_atom_grid(75, 434, 10.0)
+    pts = pts0 + coords[1]
+    d = qe.density_derivatives(pts, wfx, basis, elf_only=True)
+    if numba.config.NUMBA_NUM_THREADS < 2:
+        pytest.skip("needs at least 2 numba threads")
+    old = numba.get_num_threads()
+    res = []
+    try:
+        for n in (1, min(4, numba.config.NUMBA_NUM_THREADS)):
+            numba.set_num_threads(n)
+            res.append(qe._ibsi_accumulate(pts, wts, d["rho"], d["gradient"], coords, *pro, ptr, pj))
+    finally:
+        numba.set_num_threads(old)
+    assert np.array_equal(res[0], res[1])
+    assert (res[0] > 0).all()
+
+
+def test_ibsi_pairs_cover_the_print_distance():
+    import numpy as np
+
+    from qtaim_gen.source.core.qtaim_engine import ibsi_pairs
+
+    # Angstrom positions with b2a = 1: pairs at exactly 3.5 are kept, 3.6 and beyond dropped
+    coords = np.array([[0.0, 0, 0], [1.0, 0, 0], [4.5, 0, 0], [0.0, 3.6, 0], [1.0, 3.5, 0]])
+    ptr, pj, pi, dist = ibsi_pairs(coords, 1.0)
+    assert list(zip(pi.tolist(), pj.tolist())) == [(0, 1), (1, 2), (1, 4), (3, 4)]
+    assert dist.tolist() == pytest.approx([1.0, 3.5, 3.5, np.sqrt(1.01)])
+    assert ptr.tolist() == [0, 1, 3, 3, 4, 4]
+
+
 def test_engine_routines_by_level():
     from qtaim_gen.source.core.omol import _engine_routines
 
-    deriv = {"grad_norm_rho_fuzzy", "laplacian_rho_fuzzy"}
+    deriv = {"grad_norm_rho_fuzzy", "laplacian_rho_fuzzy", "laplacian_bond"}
     assert "elf_fuzzy" not in _engine_routines(0, spin_tf=True)
-    assert "elf_fuzzy" in _engine_routines(1, spin_tf=False)
+    assert "ibsi_bond" not in _engine_routines(0, spin_tf=True)
+    assert {"elf_fuzzy", "ibsi_bond"} <= _engine_routines(1, spin_tf=False)
     assert not deriv & _engine_routines(1, spin_tf=True)
     assert deriv <= _engine_routines(2, spin_tf=False)
 
@@ -217,9 +296,12 @@ def test_derivative_fuzzy_skipped_without_edf(tmp_path):
     wfx.write_text(text[:start] + text[end:])
     out = charge_engine.run(str(wfx), full_set=2)
     assert "elf_fuzzy" in out
-    assert not {"grad_norm_rho_fuzzy", "laplacian_rho_fuzzy"} & set(out)
-    skipped = [s for s in out["_meta"]["skipped"] if s["schemes"] == "derivative fuzzy"]
-    assert skipped and skipped[0]["reason"] == "ecp_without_edf"
+    assert not {"grad_norm_rho_fuzzy", "laplacian_rho_fuzzy", "laplacian_bond", "ibsi_bond"} & set(out)
+    reasons = {s["schemes"]: s["reason"] for s in out["_meta"]["skipped"]}
+    assert reasons["derivative fuzzy"] == "ecp_without_edf"
+    assert reasons["laplacian bond order"] == "ecp_without_edf"
+    assert reasons["ibsi"] == "ecp_without_edf"
+    assert out["_meta"]["ibsi"] is None
 
 
 @pytest.mark.skipif(not HAS_NUMBA, reason="numba not installed")
@@ -241,8 +323,9 @@ def test_ecp_atom_without_edf_skips_even_when_others_have_one(monkeypatch):
     out = charge_engine.run(os.path.join(FIXTURES, "XeCl4_step2_0_1", "orca.wfx"), full_set=2)
     reasons = {s["schemes"]: s["reason"] for s in out["_meta"]["skipped"]}
     assert reasons == {"hirshfeld family": "ecp_without_edf", "mbis family": "ecp_without_edf",
-                       "derivative fuzzy": "ecp_without_edf"}
-    assert not {"hirshfeld", "mbis", "grad_norm_rho_fuzzy"} & set(out)
+                       "derivative fuzzy": "ecp_without_edf", "ibsi": "ecp_without_edf",
+                       "laplacian bond order": "ecp_without_edf"}
+    assert not {"hirshfeld", "mbis", "grad_norm_rho_fuzzy", "ibsi_bond", "laplacian_bond"} & set(out)
     assert "elf_fuzzy" in out and "becke" in out
 
 
@@ -297,14 +380,13 @@ class TestTimingValidation:
     def test_engine_timing_covers_level1_routines(self, tmp_path):
         from qtaim_gen.source.utils.validation import validate_timing_dict
 
-        # elf_fuzzy and chelpg come from the engine (versions 2 and 6; older versions in
-        # tests/test_engine_version.py)
-        timings = {**self.BASE, "charge_engine": 2.0, "surface_engine": 1.0, "ibsi_bond": 1.0}
-        path = self._write(tmp_path, timings)
-        assert validate_timing_dict(path, full_set=1, charge_engine=True)
-        # ibsi_bond still comes from Multiwfn
-        del timings["ibsi_bond"]
-        assert not validate_timing_dict(self._write(tmp_path, timings), full_set=1, charge_engine=True)
+        # elf_fuzzy, chelpg and ibsi_bond come from the engine (versions 2, 6 and 8; older
+        # versions in tests/test_engine_version.py)
+        timings = {**self.BASE, "charge_engine": 2.0, "surface_engine": 1.0}
+        assert validate_timing_dict(self._write(tmp_path, timings), full_set=1, charge_engine=True)
+        # a version-7 engine left ibsi_bond to Multiwfn; Multiwfn's timing does not make it current
+        timings["ibsi_bond"] = 1.0
+        assert not validate_timing_dict(self._write(tmp_path, timings, version=7), full_set=1, charge_engine=True)
 
     def test_engine_mode_rejects_multiwfn_only(self, tmp_path):
         path = self._write(tmp_path, {**self.BASE, **self.MWFN})

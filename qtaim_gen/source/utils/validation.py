@@ -431,13 +431,15 @@ def validate_timing_dict(
 def validate_bond_dict(
     bond_json_loc: str, verbose: bool = False, full_set: int = 0, logger: any = None,
     n_atoms: int = None,
+    skipped: Optional[set] = None,
 ):
     """
     Basic check that the bond json file has the expected structure.
     Check that it has the keys 'fuzzy_bond', 'ibsi_bond', and 'laplacian_bond'.
 
     For small molecules (n_atoms <= 2), missing bond keys are acceptable
-    since there may be no bonds to analyze.
+    since there may be no bonds to analyze. A permanently skipped routine
+    (skipped) is not expected.
     """
     bond_dict = _safe_json_load(bond_json_loc, logger=logger)
     if bond_dict is None:
@@ -449,6 +451,7 @@ def validate_bond_dict(
         expected_keys += ["ibsi_bond"]
     if full_set > 1:
         expected_keys += ["laplacian_bond"]
+    expected_keys = [k for k in expected_keys if k not in (skipped or ())]
 
     is_small_molecule = n_atoms is not None and n_atoms <= 2
 
@@ -1859,7 +1862,7 @@ def validation_checks(
         tf_cond = False
 
     if not validate_bond_dict(
-        bond_json_loc, verbose=verbose, full_set=full_set, logger=logger
+        bond_json_loc, verbose=verbose, full_set=full_set, logger=logger, n_atoms=n_atoms, skipped=skipped
     ):
         if logger:
             logger.error(f"Bond json validation failed in folder: {folder}")

@@ -303,6 +303,99 @@ def _delta_g_hirsh(pts, rho, grad, atcoords, atnums, radpos, table, npts_of, cut
     return out
 
 
+IBSI_REF = 0.566653  # IGMH IBSI of H2 at 0.74144 Angstrom on a perfect grid (MW/bondorder.f90:845)
+IBSI_PRINT_DIST = 3.5  # Angstrom: Multiwfn prints (and the engine computes) pairs up to this distance
+IBSI_ATOM_CUT2 = 64.0  # Bohr^2: calcatmpairdg ignores free atoms beyond 8 Bohr of the point (iapprox)
+IBSI_BLOCK = 256  # points per partial sum; fixed, so the result does not depend on threads
+
+
+def ibsi_pairs(coords, b2a):
+    """The pairs IBSI reports: i < j no farther apart than IBSI_PRINT_DIST, as CSR rows
+    (ptr over i, partner j) plus their distances in Angstrom. Each pair's integral is
+    independent of the others, so computing only these is exact."""
+    d = np.linalg.norm(coords[:, None, :] - coords[None, :, :], axis=-1) * b2a
+    i, j = np.nonzero(np.triu(d <= IBSI_PRINT_DIST, 1))
+    ptr = np.zeros(len(coords) + 1, dtype=np.int64)
+    np.add.at(ptr, i + 1, 1)
+    return np.cumsum(ptr), j.astype(np.int64), i, d[i, j]
+
+
+@njit(parallel=True, cache=True)
+def _ibsi_accumulate(pts, wt, rho, grad, atcoords, atnums, radpos, table, npts_of, cut_of, ptr, pj):
+    """Weighted IGMH atom-pair delta-g integrals (calcatmpairdg, MW/visweak.f90:1068-1152):
+    free-atom densities and gradients by proatmgrad(1), zero beyond atmrhocut and beyond
+    8 Bohr; g_A = w_A grad rho - (rho/rho0) grad rho_A + (rho rho_A / rho0^2) grad rho0;
+    dg_ij = |g_i| + |g_j| - |g_i + g_j|, times wt. An atom outside both cuts has g_A = 0
+    exactly, and then dg = 0, so only pairs of atoms near the point are visited."""
+    n = pts.shape[0]
+    nat = atcoords.shape[0]
+    nblk = (n + IBSI_BLOCK - 1) // IBSI_BLOCK
+    part = np.zeros((nblk, pj.shape[0]))
+    for b in numba.prange(nblk):
+        ra = np.zeros(nat)
+        ga = np.zeros((nat, 3))
+        g = np.zeros((nat, 3))
+        gn = np.zeros(nat)
+        near = np.empty(nat, dtype=np.int64)
+        isnear = np.zeros(nat, dtype=np.bool_)
+        for ip in range(b * IBSI_BLOCK, min(n, (b + 1) * IBSI_BLOCK)):
+            if wt[ip] == 0.0:
+                continue
+            nn = 0
+            pro = 0.0
+            pg0 = pg1 = pg2 = 0.0
+            for a in range(nat):
+                isnear[a] = False
+                z = atnums[a]
+                dx = pts[ip, 0] - atcoords[a, 0]
+                dy = pts[ip, 1] - atcoords[a, 1]
+                dz = pts[ip, 2] - atcoords[a, 2]
+                r2 = dx * dx + dy * dy + dz * dz
+                if r2 > IBSI_ATOM_CUT2 or r2 >= cut_of[z] * cut_of[z]:
+                    continue
+                r = np.sqrt(r2)
+                v, d1 = _lagintpol_d1(radpos, table[z], npts_of[z], r)
+                ra[a] = v
+                if r != 0.0:
+                    ga[a, 0] = d1 / r * dx
+                    ga[a, 1] = d1 / r * dy
+                    ga[a, 2] = d1 / r * dz
+                else:
+                    ga[a, 0] = ga[a, 1] = ga[a, 2] = 0.0
+                pro += v
+                pg0 += ga[a, 0]
+                pg1 += ga[a, 1]
+                pg2 += ga[a, 2]
+                near[nn] = a
+                nn += 1
+                isnear[a] = True
+            if pro == 0.0:
+                continue
+            f = rho[ip] / pro
+            for k in range(nn):
+                a = near[k]
+                w = ra[a] / pro
+                h = rho[ip] * ra[a] / (pro * pro)
+                g[a, 0] = w * grad[ip, 0] - f * ga[a, 0] + h * pg0
+                g[a, 1] = w * grad[ip, 1] - f * ga[a, 1] + h * pg1
+                g[a, 2] = w * grad[ip, 2] - f * ga[a, 2] + h * pg2
+                gn[a] = np.sqrt(g[a, 0] * g[a, 0] + g[a, 1] * g[a, 1] + g[a, 2] * g[a, 2])
+            for k in range(nn):
+                i = near[k]
+                for q in range(ptr[i], ptr[i + 1]):
+                    j = pj[q]
+                    if not isnear[j]:
+                        continue
+                    s0 = g[i, 0] + g[j, 0]
+                    s1 = g[i, 1] + g[j, 1]
+                    s2 = g[i, 2] + g[j, 2]
+                    part[b, q] += (gn[i] + gn[j] - np.sqrt(s0 * s0 + s1 * s1 + s2 * s2)) * wt[ip]
+    out = np.zeros(pj.shape[0])
+    for b in range(nblk):
+        out += part[b]
+    return out
+
+
 def delta_g_hirsh(pts, rho, grad, wfx):
     """delta_g_Hirsh at each point from rho and its gradient (MOs + EDF). NaN at
     every point when an element has no built-in radial density (the promolecule

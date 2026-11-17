@@ -708,3 +708,20 @@ class TestFortranOverflowEdgeCases4:
         assert np.isclose(dipole_info["cm5"]["xyz"][0], -862.57631, atol=0.01)
         assert math.isnan(dipole_info["cm5"]["xyz"][1])
         assert math.isnan(dipole_info["cm5"]["xyz"][2])
+
+
+def test_parse_bond_order_laplace_two_letter_elements(tmp_path):
+    """A two-letter symbol leaves no space before ")"; whitespace splitting used to
+    produce keys like '1_Ru)_to_):'."""
+    path = tmp_path / "laplacian_bond.out"
+    path.write_text(
+        " The bond orders >=  0.050000\n"
+        " #    1:    1(Ru)    2(C ):  1.041162\n"
+        " #    2:    2(C )    3(Cl):  0.500000\n"
+        " #    3:    1(Ru) 1024(Pt):  0.300000\n"
+        "\n"
+        " If outputting bond order matrix to bndmat.txt in current folder? (y/n)\n"
+    )
+    assert parse_bond_order_laplace(str(path)) == {
+        "1_Ru_to_2_C": 1.041162, "2_C_to_3_Cl": 0.5, "1_Ru_to_1024_Pt": 0.3,
+    }

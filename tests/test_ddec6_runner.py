@@ -11,7 +11,7 @@ import shutil
 import pytest
 
 from qtaim_gen.source.core import ddec6, omol
-from qtaim_gen.source.data.engine_versions import ENGINE_VERSION
+from qtaim_gen.source.data.engine_versions import ENGINE_VERSION, last_change
 from qtaim_gen.source.utils import provenance
 from qtaim_gen.source.utils.validation import validate_ddec6
 
@@ -60,7 +60,7 @@ def test_restart_recomputes_a_result_from_an_older_version(folder, monkeypatch):
     calls = []
     monkeypatch.setattr(ddec6, "analyze", lambda wfx, **kw: calls.append(wfx) or _fake_result())
     assert omol._run_ddec6(folder, n_threads=1, logger=LOG)
-    provenance.record_routines(folder, ["ddec6"], "ddec6", ENGINE_VERSION - 1)
+    provenance.record_routines(folder, ["ddec6"], "ddec6", last_change("ddec6") - 1)
     assert omol._run_ddec6(folder, n_threads=1, logger=LOG, restart=True)
     assert len(calls) == 2
     assert provenance.load(folder)["routines"]["ddec6"]["engine_version"] == ENGINE_VERSION
@@ -134,7 +134,7 @@ def test_merge_skips_a_result_provenance_does_not_vouch_for(folder):
     with open(os.path.join(folder, omol.DDEC6_JSON), "w") as f:
         json.dump(_fake_result(), f)
     omol._merge_ddec6(folder, move_results=True, logger=LOG)  # no provenance entry
-    provenance.record_routines(folder, ["ddec6"], "ddec6", ENGINE_VERSION - 1)
+    provenance.record_routines(folder, ["ddec6"], "ddec6", last_change("ddec6") - 1)
     omol._merge_ddec6(folder, move_results=True, logger=LOG)  # an older version
     with open(os.path.join(folder, "charge.json")) as f:
         assert "ddec6" not in json.load(f)

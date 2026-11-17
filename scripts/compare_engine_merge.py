@@ -63,8 +63,11 @@ GEOMETRY_TOL = {k: 1e-5 for k in ("mpp_full", "mpp_heavy", "sdp_full", "sdp_heav
 # other.json fields each surface-engine routine writes
 OTHER_FIELDS = {"other_alie": lambda k: k.startswith("ALIE_"), "other_geometry": lambda k: k in GEOMETRY_TOL,
                 "other_esp": lambda k: k.startswith("ESP_")}
+# ibsi_bond against a production tree differs by design: grid 30 x 110 there, 75 x 434 in the engine,
+# and the H2 reference value depends on the Multiwfn build (0.500791 in 2024-Oct-6, 0.566653 later)
+BOND = ("fuzzy_bond", "ibsi_bond", "laplacian_bond")
 FILE_OF = {**{s: "charge.json" for s in CHARGE}, **{s: "fuzzy_full.json" for s in FUZZY},
-           "fuzzy_bond": "bond.json"}
+           **{s: "bond.json" for s in BOND}}
 PERIODIC_TABLE = Chem.GetPeriodicTable()
 
 
@@ -253,6 +256,8 @@ def compare_job(orig, new):
         keys = set(o) & set(n)
         if step == "fuzzy_bond":
             rec["pair_set_changes"] += len(set(o) ^ set(n))
+        elif step in BOND:
+            rec.setdefault("bond_pair_set_changes", {})[step] = len(set(o) ^ set(n))
         rec["diffs"][step] = [abs(n[k] - o[k]) for k in keys if isinstance(o[k], (int, float))]
 
     def untouched(name, o, n):
@@ -327,7 +332,7 @@ def main():
 
     print("\nscheme | clean jobs | values | median_abs_diff | max_abs_diff | pass (median<=0.005, max<=0.03)"
           " | #28-affected jobs | their max_abs_diff")
-    for step in CHARGE + FUZZY + ("fuzzy_bond",):
+    for step in CHARGE + FUZZY + BOND:
         clean, bad = [], []
         for r in done.values():
             if not r["diffs"].get(step):
@@ -381,6 +386,9 @@ def main():
     changed = [(k, r["untouched_changed"]) for k, r in done.items() if r["untouched_changed"]]
     print(f"jobs missing an engine routine: {missing}")
     print(f"fuzzy_bond pairs on one side only (clean originals): {pairs}")
+    for step in BOND[1:]:
+        n_pairs = sum(r.get("bond_pair_set_changes", {}).get(step, 0) for r in done.values())
+        print(f"{step} pairs on one side only: {n_pairs}")
     print(f"jobs where non-engine data changed: {len(changed)}")
     by_entry = {}
     for job, r in done.items():

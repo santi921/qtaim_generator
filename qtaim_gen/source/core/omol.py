@@ -1740,7 +1740,7 @@ def _engine_outputs_present(folder: str, spin_tf: bool, full_set: int = 0) -> bo
     file_of = {
         "hirshfeld": "charge.json", "adch": "charge.json", "cm5": "charge.json",
         "becke": "charge.json", "vdd": "charge.json", "mbis": "charge.json", "chelpg": "charge.json",
-        "fuzzy_bond": "bond.json",
+        "fuzzy_bond": "bond.json", "ibsi_bond": "bond.json", "laplacian_bond": "bond.json",
     }
     try:
         with open(os.path.join(gen, "timings.json")) as f:
@@ -1757,7 +1757,10 @@ def _engine_outputs_present(folder: str, spin_tf: bool, full_set: int = 0) -> bo
         for name, keys in want.items():
             with open(os.path.join(gen, name)) as f:
                 data = json.load(f)
-            if not all(data.get(k) for k in keys):
+            # IBSI and LBO may have no pair to report (no pair within 3.5 Angstrom; no LBO above
+            # the threshold), so an empty entry of theirs is complete; an empty fuzzy_bond is not
+            if not all(isinstance(data.get(k), dict) if k in ("ibsi_bond", "laplacian_bond") else data.get(k)
+                       for k in keys):
                 return False
     except (OSError, json.JSONDecodeError, TypeError):
         return False
