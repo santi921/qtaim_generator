@@ -42,7 +42,13 @@ tiers 1-3), `mbis_converged.md` (MBIS).
   difference seen anywhere is 1.12e-6 e (ADC-Becke, LRC full_set 1). The ELF, gradient
   norm and Laplacian fuzzy integrals (full_set 1 and 2) match at print precision too, apart
   from Laplacian values on ECP heavy atoms, which agree to 2.3e-11 of their integrand scale
-  (on a cluster: ELF on 70 LRC tm_react jobs, gradient and Laplacian on 9).
+  (on a cluster: ELF on 70 LRC tm_react jobs, gradient and Laplacian on 9 and on 33 NERSC
+  actinide jobs).
+- **Bond orders** (ibsi_bond at full_set 1, laplacian_bond at full_set 2) reproduce
+  Multiwfn's pair sets everywhere and its printed values (IBSI on Int(dg_pair) to 5.0e-6,
+  LBO to 5.0e-7) on 99 local jobs and 40 NERSC actinides up to 211 atoms. IBSI runs on the
+  75 x 434 grid by design; against production's 30 x 110 that moves values by up to 3.0e-2
+  (2.96e-2 on 440 NERSC and 2.58e-2 on 200 LRC jobs through the full runner).
 - **QTAIM kernels** agree with gbasis to a median 7.5e-14 rel (rho) on 100
   wavefunctions; where they differ more, 80-bit evaluation sides with the engine. The CP
   search reproduces Multiwfn's CP sets exactly in its Multiwfn-compatible mode. In engine
@@ -72,7 +78,11 @@ LRC `ncref`/`ncfix` (27498703/27498704) hit the 12 h limit and were not continue
 trees `nc_ref_l1b`/`nc_fixed_l1b` replaced them so no tree mixes MBIS versions. The NERSC
 level 1/2 batches and the LRC `l1b` pair are done (rows in section 4b, 2026-11-12).
 
-No runs in progress (last checked 2026-11-14).
+The 2026-11-16 batch (NERSC 61414540/43/45/48, LRC `v8_l1`) is done; rows in sections 2
+and 6. The reruns of the 8 full_set 2 folders that hit the 4 h limit (61476672/73) were
+cancelled.
+
+No runs in progress (last checked 2026-11-17).
 
 ## 2. Charge engine (`core/charge_engine.py`)
 
@@ -105,6 +115,16 @@ laplacian_bond (full_set 2).
 | 2026-11-16 | Multiwfn parity (Multiwfn 3.8(dev) 2024-Oct-6, production settings.ini), local | 2 fixtures (rmechdb_652 open shell, XeCl4 ECP + EDF) | ibsi_bond against IBSI grid option 4 (75 x 434), compared on Int(dg_pair) (f8.5, independent of the H2 reference value): pair sets identical, within 4.5e-6; laplacian_bond (45 x 302): pair sets identical, within 3.9e-7 | feat/engine-ibsi-lbo | `tests/test_files/charge_engine/*/multiwfn_reference_bond.json` |
 | 2026-11-16 | same | 99 jobs: 87 wfx_pull (7 OMol verticals, 25 ECP) + 12 actinide nitrates (`chelpg/list99.txt`), 2-39 atoms | ibsi_bond: pair sets identical 99 of 99, Int(dg_pair) within 5.00e-6 (median of the per-job max 4.9e-6: print rounding); laplacian_bond: pair sets identical 99 of 99, within 5.00e-7. With the reference value of this build (0.500791) every printed IBSI is reproduced. Time, 16 threads, median per job: IBSI 0.046 s in the engine (shared pass) vs 0.85 s Multiwfn at 30 x 110 and 8.5 s at 75 x 434; LBO 1.73 s vs 2.25 s (totals 241 s vs 514 s) | feat/engine-ibsi-lbo | `data/engine_test_2026-11/ibsi_lbo/` (`refs/`, `cmp99.jsonl`, `compare.py`) |
 | 2026-11-16 | production grid (IBSI option 1, 30 x 110), divergence by design | same 99 | engine (75 x 434) vs production at the same reference value: up to 2.3e-2 absolute, relative up to 18% and median 4.1% over pairs with IBSI >= 0.05 (worst: omol UN3O11, a U nitrate). Changelog entry in README.md | feat/engine-ibsi-lbo | same |
+| 2026-11-16 | Multiwfn parity on the same orca.wfx, NERSC (Multiwfn 3.8(dev) 2025-Jun-26, H2 reference 0.566653), `campaign.py` | openac `sample_l2.txt`, 40 actinide jobs (X2C and def2, 16-211 atoms, median 73) | ibsi_bond: pair sets identical 40 of 40, Int(dg_pair) within 5.00e-6 of grid option 4 (print rounding); laplacian_bond: pair sets identical 40 of 40, within 5.00e-7. Grid vs production 30 x 110 at the same reference, relative over pairs with IBSI >= 0.05: per-job max median 9.9%, worst job 20.6%, per-job median 0.2%. Time, median per job: IBSI 2.0 s in the engine vs 40 s Multiwfn at 30 x 110 and 372 s at 75 x 434; LBO 22.7 s vs 96.5 s | 25ae633 | NERSC `actinide_test/ibsi_lbo_ref/`, summary in `logs/ibsilbo_61414548.out` |
+| 2026-11-16 | full runner from scratch, NERSC, full_set 1, charge + QTAIM engine (array 61414540) | openac 440-job sample: `v8_l1` against `chelpg_l1_v7` (version 7 restart) and `l1b_fixed` (f66f277: Multiwfn IBSI at 30 x 110, libreta chelpg) | 440 of 440 validated. Against `chelpg_l1_v7`: every scheme identical except ibsi_bond. Against `l1b_fixed`: ibsi_bond pair sets identical (216602 values), median 1.25e-4, max 2.96e-2 (the grid change; same reference value on this build); chelpg max 3.26e-2 e (libreta, as in the CHELPG cluster rows on feat/engine-chelpg); mbis 8.4e-5 e (version 5 selection); every other scheme, ALIE and planarity 0; QTAIM key sets identical 440 of 440. Time (provenance `timings_s` vs Multiwfn steps): IBSI 943 s total, median 2.0 s per job, vs 36290 s and 40.8 s (38.5x); chelpg 67712 s vs 191657 s (2.8x) | 25ae633 | NERSC `actinide_test/v8_l1_vs_l1b_fixed.{txt,json,tsv}`, `v8_l1_audit.txt`, `timing_breakdown.py` |
+| 2026-11-17 | full runner from scratch, LRC, full_set 1 (run by the user) | tm_react `jobs_ref.txt`, 200 jobs, 116 open shell: `v8_l1` against `nc_fixed_l1b` (f66f277) | 200 of 200 compared. ibsi_bond pair sets identical (84936 values), median 1.16e-4, max 2.58e-2; chelpg 4.52e-3 e and mbis 2.45e-4 e (mbis_fuzzy_density 1.52e-4), both as in the LRC CHELPG run; every other scheme, ALIE and planarity 0; no engine routine missing, no non-engine data changed. Per-routine time not pulled | 25ae633 | LRC `engine_test/reports/v8_l1_vs_nc_fixed_l1b.json` |
+| 2026-11-17 | full runner from scratch, NERSC, full_set 2: engine (`v8_l2`, 61414543) vs Multiwfn mode from the same checkout (`mw_l2`, 61414545) and vs `l2b_fixed` | openac `sample_l2.txt`, 40 jobs; 39 finished in `v8_l2`, 33 in `mw_l2` within 4 h (the rest stopped in Multiwfn's bader on the largest X2C systems; their reruns were cancelled) | Against `mw_l2` (33 jobs): laplacian_bond pair sets identical, within 5.00e-7; laplacian_rho_fuzzy within 8.85e-7, grad_norm_rho_fuzzy 6.19e-9, elf_fuzzy 5.00e-9, every other non-MBIS charge and fuzzy scheme within 6.1e-8 e, fuzzy_bond 5e-7; ibsi_bond 2.72e-2 (grid), chelpg 1.07e-2 e (libreta); ALIE and planarity at print precision. These are the first full_set 2 fuzzy integrals on cluster actinides. Against `l2b_fixed` (39 jobs): every engine scheme 0 except ibsi_bond and chelpg (as above); laplacian_bond within 5.0e-7 on shared pairs, 353 pairs on one side only because `l2b_fixed` was parsed by the old parser (101 keys containing ")" in 33 of 39 jobs, several pairs collapsed into each). Time against `mw_l2`: LBO 644 s vs 2902 s (4.5x), IBSI 32 s vs 1311 s, chelpg 2494 s vs 6596 s; every non-bader step 15362 s vs 53995 s (3.5x); bader is 86% of the engine tree's time (95463 s) | 25ae633 | NERSC `actinide_test/v8_l2_vs_{mw_l2,l2b_fixed}.{txt,json}` |
+
+`compare_engine_merge.py`'s speedup line puts the new tree's whole charge-engine time
+against only the Multiwfn steps the new engine replaced. Against a baseline that already ran
+an engine (`l1b_fixed`, `nc_fixed_l1b`) it is not a speedup (0.9x and 0.5x there); the rows
+above use the per-routine `timings_s` from provenance.json instead
+(`scripts/ibsi_lbo_reference/timing_breakdown.py`).
 
 `scripts/compare_engine_merge.py` takes the routines a tree's engine covers from its
 version stamp. From charge engine version 2 its Multiwfn baseline time
@@ -272,6 +292,7 @@ the engine copies.
 | 2026-07-28 | HORTON Hirshfeld vs Multiwfn hirshfeld | 87 wfx_pull (62 all-electron for Hirshfeld) | r = 0.9993, median 0.004 e over 1030 atoms | `data/cross_validation_wfns/horton_comparison.csv` |
 | 2026-07-28 | HORTON Becke with Multiwfn's radii vs raw Multiwfn Becke | 87 jobs | r = 0.994, median 0.005 e; the shipped `becke` is ADC-corrected, not raw | same |
 | 2026-07-27 | HORTON MBIS vs Multiwfn MBIS | 1 molecule (aniBB, 12 atoms) | max 0.0028 e | session scratchpad |
+| 2026-11-17 | Multiwfn bader, three runs of the same build (2025-Jun-26) on the same native wfx, 8 threads each | NERSC openac `l2b_fixed`, `mw_l2`, `v8_l2`, 33-39 actinide jobs per pair | not reproducible run to run: charges differ by up to 4.55e-3 e (50_C, AmC27H39 PBE0 X2C-TZVP), spin populations by up to 7.70e-3 (49_C, same job). Answers the open question in the 2026-11-04 LRC full_set 2 row | NERSC `actinide_test/v8_l2_vs_{mw_l2,l2b_fixed}.json` |
 | 2026-07-28 | critic2 vs Multiwfn QTAIM | 1438 shared BCPs | median difference 0, r = 1.0000 for rho, Laplacian, energy densities; ELF/LOL differ by convention (r about 0.98); BCP sets identical in 89% of jobs | `data/cross_validation_wfns/critic2_comparison*.csv` |
 
 ## 7. Gaps
@@ -284,13 +305,12 @@ Current behaviours without a validation on current code, and checks not yet done
 | NERSC ALIE 3.4e-5 rel | larger than every other ALIE comparison | rerun Multiwfn and the engine on a few openac jobs locally |
 | level-of-theory matrix | double hybrids, HF, Cartesian basis sets, ROKS beyond one radical, ORCA 5 vs ORCA 6 not covered | tier 3 supplementary set |
 | results recorded on older code | the 87-job, 18-reference and 16-reference local sets predate the threading fixes (#63-#65) and the converged MBIS default | rerun the local sets on current code; they take minutes |
-| full_set 2 routines | bader is still Multiwfn | when an engine exists |
-| ibsi_bond / laplacian_bond on a cluster and above 39 atoms | local only (99 jobs, 2-39 atoms); not yet run through the full runner | in the batched LRC / NERSC run with the other gaps |
+| full_set 2 routines | bader is still Multiwfn, and it is not reproducible run to run (up to 4.6e-3 e, section 6) | when an engine exists |
+| stored laplacian_bond from the old parser | keys of pairs with a two-letter element are garbled (101 in 33 of 39 NERSC `l2b_fixed` jobs) and several pairs collapse into one key | audit or regenerate laplacian_bond in every stored tree before it is used |
 | IBSI reference value between Multiwfn builds | 2024-Oct-6 prints 0.500791, 2025-Jun-26 and the 2026 sources 0.566653 (IBSI scales as its inverse, 13%); stored production IBSI mixes both by cluster | audit the build per tree from the out_files headers before IBSI is compared or released |
 | ESP surface vs Multiwfn's exact code | exact-code parity on 2 fixtures only; the libreta differences on 99 jobs are attributed, not shown | eleesp1 (iESPcode=1) references on more jobs; slow (about 25x libreta) |
-| chelpg engine on a cluster | local only (99 + 33 jobs, 2 fixtures); not yet run through the full runner or on cluster actinides | LRC `nc_fixed_l1b`-style tm_react run plus an NERSC openac `prod_l1` sample, in one batch |
 | ddec6 through the full runner on a cluster | the cluster runs called the port from `scripts/ddec6_reference/campaign.py`; `--ddec6` in the runner (sidecar, merge into charge.json, provenance, restart) is covered by unit tests only | `--ddec6 --restart` on a copy of a finished tree, e.g. LRC `nc_fixed_l1b` |
-| fuzzy ELF / gradient / Laplacian on cluster actinides | done on LRC tm_react (ELF 70 jobs, gradient and Laplacian 9 jobs); none on actinides on a cluster; the Laplacian ECP-core differences are read as roundoff, not proven | NERSC: a separate eval that includes these changes (not tracked here yet); 80-bit Laplacian on one Hf or Tl job |
+| fuzzy Laplacian on ECP cores | the ELF, gradient and Laplacian integrals now match on cluster actinides too (33 NERSC jobs, section 2); the Laplacian ECP-core differences are read as roundoff, not proven | 80-bit Laplacian on one Hf or Tl job |
 
 ## 8. Adding a row
 

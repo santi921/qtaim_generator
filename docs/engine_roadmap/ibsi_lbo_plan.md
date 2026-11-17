@@ -1,7 +1,7 @@
 # Engine: laplacian_bond and ibsi_bond
 
 Date: 2026-11-15, implemented 2026-11-16 on feat/engine-ibsi-lbo (off feat/engine-ddec6 c58d250), engine version 8.
-Status: done locally; cluster validation goes in the batched run (validation_ledger.md section 7).
+Status: done; validated locally and on LRC and NERSC (validation_ledger.md section 2, 2026-11-16 and 2026-11-17).
 Decisions D1-D5 below are README decisions 15-18 (D4, the base branch, is not repeated there). MW/ = ~/dev/Multiwfn_src/Multiwfn_3.8_src_Linux (its update date is 2026-Jan-7; IBSI code identical to 2026.10.1).
 Tags: [V] verified in code or a run, [I] inference, [E] estimate.
 
