@@ -243,6 +243,8 @@ def test_ibsi_kernel_independent_of_threads():
     pts0, wts = ce.multiwfn_atom_grid(75, 434, 10.0)
     pts = pts0 + coords[1]
     d = qe.density_derivatives(pts, wfx, basis, elf_only=True)
+    if numba.config.NUMBA_NUM_THREADS < 2:
+        pytest.skip("needs at least 2 numba threads")
     old = numba.get_num_threads()
     res = []
     try:

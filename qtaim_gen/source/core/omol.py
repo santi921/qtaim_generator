@@ -1772,9 +1772,10 @@ def _engine_outputs_present(folder: str, spin_tf: bool, full_set: int = 0) -> bo
         for name, keys in want.items():
             with open(os.path.join(gen, name)) as f:
                 data = json.load(f)
-            # a bond routine may have no pair to report (one atom; no LBO above threshold), so an
-            # empty bond entry is a complete one, as validate_bond_dict treats it
-            if not all(isinstance(data.get(k), dict) if name == "bond.json" else data.get(k) for k in keys):
+            # IBSI and LBO may have no pair to report (no pair within 3.5 Angstrom; no LBO above
+            # the threshold), so an empty entry of theirs is complete; an empty fuzzy_bond is not
+            if not all(isinstance(data.get(k), dict) if k in ("ibsi_bond", "laplacian_bond") else data.get(k)
+                       for k in keys):
                 return False
     except (OSError, json.JSONDecodeError, TypeError):
         return False

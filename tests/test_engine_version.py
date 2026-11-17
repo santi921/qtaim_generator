@@ -97,6 +97,17 @@ def test_restart_reruns_an_older_engine_only_where_it_left_routines_to_multiwfn(
     assert _engine_outputs_present(new, spin_tf=True, full_set=2)
 
 
+def test_restart_accepts_empty_ibsi_and_lbo_but_not_empty_fuzzy_bond(tmp_path):
+    from qtaim_gen.source.core.omol import _engine_outputs_present
+
+    folder = _engine_folder(tmp_path / "v", version=ENGINE_VERSION)
+    bond = tmp_path / "v" / "generator" / "bond.json"
+    bond.write_text(json.dumps({"fuzzy_bond": {"1_H_to_2_H": 1.0}, "ibsi_bond": {}, "laplacian_bond": {}}))
+    assert _engine_outputs_present(folder, spin_tf=True, full_set=2)
+    bond.write_text(json.dumps({"fuzzy_bond": {}, "ibsi_bond": {}, "laplacian_bond": {}}))
+    assert not _engine_outputs_present(folder, spin_tf=True, full_set=2)
+
+
 def test_restart_reruns_a_routine_a_later_version_changed(tmp_path, monkeypatch):
     from qtaim_gen.source.core.omol import _engine_outputs_present
     from qtaim_gen.source.data import engine_versions as ev

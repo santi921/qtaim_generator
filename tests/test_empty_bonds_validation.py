@@ -46,6 +46,18 @@ class TestValidateBondDictTwoAtom:
         assert validate_bond_dict(str(bond_file), n_atoms=1) is True
 
 
+def test_skipped_bond_routines_not_required(tmp_path):
+    """An engine that records ibsi_bond / laplacian_bond as permanently skipped (e.g. an ECP
+    atom without EDF) writes no key for them; the folder still validates."""
+    bond_file = tmp_path / "bond.json"
+    bond_file.write_text('{"fuzzy_bond": {"1_C_to_2_O": 1.9}}')
+    assert validate_bond_dict(str(bond_file), full_set=2, n_atoms=5) is False
+    assert validate_bond_dict(str(bond_file), full_set=2, n_atoms=5, skipped={"ibsi_bond"}) is False
+    assert validate_bond_dict(str(bond_file), full_set=2, n_atoms=5,
+                              skipped={"ibsi_bond", "laplacian_bond"}) is True
+    assert validate_bond_dict(str(bond_file), full_set=1, n_atoms=5, skipped={"ibsi_bond"}) is True
+
+
 class TestValidateTimingDictTwoAtom:
     """validate_timing_dict with n_atoms parameter for small molecules."""
 
