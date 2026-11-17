@@ -15,7 +15,8 @@
 #   sbatch -J ddec6 --export=ALL,CODE=$CODE,DDEC6_WORK=$DDEC6_WORK,LIST=$DDEC6_WORK/ddec6_sample.txt --array=0-17 lrc_ddec6.slurm
 #
 # Optional: N (lines per task, default 5), CONDA_ENV (default qtaim_engine), SRC, CHARGEMOL,
-# DENSITIES, ORCA_2MKL, SKIP_CHARGEMOL=1 (port timings only), DDEC6_WORK (campaign
+# DENSITIES, ORCA_2MKL, SKIP_CHARGEMOL=1 (port timings only), REUSE_CHARGEMOL=1 (compare
+# against the ddec6_chargemol.json an earlier run left in $DDEC6_WORK/work), DDEC6_WORK (campaign
 # directory; not WORK, which ~/.bashrc may export and this script sources).
 
 case "${SLURM_JOB_ACCOUNT:-}" in *blau*) echo "refusing to run on a blau account (${SLURM_JOB_ACCOUNT})"; exit 1 ;; esac
@@ -44,6 +45,7 @@ LIST=${LIST:?LIST is required}
 ID=${SLURM_ARRAY_TASK_ID}
 EXTRA=""
 [ "${SKIP_CHARGEMOL:-0}" = "1" ] && EXTRA="--skip_chargemol"
+[ "${REUSE_CHARGEMOL:-0}" = "1" ] && EXTRA="--reuse_chargemol"
 
 python -c "import qtaim_gen; assert qtaim_gen.__file__.startswith('$CODE'), qtaim_gen.__file__"
 echo "branch: $(git -C $CODE rev-parse --abbrev-ref HEAD) $(git -C $CODE rev-parse --short HEAD)"
