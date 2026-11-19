@@ -2385,8 +2385,412 @@ def spin_moments(state):
             break
         omega[...] = 0.0
         _spin_omega(partial, total, tpseudo, spin, sad, saas, xi, *args, omega)
+    # the bond orders read the last iteration's shell averages and point counts: Chargemol
+    # keeps spherical_average_atomic_spin, and this iterator overwrites the global sum_points
     state.update(spin_moment=spin_pop, spin_iterations=n_iter, spin_converged=converged,
-                 total_spin_moment=_seq_sum(spin_pop))
+                 total_spin_moment=_seq_sum(spin_pop), spherical_average_atomic_spin=saas, spin_sum_points=pts)
+    return state
+
+
+# ---------------------------------------------------------------------------------
+# P7: bond orders, overlap populations, radial moments (module_perform_bond_order_analysis
+# and the modules it calls, module_compute_atomic_radial_moments)
+# ---------------------------------------------------------------------------------
+
+BO_PRINT_CUTOFF = 0.001
+BO_PREP_MAX_PASSES = 40
+SCALEFACTOR_CUBED = SCALEFACTOR * SCALEFACTOR * SCALEFACTOR  # equals the compile-time scalefactor**3
+
+
+@numba.njit(cache=True, error_model="numpy")
+def _bo_rescale_nuclei(ctd, csad, sum_points, vpop, core_e, nabc, pv, na_corr):
+    """prepare_BO_density_grids, first half of a pass: per atom (in order, as atoms could
+    share points), scale the 5x5x5 points around the nucleus so the shell-averaged density
+    integrates to the DDEC6 population."""
+    na_t, nb_t, nc_t = ctd.shape
+    for j in range(nabc.shape[0]):
+        integrated = 0.0
+        for k in range(NSHELLS):
+            integrated = integrated + csad[k, j] * sum_points[k, j] * pv
+        na_corr[j] = vpop[j] + core_e[j] - integrated
+        sum_cubes = 0.0
+        max_density = 0.0
+        for nc in range(-2, 3):
+            kc = nc + nabc[j, 2] + 1
+            if kc < 1 or kc > nc_t:
+                continue
+            for nb in range(-2, 3):
+                kb = nb + nabc[j, 1] + 1
+                if kb < 1 or kb > nb_t:
+                    continue
+                for na in range(-2, 3):
+                    ka = na + nabc[j, 0] + 1
+                    if ka < 1 or ka > na_t:
+                        continue
+                    v = ctd[ka - 1, kb - 1, kc - 1]
+                    sum_cubes = sum_cubes + v * v * v
+                    max_density = max(max_density, v)
+        k_factor = na_corr[j] / (sum_cubes * pv)
+        if max_density > ZERO_TOLERANCE:
+            k_factor = min(k_factor, 0.25 / (max_density * max_density))
+        for nc in range(-2, 3):
+            kc = nc + nabc[j, 2] + 1
+            if kc < 1 or kc > nc_t:
+                continue
+            for nb in range(-2, 3):
+                kb = nb + nabc[j, 1] + 1
+                if kb < 1 or kb > nb_t:
+                    continue
+                for na in range(-2, 3):
+                    ka = na + nabc[j, 0] + 1
+                    if ka < 1 or ka > na_t:
+                        continue
+                    v = ctd[ka - 1, kb - 1, kc - 1]
+                    if v > ZERO_TOLERANCE:
+                        ctd[ka - 1, kb - 1, kc - 1] = v / math.sqrt(1.0 - 2.0 * k_factor * (v * v))
+
+
+@numba.njit(parallel=True, cache=True, error_model="numpy")
+def _bo_shell_sums(ctd, partial, tpseudo, nabc, shift, boundary, lo, hi):
+    """prepare_BO_density_grids, second half of a pass: each atom's share of the corrected
+    density by shell, and the point counts."""
+    natoms = nabc.shape[0]
+    sd = np.zeros((NSHELLS, natoms))
+    pts = np.zeros((NSHELLS, natoms), dtype=np.int64)
+    for j in numba.prange(natoms):
+        for nc in range(lo[j, 2], hi[j, 2] + 1):
+            kc = nc + nabc[j, 2] + 1
+            for nb in range(lo[j, 1], hi[j, 1] + 1):
+                kb = nb + nabc[j, 1] + 1
+                for na in range(lo[j, 0], hi[j, 0] + 1):
+                    ka = na + nabc[j, 0] + 1
+                    s = _shell(na, nb, nc, j, boundary, shift)
+                    tp = tpseudo[ka - 1, kb - 1, kc - 1]
+                    if s <= NSHELLS and tp > ZERO_TOLERANCE:
+                        sd[s - 1, j] = sd[s - 1, j] + ctd[ka - 1, kb - 1, kc - 1] * partial[s - 1, j] / tp
+                        pts[s - 1, j] = pts[s - 1, j] + 1
+    return sd, pts
+
+
+@numba.njit(parallel=True, cache=True)
+def _bo_min_density(tl0, nabc, shift, boundary, lo, hi):
+    """compute_local_atomic_exchange_vectors: per atom and shell, the smallest summed
+    exchange-vector density component."""
+    natoms = nabc.shape[0]
+    md = np.full((NSHELLS, natoms), 1000000000.0)
+    for j in numba.prange(natoms):
+        for nc in range(lo[j, 2], hi[j, 2] + 1):
+            kc = nc + nabc[j, 2] + 1
+            for nb in range(lo[j, 1], hi[j, 1] + 1):
+                kb = nb + nabc[j, 1] + 1
+                for na in range(lo[j, 0], hi[j, 0] + 1):
+                    ka = na + nabc[j, 0] + 1
+                    s = _shell(na, nb, nc, j, boundary, shift)
+                    if s <= NSHELLS:
+                        md[s - 1, j] = min(md[s - 1, j], tl0[ka - 1, kb - 1, kc - 1])
+    return md
+
+
+@numba.njit(parallel=True, cache=True, error_model="numpy")
+def _bo_contact_exchange(ctd, dot, tl0, tl1, loc, ncomp, pv, nabc, shift, boundary, lo, hi):
+    """compute_summed_contact_exchange: per atom, the integrated exchange with all other
+    atoms."""
+    natoms = nabc.shape[0]
+    sce = np.zeros(natoms)
+    for j in numba.prange(natoms):
+        acc = 0.0
+        for nc in range(lo[j, 2], hi[j, 2] + 1):
+            kc = nc + nabc[j, 2] + 1
+            for nb in range(lo[j, 1], hi[j, 1] + 1):
+                kb = nb + nabc[j, 1] + 1
+                for na in range(lo[j, 0], hi[j, 0] + 1):
+                    ka = na + nabc[j, 0] + 1
+                    s = _shell(na, nb, nc, j, boundary, shift)
+                    d = dot[ka - 1, kb - 1, kc - 1]
+                    if s <= NSHELLS and d > ZERO_TOLERANCE * ZERO_TOLERANCE:
+                        t = 0.0
+                        t = t + loc[0, s - 1, j] * (tl0[ka - 1, kb - 1, kc - 1] - loc[0, s - 1, j])
+                        if ncomp == 2:
+                            t = t + loc[1, s - 1, j] * (tl1[ka - 1, kb - 1, kc - 1] - loc[1, s - 1, j])
+                        acc = acc + 2.0 * pv * ctd[ka - 1, kb - 1, kc - 1] * t / d
+        sce[j] = acc
+    return sce
+
+
+@numba.njit(cache=True)
+def _bo_overlap_significant(i, j, distance, na_out, min_density, csad):
+    """determine_whether_pair_overlap_is_significant: an upper bound from the populations
+    outside each shell, then an overlap estimate. Chargemol takes the square roots of the
+    estimate's integer shell distances in single precision (real())."""
+    sos = int(math.ceil(SCALEFACTOR * distance + ZERO_TOLERANCE))
+    upper = 1.0
+    for k in range(1, sos):
+        if k > NSHELLS or sos - k > NSHELLS:
+            continue
+        upper = min(upper, 2.0 * (na_out[k - 1, i] + na_out[sos - k - 1, j]))
+    if upper < BO_PRINT_CUTOFF:
+        return False
+    est = 0.0
+    if sos <= 2 * NSHELLS:
+        for x in range(sos - NSHELLS, NSHELLS + 1):
+            m = max(x * x, (sos - x) * (sos - x))
+            hmax = int(math.ceil(np.sqrt(np.float32(NSHELLS * NSHELLS - m))))
+            for h in range(0, hmax + 1):
+                ii = nint(np.float64(np.sqrt(np.float32(x * x + h * h)))) + 1
+                ij = nint(np.float64(np.sqrt(np.float32((sos - x) * (sos - x) + h * h)))) + 1
+                if ii <= NSHELLS and ij <= NSHELLS:
+                    t1 = max(min_density[ii - 1, i], min_density[ij - 1, j])
+                    t1 = max(t1, csad[ii - 1, i] + csad[ij - 1, j])
+                    if t1 > ZERO_TOLERANCE:
+                        est = est + 4.0 * PI * h * csad[ii - 1, i] * csad[ij - 1, j] / (t1 * SCALEFACTOR_CUBED)
+    return est > 0.5 * BO_PRINT_CUTOFF
+
+
+@numba.njit(cache=True)
+def _bo_pairs(coords, nabc, delta, na_out, min_density, csad):
+    """initialize_bond_pair_matrix (nonperiodic): atom pairs i < j within twice the 500 pm
+    cutoff whose overlap is significant, each with its shared parallelepiped. Rows hold
+    Chargemol's columns 1-11: atoms (1-based), translations (0) and min/max na, nb, nc."""
+    natoms = coords.shape[0]
+    cutoff = 2.0 * CUTOFF_RADIUS * BOHRPERANGSTROM / 100.0
+    rows = np.zeros((max(natoms * (natoms - 1) // 2, 1), 11))
+    n = 0
+    for i in range(natoms):
+        for j in range(i + 1, natoms):
+            dx = coords[i, 0] - coords[j, 0]
+            dy = coords[i, 1] - coords[j, 1]
+            dz = coords[i, 2] - coords[j, 2]
+            distance = math.sqrt(dx * dx + dy * dy + dz * dz)
+            if distance > cutoff:
+                continue
+            if not _bo_overlap_significant(i, j, distance, na_out, min_density, csad):
+                continue
+            r = (0.5 * distance * 100.0) / (BOHRPERANGSTROM * CUTOFF_RADIUS)
+            mult = math.sqrt(1.0 - r * r)
+            rows[n, 0] = i + 1
+            rows[n, 1] = j + 1
+            for a in range(3):
+                mid = (nabc[i, a] + nabc[j, a]) * 0.5
+                lo = float(-delta[a] + max(nabc[i, a], nabc[j, a]))
+                rows[n, 5 + 2 * a] = max(lo, nint(-(delta[a] * mult) + mid) - 2.0)
+                hi = float(delta[a] + min(nabc[i, a], nabc[j, a]))
+                rows[n, 6 + 2 * a] = min(hi, nint(delta[a] * mult + mid) + 2.0)
+            n += 1
+    return rows[:n]
+
+
+@numba.njit(parallel=True, cache=True, error_model="numpy")
+def _bo_integrate(rows, ctd, dot, tl0, loc, ncomp, partial, tpseudo, boundary, origin, coords, pv):
+    """integrate_bonding_terms: per pair over its parallelepiped, Chargemol's columns 12
+    (contact exchange), 13 (spin term), 14 (overlap population) and 15 (second-order
+    exchange propensity), each floored at 0. One pair per task, points in Chargemol's
+    order (nc, nb, na), so each pair sums in the serial order."""
+    npairs = rows.shape[0]
+    out = np.zeros((npairs, 4))
+    na_t, nb_t, nc_t = ctd.shape
+    for p in numba.prange(npairs):
+        i = int(rows[p, 0]) - 1
+        j = int(rows[p, 1]) - 1
+        a12 = 0.0
+        a13 = 0.0
+        a14 = 0.0
+        a15 = 0.0
+        for nc in range(nint(rows[p, 9]), nint(rows[p, 10]) + 1):
+            kc = nc + 1
+            if kc < 1 or kc > nc_t:
+                continue
+            for nb in range(nint(rows[p, 7]), nint(rows[p, 8]) + 1):
+                kb = nb + 1
+                if kb < 1 or kb > nb_t:
+                    continue
+                for na in range(nint(rows[p, 5]), nint(rows[p, 6]) + 1):
+                    ka = na + 1
+                    if ka < 1 or ka > na_t:
+                        continue
+                    d = dot[ka - 1, kb - 1, kc - 1]
+                    if d <= ZERO_TOLERANCE * ZERO_TOLERANCE:
+                        continue
+                    gx = na * boundary[0, 0] + nb * boundary[1, 0] + nc * boundary[2, 0] + origin[0]
+                    gy = na * boundary[0, 1] + nb * boundary[1, 1] + nc * boundary[2, 1] + origin[1]
+                    gz = na * boundary[0, 2] + nb * boundary[1, 2] + nc * boundary[2, 2] + origin[2]
+                    ex = gx - coords[i, 0]
+                    ey = gy - coords[i, 1]
+                    ez = gz - coords[i, 2]
+                    si = int(math.ceil(SCALEFACTOR * math.sqrt(ex * ex + ey * ey + ez * ez) + ZERO_TOLERANCE))
+                    if si > NSHELLS:
+                        continue
+                    ex = gx - coords[j, 0]
+                    ey = gy - coords[j, 1]
+                    ez = gz - coords[j, 2]
+                    sj = int(math.ceil(SCALEFACTOR * math.sqrt(ex * ex + ey * ey + ez * ez) + ZERO_TOLERANCE))
+                    if sj > NSHELLS:
+                        continue
+                    t1 = 2.0 * pv * ctd[ka - 1, kb - 1, kc - 1]
+                    t2 = 0.0
+                    for comp in range(ncomp):
+                        t2 = t2 + loc[comp, si - 1, i] * loc[comp, sj - 1, j]
+                    t0 = tl0[ka - 1, kb - 1, kc - 1]
+                    tp = tpseudo[ka - 1, kb - 1, kc - 1]
+                    a12 = a12 + t1 * t2 / d
+                    a13 = a13 + t1 * t2 / (t0 * t0)
+                    a14 = a14 + t1 * partial[si - 1, i] * partial[sj - 1, j] / (tp * tp)
+                    q = t2 / d
+                    a15 = a15 + (10.0 / 3.0) * t1 * (q * q)
+        out[p, 0] = max(a12, 0.0)
+        out[p, 1] = max(a13, 0.0)
+        out[p, 2] = max(a14, 0.0)
+        out[p, 3] = max(a15, 0.0)
+    return out
+
+
+def _final_bond_orders(rows, terms, sce, atom_z, net_charge):
+    """calculate_final_BOs: the coordination (tanh) and pairwise terms, the expansion, and
+    the atom self-exchange constraint. Returns columns 12-20 per pair, the SBOs, Chargemol's
+    summed contact exchange consistency error, and how many bond orders the constraint
+    changed by more than 0.1 x the print cutoff."""
+    natoms = len(sce)
+    npairs = rows.shape[0]
+    c = np.zeros((npairs, 9))  # columns 12-20
+    c[:, 0:4] = terms
+    check = np.zeros(natoms)
+    ssq = np.zeros(natoms)
+    pij = [(int(rows[p, 0]) - 1, int(rows[p, 1]) - 1) for p in range(npairs)]
+    for p, (i, j) in enumerate(pij):
+        c12 = float(c[p, 0])
+        check[i] = check[i] + c12
+        check[j] = check[j] + c12
+        ssq[i] = ssq[i] + c12 * c12
+        ssq[j] = ssq[j] + c12 * c12
+    error = float(np.max(np.abs(check - sce))) if natoms else 0.0
+    bss = np.zeros(natoms)
+    for p, (i, j) in enumerate(pij):
+        if ssq[i] > ZERO_TOLERANCE and ssq[j] > ZERO_TOLERANCE:
+            c12, c15 = float(c[p, 0]), float(c[p, 3])
+            th = math.tanh((float(sce[i]) * float(sce[i]) / float(ssq[i])
+                            + float(sce[j]) * float(sce[j]) / float(ssq[j]) - 2.0) / 26.0)
+            c[p, 4] = 1.0 - th * th
+            c[p, 5] = c15 + c12 * c12 / 6.0
+            c[p, 6] = c[p, 4] * min(c[p, 5], c12)
+            c[p, 7] = c12 + c[p, 6]
+            bss[i] = bss[i] + c[p, 6]
+            bss[j] = bss[j] + c[p, 6]
+    corr = np.zeros(natoms)
+    changed = 0
+    for p, (i, j) in enumerate(pij):
+        if bss[i] > ZERO_TOLERANCE and bss[j] > ZERO_TOLERANCE:
+            c12 = float(c[p, 0])
+            c[p, 8] = c12 + c[p, 6] * min(1.0, (float(atom_z[i]) - float(net_charge[i]) - 0.5 * float(sce[i])) / bss[i],
+                                          (float(atom_z[j]) - float(net_charge[j]) - 0.5 * float(sce[j])) / bss[j])
+            corr[i] = corr[i] + c[p, 8] - c12
+            corr[j] = corr[j] + c[p, 8] - c12
+        if c[p, 7] - c[p, 8] > 0.1 * BO_PRINT_CUTOFF:
+            changed += 1
+    return c, sce + corr, error, changed
+
+
+@numba.njit(parallel=True, cache=True, error_model="numpy")
+def _radial_moments(ctd, partial, tpseudo, pv, nabc, shift, boundary, lo, hi):
+    """compute_atomic_radial_moments: r^2, r^3 and r^4 of each atom's share of the
+    corrected density (Bohr^n). Chargemol loops na outermost here, unlike its other
+    per-atom loops; the order is kept."""
+    natoms = nabc.shape[0]
+    out = np.zeros((natoms, 3))
+    for j in numba.prange(natoms):
+        r2 = 0.0
+        r3 = 0.0
+        r4 = 0.0
+        for na in range(lo[j, 0], hi[j, 0] + 1):
+            ka = na + nabc[j, 0] + 1
+            for nb in range(lo[j, 1], hi[j, 1] + 1):
+                kb = nb + nabc[j, 1] + 1
+                for nc in range(lo[j, 2], hi[j, 2] + 1):
+                    kc = nc + nabc[j, 2] + 1
+                    v0 = na * boundary[0, 0] + nb * boundary[1, 0] + nc * boundary[2, 0] - shift[j, 0]
+                    v1 = na * boundary[0, 1] + nb * boundary[1, 1] + nc * boundary[2, 1] - shift[j, 1]
+                    v2 = na * boundary[0, 2] + nb * boundary[1, 2] + nc * boundary[2, 2] - shift[j, 2]
+                    d = math.sqrt(v0 * v0 + v1 * v1 + v2 * v2)
+                    s = int(math.ceil(SCALEFACTOR * d + ZERO_TOLERANCE))
+                    tp = tpseudo[ka - 1, kb - 1, kc - 1]
+                    if s <= NSHELLS and tp > ZERO_TOLERANCE:
+                        t = partial[s - 1, j] * pv * ctd[ka - 1, kb - 1, kc - 1] / tp
+                        d2 = d * d
+                        r2 = r2 + d2 * t
+                        r3 = r3 + d2 * d * t
+                        r4 = r4 + d2 * d2 * t
+        out[j, 0] = r2
+        out[j, 1] = r3
+        out[j, 2] = r4
+    return out
+
+
+def bond_orders(state):
+    """perform_bond_order_analysis + compute_atomic_radial_moments: DDEC6 bond orders
+    (column 20 of Chargemol's bond pair matrix), overlap populations (column 14), the sum
+    of bond orders per atom (SBO) and the r^2, r^3, r^4 radial moments. Runs after the
+    spin iterator, as in Chargemol, and replaces total_density by Chargemol's
+    corrected_total_density. The valence, core, core pseudo- and spin density grids are
+    dropped from state first (Chargemol has freed them by this point), so this step's
+    grids stay within the peak estimate_peak_bytes assumes. With no significant pair
+    Chargemol stops before calculate_final_BOs; the SBOs are then 0 here and the radial
+    moments still run."""
+    g = state["geom"]
+    args = (g["nabc"], g["shift"], g["boundary"], g["lo"], g["hi"])
+    pv = g["pixelvolume"]
+    spin = state["spin_available"]
+    partial, tpseudo = state["partial_density"], state["total_pseudodensity"]
+    natoms = partial.shape[1]
+    for k in ("valence_density", "core_density", "core_pseudodensity", "spin_density"):
+        state.pop(k, None)
+    ctd = state.pop("total_density")
+    csad = state["spherical_average_density"].copy()
+    sum_points = state["spin_sum_points"] if spin else state["sum_points"]
+    vpop, core_e = state["valence_population"], state["core_electrons"]
+    na_corr = np.zeros(natoms)
+    passes = 0
+    for passes in range(1, BO_PREP_MAX_PASSES + 1):
+        _bo_rescale_nuclei(ctd, csad, sum_points, vpop, core_e, g["nabc"], pv, na_corr)
+        sd, sum_points = _bo_shell_sums(ctd, partial, tpseudo, *args)
+        csad = _shell_average(sd, sum_points)
+        if _seq_sum(np.abs(na_corr)) < CHARGE_CONVERGENCE_TOLERANCE:
+            break
+    state["corrected_total_density"] = ctd
+
+    ncomp = 2 if spin else 1
+    loc = np.zeros((ncomp, NSHELLS, natoms))
+    loc[0] = csad
+    if spin:
+        loc[1] = state["spherical_average_atomic_spin"]
+    everyone = np.ones(natoms, dtype=np.bool_)
+    tl0 = np.zeros(ctd.shape, order="F")
+    _pseudo(tl0, np.ascontiguousarray(loc[0]), 1, everyone, *args)
+    min_density = _bo_min_density(tl0, *args)
+    dot = tl0 * tl0
+    if spin:
+        tl1 = np.zeros(ctd.shape, order="F")
+        _pseudo(tl1, np.ascontiguousarray(loc[1]), 1, everyone, *args)
+        dot = dot + tl1 * tl1
+    else:
+        tl1 = tl0
+
+    na_out = np.zeros((NSHELLS, natoms))
+    for j in range(natoms):
+        na_out[NSHELLS - 1, j] = csad[NSHELLS - 1, j] * sum_points[NSHELLS - 1, j] * pv
+        for k in range(NSHELLS - 2, -1, -1):
+            na_out[k, j] = na_out[k + 1, j] + csad[k, j] * sum_points[k, j] * pv
+    coords = np.asarray(state["atom_xyz_aligned"], dtype=np.float64)
+    rows = _bo_pairs(coords, g["nabc"], np.asarray(g["delta"], dtype=np.int64), na_out, min_density, csad)
+    if rows.shape[0]:
+        sce = _bo_contact_exchange(ctd, dot, tl0, tl1, loc, ncomp, pv, *args)
+        terms = _bo_integrate(rows, ctd, dot, tl0, loc, ncomp, partial, tpseudo, g["boundary"],
+                              np.asarray(g["origin"], dtype=np.float64), coords, pv)
+        cols, sbo, error, changed = _final_bond_orders(rows, terms, sce, state["atom_z"], state["net_atomic_charge"])
+    else:
+        cols, sbo, error, changed = np.zeros((0, 9)), np.zeros(natoms), 0.0, 0
+    del tl0, tl1, dot
+    radial = _radial_moments(ctd, partial, tpseudo, pv, *args)
+    state.update(bond_pairs=rows[:, :2].astype(np.int64), bond_pair_terms=cols, bond_order=cols[:, 8],
+                 overlap_population=cols[:, 2], sbo=sbo, radial_moments=radial, bo_prep_passes=passes,
+                 summed_contact_exchange_error=error, bo_constraint_changed=changed)
     return state
 
 
@@ -2433,7 +2837,8 @@ def memory_limit_bytes():
 
 def run(wfx, parallel=True, logger=None):
     """DDEC6 analysis of one wfx (a path, or a read_wfx dict): net atomic charges, atomic
-    multipoles, cloud penetration fits and (open shell) atomic spin moments.
+    multipoles, cloud penetration fits, (open shell) atomic spin moments, bond orders,
+    overlap populations and radial moments.
     state["stage_s"] holds the wall time of each stage (numba compilation included on a
     cold cache), state["est_peak_gb"] the memory estimate logged before the grids."""
     stage_s = {}
@@ -2471,12 +2876,17 @@ def run(wfx, parallel=True, logger=None):
     rsv = radial_shell_volume()
     neutral = np.column_stack([oxidation_density(int(z), 0, rsv) for z in prep["atom_z"]])
     state = {"geom": {"nabc": grids["center_nabc"], "shift": grids["center_shift"], "boundary": grid["boundary"],
-                      "lo": grids["shell_lo"], "hi": grids["shell_hi"], "pixelvolume": grid["pixelvolume"]},
+                      "lo": grids["shell_lo"], "hi": grids["shell_hi"], "pixelvolume": grid["pixelvolume"],
+                      "origin": grid["origin"], "delta": grid["delta"]},
              "atom_z": np.asarray(prep["atom_z"], dtype=np.int64), "core_electrons": core_e,
              "occupancy_correction": grids["occupancy_correction"], "valence_density": grids["valence_density"],
              "core_density": grids["core_density"], "spin_density": grids["spin_density"], "nvalence": nvalence,
              "radial_shell_volume": rsv, "neutral_density": neutral, "net_charge": net_charge,
-             "atom_xyz": prep["atom_xyz"], "spin_available": prep["spin_available"]}
+             "atom_xyz": prep["atom_xyz"], "atom_xyz_aligned": grids["atom_xyz_aligned"],
+             "spin_available": prep["spin_available"]}
+    # state holds the grids from here on (core_grids updated dens in place and returned it),
+    # so bond_orders can free the ones Chargemol deallocates before its bond order analysis
+    del dens, grids
     lap("setup")
     state = core_iterator(state)
     lap("core_iterator")
@@ -2489,6 +2899,8 @@ def run(wfx, parallel=True, logger=None):
     if prep["spin_available"]:
         state = spin_moments(state)
         lap("spin")
+    state = bond_orders(state)
+    lap("bond_orders")
     state["stage_s"] = stage_s
     state["est_peak_gb"] = round(est / 1e9, 2)
     return state
@@ -2499,8 +2911,10 @@ def analyze(wfx, parallel=True, logger=None):
     charge.json entry (charges, spin moments for open shells, the molecular point-charge
     dipole about the origin as charge_engine's schemes give it, atomic dipoles and
     quadrupoles in atomic units, and the eigenvalues Chargemol reports), the
-    fuzzy_full.json per-atom features, and _meta (iteration counts and whether each
-    iterator converged before Chargemol's cap of 500). Raises ChargemolStop where
+    fuzzy_full.json per-atom features (including the SBOs and r^2-r^4 radial moments), the
+    bond.json entries (bond orders and overlap populations for the pairs whose bond order
+    Chargemol prints, at or above BO_PRINT_CUTOFF), and _meta (iteration counts and whether
+    each iterator converged before Chargemol's cap of 500). Raises ChargemolStop where
     Chargemol would stop."""
     from qtaim_gen.source.core.charge_engine import atom_labels, fuzzy_entry, per_atom, point_dipole
 
@@ -2525,8 +2939,20 @@ def analyze(wfx, parallel=True, logger=None):
         meta["total_spin_moment"] = float(st["total_spin_moment"])
     feats = {"ddec6_atomic_dipole_mag": fuzzy_entry(labels, np.asarray(st["atomic_dipole_mag"])),
              "ddec6_quadrupole_mag": fuzzy_entry(labels, np.array(qmag)),
-             "ddec6_tail_decay": fuzzy_entry(labels, st["tail_fit"][:, 1])}
-    return {"ddec6": entry, "fuzzy": feats, "_meta": meta}
+             "ddec6_tail_decay": fuzzy_entry(labels, st["tail_fit"][:, 1]),
+             "ddec6_sbo": fuzzy_entry(labels, np.asarray(st["sbo"])),
+             "ddec6_r2": fuzzy_entry(labels, st["radial_moments"][:, 0]),
+             "ddec6_r3": fuzzy_entry(labels, st["radial_moments"][:, 1]),
+             "ddec6_r4": fuzzy_entry(labels, st["radial_moments"][:, 2])}
+    # the pairs Chargemol prints: bond order at or above BO_PRINT_CUTOFF
+    keep = [(f"{labels[i - 1]}_to_{labels[j - 1]}", p) for p, (i, j) in enumerate(st["bond_pairs"])
+            if st["bond_order"][p] >= BO_PRINT_CUTOFF]
+    bonds = {"ddec6_bond": {k: float(st["bond_order"][p]) for k, p in keep},
+             "ddec6_overlap_population": {k: float(st["overlap_population"][p]) for k, p in keep}}
+    meta.update(n_bond_pairs=len(st["bond_pairs"]), bo_prep_passes=int(st["bo_prep_passes"]),
+                summed_contact_exchange_error=float(st["summed_contact_exchange_error"]),
+                bo_constraint_changed=int(st["bo_constraint_changed"]))
+    return {"ddec6": entry, "fuzzy": feats, "bond": bonds, "_meta": meta}
 
 
 def load(wfx):
