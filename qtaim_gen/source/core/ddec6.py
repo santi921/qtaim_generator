@@ -906,19 +906,23 @@ def _prefix_lmax(ex, pbd):
     return pm
 
 
-@numba.njit(cache=True)
-def _powers(tab, lm, dx1, dy1, dz1, dx2, dy2, dz2):
-    """tab[k, n] = powi(d_k, n) for n <= lm[k]. Every row of a block shares its two
+# The per-point kernels below are inlined into the parallel loops and take (pm, last)
+# rather than the view pm[last]: a call or a view of a shared array per point costs an
+# atomic refcount update on that array, which all threads then contend for (phase B ran
+# 3.5x slower per thread at 16 threads than serially).
+@numba.njit(cache=True, inline="always")
+def _powers(tab, pm, last, dx1, dy1, dz1, dx2, dy2, dz2):
+    """tab[k, n] = powi(d_k, n) for n <= pm[last, k]. Every row of a block shares its two
     centres, so the six factors of a row's pair product are table lookups, bitwise
     equal to calling powi per row."""
     d = (dx1, dy1, dz1, dx2, dy2, dz2)
     for k in range(6):
         tab[k, 0] = 1.0
-        for n in range(1, lm[k] + 1):
+        for n in range(1, pm[last, k] + 1):
             tab[k, n] = powi(d[k], n)
 
 
-@numba.njit(cache=True)
+@numba.njit(cache=True, inline="always")
 def _block_value(data, ex, pm, tab, start, stop, X, Y, Z, spin, mult_pv, sums):
     """Step-1 pair sum at one point of a block. With sums=True accumulates the pass-1
     numeric overlap sums (columns 38, 39) and returns (t4, 0, 0); otherwise returns
@@ -932,7 +936,7 @@ def _block_value(data, ex, pm, tab, start, stop, X, Y, Z, spin, mult_pv, sums):
     last = start
     while last < stop and d2 <= data[last + 1, 33]:
         last += 1
-    _powers(tab, pm[last], X - x1, Y - y1, Z - z1, X - x2, Y - y2, Z - z2)
+    _powers(tab, pm, last, X - x1, Y - y1, Z - z1, X - x2, Y - y2, Z - z2)
     t4 = math.exp(-(data[start, 5] + data[start, 12]) * d2) * data[start, 34]
     t5 = t4 * mult_pv[0]
     if mult_pv[1] != 1.0:
@@ -952,7 +956,7 @@ def _block_value(data, ex, pm, tab, start, stop, X, Y, Z, spin, mult_pv, sums):
     return t4, t7, t8
 
 
-@numba.njit(cache=True)
+@numba.njit(cache=True, inline="always")
 def _block_value_both(data, ex, pm, tab, start, stop, X, Y, Z, gs, spin):
     """Accumulate-phase pair sums of both steps at one point of a block: t4, (t7, t8) of
     step 1 and (t7, t8) of step 2 (zero for gs == 0, which has no step 2). Each sum runs
@@ -968,7 +972,7 @@ def _block_value_both(data, ex, pm, tab, start, stop, X, Y, Z, gs, spin):
     last = start
     while last < stop and d2 <= data[last + 1, 33]:
         last += 1
-    _powers(tab, pm[last], X - x1, Y - y1, Z - z1, X - x2, Y - y2, Z - z2)
+    _powers(tab, pm, last, X - x1, Y - y1, Z - z1, X - x2, Y - y2, Z - z2)
     t4 = math.exp(-(data[start, 5] + data[start, 12]) * d2) * data[start, 34]
     a7 = 0.0
     a8 = 0.0
@@ -1073,6 +1077,10 @@ def _accumulate_parallel(data, ex, pmax, ntab, pbd, geo, boundary, spin, val, sp
             t2 = data[start, 23] - data[start, 29]
             t3 = data[start, 24] - data[start, 30]
             slot = _coarse_slot(gs)
+            # once per block, not per point (see the note above _powers); slot -1 (gs 0
+            # or 1) takes grid 0, unused
+            g = cval[max(slot, 0)]
+            h = cspn[max(slot, 0)]
             for nbb in range(geo[b, 3], geo[b, 4] + 1, stride):
                 kb = nbb + geo[b, 8] + 1
                 for na in range(geo[b, 1], geo[b, 2] + 1, stride):
@@ -1097,11 +1105,9 @@ def _accumulate_parallel(data, ex, pmax, ntab, pbd, geo, boundary, spin, val, sp
                         ia = nint((ka + 1) / float(gs)) - 1
                         ib = nint((kb + 1) / float(gs)) - 1
                         ic = nint((kc + 1) / float(gs)) - 1
-                        g = cval[slot]
                         g[ia, ib, ic] = g[ia, ib, ic] + a7 * t4
                         g[ia, ib, ic] = g[ia, ib, ic] + b7 * t4
                         if spin:
-                            h = cspn[slot]
                             h[ia, ib, ic] = h[ia, ib, ic] + a8 * t4
                             h[ia, ib, ic] = h[ia, ib, ic] + b8 * t4
 
