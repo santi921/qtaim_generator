@@ -2,7 +2,7 @@
 
 Branch `feat/engine-ddec6-bonds`, off `feat/charge-engine` eb946b8 (DDEC6 PR #79 and
 IBSI/LBO PR #88 merged; ENGINE_VERSION 8 there). PR target: `feat/charge-engine`.
-Status: implemented 2026-11-17, local parity done (section 7); cluster check pending.
+Status: implemented 2026-11-17; local parity (section 7) and cluster validation (validation_ledger.md section 4c, 2026-11-18 rows) done.
 
 ## 1. What Chargemol does (09_26_2017, sourcecode_linux)
 Called after the spin iterator when `compute_BOs` is true (the default), so every Chargemol
