@@ -211,6 +211,14 @@ def test_validate_ddec6(tmp_path):
     with open(bond, "w") as f:
         json.dump({"fuzzy_bond": {}, "ddec6_bond": {}}, f)  # empty: no pair at or above the print cutoff
     assert validate_ddec6(charge, timings, n_atoms=4, bond_json_loc=bond)
+    fuzzy = str(tmp_path / "fuzzy_full.json")
+    feats = {k: v for k, v in _fake_result()["fuzzy"].items()}
+    with open(fuzzy, "w") as f:
+        json.dump({k: v for k, v in feats.items() if k != "ddec6_r4"}, f)
+    assert not validate_ddec6(charge, timings, n_atoms=4, fuzzy_json_loc=fuzzy)
+    with open(fuzzy, "w") as f:
+        json.dump(feats, f)
+    assert validate_ddec6(charge, timings, n_atoms=4, bond_json_loc=bond, fuzzy_json_loc=fuzzy)
     assert not validate_ddec6(charge, timings, n_atoms=4, current=False)  # e.g. an older engine version
     with open(timings, "w") as f:
         json.dump({}, f)
@@ -235,6 +243,7 @@ def test_validation_checks_requires_current_ddec6(folder, monkeypatch):
     validation.validation_checks(folder, ddec6=True, logger=LOG)
     assert seen["current"] is False  # no provenance entry
     assert seen["bond_json_loc"] == os.path.join(folder, "generator", "bond.json")
+    assert seen["fuzzy_json_loc"] == os.path.join(folder, "generator", "fuzzy_full.json")
     provenance.record_routines(folder, ["ddec6"], "ddec6", ENGINE_VERSION)
     validation.validation_checks(folder, ddec6=True, logger=LOG)
     assert seen["current"] is True

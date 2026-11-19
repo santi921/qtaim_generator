@@ -89,8 +89,30 @@ def _compare(port, ref, row):
     """Port vs Chargemol differences into row: charges, multipoles, spin, and (P7) bond
     orders on the pairs both print, the pair-set agreement, SBOs, r^2-r^4 radial moments
     and overlap populations (Chargemol prints those at f17.10, all kept pairs; the port
-    stores them for the pairs whose bond order it prints)."""
+    stores them for the pairs whose bond order it prints). A reference without one of the
+    bond order outputs is flagged in ref_missing, not counted as agreement."""
     r, p = ref["ddec6"], port["ddec6"]
+    if "bond" in port:
+        missing = [k for k in ("ddec6_bond", "ddec6_sbo", "overlap_population") if k not in ref]
+        missing += [k for k in ("r2", "r3", "r4") if k not in r]
+        if missing:
+            row["ref_missing"] = missing
+        if "ddec6_bond" in ref:
+            pb, rb = port["bond"]["ddec6_bond"], ref["ddec6_bond"]
+            common = set(pb) & set(rb)
+            row["bond_set_equal"] = set(pb) == set(rb)
+            row["n_bonds"] = len(pb)
+            row["bond_only_port"] = sorted(set(pb) - set(rb))
+            row["bond_only_chargemol"] = sorted(set(rb) - set(pb))
+            row["max_dbo"] = max((abs(pb[k] - rb[k]) for k in common), default=0.0)
+        if "ddec6_sbo" in ref:
+            row["max_dsbo"] = _max_diff(_atoms(port["fuzzy"]["ddec6_sbo"]), ref["ddec6_sbo"])
+        for tag in ("r2", "r3", "r4"):
+            if tag in r:
+                row[f"max_d{tag}"] = _max_diff(_atoms(port["fuzzy"][f"ddec6_{tag}"]), r[tag])
+        if "overlap_population" in ref:
+            po, ro = port["bond"]["ddec6_overlap_population"], ref["overlap_population"]
+            row["max_doverlap"] = max((abs(po[k] - ro[k]) for k in set(po) & set(ro)), default=0.0)
     row["iter_port"] = port["_meta"]["n_iterations"]
     row["iter_chargemol"] = ref["_meta"].get("n_iterations")
     row["max_dq"] = _max_diff(p["charge"], r["charge"])
@@ -100,19 +122,6 @@ def _compare(port, ref, row):
         row["max_dspin"] = _max_diff(p["spin"], r["spin"])
         row["spin_sum"] = sum(p["spin"].values())
     row["charge_sum"] = sum(p["charge"].values())
-    if "bond" in port and "ddec6_bond" in ref:
-        pb, rb = port["bond"]["ddec6_bond"], ref["ddec6_bond"]
-        common = set(pb) & set(rb)
-        row["bond_set_equal"] = set(pb) == set(rb)
-        row["n_bonds"] = len(pb)
-        row["bond_only_port"] = sorted(set(pb) - set(rb))
-        row["bond_only_chargemol"] = sorted(set(rb) - set(pb))
-        row["max_dbo"] = max((abs(pb[k] - rb[k]) for k in common), default=0.0)
-        row["max_dsbo"] = _max_diff(_atoms(port["fuzzy"]["ddec6_sbo"]), ref["ddec6_sbo"])
-        for tag in ("r2", "r3", "r4"):
-            row[f"max_d{tag}"] = _max_diff(_atoms(port["fuzzy"][f"ddec6_{tag}"]), r[tag])
-        po, ro = port["bond"]["ddec6_overlap_population"], ref.get("overlap_population", {})
-        row["max_doverlap"] = max((abs(po[k] - ro[k]) for k in set(po) & set(ro)), default=0.0)
 
 
 def _max_diff(a, b):
@@ -165,8 +174,12 @@ def run_job(job, args):
                 json.dump(port, f)
         ref_path = os.path.join(workdir, "ddec6_chargemol.json")
         if args.reuse_chargemol:
-            if port is None or not os.path.exists(ref_path):
-                row["chargemol_status"] = "no earlier ddec6_chargemol.json" if port is not None else "port stopped"
+            if not os.path.exists(ref_path):
+                row["chargemol_status"] = "no earlier ddec6_chargemol.json"
+                return row
+            if port is None:
+                # the earlier Chargemol run left output: it did not stop where the port did
+                row["chargemol_status"] = "reused (port stopped, Chargemol output exists)"
                 return row
             row["chargemol_status"] = "reused"
         elif args.skip_chargemol:

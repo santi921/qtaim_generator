@@ -46,6 +46,8 @@ def main():
     for r in rows.values():
         if "error" in r:
             print("ERROR", r["job"], r["error"])
+        if r.get("ref_missing"):
+            print("REF MISSING", r["job"], r["ref_missing"])
         if r.get("bond_set_equal") is False:
             print("BOND SET", r["job"], "port only", r["bond_only_port"], "chargemol only", r["bond_only_chargemol"])
 

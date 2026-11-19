@@ -227,8 +227,12 @@ def test_bond_orders_without_pairs_give_zero_sbo_and_radial_moments():
              "spin_available": False, "partial_density": partial, "spherical_average_density": partial.copy(),
              "total_pseudodensity": rho.copy(), "total_density": rho, "sum_points": np.ones((ddec6.NSHELLS, 1), dtype=np.int64),
              "valence_population": np.array([1.0]), "core_electrons": np.array([0.0]),
-             "atom_xyz_aligned": np.zeros((1, 3)), "atom_z": np.array([1]), "net_atomic_charge": np.array([0.0])}
+             "atom_xyz_aligned": np.zeros((1, 3)), "atom_z": np.array([1]), "net_atomic_charge": np.array([0.0]),
+             "valence_density": rho.copy(), "core_density": np.zeros_like(rho), "core_pseudodensity": np.zeros_like(rho),
+             "spin_density": None}
     st = ddec6.bond_orders(state)
+    # grids Chargemol has freed by now leave state, so this step stays within the peak estimate
+    assert not {"valence_density", "core_density", "core_pseudodensity", "spin_density"} & set(st)
     assert st["bond_pairs"].shape == (0, 2) and st["bond_order"].size == 0
     assert st["sbo"].tolist() == [0.0]
     r2, r3, r4 = st["radial_moments"][0]

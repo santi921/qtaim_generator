@@ -2728,14 +2728,19 @@ def bond_orders(state):
     (column 20 of Chargemol's bond pair matrix), overlap populations (column 14), the sum
     of bond orders per atom (SBO) and the r^2, r^3, r^4 radial moments. Runs after the
     spin iterator, as in Chargemol, and replaces total_density by Chargemol's
-    corrected_total_density. With no significant pair Chargemol stops before
-    calculate_final_BOs; the SBOs are then 0 here and the radial moments still run."""
+    corrected_total_density. The valence, core, core pseudo- and spin density grids are
+    dropped from state first (Chargemol has freed them by this point), so this step's
+    grids stay within the peak estimate_peak_bytes assumes. With no significant pair
+    Chargemol stops before calculate_final_BOs; the SBOs are then 0 here and the radial
+    moments still run."""
     g = state["geom"]
     args = (g["nabc"], g["shift"], g["boundary"], g["lo"], g["hi"])
     pv = g["pixelvolume"]
     spin = state["spin_available"]
     partial, tpseudo = state["partial_density"], state["total_pseudodensity"]
     natoms = partial.shape[1]
+    for k in ("valence_density", "core_density", "core_pseudodensity", "spin_density"):
+        state.pop(k, None)
     ctd = state.pop("total_density")
     csad = state["spherical_average_density"].copy()
     sum_points = state["spin_sum_points"] if spin else state["sum_points"]
@@ -2879,6 +2884,9 @@ def run(wfx, parallel=True, logger=None):
              "radial_shell_volume": rsv, "neutral_density": neutral, "net_charge": net_charge,
              "atom_xyz": prep["atom_xyz"], "atom_xyz_aligned": grids["atom_xyz_aligned"],
              "spin_available": prep["spin_available"]}
+    # state holds the grids from here on (core_grids updated dens in place and returned it),
+    # so bond_orders can free the ones Chargemol deallocates before its bond order analysis
+    del dens, grids
     lap("setup")
     state = core_iterator(state)
     lap("core_iterator")

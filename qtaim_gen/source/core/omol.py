@@ -2021,6 +2021,7 @@ def _merge_ddec6(folder: str, move_results: bool, logger: logging.Logger) -> Non
         return
     with open(src) as f:
         result = json.load(f)
+    merged = []
     for name, update in (("charge.json", {"ddec6": result["ddec6"]}), ("fuzzy_full.json", result.get("fuzzy", {})),
                          ("bond.json", result.get("bond", {}))):
         if not update:
@@ -2040,7 +2041,8 @@ def _merge_ddec6(folder: str, move_results: bool, logger: logging.Logger) -> Non
             continue
         data.update(update)
         atomic_json_write(path, data)
-    logger.info("ddec6: merged %s into charge.json, fuzzy_full.json and bond.json", src)
+        merged.append(name)
+    logger.info("ddec6: merged %s into %s", src, ", ".join(merged) or "nothing")
 
 
 def _run_qtaim_engine(folder: str, n_threads: int, logger: logging.Logger, restart: bool = False) -> bool:
