@@ -49,6 +49,7 @@ def _timings_folder(tmp_path, version, full_set):
     (1, 0, True), (1, 1, False),                    # version 1 left elf_fuzzy to Multiwfn
     (2, 0, True), (2, 1, False), (5, 1, False),     # versions 2-5 left chelpg to Multiwfn
     (2, 2, False),                                  # version 2 left other_esp to Multiwfn
+    (7, 1, False), (7, 2, False),                   # version 7 left ibsi_bond and laplacian_bond
     (ENGINE_VERSION, 1, True), (ENGINE_VERSION, 2, True),
 ])
 def test_engine_validation_requires_current_engine_output(tmp_path, version, full_set, done):
@@ -62,9 +63,12 @@ def test_engine_validation_requires_current_engine_output(tmp_path, version, ful
 
 
 def test_engine_validation_accepts_permanently_skipped_routines(tmp_path):
+    # a version-5 engine left chelpg and ibsi_bond (versions 6 and 8) out
     path = _timings_folder(tmp_path, 5, full_set=1)
     assert not validate_timing_dict(str(path), full_set=1, charge_engine=True)
     provenance.record_skips(str(tmp_path), {"chelpg": {"reason": "test", "by": "charge_engine"}})
+    assert not validate_timing_dict(str(path), full_set=1, charge_engine=True)
+    provenance.record_skips(str(tmp_path), {"ibsi_bond": {"reason": "test", "by": "charge_engine"}})
     assert validate_timing_dict(str(path), full_set=1, charge_engine=True)
 
 
@@ -87,8 +91,9 @@ def _engine_folder(tmp_path, version):
     routines = _engine_routines(2, spin_tf=True)
     charge = {r: {"charge": {"1_H": 0.1}} for r in ("hirshfeld", "adch", "cm5", "becke", "vdd", "mbis", "chelpg")}
     (gen / "charge.json").write_text(json.dumps(charge))
-    (gen / "bond.json").write_text(json.dumps({"fuzzy_bond": {"1_H_to_2_H": 1.0}}))
-    fuzzy = {r: {"1_H": 1.0} for r in routines if r not in charge and r != "fuzzy_bond"}
+    bond = {"fuzzy_bond": {"1_H_to_2_H": 1.0}, "ibsi_bond": {"1_H_to_2_H": 1.0}, "laplacian_bond": {}}
+    (gen / "bond.json").write_text(json.dumps(bond))
+    fuzzy = {r: {"1_H": 1.0} for r in routines if r not in charge and r not in bond}
     (gen / "fuzzy_full.json").write_text(json.dumps(fuzzy))
     _write_provenance(tmp_path, version, routines_at(version) & routines)
     return str(tmp_path)
@@ -99,7 +104,8 @@ def test_restart_reruns_an_older_engine_only_where_it_left_routines_to_multiwfn(
 
     old = _engine_folder(tmp_path / "v1", version=1)
     v2 = _engine_folder(tmp_path / "v2", version=2)
-    new = _engine_folder(tmp_path / "v6", version=6)
+    v6 = _engine_folder(tmp_path / "v6", version=6)
+    new = _engine_folder(tmp_path / "v8", version=8)
     # full_set 0: version 1 computed every level-0 routine
     assert _engine_outputs_present(old, spin_tf=True, full_set=0)
     # full_set 1 and 2: version 1 left elf_fuzzy (and the level-2 fuzzy) to Multiwfn
@@ -108,7 +114,23 @@ def test_restart_reruns_an_older_engine_only_where_it_left_routines_to_multiwfn(
     # versions 2-5 left chelpg (full_set 1) to Multiwfn
     assert _engine_outputs_present(v2, spin_tf=True, full_set=0)
     assert not _engine_outputs_present(v2, spin_tf=True, full_set=1)
+    # versions up to 7 left ibsi_bond (full_set 1) and laplacian_bond (full_set 2) to Multiwfn
+    assert _engine_outputs_present(v6, spin_tf=True, full_set=0)
+    assert not _engine_outputs_present(v6, spin_tf=True, full_set=1)
+    assert not _engine_outputs_present(v6, spin_tf=True, full_set=2)
+    # version 8: everything, an empty laplacian_bond entry included (no pair above threshold)
     assert _engine_outputs_present(new, spin_tf=True, full_set=2)
+
+
+def test_restart_accepts_empty_ibsi_and_lbo_but_not_empty_fuzzy_bond(tmp_path):
+    from qtaim_gen.source.core.omol import _engine_outputs_present
+
+    folder = _engine_folder(tmp_path / "v", version=ENGINE_VERSION)
+    bond = tmp_path / "v" / "generator" / "bond.json"
+    bond.write_text(json.dumps({"fuzzy_bond": {"1_H_to_2_H": 1.0}, "ibsi_bond": {}, "laplacian_bond": {}}))
+    assert _engine_outputs_present(folder, spin_tf=True, full_set=2)
+    bond.write_text(json.dumps({"fuzzy_bond": {}, "ibsi_bond": {}, "laplacian_bond": {}}))
+    assert not _engine_outputs_present(folder, spin_tf=True, full_set=2)
 
 
 def test_restart_reruns_a_routine_a_later_version_changed(tmp_path, monkeypatch):

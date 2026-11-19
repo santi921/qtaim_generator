@@ -143,8 +143,9 @@ def _check_grids(name, parallel=True):
 @pytest.mark.skipif(not os.environ.get("DDEC6_SLOW"), reason="about a minute per fixture; set DDEC6_SLOW=1")
 @pytest.mark.parametrize("name", ["rmechdb_652_step10_0_2", "XeCl4_step2_0_1"])
 def test_outputs_match_chargemol_bitwise(name):
-    """Charges, atomic dipoles, quadrupoles and their eigenvalues, tail fits and spin
-    moments against Chargemol's precise serial -O2 build (test_files/ddec6/chargemol,
+    """Charges, atomic dipoles, quadrupoles and their eigenvalues, tail fits, spin
+    moments, bond orders, SBOs, radial moments and overlap populations against
+    Chargemol's precise serial -O2 build (test_files/ddec6/chargemol,
     written by scripts/ddec6_reference/run_chargemol.py, es25.16 output). Chargemol's
     own -O0 build differs from -O2 in one rmechdb dipole component by 1.4e-17."""
     import json
@@ -161,6 +162,17 @@ def test_outputs_match_chargemol_bitwise(name):
     assert st["tail_fit"].tolist() == [r["tail_fit"][k] for k in keys]
     if "spin" in r:
         assert st["spin_moment"].tolist() == [r["spin"][k] for k in keys]
+    # P7: bond orders (the pairs Chargemol prints), SBOs and radial moments bit for bit;
+    # overlap populations at Chargemol's printed f17.10
+    bo = {f"{keys[i - 1]}_to_{keys[j - 1]}": float(st["bond_order"][p]) for p, (i, j) in enumerate(st["bond_pairs"])
+          if st["bond_order"][p] >= ddec6.BO_PRINT_CUTOFF}
+    assert bo == ref["ddec6_bond"]
+    assert st["sbo"].tolist() == [ref["ddec6_sbo"][k] for k in keys]
+    for c, tag in enumerate(("r2", "r3", "r4")):
+        assert st["radial_moments"][:, c].tolist() == [r[tag][k] for k in keys]
+    ov = {f"{keys[i - 1]}_to_{keys[j - 1]}": round(float(st["overlap_population"][p]), 10)
+          for p, (i, j) in enumerate(st["bond_pairs"])}
+    assert ov == ref["overlap_population"]
 
 
 def test_primitives_above_h_stop_like_chargemol():
@@ -197,3 +209,32 @@ def test_run_stops_before_the_grids_when_the_estimate_is_above_the_limit(monkeyp
     monkeypatch.setattr(ddec6, "density_grids", lambda *a, **kw: pytest.fail("grids allocated above the limit"))
     with pytest.raises(ddec6.PeakMemoryAboveLimit, match=r"estimated peak .* GB > limit 0.0 GB"):
         ddec6.run(os.path.join(FIXTURES, "rmechdb_652_step10_0_2", "orca.wfx"))
+
+
+def test_bond_orders_without_pairs_give_zero_sbo_and_radial_moments():
+    """One atom on a small synthetic grid: no significant pair, so Chargemol would stop
+    before calculate_final_BOs; the SBO is 0 and the radial moments are still computed."""
+    n, h = 41, 0.14
+    k = np.arange(n) - 20
+    x, y, z = np.meshgrid(k * h, k * h, k * h, indexing="ij")
+    r = np.sqrt(x * x + y * y + z * z)
+    rho = np.asfortranarray(np.exp(-2.0 * r) / np.pi)
+    shells = (np.arange(1, ddec6.NSHELLS + 1) - 0.5) / ddec6.SCALEFACTOR
+    partial = (np.exp(-2.0 * shells) / np.pi)[:, None]
+    state = {"geom": {"nabc": np.array([[20, 20, 20]]), "shift": np.zeros((1, 3)), "boundary": np.eye(3) * h,
+                      "lo": np.full((1, 3), -20), "hi": np.full((1, 3), 20), "pixelvolume": h ** 3,
+                      "origin": np.full(3, -20 * h), "delta": (68, 68, 68)},
+             "spin_available": False, "partial_density": partial, "spherical_average_density": partial.copy(),
+             "total_pseudodensity": rho.copy(), "total_density": rho, "sum_points": np.ones((ddec6.NSHELLS, 1), dtype=np.int64),
+             "valence_population": np.array([1.0]), "core_electrons": np.array([0.0]),
+             "atom_xyz_aligned": np.zeros((1, 3)), "atom_z": np.array([1]), "net_atomic_charge": np.array([0.0]),
+             "valence_density": rho.copy(), "core_density": np.zeros_like(rho), "core_pseudodensity": np.zeros_like(rho),
+             "spin_density": None}
+    st = ddec6.bond_orders(state)
+    # grids Chargemol has freed by now leave state, so this step stays within the peak estimate
+    assert not {"valence_density", "core_density", "core_pseudodensity", "spin_density"} & set(st)
+    assert st["bond_pairs"].shape == (0, 2) and st["bond_order"].size == 0
+    assert st["sbo"].tolist() == [0.0]
+    r2, r3, r4 = st["radial_moments"][0]
+    assert 0.0 < r2 < r3 < r4
+    assert "total_density" not in st and st["corrected_total_density"] is rho

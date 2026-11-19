@@ -23,7 +23,7 @@ from qtaim_gen.source.data.multiwfn import (
     SURFACE_ENGINE_ROUTINES,
 )
 
-ENGINE_VERSION = 7
+ENGINE_VERSION = 9
 
 # the sub-engine that produces each engine routine: the "by" of its provenance entry
 ROUTINE_ENGINE = {
@@ -34,10 +34,12 @@ ROUTINE_ENGINE = {
 }
 ENGINES = frozenset(ROUTINE_ENGINE.values())
 
-_V2 = ENGINE_LEVEL2_ROUTINES | {"elf_fuzzy"}
+_V8 = frozenset({"ibsi_bond", "laplacian_bond"})
+_V2 = (ENGINE_LEVEL2_ROUTINES - _V8) | {"elf_fuzzy"}
 _V6 = frozenset({"chelpg"})
 ENGINE_CHANGES = {
-    1: {"added": frozenset(ROUTINE_ENGINE) - _V2 - SURFACE_ENGINE_LEVEL2_ROUTINES - _V6 - {"ddec6"}, "changed": frozenset(),
+    1: {"added": frozenset(ROUTINE_ENGINE) - _V2 - SURFACE_ENGINE_LEVEL2_ROUTINES - _V6 - _V8 - {"ddec6"},
+        "changed": frozenset(),
         "note": "charge and surface engines, QTAIM engine (before version stamps)"},
     2: {"added": _V2, "changed": frozenset(),
         "note": "elf_fuzzy (full_set 1), gradient-norm and Laplacian fuzzy integrals (full_set 2)"},
@@ -53,6 +55,12 @@ ENGINE_CHANGES = {
         "note": "CHELPG (full_set 1) in the charge engine: Multiwfn's points, radii and fit, exact ESP"},
     7: {"added": frozenset({"ddec6"}), "changed": frozenset(),
         "note": "DDEC6 (core/ddec6.py, a port of Chargemol 09_26_2017), opt-in with --ddec6"},
+    8: {"added": _V8, "changed": frozenset(),
+        "note": "IBSI (full_set 1, IGMH on the 75 x 434 grid) and the Laplacian bond order (full_set 2, "
+                "Multiwfn's 45 x 302 grid) in the charge engine"},
+    9: {"added": frozenset(), "changed": frozenset({"ddec6"}),
+        "note": "DDEC6 bond orders, overlap populations, SBOs and r^2-r^4 radial moments (Chargemol's "
+                "bond order analysis) added to the ddec6 output"},
 }
 
 

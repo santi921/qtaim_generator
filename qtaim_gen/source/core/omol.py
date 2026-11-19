@@ -1740,7 +1740,7 @@ def _engine_outputs_present(folder: str, spin_tf: bool, full_set: int = 0) -> bo
     file_of = {
         "hirshfeld": "charge.json", "adch": "charge.json", "cm5": "charge.json",
         "becke": "charge.json", "vdd": "charge.json", "mbis": "charge.json", "chelpg": "charge.json",
-        "fuzzy_bond": "bond.json",
+        "fuzzy_bond": "bond.json", "ibsi_bond": "bond.json", "laplacian_bond": "bond.json",
     }
     try:
         with open(os.path.join(gen, "timings.json")) as f:
@@ -1757,7 +1757,10 @@ def _engine_outputs_present(folder: str, spin_tf: bool, full_set: int = 0) -> bo
         for name, keys in want.items():
             with open(os.path.join(gen, name)) as f:
                 data = json.load(f)
-            if not all(data.get(k) for k in keys):
+            # IBSI and LBO may have no pair to report (no pair within 3.5 Angstrom; no LBO above
+            # the threshold), so an empty entry of theirs is complete; an empty fuzzy_bond is not
+            if not all(isinstance(data.get(k), dict) if k in ("ibsi_bond", "laplacian_bond") else data.get(k)
+                       for k in keys):
                 return False
     except (OSError, json.JSONDecodeError, TypeError):
         return False
@@ -1904,7 +1907,8 @@ def _ddec6_result_path(folder: str) -> Optional[str]:
 
 def _run_ddec6(folder: str, n_threads: int, logger: logging.Logger, restart: bool = False) -> bool:
     """DDEC6 (core/ddec6.py, a port of Chargemol) on orca.wfx. Writes ddec6.json (the
-    charge.json entry, the fuzzy_full.json features and _meta), a 'ddec6' timing, a
+    charge.json entry, the fuzzy_full.json features, the bond.json entries and _meta), a
+    'ddec6' timing, a
     provenance entry and the run's _meta as the provenance engine record; _merge_ddec6
     merges it after parse_multiwfn. On a restart a result that is current engine output
     is kept. Molecules above ddec6.MAX_ATOMS atoms, and wavefunctions on which Chargemol
@@ -1974,8 +1978,8 @@ def _run_ddec6(folder: str, n_threads: int, logger: logging.Logger, restart: boo
 
 def _drop_ddec6(folder: str, logger: logging.Logger) -> None:
     """Remove a DDEC6 result: ddec6.json, the 'ddec6' timing, the merged 'ddec6' scheme in
-    charge.json and ddec6_* features in fuzzy_full.json (root and generator/, which
-    move_results merges) and the provenance entry."""
+    charge.json and ddec6_* entries in fuzzy_full.json and bond.json (root and generator/,
+    which move_results merges) and the provenance entry."""
     removed = []
     for base in (folder, os.path.join(folder, "generator")):
         path = os.path.join(base, DDEC6_JSON)
@@ -1983,7 +1987,8 @@ def _drop_ddec6(folder: str, logger: logging.Logger) -> None:
             os.remove(path)
             removed.append(path)
         for name, is_ddec6 in (("timings.json", lambda k: k == "ddec6"), ("charge.json", lambda k: k == "ddec6"),
-                               ("fuzzy_full.json", lambda k: k.startswith("ddec6_"))):
+                               ("fuzzy_full.json", lambda k: k.startswith("ddec6_")),
+                               ("bond.json", lambda k: k.startswith("ddec6_"))):
             path = os.path.join(base, name)
             try:
                 with open(path) as f:
@@ -2002,11 +2007,12 @@ def _drop_ddec6(folder: str, logger: logging.Logger) -> None:
 
 
 def _merge_ddec6(folder: str, move_results: bool, logger: logging.Logger) -> None:
-    """Merge ddec6.json into charge.json (the 'ddec6' scheme) and fuzzy_full.json (the
-    ddec6_* features), in generator/ when move_results and present there, else in the
-    root (as _run_orca_parse does). Additive and idempotent: parse_multiwfn rewrites
-    charge.json from the per-step jsons, so this runs after every parse. Only a result
-    that provenance.json records as current DDEC6 output is merged."""
+    """Merge ddec6.json into charge.json (the 'ddec6' scheme), fuzzy_full.json (the
+    ddec6_* features) and bond.json (ddec6_bond, ddec6_overlap_population), in generator/
+    when move_results and present there, else in the root (as _run_orca_parse does).
+    Additive and idempotent: parse_multiwfn rewrites these files from the per-step jsons,
+    so this runs after every parse. Only a result that provenance.json records as current
+    DDEC6 output is merged."""
     src = _ddec6_result_path(folder)
     if src is None:
         return
@@ -2015,7 +2021,11 @@ def _merge_ddec6(folder: str, move_results: bool, logger: logging.Logger) -> Non
         return
     with open(src) as f:
         result = json.load(f)
-    for name, update in (("charge.json", {"ddec6": result["ddec6"]}), ("fuzzy_full.json", result.get("fuzzy", {}))):
+    merged = []
+    for name, update in (("charge.json", {"ddec6": result["ddec6"]}), ("fuzzy_full.json", result.get("fuzzy", {})),
+                         ("bond.json", result.get("bond", {}))):
+        if not update:
+            continue
         path = os.path.join(folder, name)
         gen = os.path.join(folder, "generator", name)
         if move_results and os.path.isfile(gen):
@@ -2031,7 +2041,8 @@ def _merge_ddec6(folder: str, move_results: bool, logger: logging.Logger) -> Non
             continue
         data.update(update)
         atomic_json_write(path, data)
-    logger.info("ddec6: merged %s into charge.json and fuzzy_full.json", src)
+        merged.append(name)
+    logger.info("ddec6: merged %s into %s", src, ", ".join(merged) or "nothing")
 
 
 def _run_qtaim_engine(folder: str, n_threads: int, logger: logging.Logger, restart: bool = False) -> bool:

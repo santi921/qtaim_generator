@@ -8,6 +8,7 @@
 # Optional: N (lines per task, default 8), WORKERS (default 8), THREADS (default 16),
 # SRC (input root the list is under), CHARGEMOL (binary), DENSITIES (atomic_densities/),
 # ORCA_2MKL, OUT (results JSONL directory), SKIP_CHARGEMOL=1 (port timings only),
+# REUSE_CHARGEMOL=1 (compare against the ddec6_chargemol.json an earlier run left in $OUT/work),
 # DDEC6_WORK (campaign directory; not WORK, which login environments often export).
 #SBATCH -A m3278
 #SBATCH -C cpu
@@ -45,6 +46,7 @@ LIST=${LIST:?LIST is required}
 ID=${SLURM_ARRAY_TASK_ID}
 EXTRA=""
 [ "${SKIP_CHARGEMOL:-0}" = "1" ] && EXTRA="--skip_chargemol"
+[ "${REUSE_CHARGEMOL:-0}" = "1" ] && EXTRA="--reuse_chargemol"
 
 python -c "import qtaim_gen; assert qtaim_gen.__file__.startswith('$CODE'), qtaim_gen.__file__"
 echo "branch: $(git -C $CODE rev-parse --abbrev-ref HEAD) $(git -C $CODE rev-parse --short HEAD)"
