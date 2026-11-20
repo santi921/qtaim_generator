@@ -22,6 +22,7 @@ another way are discarded and recomputed when a gbw is there. With `--wfn` the d
 | remaining_routines_plan.md | every other Multiwfn / orca_2mkl step, by cost; wavefunction reader; EDF tables |
 | descriptor_engine_vision.md | descriptors Multiwfn has that we do not use, descriptors beyond Multiwfn, standalone engine sketch, shortlist |
 | ibsi_lbo_plan.md | IBSI and Laplacian bond order in the charge engine: Multiwfn algorithms, design, validation, decisions 15-18 |
+| fukui_plan.md | condensed Fukui functions (FMO and orbital-weighted, Hirshfeld) in the charge engine: Multiwfn algorithms, design, validation, decisions F1-F7 |
 | validation_ledger.md | every engine validation run: reference, data, worst difference, code, raw output; known gaps |
 
 ## Decisions (2026-10-08)
@@ -106,6 +107,7 @@ of their own (converged MBIS as the default, 2026-10-15; planarity in the surfac
 | 7 | adds ddec6 (opt-in `--ddec6`, a port of Chargemol 09_26_2017; molecules above 120 atoms skipped) |
 | 8 | adds ibsi_bond (full_set 1, IGMH on the 75 x 434 grid) and laplacian_bond (full_set 2, Multiwfn's 45 x 302 grid) in the charge engine |
 | 9 | changes ddec6: adds Chargemol's bond order analysis (bond.json `ddec6_bond`, `ddec6_overlap_population` for pairs with bond order >= 0.001; fuzzy_full.json `ddec6_sbo`, `ddec6_r2`, `ddec6_r3`, `ddec6_r4`). Charges, spins and multipoles are unchanged; a version 7 or 8 DDEC6 result reruns on the next `--ddec6` pass |
+| 10 | adds fukui_plus_fmo, fukui_minus_fmo, fukui_plus_ow, fukui_minus_ow (full_set 0, charge engine, fuzzy_full.json): Hirshfeld-condensed frontier-orbital and orbital-weighted Fukui functions from the molden's orbitals (fukui_plan.md). A folder without the molden (removed by clean_jobs) records them as skipped (`no_molden`), so engine trees at versions 1-9 rerun the charge engine once on restart and then skip them |
 
 ## Cross-cutting requirements
 
@@ -210,6 +212,23 @@ partition and threshold, at print precision on the same 99 jobs. Not a Multiwfn 
 parser fix that changes stored data: parse_bond_order_laplace split on whitespace, so every pair
 with a two-letter element ("1(Ru)") was stored under a garbled key (`1_Ru)_to_):`); stored
 full_set 2 trees need an audit for keys containing ")".
+Fukui functions (fukui_plus/minus_fmo, fukui_plus/minus_ow, full_set 0; engine version 10;
+fukui_plan.md): the orbital-weighted values follow CDFT option 6 (MW/CDFT.f90:758-866), delta
+0.1 Hartree, including its integration over every radial point of the atom grid (no radcut;
+menu 8 and the Hirshfeld charges stop at 10 Bohr). Differences: (1) grid 75 x 434 where
+Multiwfn's option 6 under production settings (iautointgrid=1) uses 30 x 302; on 25 closed-shell
+wfx_pull jobs that moves values by a median 2.5e-3 and up to 9.8e-2 (HXeOH; 6 jobs above 1e-2).
+(2) Open shells, which Multiwfn refuses (wfntype /= 0): spin-orbital convention, with e_H the
+highest occupied and e_L the lowest unoccupied spin-orbital over both spins, and the weights
+normalized over spin-orbitals; for a closed shell this is Multiwfn's value. (3) Frontier-orbital
+(FMO) values average over the spin-orbitals within 0.01 eV of e_H or e_L (Multiwfn's degeneracy
+suggestion), so they do not depend on the rotation inside a degenerate set; Multiwfn has no
+condensed FMO Fukui routine (its orbital composition, menu 8 option 8, gives single orbitals).
+(4) Orbitals whose orbital-weighted shares sum to less than 1e-10 per side are not evaluated,
+and the weights are taken relative to the frontier orbital's so they cannot underflow (Multiwfn
+gives 0/0 when the gap exceeds about 5.5 Hartree). Values are not normalized: f+ sums to
+0.785-1.003 on the 87 wfx_pull jobs, the shortfall from unbound diffuse LUMOs of charged
+clusters reaching where every free-atom density is zero (Multiwfn skips those points too).
 
 ### Parity across levels of theory
 
