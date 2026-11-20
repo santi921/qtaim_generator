@@ -40,6 +40,7 @@ from qtaim_gen.source.core.horton import run_horton_analysis
 from qtaim_gen.source.data.engine_versions import ENGINE_VERSION, ROUTINE_ENGINE
 from qtaim_gen.source.data.multiwfn import (
     ENGINE_ROUTINES,
+    FUKUI_ROUTINES,
     charge_data,
     charge_data_dict,
     bond_order_data,
@@ -1112,7 +1113,8 @@ def parse_multiwfn(
     if separate:
         charge_routines = list(charge_dict.keys())
         bond_routines = list(bond_dict.keys())
-        fuzzy_routines = list(fuzzy_data(spin=spin_tf, full_set=full_set).keys())
+        # the Fukui routines are charge-engine only: their jsons exist only after an engine run
+        fuzzy_routines = list(fuzzy_data(spin=spin_tf, full_set=full_set).keys()) + sorted(FUKUI_ROUTINES)
         other_routines = list(other_dict.keys())
         charge_dict_compiled = {}
         bond_dict_compiled = {}
@@ -1829,10 +1831,17 @@ def _run_charge_engine(
     import numba
     from qtaim_gen.source.core import charge_engine
 
+    # the Fukui functions need the unoccupied orbitals, which only the molden of the convert
+    # step has (clean_jobs removes it); without one they are recorded as skipped (no_molden)
+    moldens = sorted(f for f in os.listdir(folder) if f.endswith(".molden.input"))
+    if "orca.molden.input" in moldens:
+        moldens = ["orca.molden.input"]
+    molden_path = os.path.join(folder, moldens[0]) if len(moldens) == 1 else None
+
     numba.set_num_threads(max(1, min(n_threads, numba.config.NUMBA_NUM_THREADS)))
     start = time.time()
     try:
-        out = charge_engine.run(wf_path, full_set=full_set)
+        out = charge_engine.run(wf_path, full_set=full_set, molden_path=molden_path)
     except Exception as e:
         logger.error("charge_engine failed on %s: %s", wf_path, e)
         return False
@@ -1877,7 +1886,10 @@ def _run_charge_engine(
         return False
     _update_timing(folder, "charge_engine", elapsed, logger)
     spec = {"grid": meta.get("grid")}
-    for family, extra in ((set(written) - set(MBIS_FAMILY), {}), (set(written) & set(MBIS_FAMILY), {"mbis_mode": meta.get("mbis_mode")})):
+    fukui_spec = {k: (meta.get("fukui") or {}).get(k) for k in ("delta", "degeneracy_tol")}
+    for family, extra in ((set(written) - set(MBIS_FAMILY) - FUKUI_ROUTINES, {}),
+                          (set(written) & set(MBIS_FAMILY), {"mbis_mode": meta.get("mbis_mode")}),
+                          (set(written) & FUKUI_ROUTINES, {"fukui": fukui_spec})):
         if family:
             provenance.record_routines(folder, sorted(family), "charge_engine", ENGINE_VERSION, spec={**spec, **extra})
     provenance.record_engine(folder, "charge_engine", meta)

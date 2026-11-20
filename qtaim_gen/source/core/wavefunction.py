@@ -90,13 +90,50 @@ def orca5_effective_charges(orca_out):
     return {int(k): float(v["number"]) for k, v in pull_ecp_dict(orca_out).items()}
 
 
-def read_orca_molden(path, zeff_override=None, mwfn_h_compat=False, keep_virtuals=False):
+def molden_mo_headers(path):
+    """(energy, occupation) of every [MO] entry of a molden file, in file order."""
+    mos, mo, section = [], None, None
+    with open(path, errors="replace") as fh:
+        for line in fh:
+            s = line.strip()
+            if s.startswith("["):
+                section = s.split("]")[0][1:].strip().lower()
+            elif section == "mo" and s:
+                if "=" in s:
+                    if mo is None or "_body" in mo:
+                        mo = {}
+                        mos.append(mo)
+                    k, v = s.split("=", 1)
+                    mo[k.strip().lower()] = v.strip()
+                else:
+                    mo["_body"] = True
+    return [(float(m["ene"]), float(m["occup"])) for m in mos]
+
+
+def frontier_window(headers, window):
+    """Indices of the orbitals within `window` Hartree of the frontier: occupied ones at
+    most that far below the highest occupied energy, unoccupied ones at most that far
+    above the lowest unoccupied energy (over both spins)."""
+    e = np.array([h[0] for h in headers])
+    occd = np.array([h[1] for h in headers]) > 0
+    keep = occd & (e >= e[occd].max() - window)
+    if (~occd).any():
+        keep |= ~occd & (e <= e[~occd].min() + window)
+    return set(np.flatnonzero(keep).tolist())
+
+
+def read_orca_molden(path, zeff_override=None, mwfn_h_compat=False, keep_virtuals=False, orbital_window=None):
     """The read_wfx dict for an ORCA .molden file, streamed line by line.
 
     zeff_override: {0-based atom: effective charge}, for ORCA 5 ECP jobs.
     mwfn_h_compat: flip h(+3,-3,+4,-4) on alpha orbitals only, as Multiwfn does.
     keep_virtuals: keep unoccupied orbitals (Multiwfn's wfx has occupied only).
+    orbital_window: keep only the orbitals frontier_window selects (occupied and
+        unoccupied, Hartree); a first pass over the [MO] headers finds the frontier,
+        so the coefficients of every other orbital are never stored. "mult" and
+        "occupied_rank" still count every orbital.
     """
+    keep_idx = frontier_window(molden_mo_headers(path), orbital_window) if orbital_window is not None else None
     atnums, zeff, coords, shells, mos = [], [], [], [], []
     is_orca, section, unit_au, nsph = False, None, True, 0
     cur_atom = shell = mo = coef = None
@@ -151,7 +188,11 @@ def read_orca_molden(path, zeff_override=None, mwfn_h_compat=False, keep_virtual
                     # skipped without storing them (most of a large molden)
                     if "_body" not in mo:
                         mo["_body"] = True
-                        coef = mo["coef"] = np.zeros(nsph) if keep_virtuals or float(mo["occup"]) != 0 else None
+                        if keep_idx is not None:
+                            stored = len(mos) - 1 in keep_idx
+                        else:
+                            stored = keep_virtuals or float(mo["occup"]) != 0
+                        coef = mo["coef"] = np.zeros(nsph) if stored else None
                     if coef is not None:
                         i, v = s.split()[:2]
                         coef[int(i) - 1] = float(v.replace("D", "E"))
@@ -223,6 +264,9 @@ def read_orca_molden(path, zeff_override=None, mwfn_h_compat=False, keep_virtual
         "prim_exp": np.array(exps), "occ": occ[keep], "spin_types": [t for t, k in zip(spin_types, keep) if k],
         "coeffs": coeffs, "mult": int(round(n_a - n_b)) + 1, "mo_energy": energy[keep],
         "edf_center": np.array(ec, dtype=np.int64), "edf_exp": np.array(ee), "edf_coef": np.array(eco),
+        # per kept orbital: its index among the occupied orbitals in file order (the order the
+        # wfx lists them), -1 when unoccupied
+        "occupied_rank": np.where(occ != 0, np.cumsum(occ != 0) - 1, -1)[keep],
     }
 
 
