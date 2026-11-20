@@ -114,17 +114,19 @@ def multiwfn(args, wd, name, stdin, auto_grid):
     return out, time.perf_counter() - t0
 
 
-def engine_compositions(molden, wfx, cut=None):
+def engine_compositions(molden, wfx, cut=None, mwfn_h=False):
     """Per-orbital Hirshfeld compositions of every window orbital from the molden on the full
     radial grid (the integrals run() takes, without its truncation), optionally with
-    Multiwfn's weight cut; returns (comp, window wfx dict, window indices in file order)."""
+    Multiwfn's weight cut and, with mwfn_h, Multiwfn's alpha-only h-function sign flip (it
+    reads the molden that way; only open shells with h functions differ); returns (comp,
+    window wfx dict, window indices in file order)."""
     import numpy as np
 
     from qtaim_gen.source.core import charge_engine as ce
     from qtaim_gen.source.core.wavefunction import frontier_window, molden_mo_headers, read_orca_molden
 
     w = ce.read_wfx(wfx)
-    fw = read_orca_molden(molden, orbital_window=ce.FUKUI_WINDOW)
+    fw = read_orca_molden(molden, orbital_window=ce.FUKUI_WINDOW, mwfn_h_compat=mwfn_h)
     idx = sorted(frontier_window(molden_mo_headers(molden), ce.FUKUI_WINDOW))
     fb = ce.prepare_basis(fw, keep=np.ones(len(fw["occ"]), dtype=bool))
     pro, _ = ce.mwfn_proatom_tables(w["atnums"])
@@ -197,10 +199,11 @@ def one(args):
     eng = {k: np.array([res[k][k][lab] for lab in labels]) for k in res if k.startswith("fukui_")}
 
     ref = parse_orbcomp(os.path.join(wd, "orbcomp_engine_grid.txt"))
-    comp_cut, fw, idx = engine_compositions(molden, wfx, cut=1e-9)
+    comp_cut, fw, idx = engine_compositions(molden, wfx, cut=1e-9, mwfn_h=True)
     R = np.array([ref[i] for i in idx]).T
     rec["comp_max"] = float(np.abs(comp_cut / comp_cut.sum(0) - R).max())
     rec["window_orbitals"] = len(idx)
+    rec["h_functions"] = bool((w["prim_type"] >= 36).any())
 
     comp, _, _ = engine_compositions(molden, wfx)
     same, _ = ce.fukui_values(comp, fw["mo_energy"], fw["occ"], fw["spin_types"])
