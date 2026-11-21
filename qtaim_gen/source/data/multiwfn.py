@@ -17,12 +17,15 @@ ENGINE_LEVEL1_ROUTINES = frozenset({"vdd", "mbis", "mbis_fuzzy_density", "mbis_f
 ENGINE_LEVEL2_ROUTINES = frozenset({"grad_norm_rho_fuzzy", "laplacian_rho_fuzzy", "laplacian_bond"})
 SURFACE_ENGINE_LEVEL2_ROUTINES = frozenset({"other_esp"})
 SURFACE_ENGINE_ROUTINES = frozenset({"other_alie", "other_geometry"}) | SURFACE_ENGINE_LEVEL2_ROUTINES
+# condensed Fukui functions (full_set 0, charge engine, fuzzy_full.json): engine-only, so
+# they have no Multiwfn input below and only the charge-engine mode expects them
+FUKUI_ROUTINES = frozenset({"fukui_plus_fmo", "fukui_minus_fmo", "fukui_plus_ow", "fukui_minus_ow"})
 ENGINE_ROUTINES = frozenset({
     "hirshfeld", "adch", "cm5", "becke",
     "becke_fuzzy_density", "hirsh_fuzzy_density",
     "becke_fuzzy_spin", "hirsh_fuzzy_spin",
     "fuzzy_bond",
-}) | ENGINE_LEVEL1_ROUTINES | ENGINE_LEVEL2_ROUTINES | SURFACE_ENGINE_ROUTINES
+}) | ENGINE_LEVEL1_ROUTINES | ENGINE_LEVEL2_ROUTINES | SURFACE_ENGINE_ROUTINES | FUKUI_ROUTINES
 
 
 def charge_engine_routines(full_set: int, spin_tf: bool) -> frozenset:
@@ -101,7 +104,8 @@ def chelpg_radii_file(atnums) -> "str | None":
 # ECP atom but no EDF, the MBIS family per its own limits, and the EDF-dependent
 # derivative fuzzy integrals with an ECP atom but no EDF; Multiwfn refuses MBIS
 # beyond MULTIWFN_MBIS_MAX_Z (it exits 64 for mbis and segfaults for the fuzzy steps)
-HIRSHFELD_FAMILY = ("hirshfeld", "adch", "cm5", "vdd", "hirsh_fuzzy_density", "hirsh_fuzzy_spin")
+HIRSHFELD_FAMILY = ("hirshfeld", "adch", "cm5", "vdd", "hirsh_fuzzy_density", "hirsh_fuzzy_spin",
+                    *sorted(FUKUI_ROUTINES))
 MBIS_FAMILY = ("mbis", "mbis_fuzzy_density", "mbis_fuzzy_spin")
 DERIV_FUZZY_FAMILY = ("grad_norm_rho_fuzzy", "laplacian_rho_fuzzy")
 MULTIWFN_MBIS_MAX_Z = 86

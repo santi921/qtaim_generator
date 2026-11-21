@@ -30,7 +30,7 @@ def test_engine_skip_is_recorded_and_the_run_stamped(tmp_path, monkeypatch):
     mbis = {"mbis", "mbis_fuzzy_density"} & wanted
     out = {r: {"x": 1.0} for r in wanted - mbis}
     out["_meta"] = {"skipped": [{"schemes": "mbis family", "reason": "ecp_disabled", "routines": list(MBIS_FAMILY)}]}
-    monkeypatch.setattr(charge_engine, "run", lambda path, full_set=0: out)
+    monkeypatch.setattr(charge_engine, "run", lambda path, full_set=0, **kw: out)
     assert omol._run_charge_engine(str(tmp_path), n_threads=1, logger=LOG, full_set=1) is True
     timings = json.loads((tmp_path / "timings.json").read_text())
     assert timings["charge_engine"] > 0
@@ -47,7 +47,7 @@ def test_a_routine_missing_without_a_skip_still_blocks_the_stamp(tmp_path, monke
     wanted = sorted(omol._engine_routines(1, False))
     out = {r: {"x": 1.0} for r in wanted[1:]}
     out["_meta"] = {"skipped": [{"schemes": "mbis family", "reason": "ecp_disabled", "routines": list(MBIS_FAMILY)}]}
-    monkeypatch.setattr(charge_engine, "run", lambda path, full_set=0: out)
+    monkeypatch.setattr(charge_engine, "run", lambda path, full_set=0, **kw: out)
     if wanted[0] in MBIS_FAMILY:  # the dropped routine must be one the skip does not cover
         out.pop(wanted[1])
     assert omol._run_charge_engine(str(tmp_path), n_threads=1, logger=LOG, full_set=1) is False

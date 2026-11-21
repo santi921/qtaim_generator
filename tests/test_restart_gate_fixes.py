@@ -604,12 +604,12 @@ def test_partial_engine_run_is_not_stamped(tmp_path, monkeypatch):
     (tmp_path / "generator" / "timings.json").write_text(json.dumps({"charge_engine": 5.0, "qtaim": 3.0}))
     monkeypatch.setattr(omol, "check_spin", lambda folder: False)
     wanted = sorted(omol._engine_routines(0, False))
-    monkeypatch.setattr(charge_engine, "run", lambda path, full_set=0: {r: {"x": 1.0} for r in wanted[1:]})
+    monkeypatch.setattr(charge_engine, "run", lambda path, full_set=0, **kw: {r: {"x": 1.0} for r in wanted[1:]})
     assert omol._run_charge_engine(str(tmp_path), n_threads=1, logger=logging.getLogger("t")) is False
     for timings in (tmp_path / "timings.json", tmp_path / "generator" / "timings.json"):
         assert not timings.exists() or "charge_engine" not in json.loads(timings.read_text())
     assert json.loads((tmp_path / "generator" / "timings.json").read_text()) == {"qtaim": 3.0}
-    monkeypatch.setattr(charge_engine, "run", lambda path, full_set=0: {r: {"x": 1.0} for r in wanted})
+    monkeypatch.setattr(charge_engine, "run", lambda path, full_set=0, **kw: {r: {"x": 1.0} for r in wanted})
     assert omol._run_charge_engine(str(tmp_path), n_threads=1, logger=logging.getLogger("t")) is True
 
 

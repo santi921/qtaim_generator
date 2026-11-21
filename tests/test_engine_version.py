@@ -6,6 +6,7 @@ import json
 import pytest
 
 from qtaim_gen.source.data.engine_versions import ENGINE_VERSION, ROUTINE_ENGINE, is_current, last_change, routines_at
+from qtaim_gen.source.data.multiwfn import FUKUI_ROUTINES
 from qtaim_gen.source.utils import provenance
 from qtaim_gen.source.utils.validation import (TIMINGS_PATCHED_KEY, get_expected_timing_keys, timing_total,
                                                  validate_timing_dict)
@@ -46,11 +47,12 @@ def _timings_folder(tmp_path, version, full_set):
 
 
 @pytest.mark.parametrize("version, full_set, done", [
-    (1, 0, True), (1, 1, False),                    # version 1 left elf_fuzzy to Multiwfn
-    (2, 0, True), (2, 1, False), (5, 1, False),     # versions 2-5 left chelpg to Multiwfn
+    (1, 1, False),                                  # version 1 left elf_fuzzy to Multiwfn
+    (2, 1, False), (5, 1, False),                   # versions 2-5 left chelpg to Multiwfn
     (2, 2, False),                                  # version 2 left other_esp to Multiwfn
     (7, 1, False), (7, 2, False),                   # version 7 left ibsi_bond and laplacian_bond
-    (ENGINE_VERSION, 1, True), (ENGINE_VERSION, 2, True),
+    (1, 0, False), (9, 0, False),                   # versions 1-9 had no Fukui functions (full_set 0)
+    (ENGINE_VERSION, 0, True), (ENGINE_VERSION, 1, True), (ENGINE_VERSION, 2, True),
 ])
 def test_engine_validation_requires_current_engine_output(tmp_path, version, full_set, done):
     """With charge_engine=True a folder is done only when every charge- and surface-engine
@@ -63,12 +65,14 @@ def test_engine_validation_requires_current_engine_output(tmp_path, version, ful
 
 
 def test_engine_validation_accepts_permanently_skipped_routines(tmp_path):
-    # a version-5 engine left chelpg and ibsi_bond (versions 6 and 8) out
+    # a version-5 engine left chelpg, ibsi_bond and the Fukui functions (versions 6, 8, 10) out
     path = _timings_folder(tmp_path, 5, full_set=1)
     assert not validate_timing_dict(str(path), full_set=1, charge_engine=True)
     provenance.record_skips(str(tmp_path), {"chelpg": {"reason": "test", "by": "charge_engine"}})
     assert not validate_timing_dict(str(path), full_set=1, charge_engine=True)
     provenance.record_skips(str(tmp_path), {"ibsi_bond": {"reason": "test", "by": "charge_engine"}})
+    assert not validate_timing_dict(str(path), full_set=1, charge_engine=True)
+    provenance.record_skips(str(tmp_path), {r: {"reason": "no_molden", "by": "charge_engine"} for r in FUKUI_ROUTINES})
     assert validate_timing_dict(str(path), full_set=1, charge_engine=True)
 
 
@@ -105,20 +109,23 @@ def test_restart_reruns_an_older_engine_only_where_it_left_routines_to_multiwfn(
     old = _engine_folder(tmp_path / "v1", version=1)
     v2 = _engine_folder(tmp_path / "v2", version=2)
     v6 = _engine_folder(tmp_path / "v6", version=6)
-    new = _engine_folder(tmp_path / "v8", version=8)
-    # full_set 0: version 1 computed every level-0 routine
-    assert _engine_outputs_present(old, spin_tf=True, full_set=0)
+    v9 = _engine_folder(tmp_path / "v9", version=9)
+    new = _engine_folder(tmp_path / "v10", version=10)
+    # full_set 0: versions 1-9 computed every level-0 routine but the Fukui functions (version 10)
+    assert not _engine_outputs_present(old, spin_tf=True, full_set=0)
+    assert not _engine_outputs_present(v9, spin_tf=True, full_set=0)
     # full_set 1 and 2: version 1 left elf_fuzzy (and the level-2 fuzzy) to Multiwfn
     assert not _engine_outputs_present(old, spin_tf=True, full_set=1)
     assert not _engine_outputs_present(old, spin_tf=True, full_set=2)
     # versions 2-5 left chelpg (full_set 1) to Multiwfn
-    assert _engine_outputs_present(v2, spin_tf=True, full_set=0)
     assert not _engine_outputs_present(v2, spin_tf=True, full_set=1)
     # versions up to 7 left ibsi_bond (full_set 1) and laplacian_bond (full_set 2) to Multiwfn
-    assert _engine_outputs_present(v6, spin_tf=True, full_set=0)
     assert not _engine_outputs_present(v6, spin_tf=True, full_set=1)
     assert not _engine_outputs_present(v6, spin_tf=True, full_set=2)
-    # version 8: everything, an empty laplacian_bond entry included (no pair above threshold)
+    # a version 9 run whose Fukui functions were since recorded as skipped (no molden) is complete
+    provenance.record_skips(v9, {r: {"reason": "no_molden", "by": "charge_engine"} for r in FUKUI_ROUTINES})
+    assert _engine_outputs_present(v9, spin_tf=True, full_set=2)
+    # version 10: everything, an empty laplacian_bond entry included (no pair above threshold)
     assert _engine_outputs_present(new, spin_tf=True, full_set=2)
 
 

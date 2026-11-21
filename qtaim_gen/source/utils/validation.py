@@ -11,7 +11,7 @@ import zlib
 from typing import Optional
 from qtaim_gen.source.core.parse_qtaim import dft_inp_to_dict, fortran_float
 from qtaim_gen.source.core.parse_orca import ORCA_PARSER_VERSION
-from qtaim_gen.source.data.multiwfn import charge_engine_routines, surface_engine_routines
+from qtaim_gen.source.data.multiwfn import FUKUI_ROUTINES, charge_engine_routines, surface_engine_routines
 from qtaim_gen.source.utils import provenance
 import numpy as np
 from datetime import datetime
@@ -479,10 +479,12 @@ def validate_fuzzy_dict(
     full_set: int = 0,
     logger: any = None,
     skipped: Optional[set] = None,
+    charge_engine: bool = False,
 ):
     """
     Basic check that the fuzzy json file has the expected structure.
     Check that it has the keys 'fuzzy', 'fuzzy_bonds', 'fuzzy_bcp', 'fuzzy_ncp'.
+    With charge_engine=True the engine-only Fukui functions are expected too.
     """
     fuzzy_dict = _safe_json_load(fuzzy_json_loc, logger=logger)
     if fuzzy_dict is None:
@@ -504,6 +506,8 @@ def validate_fuzzy_dict(
 
         if full_set > 0:
             expected_keys += ["mbis_fuzzy_spin"]
+    if charge_engine:
+        expected_keys += sorted(FUKUI_ROUTINES)
     expected_keys = [k for k in expected_keys if k not in (skipped or ())]
 
     for key in expected_keys:
@@ -1811,6 +1815,7 @@ def validation_checks(
         full_set=full_set,
         logger=logger,
         skipped=skipped,
+        charge_engine=charge_engine,
     ):
         if logger:
             logger.error(f"Fuzzy json validation failed in folder: {folder}")
