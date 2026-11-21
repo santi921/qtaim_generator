@@ -113,12 +113,16 @@ def molden_mo_headers(path):
 def frontier_window(headers, window):
     """Indices of the orbitals within `window` Hartree of the frontier: occupied ones at
     most that far below the highest occupied energy, unoccupied ones at most that far
-    above the lowest unoccupied energy (over both spins)."""
+    above the lowest unoccupied energy (over both spins). Unoccupied orbitals with an energy
+    of exactly 0 are left out: ORCA writes the orbitals of basis functions it removed as
+    linearly dependent that way (coefficients about 1e-9, after the real orbitals), and with
+    a LUMO above 0 they would otherwise be taken as the frontier."""
     e = np.array([h[0] for h in headers])
     occd = np.array([h[1] for h in headers]) > 0
+    virt = ~occd & (e != 0.0)
     keep = occd & (e >= e[occd].max() - window)
-    if (~occd).any():
-        keep |= ~occd & (e <= e[~occd].min() + window)
+    if virt.any():
+        keep |= virt & (e <= e[virt].min() + window)
     return set(np.flatnonzero(keep).tolist())
 
 

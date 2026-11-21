@@ -64,11 +64,15 @@ def test_frontier_window_selects_each_side_from_its_own_frontier():
     from qtaim_gen.source.core.wavefunction import frontier_window
 
     # (energy, occupation): a 3 Hartree gap, so no orbital lies within the window of mu
-    headers = [(-5.0, 2.0), (-3.3, 2.0), (-3.0, 2.0), (0.0, 0.0), (0.5, 0.0), (0.7, 0.0)]
+    headers = [(-5.0, 2.0), (-3.3, 2.0), (-3.0, 2.0), (0.01, 0.0), (0.5, 0.0), (0.7, 0.0)]
     assert frontier_window(headers, 0.6) == {1, 2, 3, 4}
     # unrestricted, alpha then beta in file order
     headers = [(-0.5, 1.0), (-0.3, 1.0), (0.1, 0.0), (-0.45, 1.0), (-0.05, 0.0), (1.0, 0.0)]
     assert frontier_window(headers, 0.3) == {0, 1, 2, 3, 4}
+    # ORCA's placeholders for removed linearly dependent functions: unoccupied, energy exactly 0,
+    # written after the real orbitals; with a LUMO above 0 they must not become the frontier
+    headers = [(-0.4, 2.0), (-0.27, 2.0), (0.003, 0.0), (0.2, 0.0), (0.9, 0.0), (0.0, 0.0), (0.0, 0.0)]
+    assert frontier_window(headers, 0.6) == {0, 1, 2, 3}
 
 
 def test_window_read_keeps_the_selected_orbitals_unchanged():
