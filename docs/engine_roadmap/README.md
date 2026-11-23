@@ -233,7 +233,8 @@ clusters reaching where every free-atom density is zero (Multiwfn skips those po
 basis functions it removed as linearly dependent that way (coefficients about 1e-9); Multiwfn's
 CDFT option 6 would take them as the LUMO when the real one lies above 0, or give them weight
 in the normalization (it skips MOene == 0 only in its superdelocalizabilities, CDFT.f90:953).
-2 of 440 NERSC openac sample jobs (def2-TZVPD) have them.
+2 of 440 NERSC openac sample jobs (def2-TZVPD) and 51 of 200 LRC tm_react jobs (charged MOBH19
+cations, Pd(0)) have them; 31 of the 200 change by more than 1e-10 (the 2 Pd(0) jobs by up to 1.0).
 
 ### Parity across levels of theory
 
