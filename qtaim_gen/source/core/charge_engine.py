@@ -1277,6 +1277,9 @@ FUKUI_WINDOW = 6 * FUKUI_DELTA
 FUKUI_DROP = 1e-10
 FUKUI_COORD_TOL = 1e-6  # Bohr: the molden must hold the wfx's structure
 FUKUI_ENERGY_TOL = 1e-8  # Hartree: the wfx's occupied orbitals are the molden's (E20.12 text)
+# relative to the largest coefficient: the wfx's E20.12 text differs from the molden by about
+# 1e-11 (native converter parity), an h-function sign flip by twice the coefficient
+FUKUI_COEF_TOL = 1e-8
 
 
 def _ow_weights(energy, occ, spin_types, delta):
@@ -1429,6 +1432,10 @@ def run(wfx_path, nrad=75, nang=434, radcut=10.0, bond_nrad=45, bond_nang=170, f
             reason = "molden_mismatch"
         elif not (fwfx["occ"] == 0).any():
             reason = "no_virtual_orbitals"
+        elif "Alpha" in fwfx["spin_types"] and "Alpha and Beta" in fwfx["spin_types"]:
+            # restricted open shell: a singly occupied orbital is read as alpha only, so its empty
+            # beta spin-orbital would be missing from the unoccupied side
+            reason = "restricted_open_shell"
         else:
             # the orbitals whose orbital-weighted share matters; the occupied ones are the wfx's
             # (same order), whose values the density pass computes anyway
@@ -1447,7 +1454,15 @@ def run(wfx_path, nrad=75, nang=434, radcut=10.0, bond_nrad=45, bond_nang=170, f
             skipped.append({"schemes": "fukui", "reason": reason, "routines": sorted(FUKUI_ROUTINES)})
             fukui_ok = False
         else:
-            vbasis = prepare_basis(fwfx, keep=sel & (fwfx["occ"] == 0))
+            # the wfx's occupied orbitals stand in for the molden's only when they are the same
+            # functions: a wfx from Multiwfn's convert step or native_convert multiwfn_h flips h
+            # functions on alpha orbitals only (energies equal, coefficients not); then every
+            # Fukui orbital comes from the molden
+            same_prims = all(np.array_equal(wfx[k], fwfx[k]) for k in ("prim_center", "prim_type", "prim_exp"))
+            occ_rows = wfx_occ[occ_cols]
+            reuse_occ = same_prims and np.abs(wfx["coeffs"][occ_rows] - fwfx["coeffs"][sel][f_occd]).max() \
+                <= FUKUI_COEF_TOL * np.abs(fwfx["coeffs"][sel][f_occd]).max()
+            vbasis = prepare_basis(fwfx, keep=sel & (fwfx["occ"] == 0) if reuse_occ else sel)
             abasis = prepare_basis(fwfx, keep=sel)
             # CDFT option 6 integrates every radial point of the atom grid, also beyond radcut
             # (MW/CDFT.f90:822), where diffuse frontier orbitals of charged clusters still have
@@ -1521,8 +1536,11 @@ def run(wfx_path, nrad=75, nang=434, radcut=10.0, bond_nrad=45, bond_nang=170, f
                 # as the Hirshfeld charge: atom b's weight on its own grid, zero-promolecule
                 # points skipped (Multiwfn CDFT option 6), plus the shells beyond radcut
                 t0 = time.perf_counter()
-                fcomp[b, f_occd] = hw @ phi2[:, occ_cols]
-                fcomp[b, f_virt] = hw @ orbital_values(pts, coords, vbasis) ** 2
+                if reuse_occ:
+                    fcomp[b, f_occd] = hw @ phi2[:, occ_cols]
+                    fcomp[b, f_virt] = hw @ orbital_values(pts, coords, vbasis) ** 2
+                else:
+                    fcomp[b] = hw @ orbital_values(pts, coords, vbasis) ** 2
                 opts = out_pts + coords[b]
                 ho, _, _ = _hirshfeld_mwfn(opts, coords, *pro)
                 how = ho[:, b] * out_wts
@@ -1534,7 +1552,8 @@ def run(wfx_path, nrad=75, nang=434, radcut=10.0, bond_nrad=45, bond_nang=170, f
     if fukui_ok:
         fukui, fukui_meta = fukui_values(fcomp, f_energy, f_occ, f_spin)
         fukui_meta.update({"window_orbitals": int(len(fwfx["occ"])), "drop": FUKUI_DROP,
-                           "outer_points_per_atom": int(len(out_wts))})
+                           "outer_points_per_atom": int(len(out_wts)),
+                           "occupied_from": "wfx" if reuse_occ else "molden"})
 
     if mbis_ok:
         # q = Z_eff + EDF core electrons - population

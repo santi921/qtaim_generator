@@ -1837,6 +1837,9 @@ def _run_charge_engine(
     if "orca.molden.input" in moldens:
         moldens = ["orca.molden.input"]
     molden_path = os.path.join(folder, moldens[0]) if len(moldens) == 1 else None
+    if len(moldens) > 1:
+        logger.error("charge_engine: %d moldens and none named orca.molden.input in %s: %s; the Fukui "
+                     "functions are not computed and the run is not counted as done", len(moldens), folder, moldens)
 
     numba.set_num_threads(max(1, min(n_threads, numba.config.NUMBA_NUM_THREADS)))
     start = time.time()
@@ -1849,10 +1852,14 @@ def _run_charge_engine(
 
     meta = out.get("_meta", {})
     wanted = _engine_routines(full_set, spin_tf)
-    # every engine skip is permanent for this wavefunction: record it so validation stops
-    # expecting those routines, instead of the folder rerunning the engine on every pass
+    # an engine skip is permanent for this wavefunction: record it so validation stops expecting
+    # those routines, instead of the folder rerunning the engine on every pass. Not so for what
+    # depends on the folder's files rather than the wavefunction: a molden that does not match the
+    # wfx, or several moldens to choose from; those routines stay missing, the run fails and reruns
+    transient = {"molden_mismatch"} | ({"no_molden"} if len(moldens) > 1 else set())
     permanent = {r: {"reason": entry["reason"], "by": "charge_engine"}
-                 for entry in meta.get("skipped", []) for r in entry.get("routines", ()) if r in wanted}
+                 for entry in meta.get("skipped", []) if entry["reason"] not in transient
+                 for r in entry.get("routines", ()) if r in wanted}
     if meta.get("skipped"):
         logger.warning("charge_engine skipped schemes in %s: %s", folder, meta["skipped"])
     if permanent:

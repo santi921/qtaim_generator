@@ -326,3 +326,103 @@ def test_truncation_keeps_the_frontier_and_bounds_the_dropped_share():
         assert x[sel & ~keep].sum() / x[sel].sum() < 1e-10
         assert keep[np.flatnonzero(sel)[np.argmax(x[sel])]]
     assert keep.sum() < len(occ) / 4
+
+
+# ---------------------------------------------------------------- review fixes (fix/fukui-review)
+
+
+@pytest.mark.skipif(not HAS_NUMBA, reason="numba not installed")
+def test_restricted_open_shell_is_skipped(tmp_path):
+    """A restricted open-shell molden (occupations 2/1/0, all alpha) would lose the empty beta half
+    of each singly occupied orbital, so the Fukui functions are skipped with a reason."""
+    from qtaim_gen.source.core import charge_engine as ce
+    from qtaim_gen.source.core.wavefunction import molden_mo_headers
+
+    wfx, molden = _paths("XeCl4_step2_0_1")
+    hdr = molden_mo_headers(molden)
+    homo = max((i for i, (e, o) in enumerate(hdr) if o > 0), key=lambda i: hdr[i][0])
+    lines, k = [], -1
+    for line in open(molden):
+        if line.strip().startswith("Occup="):
+            k += 1
+            if k == homo:
+                line = line.replace("2.000000", "1.000000")
+        lines.append(line)
+    roks = tmp_path / "roks.molden.input"
+    roks.write_text("".join(lines))
+    out = ce.run(wfx, molden_path=str(roks))
+    assert {"schemes": "fukui", "reason": "restricted_open_shell", "routines": sorted(FUKUI_ROUTINES)} \
+        in out["_meta"]["skipped"]
+    assert not FUKUI_ROUTINES & set(out)
+
+
+@pytest.mark.skipif(not HAS_NUMBA, reason="numba not installed")
+def test_occupied_orbitals_come_from_the_molden_when_the_wfx_differs(monkeypatch):
+    """When the wfx's occupied orbitals are not the molden's (Multiwfn's alpha-only h flip; here
+    d and higher primitives of the beta orbitals negated), every Fukui orbital is evaluated from
+    the molden, so the values do not change."""
+    from qtaim_gen.source.core import charge_engine as ce
+
+    wfx, molden = _paths("rmechdb_652_step10_0_2")
+    clean = ce.run(wfx, molden_path=molden)
+    assert clean["_meta"]["fukui"]["occupied_from"] == "wfx"
+
+    read = ce.read_wfx
+
+    def read_flipped(path):
+        w = read(path)
+        w["coeffs"] = w["coeffs"].copy()
+        beta = np.array([s == "Beta" for s in w["spin_types"]])
+        w["coeffs"][np.ix_(beta, w["prim_type"] >= 5)] *= -1
+        return w
+
+    monkeypatch.setattr(ce, "read_wfx", read_flipped)
+    flipped = ce.run(wfx, molden_path=molden)
+    assert flipped["_meta"]["fukui"]["occupied_from"] == "molden"
+    labels = ce.atom_labels(read(wfx)["atnums"])
+    for k in FUKUI_ROUTINES:
+        assert np.abs(_values(flipped, labels, k) - _values(clean, labels, k)).max() <= PATH_TOL, k
+
+
+def _fake_engine(monkeypatch, reason):
+    from qtaim_gen.source.core import charge_engine, omol
+
+    monkeypatch.setattr(omol, "check_spin", lambda folder: False)
+    wanted = omol._engine_routines(0, False)
+
+    def fake_run(path, full_set=0, molden_path=None, **kw):
+        out = {r: {r: {"1_H": 1.0}} for r in wanted - FUKUI_ROUTINES}
+        out["_meta"] = {"skipped": [{"schemes": "fukui", "reason": reason, "routines": sorted(FUKUI_ROUTINES)}]}
+        return out
+
+    monkeypatch.setattr(charge_engine, "run", fake_run)
+    return omol
+
+
+@pytest.mark.parametrize("moldens, reason", [
+    (("a.molden.input", "b.molden.input"), "no_molden"),  # ambiguous: two moldens, neither orca.molden.input
+    (("orca.molden.input",), "molden_mismatch"),
+])
+def test_file_state_skips_are_not_permanent(tmp_path, monkeypatch, moldens, reason):
+    """Several moldens to choose from, or one that does not match the wfx, depend on the folder's
+    files, not the wavefunction: the run fails (and reruns) instead of recording a permanent skip."""
+    from qtaim_gen.source.utils import provenance
+
+    omol = _fake_engine(monkeypatch, reason)
+    (tmp_path / "orca.wfx").write_text("wfx")
+    for m in moldens:
+        (tmp_path / m).write_text("molden")
+    assert omol._run_charge_engine(str(tmp_path), n_threads=1, logger=LOG) is False
+    prov = provenance.load(str(tmp_path))
+    assert not FUKUI_ROUTINES & set(prov.get("skipped", {}))
+    assert not provenance.engine_routines(prov)
+
+
+def test_missing_molden_is_still_a_permanent_skip(tmp_path, monkeypatch):
+    from qtaim_gen.source.utils import provenance
+
+    omol = _fake_engine(monkeypatch, "no_molden")
+    (tmp_path / "orca.wfx").write_text("wfx")
+    assert omol._run_charge_engine(str(tmp_path), n_threads=1, logger=LOG) is True
+    assert {r: rec["reason"] for r, rec in provenance.load(str(tmp_path))["skipped"].items()} \
+        == {r: "no_molden" for r in FUKUI_ROUTINES}
