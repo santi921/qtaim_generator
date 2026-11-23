@@ -63,8 +63,8 @@ tiers 1-3), `mbis_converged.md` (MBIS).
   closed-shell orbital-weighted values match Multiwfn at print precision (5e-6) on 87 local
   jobs and 40 NERSC actinide jobs, open shells through the compositions; the full runner on 440
   openac (NERSC) and 200 tm_react (LRC) jobs leaves every other routine unchanged. ORCA's
-  zero-energy placeholder orbitals (removed linear dependencies) are left out since fb6a5ef's
-  parent 4fa37d8; they occur in 2 of 440 openac and 51 of 200 tm_react moldens.
+  zero-energy placeholder orbitals (removed linear dependencies) are left out since
+  4fa37d8; they occur in 2 of 440 openac and 51 of 200 tm_react moldens.
 - **Gaps:** converged MBIS (the current default) has no independent reference; the ALIE
   difference on the NERSC actinides (3.4e-5 rel) is unexplained; engine-only CPs are not
   yet confirmed by critic2; no run covers double hybrids, HF, Cartesian basis sets or a
