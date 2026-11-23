@@ -18,12 +18,13 @@ Stamps only exist since 2026-11-03, so changes before that (converged MBIS as th
 from qtaim_gen.source.data.multiwfn import (
     ENGINE_LEVEL2_ROUTINES,
     ENGINE_ROUTINES,
+    FUKUI_ROUTINES,
     MBIS_FAMILY,
     SURFACE_ENGINE_LEVEL2_ROUTINES,
     SURFACE_ENGINE_ROUTINES,
 )
 
-ENGINE_VERSION = 9
+ENGINE_VERSION = 10
 
 # the sub-engine that produces each engine routine: the "by" of its provenance entry
 ROUTINE_ENGINE = {
@@ -38,7 +39,7 @@ _V8 = frozenset({"ibsi_bond", "laplacian_bond"})
 _V2 = (ENGINE_LEVEL2_ROUTINES - _V8) | {"elf_fuzzy"}
 _V6 = frozenset({"chelpg"})
 ENGINE_CHANGES = {
-    1: {"added": frozenset(ROUTINE_ENGINE) - _V2 - SURFACE_ENGINE_LEVEL2_ROUTINES - _V6 - _V8 - {"ddec6"},
+    1: {"added": frozenset(ROUTINE_ENGINE) - _V2 - SURFACE_ENGINE_LEVEL2_ROUTINES - _V6 - _V8 - FUKUI_ROUTINES - {"ddec6"},
         "changed": frozenset(),
         "note": "charge and surface engines, QTAIM engine (before version stamps)"},
     2: {"added": _V2, "changed": frozenset(),
@@ -61,6 +62,10 @@ ENGINE_CHANGES = {
     9: {"added": frozenset(), "changed": frozenset({"ddec6"}),
         "note": "DDEC6 bond orders, overlap populations, SBOs and r^2-r^4 radial moments (Chargemol's "
                 "bond order analysis) added to the ddec6 output"},
+    10: {"added": FUKUI_ROUTINES, "changed": frozenset(),
+         "note": "condensed Fukui functions (full_set 0): frontier-orbital and orbital-weighted f+ and f-, "
+                 "Hirshfeld compositions on the main grid, spin-orbital convention, from the molden's "
+                 "unoccupied orbitals"},
 }
 
 

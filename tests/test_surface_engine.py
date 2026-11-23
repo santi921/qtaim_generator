@@ -183,7 +183,7 @@ def test_restart_at_full_set_2_adds_only_the_esp_surface_and_validates(tmp_path)
 
     from qtaim_gen.source.core.omol import _run_surface_engine, move_results_to_folder, parse_multiwfn
     from qtaim_gen.source.data.engine_versions import ENGINE_VERSION, ROUTINE_ENGINE, last_change, routines_at
-    from qtaim_gen.source.data.multiwfn import ENGINE_ROUTINES
+    from qtaim_gen.source.data.multiwfn import ENGINE_ROUTINES, FUKUI_ROUTINES
     from qtaim_gen.source.utils import provenance
     from qtaim_gen.source.utils.validation import get_expected_timing_keys, validate_timing_dict
 
@@ -191,13 +191,13 @@ def test_restart_at_full_set_2_adds_only_the_esp_surface_and_validates(tmp_path)
     stored = {"ALIE_Volume": 123.0, "mpp_full": 0.5}
     # Multiwfn's timings for the full_set 2 routines no engine covers; no other_esp timing
     keys, _ = get_expected_timing_keys(full_set=2)
-    # version 2 plus chelpg (version 6) and ibsi_bond / laplacian_bond (version 8), so the
-    # surface engine's other_esp is the only stale routine
-    v2 = (routines_at(2) | {"chelpg", "ibsi_bond", "laplacian_bond"}) - {"qtaim", "convert"}
+    # version 2 plus chelpg (version 6), ibsi_bond / laplacian_bond (version 8) and the Fukui
+    # functions (version 10), so the surface engine's other_esp is the only stale routine
+    v2 = (routines_at(2) | {"chelpg", "ibsi_bond", "laplacian_bond"} | FUKUI_ROUTINES) - {"qtaim", "convert"}
     timings = {k: 1.0 for k in keys if k not in v2 and k != "other_esp"}
     timings.update({"charge_engine": 1.0, "surface_engine": 1.0})
-    # MBIS, chelpg, ibsi_bond and laplacian_bond at the version that last changed them (5, 6,
-    # 8), so only other_esp is missing
+    # MBIS, chelpg, ibsi_bond, laplacian_bond and the Fukui functions at the version that last
+    # changed them (5, 6, 8, 10), so only other_esp is missing
     folder = _restart_folder(tmp_path, stored,
                              {r: {"by": ROUTINE_ENGINE[r], "engine_version": max(2, last_change(r))} for r in v2},
                              timings)

@@ -9,6 +9,10 @@ fuzzy-bond quantity from that pass (plus one coarser grid for bond orders):
     hirshfeld, adch, cm5, becke (ADC-corrected, as shipped)  charge.json schema
     becke/hirsh_fuzzy_density, becke/hirsh_fuzzy_spin         fuzzy schema
     fuzzy_bond                                                 bond schema
+    fukui_plus/minus_fmo, fukui_plus/minus_ow                  fuzzy schema
+
+The Fukui functions need unoccupied orbitals, which only the molden orca_2mkl wrote
+has (molden_path); see fukui_values.
 
 With full_set >= 1 it adds vdd (same grid pass), mbis (its own 30-60 x 302 grid,
 as MBIS_wrapper), mbis_fuzzy_density/spin (MBIS refit on the main grid),
@@ -101,10 +105,11 @@ def read_wfx(path):
     return wfx
 
 
-def prepare_basis(wfx):
-    """Occupied MOs, alpha/beta occupations, and primitives grouped by
-    (center, exponent) so each exp() is evaluated once per group."""
-    keep = wfx["occ"] != 0
+def prepare_basis(wfx, keep=None):
+    """Occupied MOs (or the orbitals in the boolean mask keep), alpha/beta occupations,
+    and primitives grouped by (center, exponent) so each exp() is evaluated once per group."""
+    if keep is None:
+        keep = wfx["occ"] != 0
     occ = wfx["occ"][keep]
     types = [t for t, k in zip(wfx["spin_types"], keep) if k]
     occ_a = np.array([o / 2 if t == "Alpha and Beta" else (o if t == "Alpha" else 0.0) for o, t in zip(occ, types)])
@@ -377,9 +382,11 @@ def limit_blas_threads(fn):
     return wrapper
 
 
-def density(pts, coords, basis, wfx):
-    """rho (MOs + EDF core) and spin density (fdens / fspindens)."""
-    phi2 = orbital_values(pts, coords, basis) ** 2
+def density(pts, coords, basis, wfx, phi2=None):
+    """rho (MOs + EDF core) and spin density (fdens / fspindens); phi2, the squared
+    occupied MO values at pts, when the caller has them already."""
+    if phi2 is None:
+        phi2 = orbital_values(pts, coords, basis) ** 2
     rho_a = phi2 @ basis["occ_a"]
     rho_b = phi2 @ basis["occ_b"]
     rho = rho_a + rho_b
@@ -519,7 +526,7 @@ def _voronoi_mask(pts, atcoords, center):
 
 # routines a skip removes; every skip recorded in _meta["skipped"] is permanent for the
 # wavefunction (it depends only on its elements, ECP/EDF and the run options)
-from qtaim_gen.source.data.multiwfn import DERIV_FUZZY_FAMILY, HIRSHFELD_FAMILY, MBIS_FAMILY  # noqa: E402
+from qtaim_gen.source.data.multiwfn import DERIV_FUZZY_FAMILY, FUKUI_ROUTINES, HIRSHFELD_FAMILY, MBIS_FAMILY  # noqa: E402
 MBIS_DENCUT = 1e-10  # MBIS dencut: shell densities below this are zeroed
 MBIS_MAXSHELL = 6  # shells of the initial guess (period 6 rule, also used for period 7)
 MBIS_MAX_Z = 118
@@ -1257,9 +1264,78 @@ def ecp_atoms_without_edf(wfx):
     return [int(i) for i in ecp if not np.any(wfx["edf_center"] == i)]
 
 
+# ---------------------------------------------------------------- Fukui functions
+
+FUKUI_DELTA = 0.1  # Hartree, Multiwfn's orbwei_delta (define.f90:486)
+AU2EV = 27.2113838  # Multiwfn's au2eV (define.f90:29)
+FUKUI_DEGEN_TOL = 0.01 / AU2EV  # Multiwfn's suggested degeneracy threshold, 0.01 eV (CDFT.f90:85-140)
+# an orbital this far beyond the frontier carries an orbital-weighted share below
+# exp(-36) = 2.3e-16 of the frontier orbital's, so the window matches the sum over all
+FUKUI_WINDOW = 6 * FUKUI_DELTA
+# the orbitals with the smallest orbital-weighted shares are not evaluated while their
+# shares sum to less than this (per side), which bounds the change of any f by it
+FUKUI_DROP = 1e-10
+FUKUI_COORD_TOL = 1e-6  # Bohr: the molden must hold the wfx's structure
+FUKUI_ENERGY_TOL = 1e-8  # Hartree: the wfx's occupied orbitals are the molden's (E20.12 text)
+
+
+def _ow_weights(energy, occ, spin_types, delta):
+    """Spin-orbital multiplicities m, orbital-weighted weights x (m included, relative to the
+    frontier orbital on each side), e_H and e_L (see fukui_values)."""
+    m = np.array([2.0 if s == "Alpha and Beta" else 1.0 for s in spin_types])
+    occd = occ > 0
+    e_h = energy[occd].max()
+    e_l = energy[~occd].min()
+    mu = (e_h + e_l) / 2
+    x = np.zeros(len(occ))
+    for sel, ref in ((occd, e_h), (~occd, e_l)):
+        x[sel] = m[sel] * np.exp(-((mu - energy[sel]) ** 2 - (mu - ref) ** 2) / delta ** 2)
+    return m, x, e_h, e_l
+
+
+def fukui_orbitals(energy, occ, spin_types, delta=FUKUI_DELTA, drop=FUKUI_DROP):
+    """Mask of the orbitals fukui_values needs: on each side, all but those with the smallest
+    orbital-weighted shares whose shares sum to less than drop. The frontier orbitals carry
+    the largest shares, so the FMO sets are always kept."""
+    _, x, _, _ = _ow_weights(energy, occ, spin_types, delta)
+    keep = np.zeros(len(occ), dtype=bool)
+    for sel in (occ > 0, occ == 0):
+        idx = np.flatnonzero(sel)
+        order = idx[np.argsort(x[idx])]
+        keep[order[np.cumsum(x[order]) / x[idx].sum() >= drop]] = True
+    return keep
+
+
+def fukui_values(comp, energy, occ, spin_types, delta=FUKUI_DELTA, tol=FUKUI_DEGEN_TOL):
+    """Condensed Fukui functions from comp[atom, orbital], each orbital's Hirshfeld
+    composition (the integral of w_A |phi|^2 on atom A's grid, not normalized).
+
+    Spin-orbital convention: an "Alpha and Beta" orbital stands for two spin-orbitals;
+    e_H is the highest occupied and e_L the lowest unoccupied spin-orbital energy over
+    both spins. FMO: f- is the mean composition of the occupied spin-orbitals within tol
+    of e_H, f+ that of the unoccupied ones within tol of e_L (a mean over a degenerate
+    set does not depend on the rotation within it). Orbital-weighted (MW/CDFT.f90:
+    758-866): weights exp(-((mu - e_i)/delta)^2), mu = (e_H + e_L)/2, normalized over the
+    occupied (f-) and the unoccupied (f+) spin-orbitals, taken relative to the frontier
+    orbital's weight so they cannot underflow (the factor cancels). For a closed shell
+    both are Multiwfn's values: every spatial orbital counts twice."""
+    m, x, e_h, e_l = _ow_weights(energy, occ, spin_types, delta)
+    occd = occ > 0
+    out = {}
+    meta = {"e_homo": float(e_h), "e_lumo": float(e_l), "mu": float((e_h + e_l) / 2), "delta": delta,
+            "degeneracy_tol": tol, "orbitals": int(len(occ))}
+    for side, sel, ref in (("minus", occd, e_h), ("plus", ~occd, e_l)):
+        fmo = sel & (np.abs(energy - ref) <= tol)
+        out[f"{side}_fmo"] = comp[:, fmo] @ m[fmo] / m[fmo].sum()
+        xs = np.where(sel, x, 0.0)
+        out[f"{side}_ow"] = comp @ xs / xs.sum()
+        meta[f"{side}_fmo_spin_orbitals"] = int(m[fmo].sum())
+    return out, meta
+
+
 @limit_blas_threads
 def run(wfx_path, nrad=75, nang=434, radcut=10.0, bond_nrad=45, bond_nang=170, full_set=0, mbis_mode=None,
-        mbis_ecp=True):
+        mbis_ecp=True, molden_path=None):
     t = {}
     t0 = time.perf_counter()
     wfx = read_wfx(wfx_path)
@@ -1336,12 +1412,58 @@ def run(wfx_path, nrad=75, nang=434, radcut=10.0, bond_nrad=45, bond_nang=170, f
         ibsi_ptr, ibsi_j, ibsi_i, ibsi_dist = ibsi_pairs(coords, B2A)
         ibsi_int = np.zeros(len(ibsi_j))
         t["ibsi"] = 0.0
+    # Fukui functions: Hirshfeld compositions of the frontier orbitals, read with the
+    # unoccupied ones from the molden (the wfx has occupied orbitals only); the Hirshfeld
+    # family's skips cover them when pro is None
+    fukui_ok = pro is not None and molden_path is not None
+    if pro is not None and molden_path is None:
+        skipped.append({"schemes": "fukui", "reason": "no_molden", "routines": sorted(FUKUI_ROUTINES)})
+    if fukui_ok:
+        from qtaim_gen.source.core.wavefunction import read_orca_molden
+
+        t0 = time.perf_counter()
+        fwfx = read_orca_molden(molden_path, orbital_window=FUKUI_WINDOW)
+        reason = None
+        if len(fwfx["atnums"]) != nat or (fwfx["atnums"] != atnums).any() \
+                or np.abs(fwfx["coords"] - coords).max() > FUKUI_COORD_TOL:
+            reason = "molden_mismatch"
+        elif not (fwfx["occ"] == 0).any():
+            reason = "no_virtual_orbitals"
+        else:
+            # the orbitals whose orbital-weighted share matters; the occupied ones are the wfx's
+            # (same order), whose values the density pass computes anyway
+            sel = fukui_orbitals(fwfx["mo_energy"], fwfx["occ"], fwfx["spin_types"])
+            f_energy, f_occ = fwfx["mo_energy"][sel], fwfx["occ"][sel]
+            f_spin = [s for s, k in zip(fwfx["spin_types"], sel) if k]
+            f_occd = np.flatnonzero(f_occ != 0)
+            f_virt = np.flatnonzero(f_occ == 0)
+            occ_cols = fwfx["occupied_rank"][sel][f_occd]
+            wfx_occ = np.flatnonzero(wfx["occ"] != 0)
+            if occ_cols.max() >= len(wfx_occ) or (
+                    wfx["mo_energy"] is not None
+                    and np.abs(wfx["mo_energy"][wfx_occ][occ_cols] - f_energy[f_occd]).max() > FUKUI_ENERGY_TOL):
+                reason = "molden_mismatch"
+        if reason:
+            skipped.append({"schemes": "fukui", "reason": reason, "routines": sorted(FUKUI_ROUTINES)})
+            fukui_ok = False
+        else:
+            vbasis = prepare_basis(fwfx, keep=sel & (fwfx["occ"] == 0))
+            abasis = prepare_basis(fwfx, keep=sel)
+            # CDFT option 6 integrates every radial point of the atom grid, also beyond radcut
+            # (MW/CDFT.f90:822), where diffuse frontier orbitals of charged clusters still have
+            # weight; those shells are evaluated for the Fukui functions only
+            full_pts, full_wts = multiwfn_atom_grid(nrad, nang, np.inf)
+            outer = np.linalg.norm(full_pts, axis=1) >= radcut
+            out_pts, out_wts = full_pts[outer], full_wts[outer]
+            fcomp = np.zeros((nat, len(f_occ)))
+        t["fukui"] = time.perf_counter() - t0
     nelec_grid = 0.0
 
     for b in range(nat):
         pts = grid_pts + coords[b]
         t0 = time.perf_counter()
-        rho, spin = density(pts, coords, basis, wfx)
+        phi2 = orbital_values(pts, coords, basis) ** 2
+        rho, spin = density(pts, coords, basis, wfx, phi2=phi2)
         t["density"] += time.perf_counter() - t0
         t0 = time.perf_counter()
         w = _becke(pts, coords, rinv, aij, BECKE_TOL)
@@ -1395,6 +1517,24 @@ def run(wfx_path, nrad=75, nang=434, radcut=10.0, bond_nrad=45, bond_nang=170, f
             if open_shell:
                 fz["hs"] += h.T @ (wb * spin)
             t["accumulate"] += time.perf_counter() - t0
+            if fukui_ok:
+                # as the Hirshfeld charge: atom b's weight on its own grid, zero-promolecule
+                # points skipped (Multiwfn CDFT option 6), plus the shells beyond radcut
+                t0 = time.perf_counter()
+                fcomp[b, f_occd] = hw @ phi2[:, occ_cols]
+                fcomp[b, f_virt] = hw @ orbital_values(pts, coords, vbasis) ** 2
+                opts = out_pts + coords[b]
+                ho, _, _ = _hirshfeld_mwfn(opts, coords, *pro)
+                how = ho[:, b] * out_wts
+                # beyond every free-atom density the weight is 0: nothing to evaluate there
+                on = how != 0.0
+                fcomp[b] += how[on] @ orbital_values(opts[on], coords, abasis) ** 2
+                t["fukui"] += time.perf_counter() - t0
+
+    if fukui_ok:
+        fukui, fukui_meta = fukui_values(fcomp, f_energy, f_occ, f_spin)
+        fukui_meta.update({"window_orbitals": int(len(fwfx["occ"])), "drop": FUKUI_DROP,
+                           "outer_points_per_atom": int(len(out_wts))})
 
     if mbis_ok:
         # q = Z_eff + EDF core electrons - population
@@ -1495,6 +1635,9 @@ def run(wfx_path, nrad=75, nang=434, radcut=10.0, bond_nrad=45, bond_nang=170, f
         if level1:
             # printed VDD dipole comes from the raw charges, before normalization
             out["vdd"] = {"charge": chg(normalize(q_vdd, zeff, nelec)), "dipole": mol_dip(q_vdd)}
+    if fukui_ok:
+        for key, vals in fukui.items():
+            out[f"fukui_{key}"] = fuzzy(f"fukui_{key}", vals)
     if mbis_ok:
         out["mbis"] = {"charge": chg(q_mbis)}
         out["mbis_fuzzy_density"] = fuzzy("mbis_fuzzy_density", fz["md"])
@@ -1551,6 +1694,8 @@ def run(wfx_path, nrad=75, nang=434, radcut=10.0, bond_nrad=45, bond_nang=170, f
         "mbis_beyond_multiwfn": bool(mbis_ok and int(atnums.max()) > 86),
         # fitting points, RMSE / RRMSE as Multiwfn prints them, condition number of the fit
         "chelpg": chelpg_meta if level1 else None,
+        # frontier energies, mu, delta, the FMO degenerate-set sizes, orbitals in the window
+        "fukui": fukui_meta if fukui_ok else None,
         "skipped": skipped,
         "timings_s": {k: round(v, 3) for k, v in t.items()},
     }
@@ -1581,6 +1726,8 @@ def main(argv=None):
                    help="MBIS stopping: converged fixed point (default) or Multiwfn's rule (parity checks)")
     p.add_argument("--no_mbis_ecp", action="store_true",
                    help="skip MBIS when the wavefunction has ECP atoms (MBIS is defined for all-electron densities)")
+    p.add_argument("--molden", default=None,
+                   help="the orca_2mkl molden of the same wavefunction (unoccupied orbitals, for the Fukui functions)")
     args = p.parse_args(argv)
 
     if args.nthreads:
@@ -1590,7 +1737,7 @@ def main(argv=None):
 
     t0 = time.perf_counter()
     out = run(args.wfx, args.nrad, args.nang, args.radcut, args.bond_nrad, args.bond_nang, args.full_set,
-              mbis_mode=args.mbis_mode, mbis_ecp=not args.no_mbis_ecp)
+              mbis_mode=args.mbis_mode, mbis_ecp=not args.no_mbis_ecp, molden_path=args.molden)
     out["_meta"]["wall_s"] = round(time.perf_counter() - t0, 3)
 
     out_abs = os.path.abspath(args.out)
