@@ -123,7 +123,9 @@ compile step maps one routine to one top-level key [V] (omol.py fuzzy compile). 
 | degenerate HOMO/LUMO (symmetric molecules, closed-shell alpha/beta pairs) | mean over the set (tol, F5) |
 | no beta electrons (mult = nelec + 1, e.g. H atom) | the spin-orbital convention needs no beta HOMO |
 | molden with no virtuals | f+ entries NaN plus a `_meta` flag, f- still written [I]: rare, check whether any vertical has it |
-| ROKS / ROHF moldens | occupation 1 orbitals are alpha only, and their beta counterpart is empty. Handle it or skip it with a reason. Check whether any vertical uses ROKS [U] |
+| ROKS / ROHF moldens | skipped with reason `restricted_open_shell` (fix/fukui-review): a singly occupied orbital is read as alpha only, so its empty beta spin-orbital would be missing from the unoccupied side |
+| wfx from Multiwfn's convert or `multiwfn_h` (alpha-only h flip) | the occupied orbitals are reused from the wfx only when their coefficients equal the molden's (FUKUI_COEF_TOL); otherwise every Fukui orbital is evaluated from the molden (`_meta.fukui.occupied_from`) |
+| several moldens, none named orca.molden.input; a molden that does not match the wfx | not a permanent skip: the routines stay missing, the run fails and reruns (they depend on the folder's files, not the wavefunction) |
 | artificial zero-energy virtuals with diffuse bases (MW/CDFT.f90:953 comment) | outside the window unless the gap is tiny; record in `_meta` if any orbital in the window has e = 0 exactly |
 | ECP | Fukui is a valence quantity. Orbitals only, no EDF involved |
 
