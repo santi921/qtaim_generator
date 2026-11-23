@@ -229,6 +229,11 @@ and the weights are taken relative to the frontier orbital's so they cannot unde
 gives 0/0 when the gap exceeds about 5.5 Hartree). Values are not normalized: f+ sums to
 0.785-1.003 on the 87 wfx_pull jobs, the shortfall from unbound diffuse LUMOs of charged
 clusters reaching where every free-atom density is zero (Multiwfn skips those points too).
+(5) Unoccupied orbitals with an energy of exactly 0 are left out: ORCA writes the orbitals of
+basis functions it removed as linearly dependent that way (coefficients about 1e-9); Multiwfn's
+CDFT option 6 would take them as the LUMO when the real one lies above 0, or give them weight
+in the normalization (it skips MOene == 0 only in its superdelocalizabilities, CDFT.f90:953).
+2 of 440 NERSC openac sample jobs (def2-TZVPD) have them.
 
 ### Parity across levels of theory
 
