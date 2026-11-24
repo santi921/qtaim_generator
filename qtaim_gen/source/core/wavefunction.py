@@ -29,7 +29,9 @@ round trip through outwfx's E20.12 text differs from reading Multiwfn's orca.wfx
 
 import logging
 import math
+import mmap
 import os
+import re
 
 import numpy as np
 
@@ -90,23 +92,85 @@ def orca5_effective_charges(orca_out):
     return {int(k): float(v["number"]) for k, v in pull_ecp_dict(orca_out).items()}
 
 
+_NONBLANK = re.compile(rb"\S")
+_BLANK_PREFIX = re.compile(rb"[ \t]*")
+
+
+def _molden_sections(buf):
+    """(name, stripped header line, start, end) of each section of a molden file, in file
+    order, plus (None, "", 0, start of the first section) for the text before it. A section
+    starts at a line whose first non-blank character is "[" and runs to the next such line."""
+    marks, pos = [], 0
+    while True:
+        q = buf.find(b"[", pos)
+        if q < 0:
+            break
+        a = buf.rfind(b"\n", 0, q) + 1
+        b = buf.find(b"\n", q)
+        b = len(buf) if b < 0 else b
+        if _BLANK_PREFIX.fullmatch(buf, a, q):
+            marks.append((a, b))
+        pos = b
+    out = [(None, "", 0, marks[0][0] if marks else len(buf))]
+    for k, (a, b) in enumerate(marks):
+        s = buf[a:b].decode(errors="replace").strip()
+        out.append((s.split("]")[0][1:].strip().lower(), s, b, marks[k + 1][0] if k + 1 < len(marks) else len(buf)))
+    return out
+
+
+def _molden_mos(buf, start, end):
+    """The orbitals of one [MO] section: per orbital its header fields (lowercased key ->
+    stripped value) and the (start, end) span of its coefficient lines. An orbital is a
+    run of "key=value" lines; the lines up to the next run are its coefficients. Header
+    lines are found from their "=" (coefficient lines have none), so the coefficient text
+    is only searched for that one byte."""
+    mos, spans, last, pos = [], [], None, start
+    while True:
+        q = buf.find(b"=", pos, end)
+        if q < 0:
+            break
+        # start is the newline that ends the section's [MO] line
+        a = buf.rfind(b"\n", start, q) + 1
+        b = buf.find(b"\n", q, end)
+        b = end if b < 0 else b
+        if last is None:
+            if _NONBLANK.search(buf, start, a):
+                raise ValueError("molden [MO] section: coefficient lines before the first orbital header")
+            mos.append({})
+        elif _NONBLANK.search(buf, last, a):
+            spans.append((last, a))
+            mos.append({})
+        k, v = buf[a:b].decode(errors="replace").split("=", 1)
+        mos[-1][k.strip().lower()] = v.strip()
+        last = pos = b
+    if mos:
+        spans.append((last, end))
+    return mos, spans
+
+
+def _molden_coefficients(block, nsph):
+    """The coefficient vector of one orbital from its "index value" lines (index 1-based;
+    a D exponent is read as E), as the line-by-line reader: float() and int() per token."""
+    coef = np.zeros(nsph)
+    if b"D" in block:
+        block = block.replace(b"D", b"E")
+    tok = block.split()
+    rows = [line for line in block.split(b"\n") if line.strip()]
+    idx = list(map(int, tok[0::2]))
+    if len(tok) == 2 * len(rows) and len(set(idx)) == len(idx):
+        coef[np.array(idx, dtype=np.int64) - 1] = list(map(float, tok[1::2]))
+        return coef
+    # lines with other than two fields, or a repeated index (the last value wins)
+    for line in rows:
+        i, v = line.split()[:2]
+        coef[int(i) - 1] = float(v)
+    return coef
+
+
 def molden_mo_headers(path):
     """(energy, occupation) of every [MO] entry of a molden file, in file order."""
-    mos, mo, section = [], None, None
-    with open(path, errors="replace") as fh:
-        for line in fh:
-            s = line.strip()
-            if s.startswith("["):
-                section = s.split("]")[0][1:].strip().lower()
-            elif section == "mo" and s:
-                if "=" in s:
-                    if mo is None or "_body" in mo:
-                        mo = {}
-                        mos.append(mo)
-                    k, v = s.split("=", 1)
-                    mo[k.strip().lower()] = v.strip()
-                else:
-                    mo["_body"] = True
+    with open(path, "rb") as fh, mmap.mmap(fh.fileno(), 0, access=mmap.ACCESS_READ) as buf:
+        mos = [mo for name, _, a, b in _molden_sections(buf) if name == "mo" for mo in _molden_mos(buf, a, b)[0]]
     return [(float(m["ene"]), float(m["occup"])) for m in mos]
 
 
@@ -127,79 +191,74 @@ def frontier_window(headers, window):
 
 
 def read_orca_molden(path, zeff_override=None, mwfn_h_compat=False, keep_virtuals=False, orbital_window=None):
-    """The read_wfx dict for an ORCA .molden file, streamed line by line.
+    """The read_wfx dict for an ORCA .molden file, read in one pass over a memory map.
 
     zeff_override: {0-based atom: effective charge}, for ORCA 5 ECP jobs.
     mwfn_h_compat: flip h(+3,-3,+4,-4) on alpha orbitals only, as Multiwfn does.
     keep_virtuals: keep unoccupied orbitals (Multiwfn's wfx has occupied only).
     orbital_window: keep only the orbitals frontier_window selects (occupied and
-        unoccupied, Hartree); a first pass over the [MO] headers finds the frontier,
-        so the coefficients of every other orbital are never stored. "mult" and
-        "occupied_rank" still count every orbital.
+        unoccupied, Hartree); the [MO] headers are located first, so the coefficients of
+        every other orbital are never parsed. "mult" and "occupied_rank" still count
+        every orbital.
     """
-    keep_idx = frontier_window(molden_mo_headers(path), orbital_window) if orbital_window is not None else None
     atnums, zeff, coords, shells, mos = [], [], [], [], []
-    is_orca, section, unit_au, nsph = False, None, True, 0
-    cur_atom = shell = mo = coef = None
-    with open(path, errors="replace") as fh:
-        for line in fh:
-            s = line.strip()
-            if s.startswith("["):
-                section = s.split("]")[0][1:].strip().lower()
-                if section == "atoms":
-                    unit_au = "angs" not in s.lower()
-                elif section == "mo":
-                    nsph = sum(2 * sh[1] + 1 for sh in shells)
+    is_orca, unit_au = False, True
+    cur_atom = shell = None
+    with open(path, "rb") as fh, mmap.mmap(fh.fileno(), 0, access=mmap.ACCESS_READ) as buf:
+        sections = _molden_sections(buf)
+        # the window is taken over the orbitals of every [MO] section, so their headers come first
+        mo_sections = {start: _molden_mos(buf, start, end) for name, _, start, end in sections if name == "mo"}
+        if orbital_window is not None:
+            keep_idx = frontier_window([(float(m["ene"]), float(m["occup"]))
+                                        for sec_mos, _ in mo_sections.values() for m in sec_mos], orbital_window)
+        for section, head, start, end in sections:
+            if section == "atoms":
+                unit_au = "angs" not in head.lower()
+            elif section == "mo":
+                nsph = sum(2 * sh[1] + 1 for sh in shells)
+                sec_mos, spans = mo_sections[start]
+                for i, (mo, (a, b)) in enumerate(zip(sec_mos, spans)):
+                    if not _NONBLANK.search(buf, a, b):
+                        continue
+                    if orbital_window is not None:
+                        stored = len(mos) + i in keep_idx
+                    else:
+                        stored = keep_virtuals or float(mo["occup"]) != 0
+                    if stored:
+                        mo["coef"] = _molden_coefficients(buf[a:b], nsph)
+                mos += sec_mos
                 continue
-            if section in ("molden format", "title") or section is None:
-                is_orca = is_orca or "orca" in s.lower()
-            elif section == "atoms" and s:
-                p = s.split()
-                sym = p[0][0].upper() + (p[0][1].lower() if len(p[0]) > 1 and p[0][1].isalpha() else "")
-                if sym not in SYMBOL_TO_Z:
-                    raise ValueError(f"{path}: unknown element {p[0]}")
-                atnums.append(SYMBOL_TO_Z[sym])
-                zeff.append(float(p[2]))
-                coords.append([float(x) for x in p[3:6]])
-            elif section == "pseudo" and s:
-                p = s.split()
-                zeff[int(p[1]) - 1] = float(p[2])
-            elif section == "gto":
-                p = s.split()
-                if not p:
-                    cur_atom = shell = None
-                elif cur_atom is None:
-                    cur_atom = int(p[0]) - 1
-                elif p[0].lower() in SHELL_L or p[0].lower() == "i":
-                    if p[0].lower() not in SHELL_L:
-                        raise ValueError(f"{path}: {p[0]} shells are not supported")
-                    shell = [cur_atom, SHELL_L[p[0].lower()], [], []]
-                    shells.append(shell)
-                else:
-                    e, c = (float(x.replace("D", "E").replace("d", "e")) for x in p[:2])
-                    if c != 0.0:
-                        shell[2].append(e)
-                        shell[3].append(c)
-            elif section == "mo" and s:
-                if "=" in s:
-                    if mo is None or "_body" in mo:
-                        mo = {}
-                        mos.append(mo)
-                    k, v = s.split("=", 1)
-                    mo[k.strip().lower()] = v.strip()
-                else:
-                    # the header precedes the coefficients, so unoccupied orbitals are
-                    # skipped without storing them (most of a large molden)
-                    if "_body" not in mo:
-                        mo["_body"] = True
-                        if keep_idx is not None:
-                            stored = len(mos) - 1 in keep_idx
-                        else:
-                            stored = keep_virtuals or float(mo["occup"]) != 0
-                        coef = mo["coef"] = np.zeros(nsph) if stored else None
-                    if coef is not None:
-                        i, v = s.split()[:2]
-                        coef[int(i) - 1] = float(v.replace("D", "E"))
+            for line in buf[start:end].decode(errors="replace").split("\n"):
+                s = line.strip()
+                if section in ("molden format", "title") or section is None:
+                    is_orca = is_orca or "orca" in s.lower()
+                elif section == "atoms" and s:
+                    p = s.split()
+                    sym = p[0][0].upper() + (p[0][1].lower() if len(p[0]) > 1 and p[0][1].isalpha() else "")
+                    if sym not in SYMBOL_TO_Z:
+                        raise ValueError(f"{path}: unknown element {p[0]}")
+                    atnums.append(SYMBOL_TO_Z[sym])
+                    zeff.append(float(p[2]))
+                    coords.append([float(x) for x in p[3:6]])
+                elif section == "pseudo" and s:
+                    p = s.split()
+                    zeff[int(p[1]) - 1] = float(p[2])
+                elif section == "gto":
+                    p = s.split()
+                    if not p:
+                        cur_atom = shell = None
+                    elif cur_atom is None:
+                        cur_atom = int(p[0]) - 1
+                    elif p[0].lower() in SHELL_L or p[0].lower() == "i":
+                        if p[0].lower() not in SHELL_L:
+                            raise ValueError(f"{path}: {p[0]} shells are not supported")
+                        shell = [cur_atom, SHELL_L[p[0].lower()], [], []]
+                        shells.append(shell)
+                    else:
+                        e, c = (float(x.replace("D", "E").replace("d", "e")) for x in p[:2])
+                        if c != 0.0:
+                            shell[2].append(e)
+                            shell[3].append(c)
     if not is_orca:
         raise ValueError(f"{path}: not an ORCA molden (no 'orca' before [GTO]); only ORCA conventions are implemented")
     if not atnums or not shells or not mos:

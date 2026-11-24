@@ -1338,11 +1338,16 @@ def fukui_values(comp, energy, occ, spin_types, delta=FUKUI_DELTA, tol=FUKUI_DEG
 
 @limit_blas_threads
 def run(wfx_path, nrad=75, nang=434, radcut=10.0, bond_nrad=45, bond_nang=170, full_set=0, mbis_mode=None,
-        mbis_ecp=True, molden_path=None):
+        mbis_ecp=True, molden_path=None, load=None):
+    """load: callable(wfx_path) -> (wfx, basis) in place of read_wfx + prepare_basis (the
+    runner shares one parse between the engines); the two are used unmodified."""
     t = {}
     t0 = time.perf_counter()
-    wfx = read_wfx(wfx_path)
-    basis = prepare_basis(wfx)
+    if load is None:
+        wfx = read_wfx(wfx_path)
+        basis = prepare_basis(wfx)
+    else:
+        wfx, basis = load(wfx_path)
     t["load"] = time.perf_counter() - t0
 
     atnums = wfx["atnums"]

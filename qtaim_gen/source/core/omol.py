@@ -4,6 +4,7 @@ from typing import Optional, Dict, Any, List
 import signal
 import subprocess
 import sys
+import threading
 
 import zipfile
 
@@ -1844,7 +1845,7 @@ def _run_charge_engine(
     numba.set_num_threads(max(1, min(n_threads, numba.config.NUMBA_NUM_THREADS)))
     start = time.time()
     try:
-        out = charge_engine.run(wf_path, full_set=full_set, molden_path=molden_path)
+        out = charge_engine.run(wf_path, full_set=full_set, molden_path=molden_path, load=_load_wfx)
     except Exception as e:
         logger.error("charge_engine failed on %s: %s", wf_path, e)
         return False
@@ -2096,19 +2097,19 @@ def _run_qtaim_engine(folder: str, n_threads: int, logger: logging.Logger, resta
 
     import numba
     from qtaim_gen.source.core import cp_search
-    from qtaim_gen.source.core.charge_engine import ecp_atoms_without_edf, prepare_basis, read_wfx
+    from qtaim_gen.source.core.charge_engine import ecp_atoms_without_edf
 
     numba.set_num_threads(max(1, min(n_threads, numba.config.NUMBA_NUM_THREADS)))
     settings = {"seeds": "superset", "paths": "engine", "boys_mode": "exact"}
     start = time.time()
     try:
-        wfx = read_wfx(wf_path)
+        wfx, basis = _load_wfx(wf_path)
         missing = ecp_atoms_without_edf(wfx)
         if missing:
             _record_skipped(folder, {"qtaim": {"reason": "ecp_without_edf", "by": "qtaim_engine",
                                                "atoms": [int(a) + 1 for a in missing]}}, logger)
             return True
-        res = cp_search.analyze(wfx, prepare_basis(wfx), **settings)
+        res = cp_search.analyze(wfx, basis, **settings)
         cp_search.write_cpprop(os.path.join(folder, "CPprop.txt"), res, wfx)
     except Exception as e:
         logger.error("qtaim_engine failed on %s: %s", wf_path, e)
@@ -2171,7 +2172,7 @@ def _run_surface_engine(
     start = time.time()
     results, esp_s, esp_error = {}, None, None
     try:
-        wf = surface_engine.load_wavefunction(wf_path)
+        wf = _load_wfx(wf_path)
         if "other_geometry" in todo:
             results["other_geometry"] = (surface_engine.planarity(wf[0]["coords"], wf[0]["atnums"]), {})
         if "other_alie" in todo:
@@ -2575,6 +2576,26 @@ def _wavefunction_path(folder: str) -> Optional[str]:
             except OSError:
                 continue
     return None
+
+
+_loaded_wfx = threading.local()
+
+
+def _load_wfx(wf_path: str):
+    """(wfx, basis) of a wfx file, parsed once per file version and thread: the QTAIM,
+    charge and surface engines of a folder share them. One entry per thread (the local
+    runner can run folders as threads of one process), keyed on the file's identity, so a
+    rewritten wfx is parsed again. The engines do not modify either dict."""
+    from qtaim_gen.source.core.charge_engine import prepare_basis, read_wfx
+
+    st = os.stat(wf_path)
+    key = (os.path.realpath(wf_path), st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns)
+    if getattr(_loaded_wfx, "key", None) != key:
+        _loaded_wfx.key = _loaded_wfx.value = None
+        wfx = read_wfx(wf_path)
+        _loaded_wfx.value = (wfx, prepare_basis(wfx))
+        _loaded_wfx.key = key
+    return _loaded_wfx.value
 
 
 def _wavefunction_present(folder: str) -> bool:

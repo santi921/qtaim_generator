@@ -160,6 +160,12 @@ def test_nuclear_esp_is_1000_at_a_nucleus():
     assert v[0] == 1000.0 and v[1] == pytest.approx(2 / 0.7)
 
 
+def test_stored_hermite_bound_weights_equal_the_computed_ones():
+    from qtaim_gen.source.core import esp
+
+    assert np.array_equal(esp.HBOUND_W, esp._hermite_bound_weights())
+
+
 def test_screening_tolerance_bounds_the_total():
     from qtaim_gen.source.core import esp
 

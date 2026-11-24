@@ -70,6 +70,34 @@ def test_child_process_writes_what_the_in_process_run_writes(tmp_path):
         assert got == want, name
 
 
+def test_engines_share_one_wfx_parse_and_leave_it_unchanged(tmp_path, monkeypatch):
+    import numpy as np
+    from qtaim_gen.source.core import charge_engine, omol
+
+    folder = _folder(tmp_path)
+    path = os.path.join(folder, "orca.wfx")
+    real, calls = charge_engine.read_wfx, []
+    monkeypatch.setattr(charge_engine, "read_wfx", lambda p: calls.append(p) or real(p))
+    omol._run_engines(folder, n_threads=1, logger=_logger(folder), qtaim_engine=True, charge_engine=True,
+                      full_set=1, engine_subprocess=False)
+    assert all(_timings(folder).get(k, 0) > 0 for k in ("qtaim_engine", "charge_engine", "surface_engine"))
+    assert calls == [path]
+    wfx, basis = omol._load_wfx(path)
+    fresh = real(path)
+    for got, want in ((wfx, fresh), (basis, charge_engine.prepare_basis(fresh))):
+        assert got.keys() == want.keys()
+        for k in want:
+            if isinstance(want[k], np.ndarray):
+                assert np.array_equal(got[k], want[k]), k
+            else:
+                assert got[k] == want[k], k
+    # a rewritten file is parsed again
+    st = os.stat(path)
+    os.utime(path, ns=(st.st_atime_ns, st.st_mtime_ns + 10**9))
+    omol._load_wfx(path)
+    assert calls == [path, path]
+
+
 def test_killed_child_is_logged_and_drops_stale_engine_timings(tmp_path, monkeypatch):
     # an earlier run's engine timings, here and in generator/, must not vouch for what a
     # killed child half-wrote; timings of other steps stay

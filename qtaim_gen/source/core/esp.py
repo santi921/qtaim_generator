@@ -215,7 +215,11 @@ def _hermite_bound_weights(npt=4001, rmax=12.0):
     return 2.0 * W
 
 
-HBOUND_W = _hermite_bound_weights()
+# _hermite_bound_weights() output, stored: computing it takes about 0.7 s at every import.
+# tests/test_esp.py checks the two are equal.
+HBOUND_W = np.array([2.0, 0.5364161998644659, 0.6666666666666666, 0.6593964254193881, 1.2000000000000002,
+                     1.8826633707144467, 4.285714285714286, 8.75707560408186, 23.333333333333332,
+                     57.13693150788334, 171.8181818181818])
 
 
 @njit(nogil=True, cache=True)
