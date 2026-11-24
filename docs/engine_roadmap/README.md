@@ -24,6 +24,7 @@ another way are discarded and recomputed when a gbw is there. With `--wfn` the d
 | ibsi_lbo_plan.md | IBSI and Laplacian bond order in the charge engine: Multiwfn algorithms, design, validation, decisions 15-18 |
 | fukui_plan.md | condensed Fukui functions (FMO and orbital-weighted, Hirshfeld) in the charge engine: Multiwfn algorithms, design, validation, decisions F1-F7 |
 | validation_ledger.md | every engine validation run: reference, data, worst difference, code, raw output; known gaps |
+| perf_plan.md | engine speed at full_set 0 and 1: where the time goes, expected gains, phases 0-3, decisions P1-P5 |
 
 ## Decisions (2026-10-08)
 
