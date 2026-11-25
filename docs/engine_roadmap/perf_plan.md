@@ -81,16 +81,41 @@ Phase 0 results (2026-11-24, local, measured):
 - Test suite: 1725 passed, 83 skipped, 2 failed (test_critic2 end-to-end tests that need the
   git-ignored data/ tree inside the checkout; they fail the same way on trunk).
 
-## Phase 1: persistent workers and 1 thread per job
+## Phase 1: persistent workers and 1 thread per job (this branch)
 
-- The repo's cluster scripts run `--type_runner local`: a parsl ThreadPoolExecutor in one
-  process, one `engine_worker` child per folder (about 2.0-2.2 s per job outside the engines).
-- Route: a HighThroughputExecutor on a LocalProvider in local mode (as the hpc layout), workers =
-  cores, `cpu_affinity="block"`, engines in process (`engine_subprocess` False). Removes the
-  child cost and the parent-GIL limit, which 1 thread per job (P2) needs.
-- Between jobs: close the per-folder logger handler (`setup_logger`), pin BLAS to one thread at
-  worker start, recycle a worker after N jobs or above an RSS limit, keep DDEC6 in a child.
-- Measure on a cluster node: N x T throughput (128 x 1, 64 x 2, 32 x 4) and peak RSS per job.
+Implemented:
+
+- `--type_runner local` now runs `parsl_configs.local_process_config`: a HighThroughputExecutor on
+  a LocalProvider with `n_threads // n_threads_per_job` worker processes, `cpu_affinity="block"`,
+  `NUMBA_NUM_THREADS = n_threads_per_job` and single-threaded BLAS per worker. The engines run in
+  the worker (no child per folder), and native conversion and the ORCA parse of different folders
+  run in parallel instead of under one parent GIL. The interchange and worker pool start through
+  the running interpreter, so an env that is not activated works. The old layout (threads of one
+  process, an engine child per folder) stays as `--type_runner local_threads`.
+- `--n_threads_per_job` defaults to 1 (decision P2). The earlier Multiwfn profiling study also had
+  16 x 1 thread ahead of 4 x 4 (206-227 s vs 224-252 s for 16 droplet jobs).
+- DDEC6 runs in a child of its own in every layout, also where the other engines run in process
+  (its density grids are the likeliest step to be killed for memory, which would take the worker).
+- A folder whose worker dies fails alone: the runner logs it and goes on (Parsl fails the task
+  with WorkerLost and replaces the worker). Its `.processing.lock` stays until the 8 h stale-lock
+  threshold, as after a preemption.
+- Between jobs: the per-folder logger is torn down by `workflow.teardown_logger` (already), the
+  shared wfx is released by `_run_engines` (phase 0). Workers are not recycled: Parsl's
+  HighThroughputExecutor has no per-worker task limit, so memory growth is measured first.
+- `scripts/nersc/actinide_test.slurm`: 128 jobs x 1 thread, `--cpus-per-task=256` (Perlmutter
+  counts logical CPUs; 128 gave 64 physical cores).
+- `scripts/perf/throughput_{nersc,lrc}.slurm` + `summarize_throughput.py`: one whole node per
+  jobs-per-node x threads mix (NERSC 128x1, 64x2, 32x4, 256x1; LRC lr7 56x1, 28x2, 14x4) on the same
+  job list, each into its own tree; jobs per hour over the run and its steady state, seconds and
+  core-seconds per job, peak worker and node RSS from a 15 s sampler.
+
+Local check (13 ORCA 6 jobs, 8 workers x 1 thread, full_set 0, both engines): every output identical
+between `local_threads` and `local` except the `_meta.qtaim_engine.seconds` timing; wall 157.8 s vs
+151.3 s, sum of per-job times 504 s vs 486 s, parent RSS 657 MB vs 108 MB. One 142-147 s job sets
+the wall time, so this scale cannot show the parent-GIL limit; the cluster runs measure it.
+
+Cluster runs (pending): NERSC openac sample (throughput_nersc.slurm), LRC tm_react slice
+(throughput_lrc.slurm).
 
 ## Phase 2: kernels (roundoff-level, one routine per PR, cluster validation once per routine)
 

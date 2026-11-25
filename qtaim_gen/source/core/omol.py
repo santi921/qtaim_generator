@@ -2244,12 +2244,13 @@ def _run_engines(
     engine_subprocess: bool = True,
     ddec6: bool = False,
 ) -> None:
-    """The QTAIM engine, then the charge and surface engines, then DDEC6. By default in child
-    processes (core/engine_worker.py; DDEC6 in a second one): parsl's local runner runs folders as threads of
-    one process, where concurrent engine runs serialized on the GIL and shared the
-    process-wide BLAS limits. The child gets single-threaded BLAS and at most
-    n_threads numba threads (fewer if NUMBA_NUM_THREADS is lower), and imports the
-    same qtaim_gen as this process."""
+    """The QTAIM engine, then the charge and surface engines, then DDEC6. With
+    engine_subprocess (the local_threads runner, whose folders are threads of one process
+    where concurrent engine runs serialized on the GIL and shared the process-wide BLAS
+    limits) they run in a child process (core/engine_worker.py); otherwise in this worker
+    process. DDEC6 always gets a child of its own. A child gets single-threaded BLAS and at
+    most n_threads numba threads (fewer if NUMBA_NUM_THREADS is lower), and imports the same
+    qtaim_gen as this process."""
     if not (qtaim_engine or charge_engine or ddec6):
         return
     if not engine_subprocess:
@@ -2261,9 +2262,11 @@ def _run_engines(
                 _run_surface_engine(folder, n_threads=n_threads, logger=logger, restart=restart, full_set=full_set)
         finally:
             _release_wfx()
-        if ddec6:
-            _run_ddec6(folder, n_threads=n_threads, logger=logger, restart=restart)
-        return
+        if not ddec6:
+            return
+        # DDEC6's density grids are the likeliest step to be killed for memory, which in this
+        # process would take the worker and its other results down with it
+        qtaim_engine = charge_engine = False
 
     import qtaim_gen
     from qtaim_gen.source.core.engine_worker import STEP_FAILED

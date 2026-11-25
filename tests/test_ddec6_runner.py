@@ -406,13 +406,17 @@ def test_skip_on_recompute_removes_merged_ddec6_data(folder, monkeypatch):
 
 @pytest.mark.skipif(not os.environ.get("DDEC6_SLOW"), reason="a few minutes; set DDEC6_SLOW=1")
 def test_child_process_matches_in_process(tmp_path):
+    # _run_engines always runs DDEC6 in a child; the reference calls _run_ddec6 in this process
     xecl4 = os.path.join(os.path.dirname(__file__), "test_files", "charge_engine", "XeCl4_step2_0_1")
     runs = {}
     for sub in (True, False):
         d = tmp_path / ("child" if sub else "inproc")
         d.mkdir()
         shutil.copy(os.path.join(xecl4, "orca.wfx"), d / "orca.wfx")
-        omol._run_engines(str(d), n_threads=4, logger=LOG, ddec6=True, engine_subprocess=sub)
+        if sub:
+            omol._run_engines(str(d), n_threads=4, logger=LOG, ddec6=True)
+        else:
+            omol._run_ddec6(str(d), n_threads=4, logger=LOG)
         with open(d / omol.DDEC6_JSON) as f:
             runs[sub] = json.load(f)
         assert _timings(str(d))["ddec6"] > 0

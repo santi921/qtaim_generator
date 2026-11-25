@@ -1,10 +1,12 @@
 # config.py
 import os
+import sys
 import uuid
 from datetime import datetime
 from parsl.config import Config
 from parsl.providers import PBSProProvider, LocalProvider, SlurmProvider
 from parsl.executors import HighThroughputExecutor, FluxExecutor
+from parsl.executors.high_throughput.executor import DEFAULT_LAUNCH_CMD
 from parsl.launchers import MpiExecLauncher, SrunLauncher
 
 
@@ -268,6 +270,39 @@ def base_config(n_workers: int = 128) -> Config:
         executors=[ThreadPoolExecutor(max_threads=n_workers, label="local_threads")],
     )
     return local_threads
+
+
+def local_process_config(n_workers: int, threads_per_worker: int = 1) -> Config:
+    """Parsl config for one node: n_workers worker processes on a LocalProvider, each
+    pinned to its own block of cores (cpu_affinity="block") and running one folder at a
+    time with threads_per_worker numba threads and single-threaded BLAS. The workers are
+    persistent, so a folder's engines run in the worker itself (no child per folder), and
+    the native conversion and ORCA parse of different folders run in parallel instead of
+    in one process. A worker that dies (e.g. killed for memory) fails its task with
+    WorkerLost and is replaced.
+    """
+    env = (f"export NUMBA_NUM_THREADS={threads_per_worker} OMP_NUM_THREADS={threads_per_worker} "
+           "OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1; ")
+    # parsl starts its interchange and worker pool by script name from PATH; run the scripts
+    # installed next to this interpreter with it, so an env that is not activated works too
+    bindir = os.path.dirname(sys.executable)
+    launch = DEFAULT_LAUNCH_CMD.replace("process_worker_pool.py",
+                                        f"{sys.executable} {os.path.join(bindir, 'process_worker_pool.py')}", 1)
+    return Config(
+        run_dir=_unique_run_dir(),
+        executors=[
+            HighThroughputExecutor(
+                label="local_process",
+                max_workers_per_node=n_workers,
+                cpu_affinity="block",
+                prefetch_capacity=0,
+                address="127.0.0.1",
+                launch_cmd=launch,
+                interchange_launch_cmd=[sys.executable, os.path.join(bindir, "interchange.py")],
+                provider=LocalProvider(init_blocks=1, min_blocks=1, max_blocks=1, worker_init=env),
+            )
+        ],
+    )
 
 
 def tuo_flux_config(

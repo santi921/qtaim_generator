@@ -149,6 +149,25 @@ def test_no_engine_flag_launches_nothing(tmp_path, monkeypatch):
     omol._run_engines(str(tmp_path), n_threads=1, logger=_logger(str(tmp_path)))
 
 
+def test_in_process_engines_still_send_ddec6_to_a_child(tmp_path, monkeypatch):
+    from qtaim_gen.source.core import omol
+
+    ran, cmds = [], []
+
+    class Done:
+        returncode, stderr = 0, ""
+
+    monkeypatch.setattr(omol, "_run_qtaim_engine", lambda *a, **k: ran.append("qtaim"))
+    monkeypatch.setattr(omol, "_run_charge_engine", lambda *a, **k: ran.append("charge"))
+    monkeypatch.setattr(omol, "_run_surface_engine", lambda *a, **k: ran.append("surface"))
+    monkeypatch.setattr(omol, "_run_ddec6", lambda *a, **k: ran.append("ddec6 in process"))
+    monkeypatch.setattr(omol.subprocess, "run", lambda cmd, **kw: cmds.append(cmd) or Done())
+    omol._run_engines(str(tmp_path), n_threads=1, logger=_logger(str(tmp_path)), qtaim_engine=True,
+                      charge_engine=True, ddec6=True, engine_subprocess=False)
+    assert ran == ["qtaim", "charge", "surface"]
+    assert len(cmds) == 1 and cmds[0][-1] == "--ddec6" and "--qtaim" not in cmds[0] and "--charge" not in cmds[0]
+
+
 def test_child_command_carries_flags_and_environment(tmp_path, monkeypatch):
     from qtaim_gen.source.core import omol
 
@@ -221,3 +240,47 @@ def test_child_ignores_a_qtaim_gen_package_in_the_job_folder(tmp_path):
     log = _log(folder)
     assert "engine child finished" in log and "wrong checkout" not in log
     assert _timings(folder)["qtaim_engine"] > 0
+
+
+@pytest.mark.parametrize("type_runner,executor,subprocess_engines", [
+    (None, "HighThroughputExecutor", False),
+    ("local", "HighThroughputExecutor", False),
+    ("local_threads", "ThreadPoolExecutor", True),
+])
+def test_runner_local_modes(tmp_path, monkeypatch, capsys, type_runner, executor, subprocess_engines):
+    """local: worker processes with the engines in the worker; local_threads: threads of one
+    process with an engine child per folder. A folder whose worker died fails alone."""
+    from qtaim_gen.source.scripts import full_runner_parsl_alcf as runner
+
+    seen = {"tasks": []}
+
+    class Lost:
+        def result(self):
+            raise RuntimeError("worker lost")
+
+    class Ok:
+        def result(self):
+            return {"status": "ok"}
+
+    def fake_task(folder, **kw):
+        seen["tasks"].append((folder, kw["engine_subprocess"], kw["n_threads"]))
+        return Lost() if folder == "a" else Ok()
+
+    monkeypatch.setattr(runner.parsl, "load", lambda config: seen.update(config=config))
+    monkeypatch.setattr(runner.parsl, "clear", lambda *a, **k: None)
+    monkeypatch.setattr(runner.parsl, "dfk", lambda: None)
+    monkeypatch.setattr(runner.signal, "signal", lambda *a, **k: None)
+    monkeypatch.setattr(runner, "get_folders_from_file", lambda *a, **kw: ["a", "b"])
+    monkeypatch.setattr(runner, "run_folder_task_alcf", fake_task)
+    jobs = tmp_path / "jobs.txt"
+    jobs.write_text("a\nb\n")
+    args = ["--job_file", str(jobs), "--root_omol_results", str(tmp_path / "res"), "--root_omol_inputs",
+            str(tmp_path), "--n_threads", "8", "--charge_engine"]
+    runner.main(args + (["--type_runner", type_runner] if type_runner else []))
+    ex = seen["config"].executors[0]
+    assert type(ex).__name__ == executor
+    if executor == "HighThroughputExecutor":
+        assert ex.max_workers_per_node == 8 and ex.cpu_affinity == "block"
+        assert "NUMBA_NUM_THREADS=1" in ex.provider.worker_init and "OPENBLAS_NUM_THREADS=1" in ex.provider.worker_init
+    assert seen["tasks"] == [("a", subprocess_engines, 1), ("b", subprocess_engines, 1)]
+    assert "a failed in its worker: RuntimeError: worker lost" in capsys.readouterr().out
