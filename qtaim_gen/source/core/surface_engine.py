@@ -611,7 +611,8 @@ def alie_surface(wfx_path, chunk_points=262144, wf=None):
         raise ValueError("wfx has no <Molecular Orbital Energies>")
     load = time.perf_counter() - t0
     surf = molecular_surface(wfx, basis, SPACING, chunk_points)
-    t = {"load": load, **surf["timings_s"]}
+    # with wf given the parse happened elsewhere (the runner shares it between engines)
+    t = {"load" if wf is None else "load_shared": load, **surf["timings_s"]}
 
     t0 = time.perf_counter()
     live = surf["live"]
@@ -662,7 +663,8 @@ def esp_surface(wfx_path, chunk_points=262144, boys_mode="exact", wf=None):
     wfx, basis = wf or load_wavefunction(wfx_path)
     load = time.perf_counter() - t0
     surf = molecular_surface(wfx, basis, ESP_SPACING, chunk_points)
-    t = {"load": load, **surf["timings_s"]}
+    # with wf given the parse happened elsewhere (the runner shares it between engines)
+    t = {"load" if wf is None else "load_shared": load, **surf["timings_s"]}
 
     t0 = time.perf_counter()
     live = surf["live"]

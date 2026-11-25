@@ -2103,13 +2103,13 @@ def _run_qtaim_engine(folder: str, n_threads: int, logger: logging.Logger, resta
     settings = {"seeds": "superset", "paths": "engine", "boys_mode": "exact"}
     start = time.time()
     try:
-        wfx, basis = _load_wfx(wf_path)
+        wfx, _ = _load_wfx(wf_path, basis=False)
         missing = ecp_atoms_without_edf(wfx)
         if missing:
             _record_skipped(folder, {"qtaim": {"reason": "ecp_without_edf", "by": "qtaim_engine",
                                                "atoms": [int(a) + 1 for a in missing]}}, logger)
             return True
-        res = cp_search.analyze(wfx, basis, **settings)
+        res = cp_search.analyze(wfx, _load_wfx(wf_path)[1], **settings)
         cp_search.write_cpprop(os.path.join(folder, "CPprop.txt"), res, wfx)
     except Exception as e:
         logger.error("qtaim_engine failed on %s: %s", wf_path, e)
@@ -2253,11 +2253,14 @@ def _run_engines(
     if not (qtaim_engine or charge_engine or ddec6):
         return
     if not engine_subprocess:
-        if qtaim_engine:
-            _run_qtaim_engine(folder, n_threads=n_threads, logger=logger, restart=restart)
-        if charge_engine:
-            _run_charge_engine(folder, n_threads=n_threads, logger=logger, restart=restart, full_set=full_set)
-            _run_surface_engine(folder, n_threads=n_threads, logger=logger, restart=restart, full_set=full_set)
+        try:
+            if qtaim_engine:
+                _run_qtaim_engine(folder, n_threads=n_threads, logger=logger, restart=restart)
+            if charge_engine:
+                _run_charge_engine(folder, n_threads=n_threads, logger=logger, restart=restart, full_set=full_set)
+                _run_surface_engine(folder, n_threads=n_threads, logger=logger, restart=restart, full_set=full_set)
+        finally:
+            _release_wfx()
         if ddec6:
             _run_ddec6(folder, n_threads=n_threads, logger=logger, restart=restart)
         return
@@ -2581,21 +2584,28 @@ def _wavefunction_path(folder: str) -> Optional[str]:
 _loaded_wfx = threading.local()
 
 
-def _load_wfx(wf_path: str):
+def _load_wfx(wf_path: str, basis: bool = True):
     """(wfx, basis) of a wfx file, parsed once per file version and thread: the QTAIM,
     charge and surface engines of a folder share them. One entry per thread (the local
     runner can run folders as threads of one process), keyed on the file's identity, so a
-    rewritten wfx is parsed again. The engines do not modify either dict."""
+    rewritten wfx is parsed again; _run_engines releases it. The engines do not modify
+    either dict. basis=False returns (wfx, None) without building the basis."""
     from qtaim_gen.source.core.charge_engine import prepare_basis, read_wfx
 
     st = os.stat(wf_path)
     key = (os.path.realpath(wf_path), st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns)
     if getattr(_loaded_wfx, "key", None) != key:
-        _loaded_wfx.key = _loaded_wfx.value = None
-        wfx = read_wfx(wf_path)
-        _loaded_wfx.value = (wfx, prepare_basis(wfx))
+        _release_wfx()
+        _loaded_wfx.value = (read_wfx(wf_path), None)
         _loaded_wfx.key = key
+    if basis and _loaded_wfx.value[1] is None:
+        _loaded_wfx.value = (_loaded_wfx.value[0], prepare_basis(_loaded_wfx.value[0]))
     return _loaded_wfx.value
+
+
+def _release_wfx() -> None:
+    """Drop this thread's shared wfx (a large job's coefficients are held twice)."""
+    _loaded_wfx.key = _loaded_wfx.value = None
 
 
 def _wavefunction_present(folder: str) -> bool:

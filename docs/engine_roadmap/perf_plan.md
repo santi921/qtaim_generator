@@ -59,21 +59,26 @@ The full_set 1 gain is the CHELPG ESP kernel (65% of the cost, 14-19x in a proto
 
 Phase 0 results (2026-11-24, local, measured):
 
-- 0.1: `import qtaim_gen.source.core.esp` 1.11 s -> 0.23 s; test_esp checks the stored values
-  against `_hermite_bound_weights()` bit for bit.
-- 0.2: the reader maps the file and finds "[" and "=" with `find` (coefficient lines contain
-  neither), then parses only the coefficient blocks it keeps, with the same `float()`/`int()`
-  per token. Old (git HEAD) and new readers return identical dicts on all 106 distinct local
-  moldens (0.1-1954 MB), in every mode (occupied, Fukui window, mwfn_h_compat, keep_virtuals
-  below 200 MB), and identical `molden_mo_headers`. Fukui window read: 1.8 -> 0.28 s (120 MB),
-  10.3 -> 1.25 s (649 MB), 27.2 -> 3.9 s (1954 MB), 6.5-8.9x. Converter (occupied orbitals):
-  0.97 -> 0.13 s (120 MB), 14.7 -> 1.55 s (1954 MB), 7.4-10x.
-- 0.3: `omol._load_wfx` (one entry per thread, keyed on the file's path, inode, size and mtime);
-  `charge_engine.run(load=...)`. A test runs the three engines in process and checks one parse
-  and arrays equal to a fresh read afterwards.
+- 0.1: `import qtaim_gen.source.core.esp` 1.11 s -> 0.23 s; the values are pinned (equal on this
+  machine; test_esp checks them against `_hermite_bound_weights()` to 1e-12 relative).
+- 0.2: the reader reads the file once into memory (not a memory map, which turns a file
+  truncated during the read into SIGBUS in the runner's shared process), finds "[" and "=" with
+  `find` (coefficient lines contain neither), and parses only the coefficient blocks it keeps,
+  with the same `float()`/`int()` per token; a block whose lines do not all have two fields, or
+  that repeats an index, takes the line-by-line rule. Old (git HEAD) and new readers return
+  identical dicts on all 106 distinct local moldens (0.1-1954 MB), in every mode (occupied,
+  Fukui window, mwfn_h_compat, keep_virtuals below 200 MB), and identical `molden_mo_headers`.
+  Fukui window read: 1.76 -> 0.38 s (120 MB), 8.7 -> 1.6 s (649 MB), 26.7 -> 5.5 s (1954 MB),
+  4.6-5.5x. Converter (occupied orbitals): 1.04 -> 0.18 s (120 MB), 15.7 -> 2.8 s (1954 MB),
+  5.5-6.4x. A 2 GB molden costs 2 GB of memory while it is read.
+- 0.3: `omol._load_wfx` (one entry per thread, keyed on the file's path, inode, size and mtime;
+  the basis is built on first use, after the QTAIM engine's ECP-without-EDF check);
+  `charge_engine.run(load=...)`; `_run_engines` releases it after the in-process engines. The
+  engines label the stage `load_shared` when they get the shared parse. A test runs the three
+  engines in process and checks one parse, arrays equal to a fresh read, and the release.
 - Engine outputs, trunk (c7672fc) vs this branch, in process at 4 threads: every JSON and
   CPprop.txt identical on 5 jobs (12-53 atoms, full_set 0, and 12 atoms at full_set 1; 79 files).
-- Test suite: 1721 passed, 83 skipped, 2 failed (test_critic2 end-to-end tests that need the
+- Test suite: 1725 passed, 83 skipped, 2 failed (test_critic2 end-to-end tests that need the
   git-ignored data/ tree inside the checkout; they fail the same way on trunk).
 
 ## Phase 1: persistent workers and 1 thread per job

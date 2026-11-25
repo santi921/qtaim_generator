@@ -76,13 +76,17 @@ def test_engines_share_one_wfx_parse_and_leave_it_unchanged(tmp_path, monkeypatc
 
     folder = _folder(tmp_path)
     path = os.path.join(folder, "orca.wfx")
-    real, calls = charge_engine.read_wfx, []
+    real, calls, used = charge_engine.read_wfx, [], []
+    load = omol._load_wfx
     monkeypatch.setattr(charge_engine, "read_wfx", lambda p: calls.append(p) or real(p))
+    monkeypatch.setattr(omol, "_load_wfx", lambda p, basis=True: used.append(load(p, basis)) or used[-1])
     omol._run_engines(folder, n_threads=1, logger=_logger(folder), qtaim_engine=True, charge_engine=True,
                       full_set=1, engine_subprocess=False)
     assert all(_timings(folder).get(k, 0) > 0 for k in ("qtaim_engine", "charge_engine", "surface_engine"))
     assert calls == [path]
-    wfx, basis = omol._load_wfx(path)
+    assert omol._loaded_wfx.value is None, "released after the engines"
+    wfx, basis = used[-1]
+    assert all(u[0] is wfx for u in used) and basis is not None
     fresh = real(path)
     for got, want in ((wfx, fresh), (basis, charge_engine.prepare_basis(fresh))):
         assert got.keys() == want.keys()
@@ -92,10 +96,12 @@ def test_engines_share_one_wfx_parse_and_leave_it_unchanged(tmp_path, monkeypatc
             else:
                 assert got[k] == want[k], k
     # a rewritten file is parsed again
+    load(path)
     st = os.stat(path)
     os.utime(path, ns=(st.st_atime_ns, st.st_mtime_ns + 10**9))
-    omol._load_wfx(path)
-    assert calls == [path, path]
+    load(path)
+    assert calls == [path, path, path]
+    omol._release_wfx()
 
 
 def test_killed_child_is_logged_and_drops_stale_engine_timings(tmp_path, monkeypatch):

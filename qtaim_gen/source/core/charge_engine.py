@@ -1348,7 +1348,8 @@ def run(wfx_path, nrad=75, nang=434, radcut=10.0, bond_nrad=45, bond_nang=170, f
         basis = prepare_basis(wfx)
     else:
         wfx, basis = load(wfx_path)
-    t["load"] = time.perf_counter() - t0
+    # a shared load may have parsed the file for an earlier engine: then it is not this run's cost
+    t["load" if load is None else "load_shared"] = time.perf_counter() - t0
 
     atnums = wfx["atnums"]
     coords = wfx["coords"]

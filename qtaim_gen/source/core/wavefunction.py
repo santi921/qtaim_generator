@@ -29,7 +29,6 @@ round trip through outwfx's E20.12 text differs from reading Multiwfn's orca.wfx
 
 import logging
 import math
-import mmap
 import os
 import re
 
@@ -148,29 +147,11 @@ def _molden_mos(buf, start, end):
     return mos, spans
 
 
-def _molden_coefficients(block, nsph):
-    """The coefficient vector of one orbital from its "index value" lines (index 1-based;
-    a D exponent is read as E), as the line-by-line reader: float() and int() per token."""
-    coef = np.zeros(nsph)
-    if b"D" in block:
-        block = block.replace(b"D", b"E")
-    tok = block.split()
-    rows = [line for line in block.split(b"\n") if line.strip()]
-    idx = list(map(int, tok[0::2]))
-    if len(tok) == 2 * len(rows) and len(set(idx)) == len(idx):
-        coef[np.array(idx, dtype=np.int64) - 1] = list(map(float, tok[1::2]))
-        return coef
-    # lines with other than two fields, or a repeated index (the last value wins)
-    for line in rows:
-        i, v = line.split()[:2]
-        coef[int(i) - 1] = float(v)
-    return coef
-
-
 def molden_mo_headers(path):
     """(energy, occupation) of every [MO] entry of a molden file, in file order."""
-    with open(path, "rb") as fh, mmap.mmap(fh.fileno(), 0, access=mmap.ACCESS_READ) as buf:
-        mos = [mo for name, _, a, b in _molden_sections(buf) if name == "mo" for mo in _molden_mos(buf, a, b)[0]]
+    with open(path, "rb") as fh:
+        buf = fh.read()
+    mos = [mo for name, _, a, b in _molden_sections(buf) if name == "mo" for mo in _molden_mos(buf, a, b)[0]]
     return [(float(m["ene"]), float(m["occup"])) for m in mos]
 
 
@@ -191,7 +172,8 @@ def frontier_window(headers, window):
 
 
 def read_orca_molden(path, zeff_override=None, mwfn_h_compat=False, keep_virtuals=False, orbital_window=None):
-    """The read_wfx dict for an ORCA .molden file, read in one pass over a memory map.
+    """The read_wfx dict for an ORCA .molden file, read into memory once (a memory map would
+    turn a file truncated during the read into SIGBUS in the runner's shared process).
 
     zeff_override: {0-based atom: effective charge}, for ORCA 5 ECP jobs.
     mwfn_h_compat: flip h(+3,-3,+4,-4) on alpha orbitals only, as Multiwfn does.
@@ -204,7 +186,8 @@ def read_orca_molden(path, zeff_override=None, mwfn_h_compat=False, keep_virtual
     atnums, zeff, coords, shells, mos = [], [], [], [], []
     is_orca, unit_au = False, True
     cur_atom = shell = None
-    with open(path, "rb") as fh, mmap.mmap(fh.fileno(), 0, access=mmap.ACCESS_READ) as buf:
+    with open(path, "rb") as fh:
+        buf = fh.read()
         sections = _molden_sections(buf)
         # the window is taken over the orbitals of every [MO] section, so their headers come first
         mo_sections = {start: _molden_mos(buf, start, end) for name, _, start, end in sections if name == "mo"}
@@ -224,8 +207,25 @@ def read_orca_molden(path, zeff_override=None, mwfn_h_compat=False, keep_virtual
                         stored = len(mos) + i in keep_idx
                     else:
                         stored = keep_virtuals or float(mo["occup"]) != 0
-                    if stored:
-                        mo["coef"] = _molden_coefficients(buf[a:b], nsph)
+                    if not stored:
+                        continue
+                    # "index value" lines (index 1-based, D exponent read as E), parsed with
+                    # float() and int() per token as a line-by-line reader would
+                    block = buf[a:b]
+                    if b"D" in block:
+                        block = block.replace(b"D", b"E")
+                    coef = mo["coef"] = np.zeros(nsph)
+                    if set(map(len, map(bytes.split, block.split(b"\n")))) <= {0, 2}:
+                        tok = block.split()
+                        idx = list(map(int, tok[0::2]))
+                        if len(set(idx)) == len(idx):
+                            coef[np.array(idx, dtype=np.int64) - 1] = list(map(float, tok[1::2]))
+                            continue
+                    # lines with other than two fields, or a repeated index (the last value wins)
+                    for line in block.split(b"\n"):
+                        if line.strip():
+                            i, v = line.split()[:2]
+                            coef[int(i) - 1] = float(v)
                 mos += sec_mos
                 continue
             for line in buf[start:end].decode(errors="replace").split("\n"):

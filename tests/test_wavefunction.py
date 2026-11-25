@@ -353,3 +353,89 @@ def test_runner_converts_natively_by_default(tmp_path, monkeypatch, args, expect
     runner.main(args + ["--job_file", str(jobs), "--root_omol_results", str(tmp_path / "res"),
                         "--root_omol_inputs", str(tmp_path)])
     assert seen["native_convert"] == expected
+
+
+def _equal_dicts(a, b):
+    assert a.keys() == b.keys()
+    for k in a:
+        if isinstance(a[k], np.ndarray):
+            assert a[k].dtype == b[k].dtype and np.array_equal(a[k], b[k]), k
+        else:
+            assert a[k] == b[k], k
+
+
+def _molden_variant(tmp_path, name, edit):
+    """The no_cc_pv5z molden with edit(head, mo_section) -> (head, mo_section) applied."""
+    with open(_paths("no_cc_pv5z")[0]) as f:
+        text = f.read()
+    i = text.index("[MO]")
+    head, mo = edit(text[:i], text[i:])
+    path = tmp_path / name
+    path.write_bytes((head + mo).encode())
+    return str(path)
+
+
+FIRST_COEF = "  1      -0.000650007321\n"
+
+
+def test_molden_reader_reads_crlf_and_d_exponents_like_the_plain_file(tmp_path):
+    from decimal import Decimal
+
+    from qtaim_gen.source.core.charge_engine import FUKUI_WINDOW
+    from qtaim_gen.source.core.wavefunction import molden_mo_headers, read_orca_molden
+
+    def d_exponents(head, mo):
+        lines = []
+        for line in mo.split("\n"):
+            p = line.split()
+            # coefficient lines: same decimal value written as mantissa D exponent
+            lines.append(f"  {p[0]}   {format(Decimal(p[1]), 'E').replace('E', 'D')}" if len(p) == 2 and "=" not in line else line)
+        return head, "\n".join(lines)
+
+    plain = _paths("no_cc_pv5z")[0]
+    variants = [_molden_variant(tmp_path, "d.molden", d_exponents),
+                _molden_variant(tmp_path, "crlf.molden", lambda h, m: (h.replace("\n", "\r\n"), m.replace("\n", "\r\n")))]
+    assert "D-" in open(variants[0]).read()
+    for kw in ({}, {"keep_virtuals": True}, {"orbital_window": FUKUI_WINDOW}, {"mwfn_h_compat": True}):
+        want = read_orca_molden(plain, **kw)
+        for path in variants:
+            _equal_dicts(read_orca_molden(path, **kw), want)
+    for path in variants:
+        assert molden_mo_headers(path) == molden_mo_headers(plain)
+
+
+def test_molden_repeated_index_keeps_the_last_value(tmp_path):
+    from qtaim_gen.source.core.wavefunction import read_orca_molden
+
+    dup = _molden_variant(tmp_path, "dup.molden", lambda h, m: (h, m.replace(FIRST_COEF, FIRST_COEF + "  1      0.5\n", 1)))
+    last = _molden_variant(tmp_path, "last.molden", lambda h, m: (h, m.replace(FIRST_COEF, "  1      0.5\n", 1)))
+    _equal_dicts(read_orca_molden(dup), read_orca_molden(last))
+
+
+def test_molden_orbital_without_coefficients_is_counted_but_not_stored(tmp_path):
+    from qtaim_gen.source.core.wavefunction import molden_mo_headers, read_orca_molden
+
+    plain = _paths("no_cc_pv5z")[0]
+    extra = _molden_variant(tmp_path, "extra.molden",
+                            lambda h, m: (h, m.rstrip("\n") + "\n Sym= 99a\n Ene= 9.9\n Spin= Alpha\n Occup= 0.000000\n"))
+    _equal_dicts(read_orca_molden(extra, keep_virtuals=True), read_orca_molden(plain, keep_virtuals=True))
+    assert molden_mo_headers(extra) == molden_mo_headers(plain) + [(9.9, 0.0)]
+
+
+def test_molden_malformed_coefficient_lines(tmp_path):
+    from qtaim_gen.source.core.wavefunction import molden_mo_headers, read_orca_molden
+
+    plain = _paths("no_cc_pv5z")[0]
+    # a third field is ignored, as the line-by-line rule (first two fields) does
+    third = _molden_variant(tmp_path, "third.molden", lambda h, m: (h, m.replace(FIRST_COEF, FIRST_COEF[:-1] + "  7\n", 1)))
+    _equal_dicts(read_orca_molden(third), read_orca_molden(plain))
+    # a line with one field is an error, also when the next line's field count would even it out
+    for name, edit in (("short", lambda h, m: (h, m.replace(FIRST_COEF, "  1\n", 1))),
+                       ("shifted", lambda h, m: (h, m.replace(FIRST_COEF, FIRST_COEF[:-1] + "  2\n  -0.000875469716\n", 1)
+                                                 .replace("  2      -0.000875469716\n", "", 1)))):
+        with pytest.raises(ValueError):
+            read_orca_molden(_molden_variant(tmp_path, f"{name}.molden", edit))
+    early = _molden_variant(tmp_path, "early.molden", lambda h, m: (h, m.replace("[MO]\n", "[MO]\n  1  0.5\n", 1)))
+    for reader in (read_orca_molden, molden_mo_headers):
+        with pytest.raises(ValueError, match="before the first orbital header"):
+            reader(early)
