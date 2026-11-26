@@ -25,11 +25,11 @@ source ~/.bashrc
 module load gcc
 conda activate ${CONDA_ENV:-qtaim_engine}
 set -eo pipefail
-python -c "import qtaim_gen, parsl; print('python', __import__('sys').executable, 'parsl', parsl.__version__)"
 CODE=${CODE:?CODE is required: the branch checkout to import}
 export PYTHONPATH=$CODE PYTHONUNBUFFERED=1 PYTHONNOUSERSITE=1 OMP_STACKSIZE=4G KMP_STACKSIZE=200M
 export OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1
 ulimit -s unlimited
+python -c "import sys, parsl, qtaim_gen; print(sys.executable, 'parsl', parsl.__version__, 'qtaim_gen from', qtaim_gen.__file__)"
 
 MIXES=("56 1" "28 2" "14 4")
 read N_PAR THREADS <<< "${MIXES[$SLURM_ARRAY_TASK_ID]}"
