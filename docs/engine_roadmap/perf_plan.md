@@ -130,7 +130,18 @@ between the three mixes apart from timing fields.
 at 4. Peak node memory is 75 GB of 512 GB. Steady state = completions between the 10th and 90th
 percentile of completion times.
 
-LRC lr7 tm_react slice (throughput_lrc.slurm): pending.
+LRC lr7 node (2026-11-26, array 28217305, branch at 6632da2): the first 168 jobs of the tm_react
+slice (engine_test/jobs.txt), full_set 0, both engines, one whole node per mix. All 168 folders
+completed in every mix (validation and cross-mix identity not checked on LRC).
+
+| mix (workers x threads) | wall s | jobs per node-hour (run / steady) | median s per job | core-s per job (median / mean) | peak worker / node RSS GB |
+|---|---|---|---|---|---|
+| 56 x 1 | 1137 | 532 / 678 | 325 | 325 / 307 | 0.81 / 28.3 |
+| 28 x 2 | 1704 | 355 / 437 | 264 | 528 / 482 | 0.92 / 17.3 |
+| 14 x 4 | 2769 | 218 / 239 | 237 | 947 / 863 | 0.96 / 9.9 |
+
+56 x 1 gives 2.4x the jobs per node-hour of 14 x 4 over the run and 2.8x in the steady state, the
+same ratio as on NERSC; a job takes 1.37x longer at 1 thread than at 4.
 
 ## Phase 2: kernels (roundoff-level, one routine per PR, cluster validation once per routine)
 
