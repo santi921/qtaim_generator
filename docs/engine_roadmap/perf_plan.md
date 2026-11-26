@@ -43,6 +43,7 @@ The full_set 1 gain is the CHELPG ESP kernel (65% of the cost, 14-19x in a proto
 | # | Question | Decision |
 |---|---|---|
 | P1 | Roundoff-level changes (summation order, GEMM partition; at most about 1e-12 relative on stored values) | Allowed without an ENGINE_VERSION `changed` entry; validation compares with that tolerance instead of exact equality. A change above it is value-changing and follows the usual rule |
+| P1a | (2026-11-27) Quantities fitted to a roundoff-level input, e.g. CHELPG charges from an ESP within 1e-12 relative (the fit's condition number amplifies it) | Roundoff-level too: up to 1e-9 e on fitted charges, no ENGINE_VERSION entry (ESP kernel: 6.4e-11 e on the 99-job set) |
 | P2 | Threads per job on the clusters | 1 thread per job, many jobs per node. Lands with phase 1: in the local layout the native conversion and ORCA parse of every job run in the one parent process under its GIL, which 128 single-thread jobs per node would saturate |
 | P3 | Value-changing options (MBIS stalled-check stop, QTAIM seed thinning + capture radius, bond-path step 0.10 Bohr) | Evaluate each: measure how far stored values move, then decide per option |
 | P4 | Surface narrow band: point-level (roundoff, about 2.5x on ALIE) or block-level (bitwise, 1.6x) | Measure how much the derived surface values differ under the point-level variant, then decide |
@@ -182,6 +183,9 @@ The far-field thresholds `FAR_T` are pinned (a test recomputes them with scipy).
   negative area changes; 7367 s -> 730 s (10.1x; the mesh is unchanged). Fields that are NaN (no
   negative or no positive surface) are NaN in both.
 - Output independent of thread count and block size (bitwise, tested).
+- QTAIM (cp_search.analyze) with the old and new kernel on 12, 36 and 39 atoms: identical CP sets and
+  every other property, esp_e within 4.8e-16 relative (esp_total within 5.7e-13, where it nearly
+  cancels); the 39-atom QTAIM step 5.1 s -> 3.9 s.
 
 ## Phase 3: value-changing options (P3)
 
