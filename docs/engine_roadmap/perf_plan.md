@@ -187,6 +187,24 @@ The far-field thresholds `FAR_T` are pinned (a test recomputes them with scipy).
   every other property, esp_e within 4.8e-16 relative (esp_total within 5.7e-13, where it nearly
   cancels); the 39-atom QTAIM step 5.1 s -> 3.9 s.
 
+Phase 2.2 / 2.3 results (branch perf/esp-kernel, 2026-11-27), charge_engine.run old (trunk) vs new
+in one process, 1 thread, the ESP kernel already in both:
+
+- 2.2, bitwise: `_primitive_block` and `_primitive_block_derivs` on strips of 64 points with the
+  point loop innermost (same products in the same order, dropped primitives +0.0): 1.24-1.42x and
+  1.16-1.20x on real blocks, identical including signed zeros; the derivative kernel also serves the
+  QTAIM Newton search. Fukui orbitals from the density pass's primitive values
+  (`orbital_values(cts=...)`). Two-phase `_becke` (np.argsort kept for ties). full_set 0: every
+  routine bitwise identical on 5 jobs; 1.37-1.40x with Fukui (Fukui 0.60 -> 0.05 s at 12 atoms),
+  1.05-1.15x without a molden.
+- 2.3, roundoff: at full_set 1 one `density_derivatives` pass gives the density, spin, ELF/IBSI
+  inputs and the Fukui orbitals (`phi2=True, cts=...`). Charges move by at most 9.6e-14 e, Fukui
+  values 1.1e-16, mbis_fuzzy_density 4.2e-12 e (a fit, P1a), CHELPG fit diagnostics in the last
+  digits; full_set 0 schemes from a full_set 1 run therefore differ from a full_set 0 run in the
+  last digits. full_set 1 1.15-1.20x on 4 jobs (12-53 atoms).
+- Engines in process (QTAIM, charge, surface), trunk vs branch on 5 jobs: every full_set 0 output
+  identical, CPprop.txt included (the ESP kernel's differences are below its print precision).
+
 ## Phase 3: value-changing options (P3)
 
 | Option | Prototype gain | What to measure before deciding |

@@ -321,66 +321,83 @@ def _primitive_block_derivs(pts, atcoords, groups, g_center, g_alpha, g_start, g
     with q = value, d/dx, d/dy, d/dz, d2/dx2, d2/dy2, d2/dz2, d2/dxdy, d2/dxdz,
     d2/dydz. For x^l exp(-a r^2) the 1D factors are f0 = x^l,
     f1 = l x^(l-1) - 2a x^(l+1), f2 = l(l-1) x^(l-2) - 2a(2l+1) x^l + 4a^2 x^(l+2).
-    nderiv=1 returns only the first four rows (same values)."""
+    nderiv=1 returns only the first four rows (same values).
+
+    Computed on strips of PRIM_STRIP points with the point loop innermost (vectorizable),
+    every value the same expression in the same order as a point-by-point loop; dropped
+    primitives are +0.0."""
     n = pts.shape[0]
-    out = np.zeros((4 if nderiv == 1 else 10, n, ncols))
-    f = np.empty((3, 3))
-    d = np.zeros(3)
-    for ip in range(n):
-        x, y, z = pts[ip, 0], pts[ip, 1], pts[ip, 2]
+    nq = 4 if nderiv == 1 else 10
+    out = np.zeros((nq, n, ncols))
+    S = PRIM_STRIP
+    d = np.empty((3, S))
+    r2 = np.empty(S)
+    e = np.empty(S)
+    f = np.empty((3, 3, S))
+    for p0 in range(0, n, S):
+        m = min(S, n - p0)
         col = 0
         last = -1
-        r2 = 0.0
         for gi in range(groups.shape[0]):
             g = groups[gi]
             a = g_center[g]
             if a != last:
-                d[0] = x - atcoords[a, 0]
-                d[1] = y - atcoords[a, 1]
-                d[2] = z - atcoords[a, 2]
-                r2 = d[0] * d[0] + d[1] * d[1] + d[2] * d[2]
+                for p in range(m):
+                    d[0, p] = pts[p0 + p, 0] - atcoords[a, 0]
+                    d[1, p] = pts[p0 + p, 1] - atcoords[a, 1]
+                    d[2, p] = pts[p0 + p, 2] - atcoords[a, 2]
+                    r2[p] = d[0, p] * d[0, p] + d[1, p] * d[1, p] + d[2, p] * d[2, p]
                 last = a
             alpha = g_alpha[g]
-            ar2 = alpha * r2
-            if ar2 > EXP_CUTOFF:
+            ncut = 0
+            for p in range(m):
+                ar2 = alpha * r2[p]
+                if ar2 > EXP_CUTOFF:
+                    e[p] = 0.0
+                    ncut += 1
+                else:
+                    e[p] = np.exp(-ar2)
+            if ncut == m:
                 col += g_end[g] - g_start[g]
                 continue
-            e = np.exp(-ar2)
-            for p in range(g_start[g], g_end[g]):
+            for q in range(g_start[g], g_end[g]):
                 for k in range(3):
-                    lk = lmn[p, k]
-                    u = d[k]
-                    pk = 1.0
-                    for _ in range(lk):
-                        pk *= u
-                    pkm1 = 0.0
-                    if lk >= 1:
-                        pkm1 = 1.0
-                        for _ in range(lk - 1):
-                            pkm1 *= u
-                    f[k, 0] = pk
-                    f[k, 1] = lk * pkm1 - 2.0 * alpha * pk * u
-                    if nderiv == 1:
+                    lk = lmn[q, k]
+                    for p in range(m):
+                        u = d[k, p]
+                        pk = 1.0
+                        for _ in range(lk):
+                            pk *= u
+                        pkm1 = 0.0
+                        if lk >= 1:
+                            pkm1 = 1.0
+                            for _ in range(lk - 1):
+                                pkm1 *= u
+                        f[k, 0, p] = pk
+                        f[k, 1, p] = lk * pkm1 - 2.0 * alpha * pk * u
+                        if nderiv != 1:
+                            pkm2 = 0.0
+                            if lk >= 2:
+                                pkm2 = 1.0
+                                for _ in range(lk - 2):
+                                    pkm2 *= u
+                            f[k, 2, p] = lk * (lk - 1) * pkm2 - 2.0 * alpha * (2 * lk + 1) * pk + 4.0 * alpha * alpha * pk * u * u
+                for p in range(m):
+                    ep = e[p]
+                    if ep == 0.0:
                         continue
-                    pkm2 = 0.0
-                    if lk >= 2:
-                        pkm2 = 1.0
-                        for _ in range(lk - 2):
-                            pkm2 *= u
-                    f[k, 2] = lk * (lk - 1) * pkm2 - 2.0 * alpha * (2 * lk + 1) * pk + 4.0 * alpha * alpha * pk * u * u
-                out[0, ip, col] = f[0, 0] * f[1, 0] * f[2, 0] * e
-                out[1, ip, col] = f[0, 1] * f[1, 0] * f[2, 0] * e
-                out[2, ip, col] = f[0, 0] * f[1, 1] * f[2, 0] * e
-                out[3, ip, col] = f[0, 0] * f[1, 0] * f[2, 1] * e
-                if nderiv == 1:
-                    col += 1
-                    continue
-                out[4, ip, col] = f[0, 2] * f[1, 0] * f[2, 0] * e
-                out[5, ip, col] = f[0, 0] * f[1, 2] * f[2, 0] * e
-                out[6, ip, col] = f[0, 0] * f[1, 0] * f[2, 2] * e
-                out[7, ip, col] = f[0, 1] * f[1, 1] * f[2, 0] * e
-                out[8, ip, col] = f[0, 1] * f[1, 0] * f[2, 1] * e
-                out[9, ip, col] = f[0, 0] * f[1, 1] * f[2, 1] * e
+                    o = p0 + p
+                    out[0, o, col] = f[0, 0, p] * f[1, 0, p] * f[2, 0, p] * ep
+                    out[1, o, col] = f[0, 1, p] * f[1, 0, p] * f[2, 0, p] * ep
+                    out[2, o, col] = f[0, 0, p] * f[1, 1, p] * f[2, 0, p] * ep
+                    out[3, o, col] = f[0, 0, p] * f[1, 0, p] * f[2, 1, p] * ep
+                    if nderiv != 1:
+                        out[4, o, col] = f[0, 2, p] * f[1, 0, p] * f[2, 0, p] * ep
+                        out[5, o, col] = f[0, 0, p] * f[1, 2, p] * f[2, 0, p] * ep
+                        out[6, o, col] = f[0, 0, p] * f[1, 0, p] * f[2, 2, p] * ep
+                        out[7, o, col] = f[0, 1, p] * f[1, 1, p] * f[2, 0, p] * ep
+                        out[8, o, col] = f[0, 1, p] * f[1, 0, p] * f[2, 1, p] * ep
+                        out[9, o, col] = f[0, 0, p] * f[1, 1, p] * f[2, 1, p] * ep
                 col += 1
     return out
 
@@ -1562,13 +1579,24 @@ def run(wfx_path, nrad=75, nang=434, radcut=10.0, bond_nrad=45, bond_nang=170, f
     for b in range(nat):
         pts = grid_pts + coords[b]
         t0 = time.perf_counter()
-        if fukui_ok and share_prims:
+        if level1:
+            # one pass for the density, its derivatives (ELF, IBSI) and the Fukui orbitals: the
+            # values come from the derivative kernel's primitives (roundoff-level against the
+            # full_set 0 pass, which needs no derivatives)
+            d = density_derivatives(pts, wfx, basis, elf_only=not deriv_fuzzy, phi2=True,
+                                    cts=(vbasis["ct"],) if fukui_ok and share_prims else ())
+            phi2 = d.pop("phi2")
+            if fukui_ok and share_prims:
+                vphi = d.pop("cts")[0]
+            rho, spin = d["rho"], d["spin"]
+        elif fukui_ok and share_prims:
             phi, vphi = orbital_values(pts, coords, basis, cts=(vbasis["ct"],))
             phi2 = phi ** 2
             del phi
+            rho, spin = density(pts, coords, basis, wfx, phi2=phi2)
         else:
             phi2 = orbital_values(pts, coords, basis) ** 2
-        rho, spin = density(pts, coords, basis, wfx, phi2=phi2)
+            rho, spin = density(pts, coords, basis, wfx, phi2=phi2)
         t["density"] += time.perf_counter() - t0
         t0 = time.perf_counter()
         w = _becke(pts, coords, rinv, aij, BECKE_TOL)
@@ -1593,7 +1621,6 @@ def run(wfx_path, nrad=75, nang=434, radcut=10.0, bond_nrad=45, bond_nang=170, f
             # fuzzyana isel=1 with functions 9 (ELF), 2 (|grad rho|) and 3 (Laplacian):
             # the same Becke-weighted molecular grid as becke_fuzzy_density
             t0 = time.perf_counter()
-            d = density_derivatives(pts, wfx, basis, elf_only=not deriv_fuzzy)
             fz["elf"] += w.T @ (wb * elf_lol(d, wfx)[0])
             if deriv_fuzzy:
                 fz["grad"] += w.T @ (wb * np.sqrt((d["gradient"] ** 2).sum(axis=1)))
