@@ -114,8 +114,23 @@ between `local_threads` and `local` except the `_meta.qtaim_engine.seconds` timi
 151.3 s, sum of per-job times 504 s vs 486 s, parent RSS 657 MB vs 108 MB. One 142-147 s job sets
 the wall time, so this scale cannot show the parent-GIL limit; the cluster runs measure it.
 
-Cluster runs (pending): NERSC openac sample (throughput_nersc.slurm), LRC tm_react slice
-(throughput_lrc.slurm).
+NERSC Perlmutter CPU node (2026-11-25, array 61997706, branch at 7c9681a): the 440-job openac
+sample (X2C actinide complexes), full_set 0, both engines, one whole node per mix. All 440 folders
+completed and validated in every mix, and every output (3,520 json and CPprop.txt files) is identical
+between the three mixes apart from timing fields.
+
+| mix (workers x threads) | wall s | jobs per node-hour (run / steady) | median s per job | core-s per job (median / mean) | peak worker / node RSS GB |
+|---|---|---|---|---|---|
+| 128 x 1 | 4102 | 386 / 504 | 499 | 499 / 810 | 1.34 / 75.1 |
+| 64 x 2 | 5647 | 281 / 316 | 399 | 798 / 1355 | 1.50 / 47.3 |
+| 32 x 4 | 9943 | 159 / 175 | 371 | 1482 / 2524 | 1.75 / 30.7 |
+
+128 x 1 gives 2.4x the jobs per node-hour of 32 x 4 over the whole run and 2.9x in the steady state
+(the run figure includes the tail of the last long jobs); a job takes 1.35x longer at 1 thread than
+at 4. Peak node memory is 75 GB of 512 GB. Steady state = completions between the 10th and 90th
+percentile of completion times.
+
+LRC lr7 tm_react slice (throughput_lrc.slurm): pending.
 
 ## Phase 2: kernels (roundoff-level, one routine per PR, cluster validation once per routine)
 
