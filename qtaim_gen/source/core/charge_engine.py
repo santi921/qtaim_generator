@@ -29,6 +29,7 @@ listed in docs/plans/2026-10-04-feat-one-pass-charge-engine-plan.md.
 import argparse
 import functools
 import json
+import logging
 import os
 import re
 import sys
@@ -168,6 +169,11 @@ def multiwfn_atom_grid(nrad=75, nang=434, radcut=10.0):
 
 
 PRIM_STRIP = 64  # points per strip of _primitive_block (the strip's scratch stays in L1/L2)
+if getattr(numba.config, "USING_SVML", False):
+    # numba < 0.62 with Intel SVML vectorizes the strip kernels' exp with SVML, which need not
+    # match scalar libm exp in the last bit: values then differ from a build without it at roundoff
+    logging.getLogger(__name__).warning("numba uses Intel SVML: primitive values may differ from builds "
+                                        "without it in the last bit (docs/engine_roadmap/perf_plan.md)")
 
 
 @njit(nogil=True, cache=True)
@@ -1597,7 +1603,8 @@ def run(wfx_path, nrad=75, nang=434, radcut=10.0, bond_nrad=45, bond_nang=170, f
         else:
             phi2 = orbital_values(pts, coords, basis) ** 2
             rho, spin = density(pts, coords, basis, wfx, phi2=phi2)
-        t["density"] += time.perf_counter() - t0
+        # at full_set 1 the merged pass is the derivative pass, timed as such
+        t["derivatives" if level1 else "density"] += time.perf_counter() - t0
         t0 = time.perf_counter()
         w = _becke(pts, coords, rinv, aij, BECKE_TOL)
         t["becke"] += time.perf_counter() - t0

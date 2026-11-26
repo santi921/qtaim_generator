@@ -20,6 +20,7 @@ import numpy as np
 from numba import njit
 
 from qtaim_gen.source.core.esp_contract import contract3, contract4, contract5, contract6
+from qtaim_gen.source.core.esp_hermite import HIDX, HORDER, LMAX_PAIR, NTRI, OP_C, OP_DIR, OP_S1, OP_S2  # noqa: F401
 
 BOYS_SERIES_MAX_X = 30.0  # series below, erf + upward recursion above
 BOYS_TABLE_STEP = 0.05
@@ -140,41 +141,7 @@ def boys_multiwfn(mmax, x, out):
 
 BOYS_EXACT, BOYS_REFERENCE, BOYS_MULTIWFN = 0, 1, 2
 _BOYS_MODES = {"exact": BOYS_EXACT, "reference": BOYS_REFERENCE, "multiwfn": BOYS_MULTIWFN}
-LMAX_PAIR = 10  # h + h
 SCREEN_TOL = 1e-15  # dropped group pairs together contribute provably less than this at every point
-
-
-def _hermite_index():
-    """Hermite indices (t, u, v) with t + u + v <= LMAX_PAIR, ordered by total
-    order, so the indices of order <= s are a prefix of length NTRI[s]. For each
-    index of order >= 1, the MD recursion step that builds it:
-    R^m[i] = X_dir R^{m+1}[s1] + c R^{m+1}[s2] (dir = first nonzero of t, u, v)."""
-    tuv = [(t, u, s - t - u) for s in range(LMAX_PAIR + 1) for t in range(s, -1, -1) for u in range(s - t, -1, -1)]
-    idx = np.full((LMAX_PAIR + 1,) * 3, -1, dtype=np.int64)
-    for i, (t, u, v) in enumerate(tuv):
-        idx[t, u, v] = i
-    n = len(tuv)
-    op_dir = np.zeros(n, dtype=np.int64)
-    op_s1 = np.zeros(n, dtype=np.int64)
-    op_s2 = np.full(n, -1, dtype=np.int64)
-    op_c = np.zeros(n)
-    order = np.zeros(n, dtype=np.int64)
-    for i, c in enumerate(tuv):
-        order[i] = sum(c)
-        if i == 0:
-            continue
-        d = next(k for k in range(3) if c[k] > 0)
-        lo = list(c)
-        lo[d] -= 1
-        op_dir[i], op_s1[i] = d, idx[tuple(lo)]
-        if c[d] > 1:
-            lo[d] -= 1
-            op_s2[i], op_c[i] = idx[tuple(lo)], c[d] - 1
-    ntri = np.array([(s + 1) * (s + 2) * (s + 3) // 6 for s in range(LMAX_PAIR + 1)], dtype=np.int64)
-    return idx, ntri, order, op_dir, op_s1, op_s2, op_c
-
-
-HIDX, NTRI, HORDER, OP_DIR, OP_S1, OP_S2, OP_C = _hermite_index()
 
 
 @njit(nogil=True, cache=True)

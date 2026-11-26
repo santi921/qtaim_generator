@@ -5,8 +5,11 @@ trees completed, and the files or keys present in only one tree.
 usage: compare_trees.py TREE_A TREE_B [--top N]
 
 Timing fields (timings.json, timings_s, wall_s, seconds) are left out. Relative differences are
-taken against max(|a|, 1e-12), so values near zero do not dominate. A row per file/key, sorted by
-the absolute difference; values that are NaN in both trees count as equal.
+taken against max(|a|, 1e-12), so values near zero do not dominate. Structural differences (a file
+or key in one tree only, lists of different length, non-numeric values or types that differ) are
+always listed, first; then a row per file/key with numeric differences, sorted by the absolute
+difference, up to --top. Values that are NaN in both trees count as equal. Job folders found in
+only one tree are named.
 """
 
 import argparse
@@ -16,6 +19,7 @@ import os
 
 SKIP_FILES = {"timings.json", "throughput.json"}
 SKIP_KEYS = {"timings_s", "wall_s", "timings", "seconds", "elapsed", "elapsed_s"}
+STRUCTURAL = {"only one tree", "length differs", "value or type differs", "file in one tree only", "unreadable"}
 
 
 def job_files(tree):
@@ -50,7 +54,8 @@ def diff(a, b, acc, path):
             return
         for x, y in zip(a, b):
             diff(x, y, acc, path)
-    elif isinstance(a, (int, float)) and isinstance(b, (int, float)) and not isinstance(a, bool):
+    elif (isinstance(a, (int, float)) and isinstance(b, (int, float))
+          and not isinstance(a, bool) and not isinstance(b, bool)):
         a, b = float(a), float(b)
         if math.isnan(a) and math.isnan(b):
             return
@@ -59,8 +64,8 @@ def diff(a, b, acc, path):
         row[0] += 1
         row[1] = max(row[1], d)
         row[2] = max(row[2], d / max(abs(a), 1e-12))
-    elif a != b:
-        acc.setdefault(("value differs",) + path, [0, 0.0, 0.0])[0] += 1
+    elif a != b or type(a) is not type(b):
+        acc.setdefault(("value or type differs",) + path, [0, 0.0, 0.0])[0] += 1
 
 
 def main():
@@ -85,10 +90,20 @@ def main():
                 continue
             diff(a, b, acc, (f,))
     print(f"jobs: {len(ja)} in A, {len(jb)} in B, {len(common)} compared")
-    rows = sorted(acc.items(), key=lambda kv: -kv[1][1])
+    for name, only in (("A", sorted(ja.keys() - jb.keys())), ("B", sorted(jb.keys() - ja.keys()))):
+        if only:
+            print(f"only in {name} ({len(only)}): " + ", ".join(only[:20]) + (" ..." if len(only) > 20 else ""))
+    structural = sorted((k, v) for k, v in acc.items() if k[0] in STRUCTURAL)
+    numeric = sorted(((k, v) for k, v in acc.items() if k[0] not in STRUCTURAL), key=lambda kv: -kv[1][1])
+    if structural:
+        print("structural differences (file / key | occurrences):")
+        for key, (n, _, _) in structural:
+            print(f"  {' / '.join(key)} | {n}")
+    else:
+        print("structural differences: none")
     print("file / key | values | max abs diff | max rel diff")
     print("--- | --- | --- | ---")
-    for key, (n, d, r) in rows[: args.top]:
+    for key, (n, d, r) in numeric[: args.top]:
         print(f"{' / '.join(key)} | {n} | {d:.3e} | {r:.3e}")
 
 

@@ -8,7 +8,7 @@ usage: python scripts/gen_esp_contract.py [--check]   (--check: exit 1 if the fi
 import os
 import sys
 
-from qtaim_gen.source.core.esp import NTRI, OP_C, OP_DIR, OP_S1, OP_S2
+from qtaim_gen.source.core.esp_hermite import NTRI, OP_C, OP_DIR, OP_S1, OP_S2
 
 ORDERS = (3, 4, 5, 6)
 OUT = os.path.join(os.path.dirname(__file__), "..", "qtaim_gen", "source", "core", "esp_contract.py")

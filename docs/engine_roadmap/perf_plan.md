@@ -204,6 +204,12 @@ in one process, 1 thread, the ESP kernel already in both:
   last digits. full_set 1 1.15-1.20x on 4 jobs (12-53 atoms).
 - Engines in process (QTAIM, charge, surface), trunk vs branch on 5 jobs: every full_set 0 output
   identical, CPprop.txt included (the ESP kernel's differences are below its print precision).
+- The bitwise claims assume numba without Intel SVML (numba >= 0.62 has none; the generator env on
+  the workstation and on NERSC has 0.68.0): with SVML the strip kernels' vectorized exp need not
+  match scalar libm exp, and charge_engine logs a warning at import. The throughput scripts print
+  numba's version and USING_SVML. At full_set 1 the merged pass is timed as `derivatives` (density
+  near 0 there). tests/test_charge_kernels.py pins the strip kernels and the two-phase Becke weights
+  to the point-by-point versions they replaced, bit for bit.
 
 ## Phase 3: value-changing options (P3)
 
