@@ -41,8 +41,9 @@ SLICE=$TREE/jobs.txt
 head -n $N $LIST > $SLICE
 echo "branch: $(git -C $CODE rev-parse --abbrev-ref HEAD) $(git -C $CODE rev-parse --short HEAD); mix ${N_PAR}x${THREADS}; $(wc -l < $SLICE) jobs"
 
-# per-process RSS every 15 s (epoch pid kB), for peak memory per worker and per node
-( while true; do ps -u $USER -o pid=,rss=,comm= | awk -v t=$(date +%s) '$3 ~ /python/ {print t, $1, $2}'; sleep 15; done ) >> $TREE/rss.log &
+# RSS of every process of this user every 15 s (epoch pid ppid kB command), for peak memory per
+# worker (with its children, e.g. orca_2mkl and Multiwfn) and per node
+( while true; do ps -u $USER -o pid=,ppid=,rss=,comm= | awk -v t=$(date +%s) '{print t, $1, $2, $3, $4}'; sleep 15; done ) >> $TREE/rss.log &
 SAMPLER=$!
 START=$(date +%s.%N)
 python -m qtaim_gen.source.scripts.full_runner_parsl_alcf \

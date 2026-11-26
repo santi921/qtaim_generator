@@ -1808,6 +1808,21 @@ def _update_timing(folder: str, key: str, seconds: float, logger: logging.Logger
     atomic_json_write(timings_path, timings)
 
 
+def _drop_engine_records(folder: str, timing_keys, routines) -> None:
+    """Remove engine timings (root and generator/ timings.json) and the routines' provenance
+    entries before an engine rewrites its outputs. The engine writes them again when it
+    succeeds; if its process dies first (killed for memory in a worker that runs the engines
+    in process), records of an earlier run would otherwise vouch for half-written outputs.
+    Permanent skips are kept."""
+    for timings_path in (os.path.join(folder, "timings.json"), os.path.join(folder, "generator", "timings.json")):
+        t = _safe_json_load(timings_path)
+        if isinstance(t, dict) and any(k in t for k in timing_keys):
+            for k in timing_keys:
+                t.pop(k, None)
+            atomic_json_write(timings_path, t)
+    provenance.drop(folder, set(routines) - provenance.skipped(provenance.load(folder)))
+
+
 def _run_charge_engine(
     folder: str,
     n_threads: int,
@@ -1832,6 +1847,7 @@ def _run_charge_engine(
     import numba
     from qtaim_gen.source.core import charge_engine
 
+    _drop_engine_records(folder, ["charge_engine"], _engine_routines(full_set, spin_tf))
     # the Fukui functions need the unoccupied orbitals, which only the molden of the convert
     # step has (clean_jobs removes it); without one they are recorded as skipped (no_molden)
     moldens = sorted(f for f in os.listdir(folder) if f.endswith(".molden.input"))
@@ -1845,7 +1861,8 @@ def _run_charge_engine(
     numba.set_num_threads(max(1, min(n_threads, numba.config.NUMBA_NUM_THREADS)))
     start = time.time()
     try:
-        out = charge_engine.run(wf_path, full_set=full_set, molden_path=molden_path, load=_load_wfx)
+        out = charge_engine.run(wf_path, full_set=full_set, molden_path=molden_path, load=_load_wfx,
+                                load_shared=_wfx_cached(wf_path))
     except Exception as e:
         logger.error("charge_engine failed on %s: %s", wf_path, e)
         return False
@@ -2099,6 +2116,7 @@ def _run_qtaim_engine(folder: str, n_threads: int, logger: logging.Logger, resta
     from qtaim_gen.source.core import cp_search
     from qtaim_gen.source.core.charge_engine import ecp_atoms_without_edf
 
+    _drop_engine_records(folder, ["qtaim_engine"], ["qtaim"])
     numba.set_num_threads(max(1, min(n_threads, numba.config.NUMBA_NUM_THREADS)))
     settings = {"seeds": "superset", "paths": "engine", "boys_mode": "exact"}
     start = time.time()
@@ -2168,6 +2186,7 @@ def _run_surface_engine(
     import numba
     from qtaim_gen.source.core import surface_engine
 
+    _drop_engine_records(folder, ["surface_engine"] + (["other_esp"] if "other_esp" in todo else []), todo)
     numba.set_num_threads(max(1, min(n_threads, numba.config.NUMBA_NUM_THREADS)))
     start = time.time()
     results, esp_s, esp_error = {}, None, None
@@ -2595,8 +2614,7 @@ def _load_wfx(wf_path: str, basis: bool = True):
     either dict. basis=False returns (wfx, None) without building the basis."""
     from qtaim_gen.source.core.charge_engine import prepare_basis, read_wfx
 
-    st = os.stat(wf_path)
-    key = (os.path.realpath(wf_path), st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns)
+    key = _wfx_key(wf_path)
     if getattr(_loaded_wfx, "key", None) != key:
         _release_wfx()
         _loaded_wfx.value = (read_wfx(wf_path), None)
@@ -2604,6 +2622,16 @@ def _load_wfx(wf_path: str, basis: bool = True):
     if basis and _loaded_wfx.value[1] is None:
         _loaded_wfx.value = (_loaded_wfx.value[0], prepare_basis(_loaded_wfx.value[0]))
     return _loaded_wfx.value
+
+
+def _wfx_key(wf_path: str) -> tuple:
+    st = os.stat(wf_path)
+    return (os.path.realpath(wf_path), st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns)
+
+
+def _wfx_cached(wf_path: str) -> bool:
+    """True when this thread holds the current parse of wf_path (an earlier engine read it)."""
+    return getattr(_loaded_wfx, "key", None) == _wfx_key(wf_path)
 
 
 def _release_wfx() -> None:

@@ -1,5 +1,6 @@
 # config.py
 import os
+import shutil
 import sys
 import uuid
 from datetime import datetime
@@ -272,6 +273,13 @@ def base_config(n_workers: int = 128) -> Config:
     return local_threads
 
 
+def _parsl_script(name: str) -> str:
+    """Path of a parsl console script: the one installed next to this interpreter (the env
+    that runs the runner, also when it is not activated), else the one on PATH."""
+    local = os.path.join(os.path.dirname(sys.executable), name)
+    return local if os.path.exists(local) else (shutil.which(name) or name)
+
+
 def local_process_config(n_workers: int, threads_per_worker: int = 1) -> Config:
     """Parsl config for one node: n_workers worker processes on a LocalProvider, each
     pinned to its own block of cores (cpu_affinity="block") and running one folder at a
@@ -279,15 +287,23 @@ def local_process_config(n_workers: int, threads_per_worker: int = 1) -> Config:
     persistent, so a folder's engines run in the worker itself (no child per folder), and
     the native conversion and ORCA parse of different folders run in parallel instead of
     in one process. A worker that dies (e.g. killed for memory) fails its task with
-    WorkerLost and is replaced.
+    WorkerLost and is replaced. parsl's affinity sets each worker's OMP_NUM_THREADS to the
+    number of cores it is pinned to; the engines take their thread count from
+    NUMBA_NUM_THREADS and Multiwfn from settings.ini, so neither depends on it.
+
+    n_workers is capped at the CPUs this process may run on: parsl's block affinity gives
+    every worker at least one core and stops every worker when there are more workers.
     """
-    env = (f"export NUMBA_NUM_THREADS={threads_per_worker} OMP_NUM_THREADS={threads_per_worker} "
-           "OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1; ")
-    # parsl starts its interchange and worker pool by script name from PATH; run the scripts
-    # installed next to this interpreter with it, so an env that is not activated works too
-    bindir = os.path.dirname(sys.executable)
+    avail = len(os.sched_getaffinity(0))
+    if n_workers > avail:
+        print(f"local_process_config: {n_workers} workers requested, {avail} CPUs available; using {avail}")
+        n_workers = avail
+    if n_workers * threads_per_worker > avail:
+        print(f"local_process_config: {n_workers} workers x {threads_per_worker} threads on {avail} CPUs "
+              "(oversubscribed)")
+    env = f"export NUMBA_NUM_THREADS={threads_per_worker} OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1; "
     launch = DEFAULT_LAUNCH_CMD.replace("process_worker_pool.py",
-                                        f"{sys.executable} {os.path.join(bindir, 'process_worker_pool.py')}", 1)
+                                        f"{sys.executable} {_parsl_script('process_worker_pool.py')}", 1)
     return Config(
         run_dir=_unique_run_dir(),
         executors=[
@@ -298,7 +314,7 @@ def local_process_config(n_workers: int, threads_per_worker: int = 1) -> Config:
                 prefetch_capacity=0,
                 address="127.0.0.1",
                 launch_cmd=launch,
-                interchange_launch_cmd=[sys.executable, os.path.join(bindir, "interchange.py")],
+                interchange_launch_cmd=[sys.executable, _parsl_script("interchange.py")],
                 provider=LocalProvider(init_blocks=1, min_blocks=1, max_blocks=1, worker_init=env),
             )
         ],

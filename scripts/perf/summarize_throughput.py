@@ -6,8 +6,9 @@ throughput_*.slurm, the job folders, and rss.log from the memory sampler)
 Per tree: folders completed, wall time of the run, jobs per hour over the run and over its
 steady state (the 10th to 90th percentile of completion times, which leaves out the start-up
 and the tail of the last long jobs), the median and p90 seconds per job, core-seconds per job
-(seconds x threads per job), and peak memory: the largest worker RSS and the largest sum over
-the node, from rss.log.
+(seconds x threads per job), and peak memory: the largest worker RSS, with the processes it
+started (orca_2mkl, Multiwfn) counted to it, and the largest sum over the node, from rss.log.
+Only completions logged during this run count (gbw_analysis.log is appended to by every run).
 """
 
 import json
@@ -21,6 +22,38 @@ import numpy as np
 DONE = re.compile(r"^(\S+ \S+) - INFO - Completed folder (.+) in ([0-9.]+) s$")
 
 
+def rss_peaks(path):
+    """Peak worker and node RSS from rss.log: lines "epoch pid ppid kB command" (or the older
+    "epoch pid kB" of python processes only). Each process counts to its nearest python
+    ancestor, itself if it is one, so a worker includes the programs it runs."""
+    snaps = {}
+    with open(path) as f:
+        for line in f:
+            p = line.split()
+            if len(p) == 3:
+                snaps.setdefault(p[0], []).append((p[1], None, int(p[2]), "python"))
+            elif len(p) >= 5:
+                snaps.setdefault(p[0], []).append((p[1], p[2], int(p[3]), p[4]))
+    worker, node = {}, 0
+    for procs in snaps.values():
+        parent = {pid: ppid for pid, ppid, _, _ in procs}
+        is_py = {pid for pid, _, _, comm in procs if "python" in comm}
+        totals = {}
+        for pid, _, kb, _ in procs:
+            owner, seen = pid, set()
+            while owner is not None and owner not in is_py and owner not in seen:
+                seen.add(owner)
+                owner = parent.get(owner)
+            if owner in is_py:
+                totals[owner] = totals.get(owner, 0) + kb
+        for pid, kb in totals.items():
+            worker[pid] = max(worker.get(pid, 0), kb)
+        node = max(node, sum(kb for _, _, kb, _ in procs))
+    if not worker:
+        return {}
+    return {"max_worker_rss_gb": round(max(worker.values()) / 2**20, 2), "max_node_rss_gb": round(node / 2**20, 1)}
+
+
 def tree_stats(tree):
     with open(os.path.join(tree, "throughput.json")) as f:
         run = json.load(f)
@@ -32,8 +65,10 @@ def tree_stats(tree):
             for line in f:
                 m = DONE.match(line.strip())
                 if m:
-                    ends.append(datetime.strptime(m.group(1), "%Y-%m-%d %H:%M:%S,%f").timestamp())
-                    elapsed.append(float(m.group(3)))
+                    t = datetime.strptime(m.group(1), "%Y-%m-%d %H:%M:%S,%f").timestamp()
+                    if run["start"] - 1 <= t <= run["end"] + 1:
+                        ends.append(t)
+                        elapsed.append(float(m.group(3)))
     out = {"tree": os.path.basename(os.path.normpath(tree)), "workers": run["n_par"], "threads": run["threads"],
            "listed": run["listed"], "done": len(ends), "wall_s": round(run["end"] - run["start"], 1)}
     if ends:
@@ -50,17 +85,7 @@ def tree_stats(tree):
         })
     rss = os.path.join(tree, "rss.log")
     if os.path.exists(rss):
-        per_pid, per_t = {}, {}
-        with open(rss) as f:
-            for line in f:
-                p = line.split()
-                if len(p) >= 3:
-                    t, pid, kb = p[0], p[1], int(p[2])
-                    per_pid[pid] = max(per_pid.get(pid, 0), kb)
-                    per_t[t] = per_t.get(t, 0) + kb
-        if per_pid:
-            out["max_worker_rss_gb"] = round(max(per_pid.values()) / 2**20, 2)
-            out["max_node_rss_gb"] = round(max(per_t.values()) / 2**20, 1)
+        out.update(rss_peaks(rss))
     return out
 
 

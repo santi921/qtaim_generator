@@ -601,6 +601,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         for f in folders_run
     ]
 
+    lost = 0
     try:
         # block until all done
         for folder, f in zip(folders_run, futures):
@@ -613,6 +614,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                 # a worker that died (e.g. killed for memory: WorkerLost) fails only its own folder;
                 # its .processing.lock stays until the stale-lock threshold
                 print(f"Error: {folder} failed in its worker: {type(e).__name__}: {e}")
+                lost += 1
     finally:
         # ensure we cleanup even on exceptions
         try:
@@ -627,6 +629,10 @@ def main(argv: Optional[List[str]] = None) -> int:
             parsl.clear()
         except Exception:
             pass
+    if lost:
+        print(f"{lost} of {len(futures)} folders failed in their worker")
+        return 1
+    return 0
 
 
 if __name__ == "__main__":

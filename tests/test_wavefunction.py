@@ -439,3 +439,22 @@ def test_molden_malformed_coefficient_lines(tmp_path):
     for reader in (read_orca_molden, molden_mo_headers):
         with pytest.raises(ValueError, match="before the first orbital header"):
             reader(early)
+
+
+@pytest.mark.parametrize("chunk", [997, 4093])
+def test_molden_reader_is_independent_of_the_chunk_size(tmp_path, monkeypatch, chunk):
+    """Chunk boundaries inside sections, orbital headers and coefficient blocks change nothing."""
+    from qtaim_gen.source.core import wavefunction
+    from qtaim_gen.source.core.charge_engine import FUKUI_WINDOW
+
+    paths = [_paths("no_cc_pv5z")[0], _paths("iodide_droplet")[0],
+             _molden_variant(tmp_path, "crlf.molden", lambda h, m: (h.replace("\n", "\r\n"), m.replace("\n", "\r\n"))),
+             _molden_variant(tmp_path, "noeol.molden", lambda h, m: (h, m.rstrip("\n")))]
+    modes = ({}, {"keep_virtuals": True}, {"orbital_window": FUKUI_WINDOW})
+    want = {(p, i): wavefunction.read_orca_molden(p, **kw) for p in paths for i, kw in enumerate(modes)}
+    heads = {p: wavefunction.molden_mo_headers(p) for p in paths}
+    monkeypatch.setattr(wavefunction, "_MOLDEN_CHUNK", chunk)
+    for p in paths:
+        for i, kw in enumerate(modes):
+            _equal_dicts(wavefunction.read_orca_molden(p, **kw), want[(p, i)])
+        assert wavefunction.molden_mo_headers(p) == heads[p]

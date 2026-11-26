@@ -266,6 +266,9 @@ def test_runner_local_modes(tmp_path, monkeypatch, capsys, type_runner, executor
         seen["tasks"].append((folder, kw["engine_subprocess"], kw["n_threads"]))
         return Lost() if folder == "a" else Ok()
 
+    from qtaim_gen.source.utils import parsl_configs
+
+    monkeypatch.setattr(parsl_configs.os, "sched_getaffinity", lambda pid: set(range(64)))
     monkeypatch.setattr(runner.parsl, "load", lambda config: seen.update(config=config))
     monkeypatch.setattr(runner.parsl, "clear", lambda *a, **k: None)
     monkeypatch.setattr(runner.parsl, "dfk", lambda: None)
@@ -276,7 +279,7 @@ def test_runner_local_modes(tmp_path, monkeypatch, capsys, type_runner, executor
     jobs.write_text("a\nb\n")
     args = ["--job_file", str(jobs), "--root_omol_results", str(tmp_path / "res"), "--root_omol_inputs",
             str(tmp_path), "--n_threads", "8", "--charge_engine"]
-    runner.main(args + (["--type_runner", type_runner] if type_runner else []))
+    assert runner.main(args + (["--type_runner", type_runner] if type_runner else [])) == 1
     ex = seen["config"].executors[0]
     assert type(ex).__name__ == executor
     if executor == "HighThroughputExecutor":
@@ -284,3 +287,46 @@ def test_runner_local_modes(tmp_path, monkeypatch, capsys, type_runner, executor
         assert "NUMBA_NUM_THREADS=1" in ex.provider.worker_init and "OPENBLAS_NUM_THREADS=1" in ex.provider.worker_init
     assert seen["tasks"] == [("a", subprocess_engines, 1), ("b", subprocess_engines, 1)]
     assert "a failed in its worker: RuntimeError: worker lost" in capsys.readouterr().out
+
+
+def test_engine_killed_in_process_leaves_no_stale_records(tmp_path, monkeypatch):
+    """Records of an earlier run are dropped before the engine recomputes, so a worker killed
+    mid-engine leaves nothing that vouches for half-written outputs; permanent skips stay."""
+    from qtaim_gen.source.core import cp_search, omol
+    from qtaim_gen.source.utils import provenance
+
+    folder = _folder(tmp_path)
+    for base in (folder, os.path.join(folder, "generator")):
+        os.makedirs(base, exist_ok=True)
+        with open(os.path.join(base, "timings.json"), "w") as f:
+            json.dump({"qtaim_engine": 5.0, "other_geometry": 0.2}, f)
+    provenance.record_routines(folder, ["qtaim"], "qtaim_engine", 1, spec={})
+    omol._record_skipped(folder, {"other_esp": {"reason": "kept", "by": "surface_engine"}}, _logger(folder))
+
+    class Killed(BaseException):
+        pass
+
+    def die(*a, **k):
+        raise Killed
+
+    monkeypatch.setattr(cp_search, "analyze", die)
+    with pytest.raises(Killed):
+        omol._run_qtaim_engine(folder, n_threads=1, logger=_logger(folder))
+    omol._release_wfx()
+    for base in (folder, os.path.join(folder, "generator")):
+        with open(os.path.join(base, "timings.json")) as f:
+            assert json.load(f) == {"other_geometry": 0.2}, base
+    prov = provenance.load(folder)
+    assert "qtaim" not in (prov.get("routines") or {})
+    assert "other_esp" in provenance.skipped(prov)
+
+
+def test_local_process_config_caps_workers_at_available_cpus(monkeypatch, capsys):
+    from qtaim_gen.source.utils import parsl_configs
+
+    monkeypatch.setattr(parsl_configs.os, "sched_getaffinity", lambda pid: set(range(4)))
+    ex = parsl_configs.local_process_config(n_workers=8, threads_per_worker=1).executors[0]
+    assert ex.max_workers_per_node == 4
+    assert "8 workers requested, 4 CPUs available; using 4" in capsys.readouterr().out
+    ex = parsl_configs.local_process_config(n_workers=4, threads_per_worker=2).executors[0]
+    assert ex.max_workers_per_node == 4 and "oversubscribed" in capsys.readouterr().out

@@ -61,16 +61,18 @@ Phase 0 results (2026-11-24, local, measured):
 
 - 0.1: `import qtaim_gen.source.core.esp` 1.11 s -> 0.23 s; the values are pinned (equal on this
   machine; test_esp checks them against `_hermite_bound_weights()` to 1e-12 relative).
-- 0.2: the reader reads the file once into memory (not a memory map, which turns a file
-  truncated during the read into SIGBUS in the runner's shared process), finds "[" and "=" with
-  `find` (coefficient lines contain neither), and parses only the coefficient blocks it keeps,
-  with the same `float()`/`int()` per token; a block whose lines do not all have two fields, or
-  that repeats an index, takes the line-by-line rule. Old (git HEAD) and new readers return
-  identical dicts on all 106 distinct local moldens (0.1-1954 MB), in every mode (occupied,
-  Fukui window, mwfn_h_compat, keep_virtuals below 200 MB), and identical `molden_mo_headers`.
-  Fukui window read: 1.76 -> 0.38 s (120 MB), 8.7 -> 1.6 s (649 MB), 26.7 -> 5.5 s (1954 MB),
-  4.6-5.5x. Converter (occupied orbitals): 1.04 -> 0.18 s (120 MB), 15.7 -> 2.8 s (1954 MB),
-  5.5-6.4x. A 2 GB molden costs 2 GB of memory while it is read.
+- 0.2: the reader streams the file in 16 MB chunks (`_molden_scan`): sections ("[") and orbital
+  headers ("=") are found with `find` (coefficient lines contain neither), and the byte span of
+  each orbital's coefficient lines is recorded; the kept orbitals' spans are then read and parsed
+  with the same `float()`/`int()` per token. A block whose lines do not all have two fields, or
+  that repeats an index, takes the line-by-line rule. Memory stays at one chunk plus the kept
+  coefficients (peak RSS 209 / 605 MB on a 120 / 1954 MB molden in window mode, the old streaming
+  reader 175 / 591 MB); no memory map, which would turn a file truncated during the read into
+  SIGBUS. Old (git HEAD) and new readers return identical dicts on all 106 distinct local moldens
+  (0.1-1954 MB), in every mode (occupied, Fukui window, mwfn_h_compat, keep_virtuals below 200 MB),
+  and identical `molden_mo_headers`, also at chunk sizes of 997 B to 64 MB on the fixtures and
+  edited variants. Fukui window read: 1.45 -> 0.41 s (120 MB), 7.5 -> 1.6 s (649 MB), 24.5 -> 5.4 s
+  (1954 MB). Converter (occupied orbitals): 0.79 -> 0.23 s (120 MB), 13.3 -> 2.8 s (1954 MB).
 - 0.3: `omol._load_wfx` (one entry per thread, keyed on the file's path, inode, size and mtime;
   the basis is built on first use, after the QTAIM engine's ECP-without-EDF check);
   `charge_engine.run(load=...)`; `_run_engines` releases it after the in-process engines. The
@@ -96,9 +98,18 @@ Implemented:
   16 x 1 thread ahead of 4 x 4 (206-227 s vs 224-252 s for 16 droplet jobs).
 - DDEC6 runs in a child of its own in every layout, also where the other engines run in process
   (its density grids are the likeliest step to be killed for memory, which would take the worker).
-- A folder whose worker dies fails alone: the runner logs it and goes on (Parsl fails the task
-  with WorkerLost and replaces the worker). Its `.processing.lock` stays until the 8 h stale-lock
-  threshold, as after a preemption.
+- A folder whose worker dies fails alone: the runner logs it, goes on, and exits 1 at the end
+  (Parsl fails the task with WorkerLost and replaces the worker). Its `.processing.lock` stays
+  until the 8 h stale-lock threshold, as after a preemption.
+- Before an engine recomputes, its timings and provenance entries are dropped
+  (`omol._drop_engine_records`; permanent skips stay) and written again on success, so a worker
+  killed mid-engine leaves nothing that vouches for half-written outputs (the child-process
+  layout had this cleanup in `_run_engines` only).
+- Workers are capped at the CPUs the process may run on (parsl's block affinity stops every
+  worker when there are more workers than CPUs); the runner prints a warning.
+- The 1-thread default also applies to `--type_runner hpc` and `flux`, where it sets workers per
+  node (for example 256 instead of 64 on a 256-thread ALCF node); batch scripts that want 4 threads
+  per job pass `--n_threads_per_job 4`.
 - Between jobs: the per-folder logger is torn down by `workflow.teardown_logger` (already), the
   shared wfx is released by `_run_engines` (phase 0). Workers are not recycled: Parsl's
   HighThroughputExecutor has no per-worker task limit, so memory growth is measured first.

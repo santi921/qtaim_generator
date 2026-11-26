@@ -93,66 +93,105 @@ def orca5_effective_charges(orca_out):
 
 _NONBLANK = re.compile(rb"\S")
 _BLANK_PREFIX = re.compile(rb"[ \t]*")
+# bytes read per step: the scan holds one chunk, never the whole file
+_MOLDEN_CHUNK = 1 << 24
 
 
-def _molden_sections(buf):
-    """(name, stripped header line, start, end) of each section of a molden file, in file
-    order, plus (None, "", 0, start of the first section) for the text before it. A section
-    starts at a line whose first non-blank character is "[" and runs to the next such line."""
-    marks, pos = [], 0
+def _next_section(buf, i, n):
+    """Index of the first line in buf[i:n] whose first non-blank character is "[", or n."""
     while True:
-        q = buf.find(b"[", pos)
+        q = buf.find(b"[", i, n)
         if q < 0:
-            break
+            return n
         a = buf.rfind(b"\n", 0, q) + 1
-        b = buf.find(b"\n", q)
-        b = len(buf) if b < 0 else b
         if _BLANK_PREFIX.fullmatch(buf, a, q):
-            marks.append((a, b))
-        pos = b
-    out = [(None, "", 0, marks[0][0] if marks else len(buf))]
-    for k, (a, b) in enumerate(marks):
-        s = buf[a:b].decode(errors="replace").strip()
-        out.append((s.split("]")[0][1:].strip().lower(), s, b, marks[k + 1][0] if k + 1 < len(marks) else len(buf)))
-    return out
+            return a
+        i = buf.find(b"\n", q, n)
+        if i < 0:
+            return n
 
 
-def _molden_mos(buf, start, end):
-    """The orbitals of one [MO] section: per orbital its header fields (lowercased key ->
-    stripped value) and the (start, end) span of its coefficient lines. An orbital is a
-    run of "key=value" lines; the lines up to the next run are its coefficients. Header
-    lines are found from their "=" (coefficient lines have none), so the coefficient text
-    is only searched for that one byte."""
-    mos, spans, last, pos = [], [], None, start
+def _molden_scan(fh):
+    """One pass over a molden file in chunks of _MOLDEN_CHUNK bytes. Returns its sections in
+    file order, (None, "") first for the text before the first one, as dicts: name, the
+    stripped header line, and either "text" (the section's bytes, for every section but
+    [MO]) or "mos": per orbital its header fields (lowercased key -> stripped value), the
+    file span of its coefficient lines and whether that span has any. A section starts at a
+    line whose first non-blank character is "[". An orbital is a run of "key=value" lines;
+    the lines up to the next run are its coefficients. Coefficient lines contain neither "["
+    nor "=", so only those bytes are searched for in them."""
+    cur = {"name": None, "head": "", "text": []}
+    sections = [cur]
+    pos, carry = 0, b""
+    last = None  # file offset where the current orbital's coefficient lines start
+    body = False  # non-blank text since the last header line (or the [MO] line)
+
+    def close_mo(end):
+        if cur["mos"]:
+            cur["mos"][-1].update(span=(last, end), has_body=body)
+
     while True:
-        q = buf.find(b"=", pos, end)
-        if q < 0:
+        chunk = fh.read(_MOLDEN_CHUNK)
+        buf = carry + chunk
+        if chunk:
+            cut = buf.rfind(b"\n") + 1
+            if cut == 0:
+                carry = buf
+                continue
+            buf, carry = buf[:cut], buf[cut:]
+        else:
+            carry = b""
+        n, i = len(buf), 0
+        while i < n:
+            sec = _next_section(buf, i, n)
+            if "mos" in cur:
+                j = i
+                while True:
+                    q = buf.find(b"=", j, sec)
+                    if q < 0:
+                        break
+                    a = buf.rfind(b"\n", 0, q) + 1
+                    e = buf.find(b"\n", q, sec)
+                    e = sec if e < 0 else e
+                    body = body or bool(_NONBLANK.search(buf, j, a))
+                    if not cur["mos"]:
+                        if body:
+                            raise ValueError("molden [MO] section: coefficient lines before the first orbital header")
+                        cur["mos"].append({"fields": {}})
+                    elif body:
+                        close_mo(pos + a)
+                        cur["mos"].append({"fields": {}})
+                    k, v = buf[a:e].decode(errors="replace").split("=", 1)
+                    cur["mos"][-1]["fields"][k.strip().lower()] = v.strip()
+                    last, body, j = pos + e, False, e
+                body = body or bool(_NONBLANK.search(buf, j, sec))
+            else:
+                cur["text"].append(buf[i:sec])
+            if sec == n:
+                break
+            e = buf.find(b"\n", sec)
+            e = n if e < 0 else e
+            if "mos" in cur:
+                close_mo(pos + sec)
+            head = buf[sec:e].decode(errors="replace").strip()
+            name = head.split("]")[0][1:].strip().lower()
+            cur = {"name": name, "head": head, **({"mos": []} if name == "mo" else {"text": []})}
+            sections.append(cur)
+            last, body, i = None, False, e
+        pos += n
+        if not chunk:
             break
-        # start is the newline that ends the section's [MO] line
-        a = buf.rfind(b"\n", start, q) + 1
-        b = buf.find(b"\n", q, end)
-        b = end if b < 0 else b
-        if last is None:
-            if _NONBLANK.search(buf, start, a):
-                raise ValueError("molden [MO] section: coefficient lines before the first orbital header")
-            mos.append({})
-        elif _NONBLANK.search(buf, last, a):
-            spans.append((last, a))
-            mos.append({})
-        k, v = buf[a:b].decode(errors="replace").split("=", 1)
-        mos[-1][k.strip().lower()] = v.strip()
-        last = pos = b
-    if mos:
-        spans.append((last, end))
-    return mos, spans
+    if "mos" in cur:
+        close_mo(pos)
+    return sections
 
 
 def molden_mo_headers(path):
     """(energy, occupation) of every [MO] entry of a molden file, in file order."""
     with open(path, "rb") as fh:
-        buf = fh.read()
-    mos = [mo for name, _, a, b in _molden_sections(buf) if name == "mo" for mo in _molden_mos(buf, a, b)[0]]
-    return [(float(m["ene"]), float(m["occup"])) for m in mos]
+        sections = _molden_scan(fh)
+    return [(float(m["fields"]["ene"]), float(m["fields"]["occup"]))
+            for sec in sections if "mos" in sec for m in sec["mos"]]
 
 
 def frontier_window(headers, window):
@@ -172,8 +211,10 @@ def frontier_window(headers, window):
 
 
 def read_orca_molden(path, zeff_override=None, mwfn_h_compat=False, keep_virtuals=False, orbital_window=None):
-    """The read_wfx dict for an ORCA .molden file, read into memory once (a memory map would
-    turn a file truncated during the read into SIGBUS in the runner's shared process).
+    """The read_wfx dict for an ORCA .molden file. One streaming pass finds the sections and
+    orbital headers (_molden_scan); the coefficient lines of the kept orbitals are then read
+    from their spans, so memory stays at one chunk plus one orbital (a memory map would turn a
+    file truncated during the read into SIGBUS in the runner's process).
 
     zeff_override: {0-based atom: effective charge}, for ORCA 5 ECP jobs.
     mwfn_h_compat: flip h(+3,-3,+4,-4) on alpha orbitals only, as Multiwfn does.
@@ -187,31 +228,33 @@ def read_orca_molden(path, zeff_override=None, mwfn_h_compat=False, keep_virtual
     is_orca, unit_au = False, True
     cur_atom = shell = None
     with open(path, "rb") as fh:
-        buf = fh.read()
-        sections = _molden_sections(buf)
-        # the window is taken over the orbitals of every [MO] section, so their headers come first
-        mo_sections = {start: _molden_mos(buf, start, end) for name, _, start, end in sections if name == "mo"}
+        sections = _molden_scan(fh)
+        # the window is taken over the orbitals of every [MO] section
         if orbital_window is not None:
-            keep_idx = frontier_window([(float(m["ene"]), float(m["occup"]))
-                                        for sec_mos, _ in mo_sections.values() for m in sec_mos], orbital_window)
-        for section, head, start, end in sections:
+            keep_idx = frontier_window([(float(m["fields"]["ene"]), float(m["fields"]["occup"]))
+                                        for sec in sections if "mos" in sec for m in sec["mos"]], orbital_window)
+        for sec in sections:
+            section, head = sec["name"], sec["head"]
             if section == "atoms":
                 unit_au = "angs" not in head.lower()
             elif section == "mo":
                 nsph = sum(2 * sh[1] + 1 for sh in shells)
-                sec_mos, spans = mo_sections[start]
-                for i, (mo, (a, b)) in enumerate(zip(sec_mos, spans)):
-                    if not _NONBLANK.search(buf, a, b):
+                for i, orb in enumerate(sec["mos"]):
+                    mo = orb["fields"]
+                    mos.append(mo)
+                    if not orb["has_body"]:
                         continue
                     if orbital_window is not None:
-                        stored = len(mos) + i in keep_idx
+                        stored = len(mos) - 1 in keep_idx
                     else:
                         stored = keep_virtuals or float(mo["occup"]) != 0
                     if not stored:
                         continue
                     # "index value" lines (index 1-based, D exponent read as E), parsed with
                     # float() and int() per token as a line-by-line reader would
-                    block = buf[a:b]
+                    a, b = orb["span"]
+                    fh.seek(a)
+                    block = fh.read(b - a)
                     if b"D" in block:
                         block = block.replace(b"D", b"E")
                     coef = mo["coef"] = np.zeros(nsph)
@@ -226,9 +269,8 @@ def read_orca_molden(path, zeff_override=None, mwfn_h_compat=False, keep_virtual
                         if line.strip():
                             i, v = line.split()[:2]
                             coef[int(i) - 1] = float(v)
-                mos += sec_mos
                 continue
-            for line in buf[start:end].decode(errors="replace").split("\n"):
+            for line in b"".join(sec["text"]).decode(errors="replace").split("\n"):
                 s = line.strip()
                 if section in ("molden format", "title") or section is None:
                     is_orca = is_orca or "orca" in s.lower()
