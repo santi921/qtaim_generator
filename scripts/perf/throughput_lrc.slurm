@@ -18,12 +18,14 @@
 #SBATCH --output=logs/%x_%A_%a.out
 #SBATCH --error=logs/%x_%A_%a.err
 
-set -eo pipefail
 # never on a blau recharge account, whatever the header or command line says
 case "${SLURM_JOB_ACCOUNT:-}" in *blau*) echo "refusing to run on account $SLURM_JOB_ACCOUNT"; exit 1 ;; esac
+# ~/.bashrc can end on a command that returns non-zero, so set -e comes after the env setup
 source ~/.bashrc
 module load gcc
 conda activate ${CONDA_ENV:-qtaim_engine}
+set -eo pipefail
+python -c "import qtaim_gen, parsl; print('python', __import__('sys').executable, 'parsl', parsl.__version__)"
 CODE=${CODE:?CODE is required: the branch checkout to import}
 export PYTHONPATH=$CODE PYTHONUNBUFFERED=1 PYTHONNOUSERSITE=1 OMP_STACKSIZE=4G KMP_STACKSIZE=200M
 export OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1
