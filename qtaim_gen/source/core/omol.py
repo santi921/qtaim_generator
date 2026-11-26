@@ -4,6 +4,7 @@ from typing import Optional, Dict, Any, List
 import signal
 import subprocess
 import sys
+import threading
 
 import zipfile
 
@@ -1807,6 +1808,21 @@ def _update_timing(folder: str, key: str, seconds: float, logger: logging.Logger
     atomic_json_write(timings_path, timings)
 
 
+def _drop_engine_records(folder: str, timing_keys, routines) -> None:
+    """Remove engine timings (root and generator/ timings.json) and the routines' provenance
+    entries before an engine rewrites its outputs. The engine writes them again when it
+    succeeds; if its process dies first (killed for memory in a worker that runs the engines
+    in process), records of an earlier run would otherwise vouch for half-written outputs.
+    Permanent skips are kept."""
+    for timings_path in (os.path.join(folder, "timings.json"), os.path.join(folder, "generator", "timings.json")):
+        t = _safe_json_load(timings_path)
+        if isinstance(t, dict) and any(k in t for k in timing_keys):
+            for k in timing_keys:
+                t.pop(k, None)
+            atomic_json_write(timings_path, t)
+    provenance.drop(folder, set(routines) - provenance.skipped(provenance.load(folder)))
+
+
 def _run_charge_engine(
     folder: str,
     n_threads: int,
@@ -1831,6 +1847,7 @@ def _run_charge_engine(
     import numba
     from qtaim_gen.source.core import charge_engine
 
+    _drop_engine_records(folder, ["charge_engine"], _engine_routines(full_set, spin_tf))
     # the Fukui functions need the unoccupied orbitals, which only the molden of the convert
     # step has (clean_jobs removes it); without one they are recorded as skipped (no_molden)
     moldens = sorted(f for f in os.listdir(folder) if f.endswith(".molden.input"))
@@ -1844,7 +1861,8 @@ def _run_charge_engine(
     numba.set_num_threads(max(1, min(n_threads, numba.config.NUMBA_NUM_THREADS)))
     start = time.time()
     try:
-        out = charge_engine.run(wf_path, full_set=full_set, molden_path=molden_path)
+        out = charge_engine.run(wf_path, full_set=full_set, molden_path=molden_path, load=_load_wfx,
+                                load_shared=_wfx_cached(wf_path))
     except Exception as e:
         logger.error("charge_engine failed on %s: %s", wf_path, e)
         return False
@@ -2096,19 +2114,20 @@ def _run_qtaim_engine(folder: str, n_threads: int, logger: logging.Logger, resta
 
     import numba
     from qtaim_gen.source.core import cp_search
-    from qtaim_gen.source.core.charge_engine import ecp_atoms_without_edf, prepare_basis, read_wfx
+    from qtaim_gen.source.core.charge_engine import ecp_atoms_without_edf
 
+    _drop_engine_records(folder, ["qtaim_engine"], ["qtaim"])
     numba.set_num_threads(max(1, min(n_threads, numba.config.NUMBA_NUM_THREADS)))
     settings = {"seeds": "superset", "paths": "engine", "boys_mode": "exact"}
     start = time.time()
     try:
-        wfx = read_wfx(wf_path)
+        wfx, _ = _load_wfx(wf_path, basis=False)
         missing = ecp_atoms_without_edf(wfx)
         if missing:
             _record_skipped(folder, {"qtaim": {"reason": "ecp_without_edf", "by": "qtaim_engine",
                                                "atoms": [int(a) + 1 for a in missing]}}, logger)
             return True
-        res = cp_search.analyze(wfx, prepare_basis(wfx), **settings)
+        res = cp_search.analyze(wfx, _load_wfx(wf_path)[1], **settings)
         cp_search.write_cpprop(os.path.join(folder, "CPprop.txt"), res, wfx)
     except Exception as e:
         logger.error("qtaim_engine failed on %s: %s", wf_path, e)
@@ -2167,11 +2186,12 @@ def _run_surface_engine(
     import numba
     from qtaim_gen.source.core import surface_engine
 
+    _drop_engine_records(folder, ["surface_engine"] + (["other_esp"] if "other_esp" in todo else []), todo)
     numba.set_num_threads(max(1, min(n_threads, numba.config.NUMBA_NUM_THREADS)))
     start = time.time()
     results, esp_s, esp_error = {}, None, None
     try:
-        wf = surface_engine.load_wavefunction(wf_path)
+        wf = _load_wfx(wf_path)
         if "other_geometry" in todo:
             results["other_geometry"] = (surface_engine.planarity(wf[0]["coords"], wf[0]["atnums"]), {})
         if "other_alie" in todo:
@@ -2243,23 +2263,29 @@ def _run_engines(
     engine_subprocess: bool = True,
     ddec6: bool = False,
 ) -> None:
-    """The QTAIM engine, then the charge and surface engines, then DDEC6. By default in child
-    processes (core/engine_worker.py; DDEC6 in a second one): parsl's local runner runs folders as threads of
-    one process, where concurrent engine runs serialized on the GIL and shared the
-    process-wide BLAS limits. The child gets single-threaded BLAS and at most
-    n_threads numba threads (fewer if NUMBA_NUM_THREADS is lower), and imports the
-    same qtaim_gen as this process."""
+    """The QTAIM engine, then the charge and surface engines, then DDEC6. With
+    engine_subprocess (the local_threads runner, whose folders are threads of one process
+    where concurrent engine runs serialized on the GIL and shared the process-wide BLAS
+    limits) they run in a child process (core/engine_worker.py); otherwise in this worker
+    process. DDEC6 always gets a child of its own. A child gets single-threaded BLAS and at
+    most n_threads numba threads (fewer if NUMBA_NUM_THREADS is lower), and imports the same
+    qtaim_gen as this process."""
     if not (qtaim_engine or charge_engine or ddec6):
         return
     if not engine_subprocess:
-        if qtaim_engine:
-            _run_qtaim_engine(folder, n_threads=n_threads, logger=logger, restart=restart)
-        if charge_engine:
-            _run_charge_engine(folder, n_threads=n_threads, logger=logger, restart=restart, full_set=full_set)
-            _run_surface_engine(folder, n_threads=n_threads, logger=logger, restart=restart, full_set=full_set)
-        if ddec6:
-            _run_ddec6(folder, n_threads=n_threads, logger=logger, restart=restart)
-        return
+        try:
+            if qtaim_engine:
+                _run_qtaim_engine(folder, n_threads=n_threads, logger=logger, restart=restart)
+            if charge_engine:
+                _run_charge_engine(folder, n_threads=n_threads, logger=logger, restart=restart, full_set=full_set)
+                _run_surface_engine(folder, n_threads=n_threads, logger=logger, restart=restart, full_set=full_set)
+        finally:
+            _release_wfx()
+        if not ddec6:
+            return
+        # DDEC6's density grids are the likeliest step to be killed for memory, which in this
+        # process would take the worker and its other results down with it
+        qtaim_engine = charge_engine = False
 
     import qtaim_gen
     from qtaim_gen.source.core.engine_worker import STEP_FAILED
@@ -2575,6 +2601,42 @@ def _wavefunction_path(folder: str) -> Optional[str]:
             except OSError:
                 continue
     return None
+
+
+_loaded_wfx = threading.local()
+
+
+def _load_wfx(wf_path: str, basis: bool = True):
+    """(wfx, basis) of a wfx file, parsed once per file version and thread: the QTAIM,
+    charge and surface engines of a folder share them. One entry per thread (the local
+    runner can run folders as threads of one process), keyed on the file's identity, so a
+    rewritten wfx is parsed again; _run_engines releases it. The engines do not modify
+    either dict. basis=False returns (wfx, None) without building the basis."""
+    from qtaim_gen.source.core.charge_engine import prepare_basis, read_wfx
+
+    key = _wfx_key(wf_path)
+    if getattr(_loaded_wfx, "key", None) != key:
+        _release_wfx()
+        _loaded_wfx.value = (read_wfx(wf_path), None)
+        _loaded_wfx.key = key
+    if basis and _loaded_wfx.value[1] is None:
+        _loaded_wfx.value = (_loaded_wfx.value[0], prepare_basis(_loaded_wfx.value[0]))
+    return _loaded_wfx.value
+
+
+def _wfx_key(wf_path: str) -> tuple:
+    st = os.stat(wf_path)
+    return (os.path.realpath(wf_path), st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns)
+
+
+def _wfx_cached(wf_path: str) -> bool:
+    """True when this thread holds the current parse of wf_path (an earlier engine read it)."""
+    return getattr(_loaded_wfx, "key", None) == _wfx_key(wf_path)
+
+
+def _release_wfx() -> None:
+    """Drop this thread's shared wfx (a large job's coefficients are held twice)."""
+    _loaded_wfx.key = _loaded_wfx.value = None
 
 
 def _wavefunction_present(folder: str) -> bool:

@@ -7,7 +7,7 @@
 #   sbatch -J engine --export=ALL,CODE=$CODE,LIST=$WORK/sample.txt,TREE=engine_l0,ENGINE=1 --array=0-9 actinide_test.slurm
 #   sbatch -J qeng   --export=ALL,CODE=$CODE,LIST=$WORK/sample.txt,TREE=qengine_l0,ENGINE=1,QTAIM_ENGINE=1 --array=0-9 actinide_test.slurm
 # Optional: FULL_SET (default 0), N (lines per task, default 50), N_PAR (concurrent jobs per
-# node, default 16), THREADS (per job, default 8), SRC (input root the list is under),
+# node, default 128), THREADS (per job, default 1), SRC (input root the list is under),
 # MULTIWFN and ORCA_2MKL (tool paths, defaults below), NATIVE_CONVERT (the runner's default is
 # fixed, core/wavefunction.py; multiwfn_h for parity checks; off runs Multiwfn's convert step,
 # needed to continue a tree Multiwfn converted, e.g. prod_l1), FLAGS (extra runner flags, e.g.
@@ -16,7 +16,7 @@
 #SBATCH -C cpu
 #SBATCH -q regular
 #SBATCH -N 1
-#SBATCH --cpus-per-task=128
+#SBATCH --cpus-per-task=256
 #SBATCH --time=04:00:00
 #SBATCH --output=logs/%x_%A_%a.out
 #SBATCH --error=logs/%x_%A_%a.err
@@ -34,7 +34,8 @@ export PYTHONUNBUFFERED=1
 export PYTHONNOUSERSITE=1
 export OMP_STACKSIZE=4G
 export KMP_STACKSIZE=200M
-# the engines run 16 jobs as threads of one process: one BLAS thread each (Multiwfn does not use OpenBLAS)
+# one BLAS thread per job (Multiwfn does not use OpenBLAS); --type_runner local runs N_PAR worker
+# processes, each pinned to THREADS cores (parsl_configs.local_process_config)
 export OPENBLAS_NUM_THREADS=1
 ulimit -s unlimited
 
@@ -43,8 +44,8 @@ MULTIWFN=${MULTIWFN:-/pscratch/sd/s/santiago/multiwfn/Multiwfn_3.8_dev_bin_Linux
 SRC=${SRC:-/pscratch/sd/s/santiago}
 WORK=${WORK:-/pscratch/sd/s/santiago/actinide_test}
 N=${N:-50}
-N_PAR=${N_PAR:-16}
-THREADS=${THREADS:-8}
+N_PAR=${N_PAR:-128}
+THREADS=${THREADS:-1}
 TREE=${TREE:?TREE is required}
 LIST=${LIST:?LIST is required}
 ID=${SLURM_ARRAY_TASK_ID}

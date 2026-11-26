@@ -10,7 +10,7 @@ from typing import Optional, List
 
 
 from qtaim_gen.source.core.workflow import run_folder_task_alcf
-from qtaim_gen.source.utils.parsl_configs import alcf_config, base_config, tuo_flux_config
+from qtaim_gen.source.utils.parsl_configs import alcf_config, base_config, local_process_config, tuo_flux_config
 
 from qtaim_gen.source.utils.io import get_folders_from_file
 
@@ -109,14 +109,15 @@ def main(argv: Optional[List[str]] = None) -> int:
         "--n_threads",
         type=int,
         default=4,
-        help="Only used in local mode: total number of threads to use in threadpool",
+        help="local and local_threads: cores to use on this node (workers = n_threads // n_threads_per_job)",
     )
 
     parser.add_argument(
         "--n_threads_per_job",
         type=int,
-        default=4,
-        help="Number of threads to allocate per job",
+        default=1,
+        help=("Threads per job (numba threads for the engines, nthreads for Multiwfn). One thread per job "
+              "and more jobs per node gives the most jobs per core-hour (docs/engine_roadmap/perf_plan.md)"),
     )
 
     parser.add_argument(
@@ -154,7 +155,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         "--type_runner",
         type=str,
         default="local",
-        help="local or hpc/qsub submission via parsl (HPC)",
+        choices=["local", "local_threads", "hpc", "flux"],
+        help=("local: worker processes on this node, engines in the worker (parsl_configs.local_process_config); "
+              "local_threads: the folders as threads of one process, engines in a child process per folder; "
+              "hpc / flux: batch submission via parsl"),
     )
 
     parser.add_argument(
@@ -282,10 +286,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         "--engine_in_process",
         action="store_true",
         help=(
-            "local mode: run the --qtaim_engine / --charge_engine steps in the worker itself instead of "
-            "one child process per folder (core/engine_worker.py). Local mode runs the folders as threads "
-            "of one process, where in-process engine runs share the GIL; hpc and flux workers are "
-            "processes already and always run the engines in-process"
+            "local_threads mode: run the --qtaim_engine / --charge_engine steps in the worker thread itself "
+            "instead of one child process per folder (core/engine_worker.py); in-process engine runs then "
+            "share the GIL. local, hpc and flux workers are processes and always run the engines in-process"
         ),
     )
 
@@ -445,17 +448,20 @@ def main(argv: Optional[List[str]] = None) -> int:
     # parsl args
     type_runner: str = str(getattr(args, "type_runner", "local"))
     # a child process per folder only where folders are threads of one process
-    engine_subprocess = type_runner == "local" and not bool(getattr(args, "engine_in_process", False))
+    engine_subprocess = type_runner == "local_threads" and not bool(getattr(args, "engine_in_process", False))
     queue: str = str(getattr(args, "queue", "debug"))
     timeout_hr: float = float(getattr(args, "timeout_hr", 0.5))
     safety_factor: float = float(getattr(args, "safety_factor", 1.0))
     n_nodes: int = int(getattr(args, "n_nodes", 1))
     # convert timeout_hr to str
 
-    assert type_runner in ["local", "hpc", "flux"], "type_runner must be 'local' or 'hpc'"
+    assert type_runner in ["local", "local_threads", "hpc", "flux"], type_runner
     if type_runner == "local":
+        parsl_config = local_process_config(n_workers=max(1, n_threads // n_threads_per_job),
+                                            threads_per_worker=n_threads_per_job)
+    elif type_runner == "local_threads":
         parsl_config = base_config(n_workers=max(1, int(n_threads / n_threads_per_job)))
-    
+
     elif type_runner == "flux": 
         timeout_str: str = (
             f"{int(timeout_hr)}:{int((timeout_hr - int(timeout_hr)) * 60):02d}:00"
@@ -481,10 +487,10 @@ def main(argv: Optional[List[str]] = None) -> int:
             monitoring=False,
         )
 
-    # --engine_in_process in local mode runs the engines as threads of this process: load
-    # their libraries and pin BLAS to one thread here, before parsl starts any thread
+    # --engine_in_process in local_threads mode runs the engines as threads of this process:
+    # load their libraries and pin BLAS to one thread here, before parsl starts any thread
     # (core/charge_engine.py)
-    if type_runner == "local" and not engine_subprocess and (charge_engine or qtaim_engine or ddec6):
+    if type_runner == "local_threads" and not engine_subprocess and (charge_engine or qtaim_engine or ddec6):
         import scipy.stats  # noqa: F401  (cp_search.sphere_seeds imports it lazily)
         from qtaim_gen.source.core import cp_search, surface_engine  # noqa: F401
         from qtaim_gen.source.core.charge_engine import pin_blas_single_thread
@@ -499,7 +505,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     ####################
 
     # set env vars - this is only for the main process; workers set their own envs
-    if type_runner == "local":
+    if type_runner in ("local", "local_threads"):
         os.environ["OMP_NUM_THREADS"] = "{}".format(n_threads_per_job)
         # threads_per = n_threads_per_job
 
@@ -595,13 +601,20 @@ def main(argv: Optional[List[str]] = None) -> int:
         for f in folders_run
     ]
 
+    lost = 0
     try:
         # block until all done
-        for f in futures:
+        for folder, f in zip(folders_run, futures):
             if should_stop:
                 print("Graceful shutdown requested. Exiting before all jobs complete.")
                 break
-            f.result()
+            try:
+                f.result()
+            except Exception as e:
+                # a worker that died (e.g. killed for memory: WorkerLost) fails only its own folder;
+                # its .processing.lock stays until the stale-lock threshold
+                print(f"Error: {folder} failed in its worker: {type(e).__name__}: {e}")
+                lost += 1
     finally:
         # ensure we cleanup even on exceptions
         try:
@@ -616,6 +629,10 @@ def main(argv: Optional[List[str]] = None) -> int:
             parsl.clear()
         except Exception:
             pass
+    if lost:
+        print(f"{lost} of {len(futures)} folders failed in their worker")
+        return 1
+    return 0
 
 
 if __name__ == "__main__":

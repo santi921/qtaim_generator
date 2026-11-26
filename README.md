@@ -77,10 +77,10 @@ Key flags:
 
 | Flag | Description |
 |------|-------------|
-| `--type_runner` | `local`, `hpc` (PBS/ALCF), or `flux` |
+| `--type_runner` | `local` (worker processes on this node), `local_threads` (threads of one process, engines in a child per folder), `hpc` (PBS/ALCF), or `flux` |
 | `--n_nodes` | Number of compute nodes to request |
 | `--n_threads` | Total worker threads across all nodes |
-| `--n_threads_per_job` | Threads per ORCA job (typically 1 for QTAIM-only) |
+| `--n_threads_per_job` | Threads per job (default 1: one thread per job, more jobs per node) |
 | `--restart` | Resume a previously interrupted run |
 | `--num_folders` | Folders to process per batch (tune to walltime) |
 | `--job_file` | Flat list of absolute job folder paths, one per line |
