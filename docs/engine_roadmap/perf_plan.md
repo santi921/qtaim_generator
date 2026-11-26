@@ -132,7 +132,7 @@ percentile of completion times.
 
 LRC lr7 node (2026-11-26, array 28217305, branch at 6632da2): the first 168 jobs of the tm_react
 slice (engine_test/jobs.txt), full_set 0, both engines, one whole node per mix. All 168 folders
-completed in every mix (validation and cross-mix identity not checked on LRC).
+completed in every mix; all 168 validated in the 56 x 1 tree (cross-mix identity not checked on LRC).
 
 | mix (workers x threads) | wall s | jobs per node-hour (run / steady) | median s per job | core-s per job (median / mean) | peak worker / node RSS GB |
 |---|---|---|---|---|---|
