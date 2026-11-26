@@ -19,6 +19,8 @@ import numba
 import numpy as np
 from numba import njit
 
+from qtaim_gen.source.core.esp_contract import contract3, contract4, contract5, contract6
+
 BOYS_SERIES_MAX_X = 30.0  # series below, erf + upward recursion above
 BOYS_TABLE_STEP = 0.05
 BOYS_TABLE_TERMS = 8  # Taylor terms; error ~ (step/2)^8 / 8! ~ 4e-17 relative
@@ -374,6 +376,232 @@ def _esp_e_points(pts, p_exp, p_ctr, pref, L, off, D, mode, table, inv_fact, ntr
     return out
 
 
+# ------------------------------------------------- blocked kernel (boys_mode="exact")
+
+# T at and above which F_N(T) equals its asymptotic form (2N-1)!! / (2T)^N sqrt(pi / T) / 2 to
+# 3e-17 relative: the dropped part is the regularized upper incomplete gamma Q(N + 1/2, T),
+# so the smallest T on a 0.5 grid with Q <= 3e-17. Pinned; tests/test_esp.py recomputes them.
+FAR_T = np.array([36.0, 40.5, 43.5, 46.5, 49.5, 52.0, 54.5, 57.0, 59.5, 62.0, 64.0])
+NEAR_TMAX = 72.0  # the near-field table covers 0 <= T < NEAR_TMAX > FAR_T.max()
+NEAR_MTOP = LMAX_PAIR + BOYS_TABLE_TERMS + 2
+_HALF_SQRT_PI = 0.5 * math.sqrt(math.pi)
+_RDEN = np.array([1.0 / (2 * m - 1) if m > 0 else 0.0 for m in range(LMAX_PAIR + 2)])
+
+
+@njit(cache=True)
+def _boys_series(mmax, x, out):
+    """F_0..F_mmax(x) by the series for F_mmax (stopped at 1e-18 relative) and downward
+    recursion; the near-field table is built from it."""
+    ex = math.exp(-x)
+    term = 1.0 / (2 * mmax + 1)
+    s = term
+    k = 0
+    while term > 1e-18 * s:
+        k += 1
+        term *= 2.0 * x / (2 * mmax + 2 * k + 1)
+        s += term
+    out[mmax] = ex * s
+    for m in range(mmax, 0, -1):
+        out[m - 1] = (2.0 * x * out[m] + ex) / (2 * m - 1)
+
+
+def _near_tables():
+    """F_m(i BOYS_TABLE_STEP), m <= NEAR_MTOP, as rows per m (contiguous in i), and exp(-i step)."""
+    n = int(round(NEAR_TMAX / BOYS_TABLE_STEP)) + 2
+    tab = np.empty((n, NEAR_MTOP + 1))
+    for i in range(n):
+        _boys_series(NEAR_MTOP, i * BOYS_TABLE_STEP, tab[i])
+    return np.ascontiguousarray(tab.T), np.exp(-np.arange(n) * BOYS_TABLE_STEP)
+
+
+NEAR_TABLE, NEAR_EXP = _near_tables()
+
+
+@njit(nogil=True, cache=True, error_model="numpy")
+def _esp_e_blocked(pts, p_exp, p_ctr, pref, L, off, D, tabt, etab, inv_fact, rden, far_t, ntri,
+                   op_dir, op_s1, op_s2, op_c, B):
+    """As _esp_e_points with the exact Boys function, organized for SIMD: group pairs outside,
+    blocks of B points inside (pts spatially sorted so a block is compact). Per point, F_m is
+    the asymptotic form where T >= far_t[N] and otherwise an 8-term Taylor expansion of F_N
+    about the nearest table point with exp(-T) from the table, then downward recursion; the
+    contraction is written out for Hermite orders up to 6. Every point's sum runs over the
+    pairs in the same order whatever block it is in, so the result does not depend on the
+    blocking or the thread count."""
+    n = pts.shape[0]
+    out = np.zeros(n)
+    X = np.empty(B)
+    Y = np.empty(B)
+    Z = np.empty(B)
+    T = np.empty(B)
+    h = np.empty(B)
+    acc = np.empty(B)
+    near = np.empty(B, dtype=np.int64)
+    cx = np.empty(B)
+    cy = np.empty(B)
+    cz = np.empty(B)
+    F = np.zeros((LMAX_PAIR + 1, B))
+    R = np.zeros((LMAX_PAIR + 1, ntri[LMAX_PAIR], B))
+    i7, i6, i5, i4 = inv_fact[7], inv_fact[6], inv_fact[5], inv_fact[4]
+    i3, i2 = inv_fact[3], inv_fact[2]
+    inv_step = 1.0 / BOYS_TABLE_STEP
+    for s0 in range(0, n, B):
+        nb = min(B, n - s0)
+        bcx = 0.0
+        bcy = 0.0
+        bcz = 0.0
+        for i in range(nb):
+            cx[i] = pts[s0 + i, 0]
+            cy[i] = pts[s0 + i, 1]
+            cz[i] = pts[s0 + i, 2]
+            acc[i] = 0.0
+            bcx += cx[i]
+            bcy += cy[i]
+            bcz += cz[i]
+        bcx /= nb
+        bcy /= nb
+        bcz /= nb
+        brad = 0.0
+        for i in range(nb):
+            brad = max(brad, (cx[i] - bcx) ** 2 + (cy[i] - bcy) ** 2 + (cz[i] - bcz) ** 2)
+        # a bounding sphere of the block, padded: it only decides which branches are run,
+        # each point still takes the branch its own T selects
+        brad = math.sqrt(brad) * (1.0 + 1e-12) + 1e-12
+        for k in range(p_exp.shape[0]):
+            p = p_exp[k]
+            N = L[k]
+            tf = far_t[N]
+            px = p_ctr[k, 0]
+            py = p_ctr[k, 1]
+            pz = p_ctr[k, 2]
+            dc = math.sqrt((px - bcx) ** 2 + (py - bcy) ** 2 + (pz - bcz) ** 2)
+            lo = max(dc - brad, 0.0)
+            hi = dc + brad
+            all_far = p * lo * lo >= tf
+            all_near = p * hi * hi < tf
+            for i in range(nb):
+                x = px - cx[i]
+                y = py - cy[i]
+                z = pz - cz[i]
+                X[i] = x
+                Y[i] = y
+                Z[i] = z
+                T[i] = p * (x * x + y * y + z * z)
+            if not all_near:
+                for i in range(nb):
+                    hh = 1.0 / T[i]
+                    F[0, i] = _HALF_SQRT_PI * math.sqrt(hh)
+                    h[i] = 0.5 * hh
+                for m in range(N):
+                    c = 2.0 * m + 1.0
+                    for i in range(nb):
+                        F[m + 1, i] = c * F[m, i] * h[i]
+            if not all_far:
+                nn = 0
+                for i in range(nb):
+                    if T[i] < tf:
+                        near[nn] = i
+                        nn += 1
+                cN, c1, c2, c3 = tabt[N], tabt[N + 1], tabt[N + 2], tabt[N + 3]
+                c4, c5, c6, c7 = tabt[N + 4], tabt[N + 5], tabt[N + 6], tabt[N + 7]
+                for u in range(nn):
+                    i = near[u]
+                    t = T[i]
+                    j = int(t * inv_step + 0.5)
+                    dx = j * BOYS_TABLE_STEP - t
+                    s = c7[j] * i7
+                    s = c6[j] * i6 + dx * s
+                    s = c5[j] * i5 + dx * s
+                    s = c4[j] * i4 + dx * s
+                    s = c3[j] * i3 + dx * s
+                    s = c2[j] * i2 + dx * s
+                    s = c1[j] + dx * s
+                    f = cN[j] + dx * s
+                    F[N, i] = f
+                    if N > 0:
+                        e = i7
+                        e = i6 + dx * e
+                        e = i5 + dx * e
+                        e = i4 + dx * e
+                        e = i3 + dx * e
+                        e = i2 + dx * e
+                        e = 1.0 + dx * e
+                        e = etab[j] * (1.0 + dx * e)
+                        t2 = 2.0 * t
+                        for m in range(N, 0, -1):
+                            f = (t2 * f + e) * rden[m]
+                            F[m - 1, i] = f
+            base = off[k]
+            pk = pref[k]
+            if N == 0:
+                d0 = pk * D[base]
+                for i in range(nb):
+                    acc[i] += d0 * F[0, i]
+            elif N == 1:
+                a1 = -2.0 * p * pk
+                d0 = pk * D[base]
+                d1 = a1 * D[base + 1]
+                d2 = a1 * D[base + 2]
+                d3 = a1 * D[base + 3]
+                for i in range(nb):
+                    acc[i] += d0 * F[0, i] + F[1, i] * (d1 * X[i] + d2 * Y[i] + d3 * Z[i])
+            elif N == 2:
+                a1 = -2.0 * p * pk
+                a2 = 4.0 * p * p * pk
+                d0 = pk * D[base]
+                d1 = a1 * D[base + 1]
+                d2 = a1 * D[base + 2]
+                d3 = a1 * D[base + 3]
+                dt = a1 * (D[base + 4] + D[base + 7] + D[base + 9])
+                e4 = a2 * D[base + 4]
+                e5 = a2 * D[base + 5]
+                e6 = a2 * D[base + 6]
+                e7 = a2 * D[base + 7]
+                e8 = a2 * D[base + 8]
+                e9 = a2 * D[base + 9]
+                for i in range(nb):
+                    x = X[i]
+                    y = Y[i]
+                    z = Z[i]
+                    acc[i] += (d0 * F[0, i] + F[1, i] * (d1 * x + d2 * y + d3 * z + dt)
+                               + F[2, i] * (x * (e4 * x + e5 * y + e6 * z) + y * (e7 * y + e8 * z) + e9 * z * z))
+            elif N == 3:
+                contract3(nb, X, Y, Z, F, D, base, pk, p, acc)
+            elif N == 4:
+                contract4(nb, X, Y, Z, F, D, base, pk, p, acc)
+            elif N == 5:
+                contract5(nb, X, Y, Z, F, D, base, pk, p, acc)
+            elif N == 6:
+                contract6(nb, X, Y, Z, F, D, base, pk, p, acc)
+            else:
+                fac = 1.0
+                for m in range(N + 1):
+                    for i in range(nb):
+                        R[m, 0, i] = fac * F[m, i]
+                    fac *= -2.0 * p
+                for m in range(N - 1, -1, -1):
+                    for q in range(1, ntri[N - m]):
+                        d = op_dir[q]
+                        s1 = op_s1[q]
+                        s2 = max(op_s2[q], 0)
+                        c = op_c[q] if op_s2[q] >= 0 else 0.0
+                        if d == 0:
+                            for i in range(nb):
+                                R[m, q, i] = X[i] * R[m + 1, s1, i] + c * R[m + 1, s2, i]
+                        elif d == 1:
+                            for i in range(nb):
+                                R[m, q, i] = Y[i] * R[m + 1, s1, i] + c * R[m + 1, s2, i]
+                        else:
+                            for i in range(nb):
+                                R[m, q, i] = Z[i] * R[m + 1, s1, i] + c * R[m + 1, s2, i]
+                for q in range(ntri[N]):
+                    dq = pk * D[base + q]
+                    for i in range(nb):
+                        acc[i] += dq * R[0, q, i]
+        for i in range(nb):
+            out[s0 + i] = -acc[i]
+    return out
+
+
 def nuclear_esp(pts, coords, zeff):
     """nucesp: sum_A Zeff_A / |r - R_A|, exactly 1000 at a nucleus."""
     d2 = ((np.asarray(pts, dtype=float)[:, None, :] - coords[None, :, :]) ** 2).sum(axis=2)
@@ -399,22 +627,36 @@ def esp_pairs(wfx, basis, cutoff=60.0, tol=SCREEN_TOL):
 
 def electrostatic_potential(pts, wfx, basis, pairs=None, boys_mode="exact", block=None):
     """(esp_nuc, esp_e, esp_total) at each point, as showptprop prints them.
-    The EDF core density is left out, as Multiwfn does. Points are split into
-    blocks (default: 4 per worker thread, at most 64 points) run on
-    numba.get_num_threads() workers; each point's sum is independent of the
-    blocking, so the output does not depend on the thread count."""
+    The EDF core density is left out, as Multiwfn does. boys_mode="exact" runs the blocked
+    kernel (_esp_e_blocked) on the points in Morton order; "reference" and "multiwfn" run the
+    per-point kernel (_esp_e_points). Points are split into blocks run on
+    numba.get_num_threads() workers; each point's sum is independent of the blocking, so the
+    output does not depend on the thread count."""
+    from qtaim_gen.source.core.charge_engine import _morton_order
+
     pts = np.ascontiguousarray(pts, dtype=float)
     if pairs is None:
         pairs = esp_pairs(wfx, basis)
     mode = _BOYS_MODES[boys_mode]
     ele = np.empty(len(pts))
     nthreads = numba.get_num_threads()
-    if block is None:
-        block = max(1, min(64, -(-len(pts) // (4 * nthreads))))
+    if mode == BOYS_EXACT:
+        order = _morton_order(pts) if len(pts) else np.arange(0)
+        spts = np.ascontiguousarray(pts[order])
+        sele = np.empty(len(pts))
+        if block is None:
+            block = max(64, 64 * -(-len(pts) // (4 * nthreads * 64)))
 
-    def one_block(s0):
-        ele[s0 : s0 + block] = _esp_e_points(pts[s0 : s0 + block], *pairs, mode, BOYS_TABLE, _INV_FACT,
-                                             NTRI, OP_DIR, OP_S1, OP_S2, OP_C)
+        def one_block(s0):
+            sele[s0 : s0 + block] = _esp_e_blocked(spts[s0 : s0 + block], *pairs, NEAR_TABLE, NEAR_EXP, _INV_FACT,
+                                                   _RDEN, FAR_T, NTRI, OP_DIR, OP_S1, OP_S2, OP_C, 64)
+    else:
+        if block is None:
+            block = max(1, min(64, -(-len(pts) // (4 * nthreads))))
+
+        def one_block(s0):
+            ele[s0 : s0 + block] = _esp_e_points(pts[s0 : s0 + block], *pairs, mode, BOYS_TABLE, _INV_FACT,
+                                                 NTRI, OP_DIR, OP_S1, OP_S2, OP_C)
 
     starts = range(0, len(pts), block)
     if nthreads == 1 or len(starts) <= 1:
@@ -423,5 +665,7 @@ def electrostatic_potential(pts, wfx, basis, pairs=None, boys_mode="exact", bloc
     else:
         with ThreadPoolExecutor(nthreads) as pool:
             list(pool.map(one_block, starts))
+    if mode == BOYS_EXACT:
+        ele[order] = sele
     nuc = nuclear_esp(pts, wfx["coords"], wfx["zeff"])
     return nuc, ele, nuc + ele
