@@ -48,7 +48,7 @@ The full_set 1 gain is the CHELPG ESP kernel (65% of the cost, 14-19x in a proto
 | P1c | (2026-11-27) The MBIS stopping rule itself | Change it (value-changing, ENGINE_VERSION entry): see Phase 3 |
 | P2 | Threads per job on the clusters | 1 thread per job, many jobs per node. Lands with phase 1: in the local layout the native conversion and ORCA parse of every job run in the one parent process under its GIL, which 128 single-thread jobs per node would saturate |
 | P3 | Value-changing options (MBIS stalled-check stop, QTAIM seed thinning + capture radius, bond-path step 0.10 Bohr) | Evaluate each: measure how far stored values move, then decide per option |
-| P4 | Surface narrow band: point-level (roundoff, about 2.5x on ALIE) or block-level (bitwise, 1.6x) | Measure how much the derived surface values differ under the point-level variant, then decide |
+| P4 | Surface narrow band: point-level (roundoff, about 2.5x on ALIE) or block-level (bitwise, 1.6x) | Measure how much the derived surface values differ under the point-level variant, then decide. Decided 2026-11-27: point-level (same mesh on 99 of 99 jobs, stored values within 2.9e-14 relative; phase 2.4 results) |
 | P5 | GPU | After phases 0-3 |
 | P6 | (2026-11-27) Phase 2.4-2.6 order and packaging | 2.5 QTAIM, then 2.4 surface, then 2.6 MBIS; 2.6 lands together with the P1c stopping rule under one ENGINE_VERSION bump; one branch (perf/phase2b), one cluster run and one PR at the end |
 
@@ -285,6 +285,30 @@ Phase 2.5 results (branch perf/phase2b, 2026-11-27), QTAIM engine, roundoff:
 - One core, best of 2, analyze (search alone): 12 atoms 0.230 -> 0.142 s, 1.62x (1.88x); 39 atoms
   Cs 4.45 -> 3.43 s, 1.30x (1.68x); 54 atoms V4 5.38 -> 3.76 s, 1.43x (1.50x); 110 atoms 26.8 ->
   20.9 s, 1.29x (1.32x).
+
+Phase 2.4 results (branch perf/phase2b, 2026-11-27), surface engine narrow band, roundoff (P4):
+
+- `molecular_surface(band=True)` (default; band=False is the full box, Multiwfn's way): a
+  coarse scan of every 4th grid plane seeds the cubes the surface cuts; tracking evaluates the
+  corners of every cut cube and its 26 neighbours until nothing new is needed; each unevaluated
+  6-connected region takes the class (1.0 inside, 0.0 outside) of the evaluated points it touches,
+  and a region touching both is evaluated. Each needed point is evaluated with the primitive groups
+  of the full grid's block it belongs to (same columns; the product over fewer rows rounds
+  differently). Not provable: a closed surface piece lying inside one coarse cell (0.8 Bohr at the
+  ALIE spacing) between evaluated points would be missed. Surface meta gains `band` (point counts).
+- 99-job set (1 thread, 12 jobs at a time), full box vs block variant vs point variant:
+
+  | function | variant | mesh counts differ | outputs not bitwise | grid stage | whole function | points evaluated |
+  |---|---|---|---|---|---|---|
+  | ALIE | block | 0 | 0 | 603 -> 332 s (1.82x) | 831 -> 553 s (1.50x) | median 47% |
+  | ALIE | point | 0 | 6 | 603 -> 136 s (4.42x) | 831 -> 355 s (2.34x) | median 15% |
+  | ESP | block | 0 | 0 | 294 -> 176 s (1.67x) | 828 -> 701 s (1.18x) | median 52% |
+  | ESP | point | 0 | 25 | 294 -> 79 s (3.74x) | 828 -> 590 s (1.40x) | median 19% |
+
+  Point variant, largest changes: ALIE_Overall_skewness 2.9e-14 relative, ESP_Overall_skewness
+  3.7e-15, ESP variances and balance of charges 2.3e-15 or less, areas 1.5e-16. The point variant
+  was kept (P4) and the block variant removed. The ESP surface gains less because the ESP at the
+  vertices, untouched here, is most of its time.
 
 ## Phase 3: value-changing options (P3)
 

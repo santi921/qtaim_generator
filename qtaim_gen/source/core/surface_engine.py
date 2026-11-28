@@ -6,7 +6,9 @@ rho = 0.001 a.u. isosurface.
 
 Reproduces, in Multiwfn's order:
   - grid box: atoms +- 1.7 * vdW radius, 0.2 Bohr spacing (ALIE) or 0.25 Bohr
-    (ESP), rho incl. EDF at D20.13-rounded coordinates (savecubmat)
+    (ESP), rho incl. EDF at D20.13-rounded coordinates (savecubmat); by default
+    only the points marching tetrahedra reads are evaluated (a narrow band around
+    the surface, the rest set to inside/outside), band=False evaluates the whole box
   - marching tetrahedra (marchtetra/genvertex: main-axis decomposition, six
     tetrahedra sharing the 4-3 diagonal), one vertex per cut edge placed by three
     bisections plus linear interpolation (vertexinterpolate), and the enclosed
@@ -29,11 +31,16 @@ import sys
 import tempfile
 import time
 
+from concurrent.futures import ThreadPoolExecutor
+
+import numba
 import numpy as np
 from numba import njit
+from scipy import ndimage
 
 from qtaim_gen.source.core.charge_engine import (
-    B2A, _edf, limit_blas_threads, orbital_values, prepare_basis, read_wfx,
+    B2A, EXP_CUTOFF, _edf, _morton_order, _primitive_block, limit_blas_threads, orbital_values, prepare_basis,
+    read_wfx,
 )
 from qtaim_gen.source.data import multiwfn_tables as T
 
@@ -60,7 +67,12 @@ TETRAHEDRA = np.array(
 ) - 1
 
 
-def _evaluate(pts, coords, basis, wfx, with_alie=False, chunk=32768):
+EVAL_CHUNK = 32768  # _evaluate's chunk
+ORB_BLOCK = 512  # orbital_values' block
+BAND_STRIDE = 4  # narrow band: coarse scan of every 4th grid plane
+
+
+def _evaluate(pts, coords, basis, wfx, with_alie=False, chunk=EVAL_CHUNK):
     """fdens (MO density + EDF), the MO-only density and, with with_alie, the
     ALIE numerator sum |e_i| n_i phi_i^2 (avglocion), in chunks of points."""
     n = len(pts)
@@ -477,11 +489,162 @@ def planarity(coords, atnums):
     return out
 
 
-def molecular_surface(wfx, basis, spacing, chunk_points=262144):
+def _grid_layout(shape, axes, chunk_points):
+    """The order the full grid is evaluated in (slabs of x planes, _evaluate's chunks,
+    orbital_values' Morton order and blocks): the flat index of every point in that
+    order, each point's rank in it, and every block's [start, end) and bounding box."""
+    nx, ny, nz = shape
+    slab = max(1, chunk_points // (ny * nz))
+    yz = np.stack(np.meshgrid(axes[1], axes[2], indexing="ij"), axis=-1).reshape(-1, 2)
+    flat_sorted = np.empty(nx * ny * nz, dtype=np.int64)
+    b_start, b_end, b_lo, b_hi = [], [], [], []
+    pos = 0
+    for i0 in range(0, nx, slab):
+        xs = axes[0][i0 : i0 + slab]
+        pts = np.empty((len(xs) * len(yz), 3))
+        pts[:, 0] = np.repeat(xs, len(yz))
+        pts[:, 1:] = np.tile(yz, (len(xs), 1))
+        for s0 in range(0, len(pts), EVAL_CHUNK):
+            sub = pts[s0 : s0 + EVAL_CHUNK]
+            order = _morton_order(sub)
+            flat_sorted[pos : pos + len(sub)] = i0 * ny * nz + s0 + order
+            sp = sub[order]
+            st = np.arange(0, len(sub), ORB_BLOCK)
+            b_start.append(pos + st)
+            b_end.append(np.minimum(pos + st + ORB_BLOCK, pos + len(sub)))
+            b_lo.append(np.stack([np.minimum.reduceat(sp[:, d], st) for d in range(3)], axis=1))
+            b_hi.append(np.stack([np.maximum.reduceat(sp[:, d], st) for d in range(3)], axis=1))
+            pos += len(sub)
+    rank = np.empty_like(flat_sorted)
+    rank[flat_sorted] = np.arange(len(flat_sorted))
+    return (flat_sorted, rank, np.concatenate(b_start), np.concatenate(b_end), np.concatenate(b_lo),
+            np.concatenate(b_hi))
+
+
+def _band_values(q, val, known, layout, shape, axes, coords, basis, wfx):
+    """Density at the grid points q (flat indices), each with the primitive groups of
+    the full grid's block it belongs to, so the same columns enter the product; the
+    product over fewer rows rounds differently (roundoff: 2.9e-14 relative at most on
+    the stored ALIE and ESP values of 99 jobs, same mesh on all). Returns the number of
+    points evaluated."""
+    flat_sorted, rank, b_start, b_end, b_lo, b_hi = layout
+    _, ny, nz = shape
+    gs, ge, ga, gc = basis["g_start"], basis["g_end"], basis["g_alpha"], basis["g_center"]
+    glen = ge - gs
+    ct, occ = basis["ct"], basis["occ"]
+    r = np.sort(rank[q])
+    bid = np.searchsorted(b_start, r, side="right") - 1
+    ub, first = np.unique(bid, return_index=True)
+    last = np.append(first[1:], len(r))
+
+    def one(j):
+        bi = ub[j]
+        idx = flat_sorted[r[first[j] : last[j]]]
+        blk = np.empty((len(idx), 3))
+        blk[:, 0] = axes[0][idx // (ny * nz)]
+        blk[:, 1] = axes[1][(idx // nz) % ny]
+        blk[:, 2] = axes[2][idx % nz]
+        d2 = (np.maximum(0.0, np.maximum(b_lo[bi] - coords, coords - b_hi[bi])) ** 2).sum(axis=1)
+        groups = np.flatnonzero(ga * d2[gc] <= EXP_CUTOFF)
+        n = glen[groups]
+        cols = np.arange(n.sum()) + np.repeat(gs[groups] - (np.cumsum(n) - n), n)
+        prim = _primitive_block(blk, coords, groups, gc, ga, gs, ge, basis["lmn"], len(cols))
+        rho = ((prim @ ct[cols]) ** 2) @ occ
+        if len(wfx["edf_center"]):
+            rho = rho + _edf(blk, coords, wfx["edf_center"], wfx["edf_exp"], wfx["edf_coef"])
+        val[idx] = rho
+        known[idx] = True
+        return len(idx)
+
+    nth = numba.get_num_threads()
+    if nth == 1 or len(ub) == 1:
+        return sum(one(j) for j in range(len(ub)))
+    with ThreadPoolExecutor(nth) as pool:
+        return sum(pool.map(one, range(len(ub))))
+
+
+def _cube_count(mask):
+    """Per cube, how many of its 8 corners are set."""
+    nx, ny, nz = mask.shape
+    out = np.zeros((nx - 1, ny - 1, nz - 1), dtype=np.int8)
+    for dx in (0, 1):
+        for dy in (0, 1):
+            for dz in (0, 1):
+                out += mask[dx : nx - 1 + dx, dy : ny - 1 + dy, dz : nz - 1 + dz]
+    return out
+
+
+def _cube_corners(cubes, shape):
+    """Grid points that are a corner of a set cube."""
+    nx, ny, nz = shape
+    need = np.zeros(shape, dtype=bool)
+    for dx in (0, 1):
+        for dy in (0, 1):
+            for dz in (0, 1):
+                need[dx : nx - 1 + dx, dy : ny - 1 + dy, dz : nz - 1 + dz] |= cubes
+    return need
+
+
+def _band_grid(wfx, basis, shape, axes, chunk_points):
+    """The grid values marching tetrahedra and bisection read, without evaluating the
+    whole box: exact density at the corners of every cube the surface cuts, 1.0 inside
+    and 0.0 outside elsewhere. Seeds: the cubes of a coarse lattice (every BAND_STRIDE-th
+    plane) whose corners straddle ISOVALUE. Tracking: evaluate the corners of every cut
+    cube and its 26 neighbours until no new point is needed. Fill: each unevaluated
+    6-connected region takes the class of the evaluated points it touches; a region
+    touching both classes hides surface and is evaluated. A closed surface piece lying
+    entirely inside one coarse cell, between evaluated points, is not seen."""
+    coords = wfx["coords"]
+    npts = int(np.prod(shape))
+    layout = _grid_layout(shape, axes, chunk_points)
+    ci = [np.unique(np.append(np.arange(0, n, BAND_STRIDE), n - 1)) for n in shape]
+    cx, cy, cz = np.meshgrid(axes[0][ci[0]], axes[1][ci[1]], axes[2][ci[2]], indexing="ij")
+    crho, _, _ = _evaluate(np.stack([cx.ravel(), cy.ravel(), cz.ravel()], axis=1), coords, basis, wfx)
+    cin = (crho >= ISOVALUE).reshape(cx.shape)
+    cc = _cube_count(cin)
+    need = np.zeros(shape, dtype=bool)
+    for a, b, c in np.argwhere((cc > 0) & (cc < 8)):
+        need[ci[0][a] : ci[0][a + 1] + 1, ci[1][b] : ci[1][b + 1] + 1, ci[2][c] : ci[2][c + 1] + 1] = True
+    val = np.zeros(npts)
+    known = np.zeros(npts, dtype=bool)
+    need = need.ravel()
+    evaluated = 0
+    cube26 = np.ones((3, 3, 3), dtype=bool)
+    face6 = ndimage.generate_binary_structure(3, 1)
+    while True:
+        q = np.flatnonzero(need & ~known)
+        if len(q):
+            evaluated += _band_values(q, val, known, layout, shape, axes, coords, basis, wfx)
+        k3 = known.reshape(shape)
+        ins = k3 & (val.reshape(shape) >= ISOVALUE)
+        out = k3 & ~ins
+        cut = (_cube_count(ins) > 0) & (_cube_count(out) > 0)
+        need = _cube_corners(ndimage.binary_dilation(cut, structure=cube26), shape).ravel()
+        if (need & ~known).any():
+            continue
+        unk = ~k3
+        lab, nlab = ndimage.label(unk, structure=face6)
+        has_in = np.bincount(lab[unk & ndimage.binary_dilation(ins, structure=face6)], minlength=nlab + 1) > 0
+        has_out = np.bincount(lab[unk & ndimage.binary_dilation(out, structure=face6)], minlength=nlab + 1) > 0
+        both = has_in & has_out
+        both[0] = False
+        if both.any():
+            need = both[lab].ravel()
+            continue
+        v3 = val.reshape(shape)
+        v3[unk & has_in[lab]] = 1.0
+        return v3, {"points_evaluated": int(evaluated), "points_known": int(known.sum()), "points_total": npts,
+                    "coarse_points": int(crho.size)}
+
+
+def molecular_surface(wfx, basis, spacing, chunk_points=262144, band=True):
     """The rho = ISOVALUE surface surfana builds at this grid spacing: grid,
     marching tetrahedra, bisection, enclosed volume, vertex elimination and facet
     areas. Returns the vertex positions with the surviving ones (live), the
-    surviving facets and their areas, the volume and mesh counts, and timings."""
+    surviving facets and their areas, the volume and mesh counts, and timings.
+
+    band: evaluate the grid only in a narrow band around the surface (_band_grid);
+    False evaluates the whole grid box, as Multiwfn does (the reference)."""
     t = {}
     coords = wfx["coords"]
     atnums = wfx["atnums"]
@@ -491,16 +654,20 @@ def molecular_surface(wfx, basis, spacing, chunk_points=262144):
     end = (coords + VDWMULTI * vdw[:, None]).max(axis=0)
     shape = tuple(int(np.floor((end[k] - org[k]) / spacing + 0.5)) + 1 for k in range(3))
     axes = [np.array([_d20_13(org[k] + i * spacing) for i in range(shape[k])]) for k in range(3)]
-    val = np.empty(shape)
-    slab = max(1, chunk_points // (shape[1] * shape[2]))
-    yz = np.stack(np.meshgrid(axes[1], axes[2], indexing="ij"), axis=-1).reshape(-1, 2)
-    for i0 in range(0, shape[0], slab):
-        xs = axes[0][i0 : i0 + slab]
-        pts = np.empty((len(xs) * len(yz), 3))
-        pts[:, 0] = np.repeat(xs, len(yz))
-        pts[:, 1:] = np.tile(yz, (len(xs), 1))
-        rho, _, _ = _evaluate(pts, coords, basis, wfx)
-        val[i0 : i0 + len(xs)] = rho.reshape(len(xs), shape[1], shape[2])
+    band_stats = None
+    if not band:
+        val = np.empty(shape)
+        slab = max(1, chunk_points // (shape[1] * shape[2]))
+        yz = np.stack(np.meshgrid(axes[1], axes[2], indexing="ij"), axis=-1).reshape(-1, 2)
+        for i0 in range(0, shape[0], slab):
+            xs = axes[0][i0 : i0 + slab]
+            pts = np.empty((len(xs) * len(yz), 3))
+            pts[:, 0] = np.repeat(xs, len(yz))
+            pts[:, 1:] = np.tile(yz, (len(xs), 1))
+            rho, _, _ = _evaluate(pts, coords, basis, wfx)
+            val[i0 : i0 + len(xs)] = rho.reshape(len(xs), shape[1], shape[2])
+    else:
+        val, band_stats = _band_grid(wfx, basis, shape, axes, chunk_points)
     t["grid"] = time.perf_counter() - t0
 
     t0 = time.perf_counter()
@@ -548,7 +715,7 @@ def molecular_surface(wfx, basis, spacing, chunk_points=262144):
     return {
         "pos": pos_m, "live": live, "live_tri": live_tri, "area": area, "volume": float(totvol),
         "grid": list(shape), "vef_before": list(n_before),
-        "vef_after": [int(len(live)), int(e_after), int(len(live_tri))], "timings_s": t,
+        "vef_after": [int(len(live)), int(e_after), int(len(live_tri))], "timings_s": t, "band": band_stats,
     }
 
 
@@ -603,14 +770,15 @@ def load_wavefunction(wfx_path):
 
 
 @limit_blas_threads
-def alie_surface(wfx_path, chunk_points=262144, wf=None):
-    """wf: (wfx, basis) from load_wavefunction, instead of reading wfx_path."""
+def alie_surface(wfx_path, chunk_points=262144, wf=None, band=True):
+    """wf: (wfx, basis) from load_wavefunction, instead of reading wfx_path; band: see
+    molecular_surface."""
     t0 = time.perf_counter()
     wfx, basis = wf or load_wavefunction(wfx_path)
     if wfx["mo_energy"] is None:
         raise ValueError("wfx has no <Molecular Orbital Energies>")
     load = time.perf_counter() - t0
-    surf = molecular_surface(wfx, basis, SPACING, chunk_points)
+    surf = molecular_surface(wfx, basis, SPACING, chunk_points, band=band)
     # with wf given the parse happened elsewhere (the runner shares it between engines)
     t = {"load" if wf is None else "load_shared": load, **surf["timings_s"]}
 
@@ -638,6 +806,7 @@ def alie_surface(wfx_path, chunk_points=262144, wf=None):
         "grid": surf["grid"],
         "vef_before": surf["vef_before"],
         "vef_after": surf["vef_after"],
+        "band": surf["band"],
         "average_au": float(st["avg_pos"]),
         "variance_au2": float(st["var"]),
         "timings_s": {k: round(v, 3) for k, v in t.items()},
@@ -646,7 +815,7 @@ def alie_surface(wfx_path, chunk_points=262144, wf=None):
 
 
 @limit_blas_threads
-def esp_surface(wfx_path, chunk_points=262144, boys_mode="exact", wf=None):
+def esp_surface(wfx_path, chunk_points=262144, boys_mode="exact", wf=None, band=True):
     """The production other_esp step ("12\\n0\\n-1\\n-1\\nq\\n": function 12 with
     the default mapped function, ESP, on the rho = 0.001 isosurface at 0.25 Bohr):
     the same surface construction as alie_surface, the total ESP (core/esp.py,
@@ -656,13 +825,13 @@ def esp_surface(wfx_path, chunk_points=262144, boys_mode="exact", wf=None):
     the polarity index, Angstrom^2 for the polar and nonpolar areas. Production
     Multiwfn evaluates the ESP with libreta (iESPcode=2), the engine exactly
     (docs/engine_roadmap/README.md, divergence changelog). wf: (wfx, basis) from
-    load_wavefunction, instead of reading wfx_path."""
+    load_wavefunction, instead of reading wfx_path; band: see molecular_surface."""
     from qtaim_gen.source.core.esp import electrostatic_potential
 
     t0 = time.perf_counter()
     wfx, basis = wf or load_wavefunction(wfx_path)
     load = time.perf_counter() - t0
-    surf = molecular_surface(wfx, basis, ESP_SPACING, chunk_points)
+    surf = molecular_surface(wfx, basis, ESP_SPACING, chunk_points, band=band)
     # with wf given the parse happened elsewhere (the runner shares it between engines)
     t = {"load" if wf is None else "load_shared": load, **surf["timings_s"]}
 
@@ -699,6 +868,7 @@ def esp_surface(wfx_path, chunk_points=262144, boys_mode="exact", wf=None):
         "grid": surf["grid"],
         "vef_before": surf["vef_before"],
         "vef_after": surf["vef_after"],
+        "band": surf["band"],
         "boys_mode": boys_mode,
         "timings_s": {k: round(v, 3) for k, v in t.items()},
     }

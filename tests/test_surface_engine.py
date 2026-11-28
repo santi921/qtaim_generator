@@ -304,3 +304,36 @@ def test_esp_failure_drops_a_multiwfn_esp_timing(tmp_path, monkeypatch):
     prov = provenance.load(str(folder))
     assert "other_esp" not in prov["routines"] and "other_esp" not in prov["skipped"]
     assert prov["engines"]["surface_engine"]["failures"] == {"other_esp": 1}
+
+
+
+@pytest.mark.skipif(not HAS_NUMBA, reason="numba not installed")
+@pytest.mark.parametrize("name", _fixture_names())
+def test_narrow_band_grid_gives_the_full_grid_mesh(name):
+    """The default narrow band evaluates only the points marching tetrahedra reads: the same
+    vertices and facets as the full grid box, positions and areas within roundoff, and the
+    same result on any thread count."""
+    import numba
+    import numpy as np
+
+    from qtaim_gen.source.core import surface_engine as se
+
+    wfx, basis = se.load_wavefunction(os.path.join(FIXTURES, name, "orca.wfx"))
+    ref = se.molecular_surface(wfx, basis, se.SPACING, band=False)
+    band = se.molecular_surface(wfx, basis, se.SPACING)
+    n0 = numba.get_num_threads()
+    try:
+        numba.set_num_threads(min(2, numba.config.NUMBA_NUM_THREADS))
+        band2 = se.molecular_surface(wfx, basis, se.SPACING)
+    finally:
+        numba.set_num_threads(n0)
+    assert ref["band"] is None
+    assert band["vef_before"] == ref["vef_before"] and band["vef_after"] == ref["vef_after"]
+    assert np.array_equal(band["live"], ref["live"]) and np.array_equal(band["live_tri"], ref["live_tri"])
+    assert np.abs(band["pos"] - ref["pos"]).max() < 1e-12
+    assert np.abs(band["area"] - ref["area"]).max() < 1e-12
+    assert band["volume"] == pytest.approx(ref["volume"], rel=1e-12)
+    for k in ("pos", "live_tri", "area"):
+        assert np.array_equal(band[k], band2[k]), k
+    assert band["volume"] == band2["volume"]
+    assert 0 < band["band"]["points_known"] < 0.5 * band["band"]["points_total"]
