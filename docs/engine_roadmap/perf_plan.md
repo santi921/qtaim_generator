@@ -44,6 +44,8 @@ The full_set 1 gain is the CHELPG ESP kernel (65% of the cost, 14-19x in a proto
 |---|---|---|
 | P1 | Roundoff-level changes (summation order, GEMM partition; at most about 1e-12 relative on stored values) | Allowed without an ENGINE_VERSION `changed` entry; validation compares with that tolerance instead of exact equality. A change above it is value-changing and follows the usual rule |
 | P1a | (2026-11-26) Quantities fitted to a roundoff-level input, e.g. CHELPG charges from an ESP within 1e-12 relative (the fit's condition number amplifies it) | Roundoff-level too: up to 1e-9 e on fitted charges, no ENGINE_VERSION entry (ESP kernel: 6.4e-11 e on the 99-job set) |
+| P1b | (2026-11-26, widened 2026-11-27) Iterative fits whose stopping rule is coarser than roundoff, e.g. the MBIS fuzzy refit (stops when no population moves more than 1e-8 e in one step) | A roundoff-level input change can change the iteration count and the stopping point; differences up to the fit's convergence floor are accepted with no ENGINE_VERSION entry, for all systems. Measured: LRC tm_react mbis_fuzzy_density 3.6e-7 e; NERSC openac 3.3e-5 e on one Pu nitrate, where trunk is the one 3.3e-5 e from the fixed point and the branch 3.6e-9 e (phase 2.2/2.3 results) |
+| P1c | (2026-11-27) The MBIS stopping rule itself | Change it (value-changing, ENGINE_VERSION entry): see Phase 3 |
 | P2 | Threads per job on the clusters | 1 thread per job, many jobs per node. Lands with phase 1: in the local layout the native conversion and ORCA parse of every job run in the one parent process under its GIL, which 128 single-thread jobs per node would saturate |
 | P3 | Value-changing options (MBIS stalled-check stop, QTAIM seed thinning + capture radius, bond-path step 0.10 Bohr) | Evaluate each: measure how far stored values move, then decide per option |
 | P4 | Surface narrow band: point-level (roundoff, about 2.5x on ALIE) or block-level (bitwise, 1.6x) | Measure how much the derived surface values differ under the point-level variant, then decide |
@@ -210,12 +212,64 @@ in one process, 1 thread, the ESP kernel already in both:
   numba's version and USING_SVML. At full_set 1 the merged pass is timed as `derivatives` (density
   near 0 there). tests/test_charge_kernels.py pins the strip kernels and the two-phase Becke weights
   to the point-by-point versions they replaced, bit for bit.
+- LRC lr7, tm_react full_set 1, 56 jobs x 1 thread per node, trunk (713c907) vs branch (5e108b6),
+  both numba 0.68.0 without SVML, values on the jobs both trees had finished (trunk still running
+  4): charge.json mbis bitwise identical; adch, becke, hirshfeld, cm5, vdd within 1.3e-13 e; chelpg
+  1.0e-10 e (P1a); Hirshfeld, Becke and Fukui fuzzy within 1.2e-13 e; bond.json bitwise identical;
+  qtaim.json within 1e-10 (last printed digit); mbis_fuzzy_density 3.6e-7 e and mbis_fuzzy_spin
+  1.9e-8 e from a different refit cycle count (P1b). Largest single-job timing changes: CHELPG
+  2355 -> 122 s (Pt, 19x), Fukui 92 -> 6 s. MBIS charge fitting dominates the slowest jobs (9629 s
+  trunk, 8613 s branch on a Ru4 job), which makes 2.6 the main level-1 target on tm_react.
+  Throughput (trunk rebuilt from rss.log start and its last completion, because the 12 h limit
+  killed it with 167 of 168 done):
+
+  | tree | done | jobs/node-hour, steady | median job | mean core-s/job | peak node RSS |
+  |---|---|---|---|---|---|
+  | trunk | 167 | 66.2 | 2472 s | 3572 (167 jobs) | 36.0 GB |
+  | branch | 168 | 83.8 (1.27x) | 1145 s (2.16x) | 2683 (168 jobs) | 41.0 GB |
+
+  Whole-run jobs/hour (17.3 trunk, 14.4 branch) is set by one job and not comparable:
+  MOBH19_Re4_Charge4_UHF3_..._rev_step37_4_4 took 42058 s on the branch, 41432 s of it in MBIS, with
+  both fits at their cycle caps and unconverged (charge 43130 evaluations, 22641 s; fuzzy refit 21000,
+  18791 s); trunk had not finished it at 12 h. The gain is smaller than on NERSC because MBIS charge
+  fitting, untouched here, is a large share of tm_react full_set 1.
+- NERSC Perlmutter, openac 440 full_set 1, 128 jobs x 1 thread per node, trunk (713c907) vs branch
+  (f53dfb8; the later review fixes change no values), numba 0.68.0 without SVML, all 440 jobs in
+  both trees, no structural differences:
+
+  | tree | wall | jobs/node-hour | steady | median job | mean core-s/job | peak node RSS |
+  |---|---|---|---|---|---|---|
+  | trunk | 21077 s | 75.2 | 105.2 | 2794 s | 3882 | 91.1 GB |
+  | branch | 10967 s | 144.4 (1.92x) | 190.1 (1.81x) | 1793 s | 2265 | 108.9 GB |
+
+  Values: charge.json mbis bitwise identical; adch, becke, hirshfeld, cm5 within 2.6e-12 e, vdd
+  1.2e-13 e; chelpg 7.1e-11 e (P1a); Hirshfeld and Becke fuzzy within 2.3e-13 e; qtaim.json and
+  qtaim_cp.json within 1e-9 (last printed digit); mbis_fuzzy_density 3.3e-5 e (4.2e-7 relative) and
+  mbis_fuzzy_spin 3.0e-7 e, refit cycle count different on 36 of 440 jobs (384 -> 281 on a Pu
+  nitrate). Accepted under P1b (widened 2026-11-27), see below.
+- MBIS convergence floor (2026-11-27): charge_engine.run full_set 1 (CHELPG stubbed) with trunk and
+  branch code at MBIS_TOL 1e-8 and 1e-11, on 6 local nitrates (Th, U, Np x2, Pu x2; X2C-TZVPall
+  R2SCAN) and on the 5 openac jobs with the largest mbis_fuzzy_density difference (wfx rebuilt from
+  the raw gbw with orca_2mkl + native convert; reproduces the stored 3.3e-5 e). At 1e-11 trunk and
+  branch agree within 2.3e-10 e on all 11; at 1e-8 the trunk-branch difference is never above the
+  larger of the two distances to the 1e-11 solution. Worst job, mbis_fuzzy_density (e):
+
+  | job | trunk vs branch (1e-8) | trunk 1e-8 vs 1e-11 | branch 1e-8 vs 1e-11 | 1e-11 trunk vs branch | fuzzy cycles t / b / t 1e-11 / b 1e-11 |
+  |---|---|---|---|---|---|
+  | openac PuN3O9Cl3 spin 3 R2SCAN TZVP | 3.3e-5 | 3.3e-5 | 3.6e-9 | 2.2e-11 | 384 / 281 / 153 / 130 |
+  | openac ThN6O18 WB97M-V SVP | 4.2e-7 | 6.5e-7 | 2.2e-7 | 2.3e-10 | 102 / 97 / 166 / 133 |
+  | local PuNO5Cl3 spin 3 | 1.6e-8 | 7.2e-8 | 5.6e-8 | 4.2e-11 | 79 / 80 / 98 / 102 |
+
+  The stored MBIS charges (bitwise identical between trunk and branch) sit up to 2.5e-7 e from
+  their 1e-11 solution. The per-step stopping rule can stop a slow refit 3.3e-5 e short of its
+  fixed point (trunk on the Pu nitrate), which Phase 3 addresses.
 
 ## Phase 3: value-changing options (P3)
 
 | Option | Prototype gain | What to measure before deciding |
 |---|---|---|
 | MBIS: stop a stalled check fit at about evaluation 200 when its objective is below the best converged fit | selection 2.4-3.7x on jobs with stalled checks | selection flips on the 112-job set and the NERSC openac 440 (actinides untested) |
+| MBIS stopping rule (agreed 2026-11-27, P1c): replace "no population moves more than 1e-8 e in one step" with a rule that bounds the distance to the fixed point (e.g. step size divided by (1 - estimated contraction rate), or a tighter tolerance once the plain fallback runs) | none (accuracy fix; may cost cycles) | how far stored MBIS charges and fuzzy values move on the 112-job set and openac 440; cycle counts; the Pu nitrate's 3.3e-5 e case; the LRC Re4 job whose charge fit and fuzzy refit both run to their caps unconverged (41432 s of MBIS) |
 | QTAIM: drop seeds within 0.2 Bohr of an earlier seed; stop a seed within 0.03 Bohr of a CP of an earlier stage | 1.4-1.8x fewer Newton evaluations | CP-set changes on the LRC tier 2 set; the 0.0115 Bohr BCP-RCP case |
 | Bond paths: RK2 step 0.10 Bohr (stop radius unchanged) | 3.3x fewer evaluations | end-CP changes; 0 of 1,671 BCPs so far |
 
