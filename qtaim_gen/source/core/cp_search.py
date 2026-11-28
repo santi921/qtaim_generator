@@ -156,7 +156,7 @@ def newton(seeds, wfx, basis, gradconv=GRADCONV, dispconv=DISPCONV, maxcyc=TOPOM
     for _ in range(maxcyc):
         if not len(active):
             break
-        d = density_derivatives(x[active], wfx, basis)
+        d = density_derivatives(x[active], wfx, basis, extras=False)
         g, H = d["gradient"], d["hessian"]
         niter[active] += 1
         sing = np.abs(np.linalg.det(H)) < singular
@@ -199,7 +199,7 @@ def _final_eigenvalues(pos, wfx, basis):
     sign with them for a near-degenerate CP, which cpprop_integrity rejects."""
     if not len(pos):
         return np.zeros((0, 3))
-    return np.linalg.eigvalsh(density_derivatives(pos, wfx, basis)["hessian"])
+    return np.linalg.eigvalsh(density_derivatives(pos, wfx, basis, extras=False)["hessian"])
 
 
 def _nucleus_frame(wfx, atom):
@@ -208,23 +208,52 @@ def _nucleus_frame(wfx, atom):
     return {**wfx, "coords": wfx["coords"] - wfx["coords"][atom]}
 
 
+def _dedup_stages(stages):
+    """Drop every seed after the first stage (the nuclei, kept whole: their index is the
+    atom index) that is bitwise equal to an earlier one, in stage then seed order. In
+    superset mode the Delaunay face and tetrahedron centroids repeat about half of the
+    triad and quad seeds; a repeated seed would only re-find the same CP. Returns the
+    stages and the number dropped per stage."""
+    seen = {p.tobytes() for p in stages[0][1]}
+    out, dropped = [stages[0]], [0]
+    for stage, pts in stages[1:]:
+        keep = []
+        for i, p in enumerate(pts):
+            k = p.tobytes()
+            if k not in seen:
+                keep.append(i)
+                seen.add(k)
+        out.append((stage, pts[keep]))
+        dropped.append(len(pts) - len(keep))
+    return out, dropped
+
+
 def _engine_search(wfx, basis, minicpdis, superset):
-    stats = []
+    """Engine-mode search: nuclei first (gradient criterion off), then every other seed
+    stage in one Newton batch (seeds deduplicated across stages), so the batch's blocks
+    are denser; per-stage statistics come from each seed's stage label."""
     cand_x, cand_eig, cand_g, cand_stage, cand_frame, cand_off = [], [], [], [], [], []
-    stages = [("nuclei", wfx["coords"].copy(), 1.0)]
+    stages = [("nuclei", wfx["coords"].copy())]
     if superset:
-        stages += [(name, pts, GRADCONV) for name, pts in multiwfn_seeds(wfx["coords"], wfx["atnums"])[1:]]
-    stages.append(("delaunay", delaunay_seeds(wfx["coords"], wfx["atnums"]), GRADCONV))
-    for stage, pts, gconv in stages:
+        stages += multiwfn_seeds(wfx["coords"], wfx["atnums"])[1:]
+    stages.append(("delaunay", delaunay_seeds(wfx["coords"], wfx["atnums"])))
+    stages, dropped = _dedup_stages(stages)
+    rest = [(s, p) for s, p in stages[1:] if len(p)]
+    batches = [("nuclei", stages[0][1], np.array(["nuclei"] * len(stages[0][1])), 1.0)]
+    if rest:
+        batches.append(("merged", np.concatenate([p for _, p in rest]),
+                        np.concatenate([[s] * len(p) for s, p in rest]), GRADCONV))
+    stage_stats = {s: {"stage": s, "seeds": len(p), "duplicate_seeds": d, "converged": 0, "singular": 0, "maxcyc": 0,
+                       "newton_steps": 0, "precision_limited": 0, "nucleus_frame": 0}
+                   for (s, p), d in zip(stages, dropped)}
+    for batch, pts, labels, gconv in batches:
         if not len(pts):
-            stats.append({"stage": stage, "seeds": 0, "converged": 0, "singular": 0, "maxcyc": 0, "newton_steps": 0,
-                          "precision_limited": 0, "nucleus_frame": 0})
             continue
         x, status, hess, gnorm, niter = newton(pts, wfx, basis, gradconv=gconv, trust=TRUST_RADIUS,
-                                               accept_maximum=stage == "nuclei")
+                                               accept_maximum=batch == "nuclei")
         frame = np.full(len(pts), -1, dtype=np.int64)
         offset = np.zeros((len(pts), 3))
-        if stage == "nuclei":
+        if batch == "nuclei":
             # a nuclear seed that ran out of cycles or stopped on the gradient floor (heavy
             # all-electron nucleus far from the origin: |g| ~ |H| * spacing of doubles at
             # that coordinate stays above gconv) gets a second Newton run with its nucleus at
@@ -244,10 +273,14 @@ def _engine_search(wfx, basis, minicpdis, superset):
         cand_g.append(gnorm[ok][keep])
         cand_frame.append(frame[ok][keep])
         cand_off.append(offset[ok][keep])
-        cand_stage += [stage] * int(keep.sum())
-        stats.append({"stage": stage, "seeds": len(pts), "converged": len(ok), "singular": int((status == -1).sum()),
-                      "maxcyc": int((status == -2).sum()), "newton_steps": int(niter.sum()),
-                      "precision_limited": int((status == 2).sum()), "nucleus_frame": int((status == 3).sum())})
+        cand_stage += [str(s) for s in labels[ok][keep]]
+        for s in np.unique(labels):
+            m = labels == s
+            stage_stats[s].update(converged=int((status[m] >= 1).sum()), singular=int((status[m] == -1).sum()),
+                                  maxcyc=int((status[m] == -2).sum()), newton_steps=int(niter[m].sum()),
+                                  precision_limited=int((status[m] == 2).sum()),
+                                  nucleus_frame=int((status[m] == 3).sum()))
+    stats = [stage_stats[s] for s, _ in stages]
     x, eig, g = np.concatenate(cand_x), np.concatenate(cand_eig), np.concatenate(cand_g)
     fr, off = np.concatenate(cand_frame), np.concatenate(cand_off)
     ctype = (eig > 0).sum(axis=1)
@@ -430,7 +463,7 @@ def bond_paths(cps, wfx, basis, mode="multiwfn"):
     ends = np.full((nb, 2), -1, dtype=np.int64)
     npts = np.zeros((nb, 2), dtype=np.int64)
     if nb:
-        d = density_derivatives(pos[bcps], wfx, basis)
+        d = density_derivatives(pos[bcps], wfx, basis, extras=False)
         eigval, eigvec = np.linalg.eigh(d["hessian"])
         v = eigvec[np.arange(nb), :, np.argmax(eigval > 0, axis=1)]
         x = np.concatenate([pos[bcps] + PATH_STEP * v, pos[bcps] - PATH_STEP * v])

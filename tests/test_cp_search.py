@@ -387,3 +387,57 @@ def test_pinned_blas_stays_single_threaded_after_a_limited_call():
                          timeout=120, env=env, cwd=root)
     assert out.returncode == 0, out.stderr[-2000:]
     assert out.stdout.strip() == "[1] [1]"
+
+
+@pytest.mark.parametrize("job", JOBS)
+def test_lean_derivatives_are_bitwise_equal_to_the_full_call(job):
+    from qtaim_gen.source.core.qtaim_engine import density_derivatives
+
+    wfx, basis, _ = _load(job)
+    rng = np.random.default_rng(0)
+    pts = wfx["coords"][rng.integers(len(wfx["coords"]), size=200)] + rng.normal(scale=1.5, size=(200, 3))
+    for hessian in (True, False):
+        full = density_derivatives(pts, wfx, basis, hessian=hessian)
+        lean = density_derivatives(pts, wfx, basis, hessian=hessian, extras=False)
+        keys = {"rho", "gradient"} | ({"hessian"} if hessian else set())
+        assert set(lean) == keys
+        for k in keys:
+            assert np.array_equal(full[k], lean[k]), (hessian, k)
+    with pytest.raises(ValueError):
+        density_derivatives(pts, wfx, basis, phi2=True, extras=False)
+
+
+def test_dedup_stages_drops_repeats_of_earlier_seeds_only():
+    from qtaim_gen.source.core.cp_search import _dedup_stages
+
+    nuc = np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]])
+    a = np.array([[0.5, 0.0, 0.0], [0.5, 0.0, 0.0], [0.0, 0.0, 0.0]])
+    b = np.array([[0.5, 0.0, 0.0], [0.25, 0.0, 0.0], [-0.0, 0.0, 0.0]])
+    out, dropped = _dedup_stages([("nuclei", nuc), ("a", a), ("b", b)])
+    assert dropped == [0, 2, 1]
+    assert np.array_equal(out[0][1], nuc)
+    assert np.array_equal(out[1][1], a[:1])
+    # -0.0 is a different bit pattern: kept (a harmless extra seed)
+    assert np.array_equal(out[2][1], b[1:])
+
+
+def test_superset_search_is_independent_of_thread_count_and_counts_every_seed():
+    import numba
+
+    from qtaim_gen.source.core.cp_search import delaunay_seeds, multiwfn_seeds, search
+
+    wfx, basis, _ = _load("rmechdb_652_step10_0_2")
+    n0 = numba.get_num_threads()
+    try:
+        numba.set_num_threads(1)
+        a = search(wfx, basis, seeds="superset")
+        numba.set_num_threads(min(2, numba.config.NUMBA_NUM_THREADS))
+        b = search(wfx, basis, seeds="superset")
+    finally:
+        numba.set_num_threads(n0)
+    assert np.array_equal(a["pos"], b["pos"]) and np.array_equal(a["type"], b["type"])
+    raw = [len(p) for _, p in multiwfn_seeds(wfx["coords"], wfx["atnums"])]
+    raw.append(len(delaunay_seeds(wfx["coords"], wfx["atnums"])))
+    assert [s["stage"] for s in a["stats"]] == ["nuclei", "pairs", "triads", "quads", "delaunay"]
+    assert [s["seeds"] + s["duplicate_seeds"] for s in a["stats"]] == raw
+    assert all(s["converged"] + s["singular"] + s["maxcyc"] <= s["seeds"] for s in a["stats"])

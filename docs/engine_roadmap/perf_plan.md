@@ -50,6 +50,7 @@ The full_set 1 gain is the CHELPG ESP kernel (65% of the cost, 14-19x in a proto
 | P3 | Value-changing options (MBIS stalled-check stop, QTAIM seed thinning + capture radius, bond-path step 0.10 Bohr) | Evaluate each: measure how far stored values move, then decide per option |
 | P4 | Surface narrow band: point-level (roundoff, about 2.5x on ALIE) or block-level (bitwise, 1.6x) | Measure how much the derived surface values differ under the point-level variant, then decide |
 | P5 | GPU | After phases 0-3 |
+| P6 | (2026-11-27) Phase 2.4-2.6 order and packaging | 2.5 QTAIM, then 2.4 surface, then 2.6 MBIS; 2.6 lands together with the P1c stopping rule under one ENGINE_VERSION bump; one branch (perf/phase2b), one cluster run and one PR at the end |
 
 ## Phase 0: per-job overhead (bitwise, this branch)
 
@@ -263,6 +264,27 @@ in one process, 1 thread, the ESP kernel already in both:
   The stored MBIS charges (bitwise identical between trunk and branch) sit up to 2.5e-7 e from
   their 1e-11 solution. The per-step stopping rule can stop a slow refit 3.3e-5 e short of its
   fixed point (trunk on the Pu nitrate), which Phase 3 addresses.
+
+Phase 2.5 results (branch perf/phase2b, 2026-11-27), QTAIM engine, roundoff:
+
+- `density_derivatives(extras=False)`: rho, gradient and Hessian only, by the same operations as
+  the full call (bitwise, tested); used by the Newton steps, the final eigenvalues and the bond-path
+  start.
+- Engine-mode search: seeds bitwise equal to an earlier seed are dropped (`_dedup_stages`; the
+  nuclei are kept whole), and every non-nuclear stage runs as one Newton batch; per-stage
+  statistics come from each seed's stage label and gain `duplicate_seeds`. Multiwfn-parity mode
+  (seeds="multiwfn") is unchanged.
+- `_morton_order`: the key is built in a numba loop instead of 60 numpy operations (same order,
+  tested; 1-32 points about 5 us instead of about 139 us). Skipping the sort for small calls was
+  rejected: the row order changes GEMM rounding (115 of 256 small calls not bitwise).
+- cp_search.analyze, trunk (c44a3f8) vs branch on 89 jobs (the 87-job set plus 54 and 110 atoms):
+  CP types and counts, bond-path atoms and ends, Poincare-Hopf sums identical on all 89; positions
+  within 1.1e-14 Bohr; properties within 1e-14 of each job's largest value, except ellipticity
+  (9.2e-13 absolute on 3.58), spin (1.1e-16 absolute) and the gradient at CPs (6.3e-15 absolute,
+  i.e. zero); all below CPprop.txt's 10 printed digits. Newton evaluations 0.865 of trunk.
+- One core, best of 2, analyze (search alone): 12 atoms 0.230 -> 0.142 s, 1.62x (1.88x); 39 atoms
+  Cs 4.45 -> 3.43 s, 1.30x (1.68x); 54 atoms V4 5.38 -> 3.76 s, 1.43x (1.50x); 110 atoms 26.8 ->
+  20.9 s, 1.29x (1.32x).
 
 ## Phase 3: value-changing options (P3)
 

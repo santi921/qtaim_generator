@@ -108,7 +108,8 @@ _HESS_PAIRS = np.array([(0, 0), (1, 1), (2, 2), (0, 1), (0, 2), (1, 2)])
 
 
 @limit_blas_threads
-def density_derivatives(pts, wfx, basis, block=DERIV_BLOCK, hessian=True, elf_only=False, phi2=False, cts=()):
+def density_derivatives(pts, wfx, basis, block=DERIV_BLOCK, hessian=True, elf_only=False, phi2=False, cts=(),
+                        extras=True):
     """rho, its gradient and Hessian (MOs + EDF) at every point, and the MO-only
     parts point_properties needs. hessian=False returns only rho and its gradient
     (grad rho = 2 w . grad chi), which needs MO values but no MO gradients (rho_mo, grad_mo, spin, alpha/beta
@@ -126,7 +127,11 @@ def density_derivatives(pts, wfx, basis, block=DERIV_BLOCK, hessian=True, elf_on
     With hessian or elf_only, phi2=True also returns the squared MO values ("phi2", points x
     MOs) and cts (coefficient matrices over the same primitives) the values of those
     orbitals ("cts", a list), from the same primitive values: the charge engine's full_set 1
-    pass takes the density and the Fukui orbitals from here instead of a separate evaluation."""
+    pass takes the density and the Fukui orbitals from here instead of a separate evaluation.
+
+    extras=False returns only rho, its gradient and (with hessian) the Hessian, computed by
+    the same operations as the full call, so bitwise equal to it: the CP search's Newton
+    steps and bond paths need nothing else."""
     pts = np.ascontiguousarray(pts, dtype=float)
     n = len(pts)
     coords = wfx["coords"]
@@ -135,14 +140,14 @@ def density_derivatives(pts, wfx, basis, block=DERIV_BLOCK, hessian=True, elf_on
     open_shell = wavefunction_type(wfx) not in (0, 3)
     out = {"rho": np.zeros(n), "gradient": np.zeros((n, 3)), "h6": np.zeros((n, 6))}
     second = hessian and not elf_only
-    extras = () if not (hessian or elf_only) else (
+    extra_keys = () if not ((hessian or elf_only) and extras) else (
         ("rho_mo", ()), ("spin", ()), ("grad_mo", (3,)), ("G_xyz", (3,)),
         ("rho_a", ()), ("rho_b", ()), ("grad_a", (3,)), ("grad_b", (3,))
     ) + ((("K", ()), ("alie_num", ())) if second else ())
-    for key, shape in extras:
+    for key, shape in extra_keys:
         out[key] = np.zeros((n,) + shape)
-    if (phi2 or cts) and not (hessian or elf_only):
-        raise ValueError("phi2 and cts need hessian or elf_only")
+    if (phi2 or cts) and not ((hessian or elf_only) and extras):
+        raise ValueError("phi2 and cts need hessian or elf_only, with extras")
     if phi2:
         out["phi2"] = np.zeros((n, ct.shape[1]))
     if cts:
@@ -183,6 +188,14 @@ def density_derivatives(pts, wfx, basis, block=DERIV_BLOCK, hessian=True, elf_on
         grad_mo = 2.0 * np.einsum("kpi,pi->pk", dphi, nphi)
         out["rho"][idx] = rho_mo
         out["gradient"][idx] = grad_mo
+        if second:
+            w = nphi @ C.T
+            h6 = np.empty((nb, 6))
+            for q, (i, j) in enumerate(_HESS_PAIRS):
+                h6[:, q] = 2.0 * ((dphi[i] * dphi[j]) @ occ + (w * prim[4 + q]).sum(axis=1))
+            out["h6"][idx] = h6
+        if not extras:
+            return
         phi2 = phi * phi
         if "phi2" in out:
             out["phi2"][idx] = phi2
@@ -193,11 +206,6 @@ def density_derivatives(pts, wfx, basis, block=DERIV_BLOCK, hessian=True, elf_on
         out["spin"][idx] = phi2 @ dspin
         out["G_xyz"][idx] = 0.5 * np.einsum("kpi,i->pk", dphi * dphi, occ)
         if second:
-            w = nphi @ C.T
-            h6 = np.empty((nb, 6))
-            for q, (i, j) in enumerate(_HESS_PAIRS):
-                h6[:, q] = 2.0 * ((dphi[i] * dphi[j]) @ occ + (w * prim[4 + q]).sum(axis=1))
-            out["h6"][idx] = h6
             out["K"][idx] = -0.5 * (w * (prim[4] + prim[5] + prim[6])).sum(axis=1)
             if alie_w is not None:
                 out["alie_num"][idx] = phi2 @ alie_w

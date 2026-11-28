@@ -266,15 +266,26 @@ def _edf(pts, atcoords, e_center, e_alpha, e_coef):
     return out
 
 
+@njit(nogil=True, cache=True)
+def _morton_key(q):
+    """Interleave the low 20 bits of the three lattice indices (bit b of axis k at 3b + k)."""
+    key = np.zeros(q.shape[0], dtype=np.int64)
+    for p in range(q.shape[0]):
+        v = 0
+        for bit in range(20):
+            for k in range(3):
+                v |= ((q[p, k] >> bit) & 1) << (3 * bit + k)
+        key[p] = v
+    return key
+
+
 def _morton_order(pts, cell=1.0):
     """Points sorted along a Z-order curve on a `cell`-Bohr lattice, so each
     block of consecutive points is spatially compact."""
+    if len(pts) <= 1:
+        return np.arange(len(pts))
     q = np.floor((pts - pts.min(axis=0)) / cell).astype(np.int64)
-    key = np.zeros(len(pts), dtype=np.int64)
-    for bit in range(20):
-        for k in range(3):
-            key |= ((q[:, k] >> bit) & 1) << (3 * bit + k)
-    return np.argsort(key, kind="stable")
+    return np.argsort(_morton_key(q), kind="stable")
 
 
 def orbital_values(pts, coords, basis, block=512, cts=()):

@@ -244,5 +244,8 @@ def test_generated_contractions_are_up_to_date():
     import subprocess
     import sys
 
-    script = os.path.join(os.path.dirname(__file__), "..", "scripts", "gen_esp_contract.py")
-    assert subprocess.run([sys.executable, script, "--check"]).returncode == 0, "rerun scripts/gen_esp_contract.py"
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    script = os.path.join(root, "scripts", "gen_esp_contract.py")
+    # the checkout under test, not whichever one an editable install points at
+    env = {**os.environ, "PYTHONPATH": os.pathsep.join(filter(None, [root, os.environ.get("PYTHONPATH")]))}
+    assert subprocess.run([sys.executable, script, "--check"], env=env).returncode == 0, "rerun scripts/gen_esp_contract.py"

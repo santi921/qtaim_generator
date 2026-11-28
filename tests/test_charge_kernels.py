@@ -268,3 +268,26 @@ def test_density_derivatives_phi2_and_cts():
             assert np.array_equal(d[k], plain[k]), k
     with pytest.raises(ValueError):
         density_derivatives(pts, wfx, basis, hessian=False, phi2=True)
+
+
+def _ref_morton_order(pts, cell=1.0):
+    q = np.floor((pts - pts.min(axis=0)) / cell).astype(np.int64)
+    key = np.zeros(len(pts), dtype=np.int64)
+    for bit in range(20):
+        for k in range(3):
+            key |= ((q[:, k] >> bit) & 1) << (3 * bit + k)
+    return np.argsort(key, kind="stable")
+
+
+def test_morton_order_matches_the_numpy_key():
+    from qtaim_gen.source.core.charge_engine import _morton_order
+
+    rng = np.random.default_rng(3)
+    for n, scale in ((0, 1.0), (1, 1.0), (2, 1.0), (33, 0.2), (1000, 5.0), (5000, 3e6)):
+        pts = rng.normal(scale=scale, size=(n, 3))
+        if n > 4:
+            pts[n // 2:] = np.round(pts[n // 2:])  # ties on the lattice
+        if n == 0:
+            assert len(_morton_order(pts)) == 0
+            continue
+        assert np.array_equal(_morton_order(pts), _ref_morton_order(pts)), (n, scale)
