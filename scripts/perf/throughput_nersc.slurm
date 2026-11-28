@@ -40,6 +40,7 @@ mkdir -p $TREE logs
 SLICE=$TREE/jobs.txt
 head -n $N $LIST > $SLICE
 echo "branch: $(git -C $CODE rev-parse --abbrev-ref HEAD) $(git -C $CODE rev-parse --short HEAD); mix ${N_PAR}x${THREADS}; $(wc -l < $SLICE) jobs"
+python -c "import numba; print('numba', numba.__version__, 'USING_SVML', numba.config.USING_SVML)"
 
 # RSS of every process of this user every 15 s (epoch pid ppid kB command), for peak memory per
 # worker (with its children, e.g. orca_2mkl and Multiwfn) and per node

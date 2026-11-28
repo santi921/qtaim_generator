@@ -183,3 +183,66 @@ def test_angular_momentum_beyond_h_is_refused():
     wfx, basis = _two_primitive_system((6, 0, 0), (0, 0, 0), [0.0, 0.0, 0.0], [1.0, 0.0, 0.0], 1.0, 1.0)
     with pytest.raises(ValueError, match="beyond h"):
         esp.esp_pairs(wfx, basis)
+
+
+def _kernel_points(wfx):
+    """CHELPG fitting points, the nuclei (T = 0 for pairs centred there) and a few far points."""
+    from qtaim_gen.source.core.chelpg import chelpg_points, chelpg_radii
+
+    pts = chelpg_points(wfx["coords"], chelpg_radii(wfx["atnums"]))
+    far = wfx["coords"].mean(axis=0) + np.array([[30.0, 0.0, 0.0], [0.0, -45.0, 12.0], [80.0, 80.0, -80.0]])
+    return np.vstack([pts[::3], wfx["coords"], far])
+
+
+@pytest.mark.parametrize("name", ["XeCl4_step2_0_1", "rmechdb_652_step10_0_2"])
+def test_blocked_kernel_matches_the_per_point_kernel(name):
+    from qtaim_gen.source.core import esp
+    from qtaim_gen.source.core.charge_engine import prepare_basis, read_wfx
+
+    wfx = read_wfx(os.path.join(FIXTURES, "charge_engine", name, "orca.wfx"))
+    basis = prepare_basis(wfx)
+    pts = _kernel_points(wfx)
+    pairs = esp.esp_pairs(wfx, basis)
+    want = esp._esp_e_points(pts, *pairs, esp.BOYS_REFERENCE, esp.BOYS_TABLE, esp._INV_FACT, esp.NTRI,
+                             esp.OP_DIR, esp.OP_S1, esp.OP_S2, esp.OP_C)
+    got = esp.electrostatic_potential(pts, wfx, basis, pairs)[1]
+    assert np.allclose(got, want, rtol=1e-13, atol=1e-13)
+
+
+def test_blocked_kernel_does_not_depend_on_threads_or_blocks():
+    import numba
+
+    from qtaim_gen.source.core import esp
+    from qtaim_gen.source.core.charge_engine import prepare_basis, read_wfx
+
+    wfx = read_wfx(os.path.join(FIXTURES, "charge_engine", "XeCl4_step2_0_1", "orca.wfx"))
+    basis = prepare_basis(wfx)
+    pts = _kernel_points(wfx)
+    pairs = esp.esp_pairs(wfx, basis)
+    before = numba.get_num_threads()
+    try:
+        runs = []
+        for threads, block in ((1, None), (min(4, numba.config.NUMBA_NUM_THREADS), None), (1, 64), (1, 1000)):
+            numba.set_num_threads(threads)
+            runs.append(esp.electrostatic_potential(pts, wfx, basis, pairs, block=block)[1])
+    finally:
+        numba.set_num_threads(before)
+    for r in runs[1:]:
+        assert np.array_equal(r, runs[0])
+
+
+def test_far_field_thresholds():
+    gammaincc = pytest.importorskip("scipy.special").gammaincc
+    from qtaim_gen.source.core import esp
+
+    for n, t in enumerate(esp.FAR_T):
+        assert gammaincc(n + 0.5, t) <= 3e-17 < gammaincc(n + 0.5, t - 0.5)
+    assert esp.FAR_T.max() < esp.NEAR_TMAX
+
+
+def test_generated_contractions_are_up_to_date():
+    import subprocess
+    import sys
+
+    script = os.path.join(os.path.dirname(__file__), "..", "scripts", "gen_esp_contract.py")
+    assert subprocess.run([sys.executable, script, "--check"]).returncode == 0, "rerun scripts/gen_esp_contract.py"

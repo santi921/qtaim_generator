@@ -108,7 +108,7 @@ _HESS_PAIRS = np.array([(0, 0), (1, 1), (2, 2), (0, 1), (0, 2), (1, 2)])
 
 
 @limit_blas_threads
-def density_derivatives(pts, wfx, basis, block=DERIV_BLOCK, hessian=True, elf_only=False):
+def density_derivatives(pts, wfx, basis, block=DERIV_BLOCK, hessian=True, elf_only=False, phi2=False, cts=()):
     """rho, its gradient and Hessian (MOs + EDF) at every point, and the MO-only
     parts point_properties needs. hessian=False returns only rho and its gradient
     (grad rho = 2 w . grad chi), which needs MO values but no MO gradients (rho_mo, grad_mo, spin, alpha/beta
@@ -121,7 +121,12 @@ def density_derivatives(pts, wfx, basis, block=DERIV_BLOCK, hessian=True, elf_on
     the groups whose exp-cutoff sphere reaches the block; MO values and gradients
     from one product with the coefficients; then the back-projection
     w = (n phi) C^T, so sum_i n_i phi_i d2 phi_i = w . d2 chi without forming MO
-    second derivatives. Each block is reduced to per-point scalars in its worker."""
+    second derivatives. Each block is reduced to per-point scalars in its worker.
+
+    With hessian or elf_only, phi2=True also returns the squared MO values ("phi2", points x
+    MOs) and cts (coefficient matrices over the same primitives) the values of those
+    orbitals ("cts", a list), from the same primitive values: the charge engine's full_set 1
+    pass takes the density and the Fukui orbitals from here instead of a separate evaluation."""
     pts = np.ascontiguousarray(pts, dtype=float)
     n = len(pts)
     coords = wfx["coords"]
@@ -136,6 +141,12 @@ def density_derivatives(pts, wfx, basis, block=DERIV_BLOCK, hessian=True, elf_on
     ) + ((("K", ()), ("alie_num", ())) if second else ())
     for key, shape in extras:
         out[key] = np.zeros((n,) + shape)
+    if (phi2 or cts) and not (hessian or elf_only):
+        raise ValueError("phi2 and cts need hessian or elf_only")
+    if phi2:
+        out["phi2"] = np.zeros((n, ct.shape[1]))
+    if cts:
+        out["cts"] = [np.zeros((n, c.shape[1])) for c in cts]
     if not n:
         out.pop("h6")
         if second:
@@ -173,6 +184,10 @@ def density_derivatives(pts, wfx, basis, block=DERIV_BLOCK, hessian=True, elf_on
         out["rho"][idx] = rho_mo
         out["gradient"][idx] = grad_mo
         phi2 = phi * phi
+        if "phi2" in out:
+            out["phi2"][idx] = phi2
+        for c, o in zip(cts, out.get("cts", ())):
+            o[idx] = prim[0] @ c[cols]
         out["rho_mo"][idx] = rho_mo
         out["grad_mo"][idx] = grad_mo
         out["spin"][idx] = phi2 @ dspin

@@ -29,6 +29,7 @@ listed in docs/plans/2026-10-04-feat-one-pass-charge-engine-plan.md.
 import argparse
 import functools
 import json
+import logging
 import os
 import re
 import sys
@@ -167,43 +168,82 @@ def multiwfn_atom_grid(nrad=75, nang=434, radcut=10.0):
 # ---------------------------------------------------------------- kernels
 
 
+PRIM_STRIP = 64  # points per strip of _primitive_block (the strip's scratch stays in L1/L2)
+if getattr(numba.config, "USING_SVML", False):
+    # numba < 0.62 with Intel SVML vectorizes the strip kernels' exp with SVML, which need not
+    # match scalar libm exp in the last bit: values then differ from a build without it at roundoff
+    logging.getLogger(__name__).warning("numba uses Intel SVML: primitive values may differ from builds "
+                                        "without it in the last bit (docs/engine_roadmap/perf_plan.md)")
+
+
 @njit(nogil=True, cache=True)
 def _primitive_block(pts, atcoords, groups, g_center, g_alpha, g_start, g_end, lmn, ncols):
     """Values of the primitives of `groups` (one column each, in group order) at
     every point (orbderv's GTF part), zero where Multiwfn's exp cutoff drops
     them. Callers pass only the groups whose cutoff sphere reaches the block.
-    Serial and GIL-free: orbital_values runs one block per worker thread."""
+    Serial and GIL-free: orbital_values runs one block per worker thread.
+
+    Computed on strips of PRIM_STRIP points with the point loop innermost, so the
+    distance, exp and monomial loops vectorize, then copied into the row-major block:
+    every value is the same product in the same order as a point-by-point loop
+    (exp(-a r^2), then one factor of dx, dy, dz per power)."""
     n = pts.shape[0]
     out = np.zeros((n, ncols))
-    for ip in range(n):
-        x, y, z = pts[ip, 0], pts[ip, 1], pts[ip, 2]
+    S = PRIM_STRIP
+    sc = np.empty((ncols, S))
+    dx = np.empty(S)
+    dy = np.empty(S)
+    dz = np.empty(S)
+    r2 = np.empty(S)
+    e = np.empty(S)
+    for p0 in range(0, n, S):
+        m = min(S, n - p0)
         col = 0
         last = -1
-        dx = dy = dz = r2 = 0.0
         for gi in range(groups.shape[0]):
             g = groups[gi]
             a = g_center[g]
             if a != last:
-                dx = x - atcoords[a, 0]
-                dy = y - atcoords[a, 1]
-                dz = z - atcoords[a, 2]
-                r2 = dx * dx + dy * dy + dz * dz
+                ax, ay, az = atcoords[a, 0], atcoords[a, 1], atcoords[a, 2]
+                for p in range(m):
+                    dx[p] = pts[p0 + p, 0] - ax
+                    dy[p] = pts[p0 + p, 1] - ay
+                    dz[p] = pts[p0 + p, 2] - az
+                    r2[p] = dx[p] * dx[p] + dy[p] * dy[p] + dz[p] * dz[p]
                 last = a
-            ar2 = g_alpha[g] * r2
-            if ar2 > EXP_CUTOFF:
-                col += g_end[g] - g_start[g]
-                continue
-            e = np.exp(-ar2)
-            for p in range(g_start[g], g_end[g]):
-                v = e
-                for _ in range(lmn[p, 0]):
-                    v *= dx
-                for _ in range(lmn[p, 1]):
-                    v *= dy
-                for _ in range(lmn[p, 2]):
-                    v *= dz
-                out[ip, col] = v
+            alpha = g_alpha[g]
+            ncut = 0
+            for p in range(m):
+                ar2 = alpha * r2[p]
+                if ar2 > EXP_CUTOFF:
+                    e[p] = 0.0
+                    ncut += 1
+                else:
+                    e[p] = np.exp(-ar2)
+            for q in range(g_start[g], g_end[g]):
+                row = sc[col]
+                for p in range(m):
+                    row[p] = e[p]
+                for _ in range(lmn[q, 0]):
+                    for p in range(m):
+                        row[p] *= dx[p]
+                for _ in range(lmn[q, 1]):
+                    for p in range(m):
+                        row[p] *= dy[p]
+                for _ in range(lmn[q, 2]):
+                    for p in range(m):
+                        row[p] *= dz[p]
+                if ncut:
+                    # a dropped primitive is +0.0, not 0 x (negative distance) = -0.0
+                    for p in range(m):
+                        if e[p] == 0.0:
+                            row[p] = 0.0
                 col += 1
+        for c0 in range(0, ncols, 8):
+            c1 = min(ncols, c0 + 8)
+            for p in range(m):
+                for c in range(c0, c1):
+                    out[p0 + p, c] = sc[c, p]
     return out
 
 
@@ -237,17 +277,22 @@ def _morton_order(pts, cell=1.0):
     return np.argsort(key, kind="stable")
 
 
-def orbital_values(pts, coords, basis, block=512):
+def orbital_values(pts, coords, basis, block=512, cts=()):
     """Occupied MO values at every point. Points are taken in spatially compact
     blocks; per block only primitive groups whose exp-cutoff sphere reaches the
     block's bounding box are evaluated, and the MOs follow from one dense
     matrix product with their coefficients. Blocks run on numba.get_num_threads()
-    worker threads, each with single-threaded BLAS (see limit_blas_threads)."""
+    worker threads, each with single-threaded BLAS (see limit_blas_threads).
+
+    cts: further coefficient matrices over the same primitives (rows in basis["ct"]
+    order, e.g. another orbital set of the same wavefunction), multiplied with the same
+    primitive values; then the return value is [values, values for each of cts]."""
     pts = np.asarray(pts, dtype=float)
     ct = basis["ct"]
     out = np.empty((len(pts), ct.shape[1]))
+    extra = [np.empty((len(pts), c.shape[1])) for c in cts]
     if not len(pts):
-        return out
+        return [out] + extra if cts else out
     order = _morton_order(pts)
     sorted_pts = np.ascontiguousarray(pts[order])
     gs, ge, ga, gc = basis["g_start"], basis["g_end"], basis["g_alpha"], basis["g_center"]
@@ -262,6 +307,8 @@ def orbital_values(pts, coords, basis, block=512):
         cols = np.arange(n.sum()) + np.repeat(gs[groups] - (np.cumsum(n) - n), n)
         prim = _primitive_block(blk, coords, groups, gc, ga, gs, ge, basis["lmn"], len(cols))
         out[order[s0 : s0 + block]] = prim @ ct[cols]
+        for c, o in zip(cts, extra):
+            o[order[s0 : s0 + block]] = prim @ c[cols]
 
     starts = range(0, len(pts), block)
     nthreads = numba.get_num_threads()
@@ -271,7 +318,7 @@ def orbital_values(pts, coords, basis, block=512):
     else:
         with ThreadPoolExecutor(nthreads) as pool:
             list(pool.map(one_block, starts))
-    return out
+    return [out] + extra if cts else out
 
 
 @njit(nogil=True, cache=True)
@@ -280,66 +327,83 @@ def _primitive_block_derivs(pts, atcoords, groups, g_center, g_alpha, g_start, g
     with q = value, d/dx, d/dy, d/dz, d2/dx2, d2/dy2, d2/dz2, d2/dxdy, d2/dxdz,
     d2/dydz. For x^l exp(-a r^2) the 1D factors are f0 = x^l,
     f1 = l x^(l-1) - 2a x^(l+1), f2 = l(l-1) x^(l-2) - 2a(2l+1) x^l + 4a^2 x^(l+2).
-    nderiv=1 returns only the first four rows (same values)."""
+    nderiv=1 returns only the first four rows (same values).
+
+    Computed on strips of PRIM_STRIP points with the point loop innermost (vectorizable),
+    every value the same expression in the same order as a point-by-point loop; dropped
+    primitives are +0.0."""
     n = pts.shape[0]
-    out = np.zeros((4 if nderiv == 1 else 10, n, ncols))
-    f = np.empty((3, 3))
-    d = np.zeros(3)
-    for ip in range(n):
-        x, y, z = pts[ip, 0], pts[ip, 1], pts[ip, 2]
+    nq = 4 if nderiv == 1 else 10
+    out = np.zeros((nq, n, ncols))
+    S = PRIM_STRIP
+    d = np.empty((3, S))
+    r2 = np.empty(S)
+    e = np.empty(S)
+    f = np.empty((3, 3, S))
+    for p0 in range(0, n, S):
+        m = min(S, n - p0)
         col = 0
         last = -1
-        r2 = 0.0
         for gi in range(groups.shape[0]):
             g = groups[gi]
             a = g_center[g]
             if a != last:
-                d[0] = x - atcoords[a, 0]
-                d[1] = y - atcoords[a, 1]
-                d[2] = z - atcoords[a, 2]
-                r2 = d[0] * d[0] + d[1] * d[1] + d[2] * d[2]
+                for p in range(m):
+                    d[0, p] = pts[p0 + p, 0] - atcoords[a, 0]
+                    d[1, p] = pts[p0 + p, 1] - atcoords[a, 1]
+                    d[2, p] = pts[p0 + p, 2] - atcoords[a, 2]
+                    r2[p] = d[0, p] * d[0, p] + d[1, p] * d[1, p] + d[2, p] * d[2, p]
                 last = a
             alpha = g_alpha[g]
-            ar2 = alpha * r2
-            if ar2 > EXP_CUTOFF:
+            ncut = 0
+            for p in range(m):
+                ar2 = alpha * r2[p]
+                if ar2 > EXP_CUTOFF:
+                    e[p] = 0.0
+                    ncut += 1
+                else:
+                    e[p] = np.exp(-ar2)
+            if ncut == m:
                 col += g_end[g] - g_start[g]
                 continue
-            e = np.exp(-ar2)
-            for p in range(g_start[g], g_end[g]):
+            for q in range(g_start[g], g_end[g]):
                 for k in range(3):
-                    lk = lmn[p, k]
-                    u = d[k]
-                    pk = 1.0
-                    for _ in range(lk):
-                        pk *= u
-                    pkm1 = 0.0
-                    if lk >= 1:
-                        pkm1 = 1.0
-                        for _ in range(lk - 1):
-                            pkm1 *= u
-                    f[k, 0] = pk
-                    f[k, 1] = lk * pkm1 - 2.0 * alpha * pk * u
-                    if nderiv == 1:
+                    lk = lmn[q, k]
+                    for p in range(m):
+                        u = d[k, p]
+                        pk = 1.0
+                        for _ in range(lk):
+                            pk *= u
+                        pkm1 = 0.0
+                        if lk >= 1:
+                            pkm1 = 1.0
+                            for _ in range(lk - 1):
+                                pkm1 *= u
+                        f[k, 0, p] = pk
+                        f[k, 1, p] = lk * pkm1 - 2.0 * alpha * pk * u
+                        if nderiv != 1:
+                            pkm2 = 0.0
+                            if lk >= 2:
+                                pkm2 = 1.0
+                                for _ in range(lk - 2):
+                                    pkm2 *= u
+                            f[k, 2, p] = lk * (lk - 1) * pkm2 - 2.0 * alpha * (2 * lk + 1) * pk + 4.0 * alpha * alpha * pk * u * u
+                for p in range(m):
+                    ep = e[p]
+                    if ep == 0.0:
                         continue
-                    pkm2 = 0.0
-                    if lk >= 2:
-                        pkm2 = 1.0
-                        for _ in range(lk - 2):
-                            pkm2 *= u
-                    f[k, 2] = lk * (lk - 1) * pkm2 - 2.0 * alpha * (2 * lk + 1) * pk + 4.0 * alpha * alpha * pk * u * u
-                out[0, ip, col] = f[0, 0] * f[1, 0] * f[2, 0] * e
-                out[1, ip, col] = f[0, 1] * f[1, 0] * f[2, 0] * e
-                out[2, ip, col] = f[0, 0] * f[1, 1] * f[2, 0] * e
-                out[3, ip, col] = f[0, 0] * f[1, 0] * f[2, 1] * e
-                if nderiv == 1:
-                    col += 1
-                    continue
-                out[4, ip, col] = f[0, 2] * f[1, 0] * f[2, 0] * e
-                out[5, ip, col] = f[0, 0] * f[1, 2] * f[2, 0] * e
-                out[6, ip, col] = f[0, 0] * f[1, 0] * f[2, 2] * e
-                out[7, ip, col] = f[0, 1] * f[1, 1] * f[2, 0] * e
-                out[8, ip, col] = f[0, 1] * f[1, 0] * f[2, 1] * e
-                out[9, ip, col] = f[0, 0] * f[1, 1] * f[2, 1] * e
+                    o = p0 + p
+                    out[0, o, col] = f[0, 0, p] * f[1, 0, p] * f[2, 0, p] * ep
+                    out[1, o, col] = f[0, 1, p] * f[1, 0, p] * f[2, 0, p] * ep
+                    out[2, o, col] = f[0, 0, p] * f[1, 1, p] * f[2, 0, p] * ep
+                    out[3, o, col] = f[0, 0, p] * f[1, 0, p] * f[2, 1, p] * ep
+                    if nderiv != 1:
+                        out[4, o, col] = f[0, 2, p] * f[1, 0, p] * f[2, 0, p] * ep
+                        out[5, o, col] = f[0, 0, p] * f[1, 2, p] * f[2, 0, p] * ep
+                        out[6, o, col] = f[0, 0, p] * f[1, 0, p] * f[2, 2, p] * ep
+                        out[7, o, col] = f[0, 1, p] * f[1, 1, p] * f[2, 0, p] * ep
+                        out[8, o, col] = f[0, 1, p] * f[1, 0, p] * f[2, 1, p] * ep
+                        out[9, o, col] = f[0, 0, p] * f[1, 1, p] * f[2, 1, p] * ep
                 col += 1
     return out
 
@@ -395,44 +459,78 @@ def density(pts, coords, basis, wfx, phi2=None):
     return rho, rho_a - rho_b
 
 
+BECKE_FIRST = 5  # nearest atoms whose factors _becke multiplies in for every atom at once
+
+
 @njit(parallel=True, cache=True)
 def _becke(pts, atcoords, rinv, aij, tol):
     """Normalized Becke weights of every atom at every point (BeckePvec).
 
     Atoms are visited nearest first. The pair factors s are <= 1, so a partial
     product already below tol * (largest P so far) bounds the full product;
-    that atom's P is set to zero without looping over the remaining atoms."""
+    that atom's P is set to zero without looping over the remaining atoms.
+
+    In two phases with the same factors in the same order: first the factors of the
+    BECKE_FIRST nearest atoms for every atom j in one loop over j (vectorizable),
+    then the remaining factors atom by atom with the cut test. A product only
+    decreases, so an atom whose product after the first phase is below the cut would
+    have been cut within it, and one that is not was not."""
     npts = pts.shape[0]
     nat = atcoords.shape[0]
     w = np.zeros((npts, nat))
+    aijT = np.ascontiguousarray(aij.T)
+    nf = min(BECKE_FIRST, nat)
     for ip in prange(npts):
         r = np.empty(nat)
+        part = np.empty(nat)
+        s = np.empty(nat)
         for j in range(nat):
             dx = pts[ip, 0] - atcoords[j, 0]
             dy = pts[ip, 1] - atcoords[j, 1]
             dz = pts[ip, 2] - atcoords[j, 2]
             r[j] = np.sqrt(dx * dx + dy * dy + dz * dz)
         order = np.argsort(r)
-        pmax = 0.0
-        ptot = 0.0
-        for jj in range(nat):
-            j = order[jj]
-            pj = 1.0
-            for kk in range(nat):
-                k = order[kk]
-                if k == j:
-                    continue
-                mu = (r[j] - r[k]) * rinv[j, k]
-                a = aij[j, k]
+        for j in range(nat):
+            part[j] = 1.0
+        for kk in range(nf):
+            k = order[kk]
+            rk = r[k]
+            for j in range(nat):
+                mu = (r[j] - rk) * rinv[k, j]
+                a = aijT[k, j]
                 if a != 0.0:
                     mu = mu + a * (1.0 - mu * mu)
                 t = 1.5 * mu - 0.5 * mu * mu * mu
                 t = 1.5 * t - 0.5 * t * t * t
                 t = 1.5 * t - 0.5 * t * t * t
-                pj *= 0.5 * (1.0 - t)
-                if pj < tol * pmax:
-                    pj = 0.0
-                    break
+                s[j] = 0.5 * (1.0 - t)
+            s[k] = 1.0
+            for j in range(nat):
+                part[j] *= s[j]
+        pmax = 0.0
+        ptot = 0.0
+        for jj in range(nat):
+            j = order[jj]
+            pj = part[j]
+            if pj < tol * pmax:
+                pj = 0.0
+            else:
+                rj = r[j]
+                for kk in range(nf, nat):
+                    k = order[kk]
+                    if k == j:
+                        continue
+                    mu = (rj - r[k]) * rinv[j, k]
+                    a = aij[j, k]
+                    if a != 0.0:
+                        mu = mu + a * (1.0 - mu * mu)
+                    t = 1.5 * mu - 0.5 * mu * mu * mu
+                    t = 1.5 * t - 0.5 * t * t * t
+                    t = 1.5 * t - 0.5 * t * t * t
+                    pj *= 0.5 * (1.0 - t)
+                    if pj < tol * pmax:
+                        pj = 0.0
+                        break
             w[ip, j] = pj
             ptot += pj
             if pj > pmax:
@@ -1470,6 +1568,10 @@ def run(wfx_path, nrad=75, nang=434, radcut=10.0, bond_nrad=45, bond_nang=170, f
                 <= FUKUI_COEF_TOL * np.abs(fwfx["coeffs"][sel][f_occd]).max()
             vbasis = prepare_basis(fwfx, keep=sel & (fwfx["occ"] == 0) if reuse_occ else sel)
             abasis = prepare_basis(fwfx, keep=sel)
+            # with the same primitives the Fukui orbitals come from the density pass's primitive
+            # values (one more matrix product per block) instead of a second evaluation
+            share_prims = same_prims and all(np.array_equal(basis[k], vbasis[k])
+                                             for k in ("g_start", "g_end", "g_alpha", "g_center", "lmn"))
             # CDFT option 6 integrates every radial point of the atom grid, also beyond radcut
             # (MW/CDFT.f90:822), where diffuse frontier orbitals of charged clusters still have
             # weight; those shells are evaluated for the Fukui functions only
@@ -1483,9 +1585,26 @@ def run(wfx_path, nrad=75, nang=434, radcut=10.0, bond_nrad=45, bond_nang=170, f
     for b in range(nat):
         pts = grid_pts + coords[b]
         t0 = time.perf_counter()
-        phi2 = orbital_values(pts, coords, basis) ** 2
-        rho, spin = density(pts, coords, basis, wfx, phi2=phi2)
-        t["density"] += time.perf_counter() - t0
+        if level1:
+            # one pass for the density, its derivatives (ELF, IBSI) and the Fukui orbitals: the
+            # values come from the derivative kernel's primitives (roundoff-level against the
+            # full_set 0 pass, which needs no derivatives)
+            d = density_derivatives(pts, wfx, basis, elf_only=not deriv_fuzzy, phi2=True,
+                                    cts=(vbasis["ct"],) if fukui_ok and share_prims else ())
+            phi2 = d.pop("phi2")
+            if fukui_ok and share_prims:
+                vphi = d.pop("cts")[0]
+            rho, spin = d["rho"], d["spin"]
+        elif fukui_ok and share_prims:
+            phi, vphi = orbital_values(pts, coords, basis, cts=(vbasis["ct"],))
+            phi2 = phi ** 2
+            del phi
+            rho, spin = density(pts, coords, basis, wfx, phi2=phi2)
+        else:
+            phi2 = orbital_values(pts, coords, basis) ** 2
+            rho, spin = density(pts, coords, basis, wfx, phi2=phi2)
+        # at full_set 1 the merged pass is the derivative pass, timed as such
+        t["derivatives" if level1 else "density"] += time.perf_counter() - t0
         t0 = time.perf_counter()
         w = _becke(pts, coords, rinv, aij, BECKE_TOL)
         t["becke"] += time.perf_counter() - t0
@@ -1509,7 +1628,6 @@ def run(wfx_path, nrad=75, nang=434, radcut=10.0, bond_nrad=45, bond_nang=170, f
             # fuzzyana isel=1 with functions 9 (ELF), 2 (|grad rho|) and 3 (Laplacian):
             # the same Becke-weighted molecular grid as becke_fuzzy_density
             t0 = time.perf_counter()
-            d = density_derivatives(pts, wfx, basis, elf_only=not deriv_fuzzy)
             fz["elf"] += w.T @ (wb * elf_lol(d, wfx)[0])
             if deriv_fuzzy:
                 fz["grad"] += w.T @ (wb * np.sqrt((d["gradient"] ** 2).sum(axis=1)))
@@ -1542,11 +1660,13 @@ def run(wfx_path, nrad=75, nang=434, radcut=10.0, bond_nrad=45, bond_nang=170, f
                 # as the Hirshfeld charge: atom b's weight on its own grid, zero-promolecule
                 # points skipped (Multiwfn CDFT option 6), plus the shells beyond radcut
                 t0 = time.perf_counter()
+                if not share_prims:
+                    vphi = orbital_values(pts, coords, vbasis)
                 if reuse_occ:
                     fcomp[b, f_occd] = hw @ phi2[:, occ_cols]
-                    fcomp[b, f_virt] = hw @ orbital_values(pts, coords, vbasis) ** 2
+                    fcomp[b, f_virt] = hw @ vphi ** 2
                 else:
-                    fcomp[b] = hw @ orbital_values(pts, coords, vbasis) ** 2
+                    fcomp[b] = hw @ vphi ** 2
                 opts = out_pts + coords[b]
                 ho, _, _ = _hirshfeld_mwfn(opts, coords, *pro)
                 how = ho[:, b] * out_wts
