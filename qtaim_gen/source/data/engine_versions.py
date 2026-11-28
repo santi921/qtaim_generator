@@ -24,7 +24,7 @@ from qtaim_gen.source.data.multiwfn import (
     SURFACE_ENGINE_ROUTINES,
 )
 
-ENGINE_VERSION = 10
+ENGINE_VERSION = 11
 
 # the sub-engine that produces each engine routine: the "by" of its provenance entry
 ROUTINE_ENGINE = {
@@ -66,6 +66,11 @@ ENGINE_CHANGES = {
          "note": "condensed Fukui functions (full_set 0): frontier-orbital and orbital-weighted f+ and f-, "
                  "Hirshfeld compositions on the main grid, spin-orbital convention, from the molden's "
                  "unoccupied orbitals"},
+    11: {"added": frozenset(), "changed": frozenset(MBIS_FAMILY),
+         "note": "MBIS fits end with a chord iteration (analytic Jacobian of the MBIS map) and stop when the "
+                 "estimated distance to the fixed point is below 1e-8 e / 1e-8 relative, instead of the "
+                 "per-step change (which left slow actinide fits up to 3.3e-5 e short); the fuzzy refit "
+                 "reuses the charge fit's Jacobian"},
 }
 
 

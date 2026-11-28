@@ -310,12 +310,59 @@ Phase 2.4 results (branch perf/phase2b, 2026-11-27), surface engine narrow band,
   was kept (P4) and the block variant removed. The ESP surface gains less because the ESP at the
   vertices, untouched here, is most of its time.
 
+Phase 2.6 results (branch perf/phase2b, 2026-11-28), MBIS chord fit and distance stopping rule
+(P1c), value-changing, ENGINE_VERSION 11 (MBIS_FAMILY):
+
+- Analytic sparse Jacobian of the MBIS map in (log populations, log widths)
+  (`_mbis_jacobian_matrix`, checked against finite differences); chord iteration
+  x <- x + (I - J)^-1 (G(x) - x) with one factorization (`_mbis_chord`). A fit switches to the
+  chord when its per-step change is below MBIS_CHORD_SWITCH (1e-3); a check fit within
+  MBIS_CHORD_NEAR (0.1 in log parameters) of the default fit's fixed point borrows the default's
+  Jacobian; the fuzzy refit starts from the charge fit with its Jacobian.
+- Stopping rule: the chord step (estimated distance to the fixed point) below MBIS_TOL (1e-8 e in
+  populations, 1e-8 relative in widths). After two failed chords the old per-step rule applies.
+  The meta records which rule each fit met (`mbis_stop_rule`).
+- 113-job set (1 thread, 12 jobs at a time), trunk (0014371) vs branch vs a 1e-12 step-rule
+  reference continuing trunk's iteration. Selection identical on all 113. Rule met: selected charge
+  fit distance 109 / step 4, fuzzy refit distance 112 / step 1. Distance to the reference (e):
+
+  | quantity | trunk max | trunk median | trunk jobs > 1e-8 | branch max | branch median | branch jobs > 1e-8 |
+  |---|---|---|---|---|---|---|
+  | charges | 4.6e-5 | 2.3e-8 | 78 | 3.1e-4 | 6.9e-12 | 3 |
+  | fuzzy-refit charges | 1.6e-7 | 2.9e-8 | 72 | 8.2e-5 | 1.2e-11 | 3 |
+  | fuzzy-refit shell populations | 2.9e-5 | 1.4e-7 | 109 | 2.1e-3 | 5.8e-11 | 3 |
+
+  | cost | trunk | branch | ratio |
+  |---|---|---|---|
+  | selection, map evaluations | 189793 | 174385 | 1.09x |
+  | fuzzy refit, map evaluations | 6498 | 2419 | 2.69x |
+  | selection + fuzzy refit, s | 6371 | 5855 | 1.09x |
+  | fuzzy refit, s | 401 | 120 | 3.34x |
+
+  The selection gains little because stalled check fits (Phase 3) dominate it.
+- Fixed-point clusters on actinides (accepted 2026-11-28): the branch maxima are PuNO5Cl3 spin 1
+  (charges 3.1e-4 e), PuNO5Cl3 spin 3 (fuzzy refit 8.2e-5 e, outermost Pu shell 2.1e-3 e) and
+  UN3O11 R2SCAN (fuzzy refit 7.5e-6 e). Both the branch and the reference end points are fixed
+  points (fresh-Jacobian distance 1e-11 to 3e-10); the residual on the line between them is a
+  sawtooth with jumps, so the map (with Multiwfn's density cutoffs, MBIS_DENCUT and the reach
+  limits) is discontinuous there, and a nearly flat direction (smallest singular value of I - J
+  about 1.7e-3) leaves a cluster of fixed points whose objectives differ by at most 4e-9 relative
+  (below MBIS_TIE_REL; the branch's is the larger in all three). Which one a fit reaches depends on
+  its path: actinide outer-shell populations are reproducible to about 1e-3 e and charges to about
+  3e-4 e whatever the stopping rule. The reference matches trunk on these jobs only because it
+  continues trunk's iteration. Sm3Ir3 (4.6e-5 e) is the same case for trunk and branch alike.
+- Per-guess convergence vs trunk: 298 both, 37 neither, 3 trunk-only failures now converge, 1
+  trunk-only success now fails (rmechdb_1392 x0.6 check fit, Mg shell near merging, |d| / |r|
+  about 600): the 1e-12 reference fails it too, trunk's step rule passed about 6e-6 short of the
+  fixed point. Selection unchanged.
+
 ## Phase 3: value-changing options (P3)
 
 | Option | Prototype gain | What to measure before deciding |
 |---|---|---|
 | MBIS: stop a stalled check fit at about evaluation 200 when its objective is below the best converged fit | selection 2.4-3.7x on jobs with stalled checks | selection flips on the 112-job set and the NERSC openac 440 (actinides untested) |
-| MBIS stopping rule (agreed 2026-11-27, P1c): replace "no population moves more than 1e-8 e in one step" with a rule that bounds the distance to the fixed point (e.g. step size divided by (1 - estimated contraction rate), or a tighter tolerance once the plain fallback runs) | none (accuracy fix; may cost cycles) | how far stored MBIS charges and fuzzy values move on the 112-job set and openac 440; cycle counts; the Pu nitrate's 3.3e-5 e case; the LRC Re4 job whose charge fit and fuzzy refit both run to their caps unconverged (41432 s of MBIS) |
+| MBIS stopping rule (agreed 2026-11-27, P1c): done in 2.6 (chord distance rule, ENGINE_VERSION 11); still to measure on the cluster: openac 440 and the LRC Re4 job whose charge fit and fuzzy refit both ran to their caps unconverged (41432 s of MBIS) | - | - |
+| MBIS map continuity: smooth MBIS_DENCUT and the reach cutoffs so actinide fits stop landing on different members of a fixed-point cluster (2.6 results) | none (reproducibility, up to 3e-4 e on Pu) | changes Multiwfn parity; own ENGINE_VERSION bump |
 | QTAIM: drop seeds within 0.2 Bohr of an earlier seed; stop a seed within 0.03 Bohr of a CP of an earlier stage | 1.4-1.8x fewer Newton evaluations | CP-set changes on the LRC tier 2 set; the 0.0115 Bohr BCP-RCP case |
 | Bond paths: RK2 step 0.10 Bohr (stop radius unchanged) | 3.3x fewer evaluations | end-CP changes; 0 of 1,671 BCPs so far |
 

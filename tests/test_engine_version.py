@@ -24,9 +24,11 @@ def _write_provenance(folder, version, routines=None, generator=True):
     (path / provenance.PROVENANCE_FILE).write_text(json.dumps(prov))
 
 
-def test_mbis_recorded_before_version_5_is_stale():
+def test_mbis_recorded_before_version_11_is_stale():
+    # versions 5 (selection) and 11 (chord fit and distance stopping rule) changed the MBIS family
     assert not is_current("mbis", 4) and not is_current("mbis_fuzzy_spin", 4)
-    assert is_current("mbis", 5) and is_current("hirshfeld", 4)
+    assert not is_current("mbis", 10) and not is_current("mbis_fuzzy_density", 10)
+    assert is_current("mbis", 11) and is_current("hirshfeld", 4)
 
 
 def test_timing_total_skips_metadata():

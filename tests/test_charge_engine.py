@@ -698,7 +698,7 @@ def test_mbis_select_drops_failed_check_guesses(monkeypatch):
 
     above = []
 
-    def fake_fit(step, mshell, pop, sig, qbase, fallback=True, objective=None, fallback_above=None):
+    def fake_fit(step, mshell, pop, sig, qbase, fallback=True, objective=None, fallback_above=None, **chord):
         seen.append(fallback)
         above.append(fallback_above)
         r = results[round(float(sig[0, 0]), 2)]
@@ -812,3 +812,58 @@ def test_mbis_ecp_switch():
     assert "mbis" not in off and "mbis_fuzzy_density" not in off
     assert {"schemes": "mbis family", "reason": "ecp_disabled",
             "routines": ["mbis", "mbis_fuzzy_density", "mbis_fuzzy_spin"]} in off["_meta"]["skipped"]
+
+
+@pytest.mark.skipif(not HAS_NUMBA, reason="numba not installed")
+def test_mbis_jacobian_matches_finite_differences():
+    """The analytic Jacobian of the MBIS map (log populations, log widths of the live
+    shells) against central differences of the map itself."""
+    import numpy as np
+
+    from qtaim_gen.source.core import charge_engine as CE
+
+    grel, coords, td, atnums, qbase = _mbis_grid_density(os.path.join(FIXTURES, "XeCl4_step2_0_1", "orca.wfx"))
+    pairs = CE.mbis_pairs(grel, coords, td, atnums)
+    mshell, pop, sig = CE.mbis_guesses(atnums)[0][1]
+    for _ in range(30):  # away from the guess, not at the fixed point
+        pop, sig = CE._mbis_step(td, pairs, mshell, pop, sig)
+    live, jac = CE._mbis_jacobian_matrix(td, pairs, coords, mshell, pop, sig)
+    jac = jac.toarray()
+    n = int(live.sum())
+    x = np.concatenate([np.log(pop[live]), np.log(sig[live])])
+    h = 1e-5
+    for col in range(0, 2 * n, max(1, n // 4)):
+        out = []
+        for sgn in (1.0, -1.0):
+            xx = x.copy()
+            xx[col] += sgn * h
+            p, s = pop.copy(), sig.copy()
+            p[live], s[live] = np.exp(xx[:n]), np.exp(xx[n:])
+            pn, sn = CE._mbis_step(td, pairs, mshell, p, s)
+            out.append(np.concatenate([np.log(pn[live]), np.log(sn[live])]))
+        fd = (out[0] - out[1]) / (2 * h)
+        assert np.abs(fd - jac[:, col]).max() < 1e-6 * max(1.0, np.abs(fd).max()), col
+
+
+@pytest.mark.skipif(not HAS_NUMBA, reason="numba not installed")
+def test_mbis_chord_meets_the_distance_rule_closer_than_the_step_rule():
+    """With the chord endgame the fit stops on the estimated distance to the fixed point;
+    it lands within that tolerance of a far tighter step-rule fit, and the step-rule fit at
+    the same tolerance does not do better."""
+    import numpy as np
+
+    from qtaim_gen.source.core import charge_engine as CE
+
+    grel, coords, td, atnums, qbase = _mbis_grid_density(os.path.join(FIXTURES, "XeCl4_step2_0_1", "orca.wfx"))
+    pairs = CE.mbis_pairs(grel, coords, td, atnums)
+    step = lambda mm, pp, ss: CE._mbis_step(td, pairs, mm, pp, ss)  # noqa: E731
+    jac = lambda mm, pp, ss: CE._mbis_jacobian(td, pairs, coords, mm, pp, ss)  # noqa: E731
+    m0, p0, s0 = CE.mbis_guesses(atnums)[0][1]
+    ref = CE._mbis_converged(step, m0, p0, s0, qbase, tol=1e-12, maxcyc=20000)
+    rec = {}
+    new = CE._mbis_converged(step, m0, p0, s0, qbase, jac=jac, record=rec)
+    old = CE._mbis_converged(step, m0, p0, s0, qbase)
+    assert rec["rule"] == "distance" and rec["solver"] is not None
+    assert np.abs(new[2] - ref[2]).max() < 1e-8
+    assert np.abs(new[2] - ref[2]).max() <= np.abs(old[2] - ref[2]).max()
+    assert new[4] < old[4]

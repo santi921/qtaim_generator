@@ -642,7 +642,13 @@ MBIS_MAX_Z = 118
 MBIS_NRAD_PERIOD7 = 70  # MBIS grid radial points when any Z > 86 (Multiwfn's rule stops at 60)
 MBIS_MODE = "converged"  # "multiwfn" reproduces Multiwfn's stopping rule (parity tests)
 MBIS_GUESS = "fitted"  # converged mode's initial guess: free-atom fits, or "multiwfn" (mbis_initial_shells)
-MBIS_TOL = 1e-8  # converged mode: largest population change (e) and relative width change per step
+# converged mode: largest estimated distance to the fixed point, population (e) and relative width,
+# from the chord step (I - J)^-1 (G(x) - x); when the chord iteration fails twice, the per-step change
+MBIS_TOL = 1e-8
+MBIS_CHORD_SWITCH = 1e-3  # per-step change (e, relative width) below which a fit switches to the chord iteration
+MBIS_CHORD_NEAR = 0.1  # check fits: log-parameter distance to the default fit's fixed point that switches to its Jacobian
+MBIS_CHORD_MAXCYC = 60  # chord map evaluations before it gives up
+MBIS_CHORD_SLOW = 0.5  # from its third step, the chord gives up when its distance estimate shrinks by less than this
 MBIS_MAXCYC = 20000
 MBIS_ANDERSON = 6  # Anderson history length
 MBIS_ANDERSON_MAXCYC = 1000  # map evaluations before an accelerated fit is redone by plain iteration (see mbis_select)
@@ -858,7 +864,8 @@ def mbis_initial_shells(atnums):
     return mshell, pop, sig
 
 
-def mbis_fit(grel, coords, tmpden, atnums, qbase, crit=1e-4, maxcyc=500, mode=None, guess=None, *, status=False):
+def mbis_fit(grel, coords, tmpden, atnums, qbase, crit=1e-4, maxcyc=500, mode=None, guess=None, *, status=False,
+             solver=None, record=None):
     """MBIS shell fit from one guess (run() uses mbis_select in converged mode);
     returns the charges (qbase - population; not normalized,
     as printed for imode 0), the shell parameters the radial tables are built
@@ -870,8 +877,10 @@ def mbis_fit(grel, coords, tmpden, atnums, qbase, crit=1e-4, maxcyc=500, mode=No
     loop exits before replacing them). It can stop far from the fixed point: on
     30 local jobs, 4 ended more than 0.03 e from it (up to 0.25 e).
     mode "converged" (default, MBIS_MODE): Anderson-accelerated iteration to the
-    fixed point (_mbis_converged). guess: (mshell, pop, sig) in place of
-    mbis_initial_shells."""
+    fixed point (_mbis_converged) with the chord endgame and its distance rule.
+    guess: (mshell, pop, sig) in place of mbis_initial_shells; solver: a chord solver
+    to start from (the fuzzy refit reuses the charge fit's); record: see
+    _mbis_fit_converged."""
     mode = mode or MBIS_MODE
     if guess is not None:
         mshell, pop, sig = guess
@@ -885,7 +894,9 @@ def mbis_fit(grel, coords, tmpden, atnums, qbase, crit=1e-4, maxcyc=500, mode=No
     if mode == "converged":
         step = lambda mm, pp, ss: _mbis_step(tmpden, pairs, mm, pp, ss)  # noqa: E731
         objective = lambda mm, pp, ss: mbis_objective(grel, coords, tmpden, atnums, mm, pp, ss)  # noqa: E731
-        res, converged, _ = _mbis_fit_converged(step, mshell, pop, sig, qbase, objective=objective)
+        jac = lambda mm, pp, ss: _mbis_jacobian(tmpden, pairs, coords, mm, pp, ss)  # noqa: E731
+        res, converged, _ = _mbis_fit_converged(step, mshell, pop, sig, qbase, objective=objective, jac=jac,
+                                                start=solver, record=record)
         return (res, converged) if status else res
     last = np.zeros(len(atnums))
     for icyc in range(1, maxcyc + 1):
@@ -942,7 +953,181 @@ def mbis_merge_shells(mshell, pop, sig):
     return ms, p, s
 
 
-def _mbis_fit_converged(step, mshell, pop, sig, qbase, fallback=True, objective=None, fallback_above=None):
+def _mbis_live(mshell, pop):
+    """Shells of the model (k < mshell) with a positive population."""
+    act = np.zeros(pop.shape, dtype=bool)
+    for a, m in enumerate(mshell):
+        act[a, :m] = True
+    return act & (pop > 0)
+
+
+@njit(nogil=True, cache=True)
+def _mbis_jac_blocks(tmpden, pptr, pj, pd, mshell, amp, sig, dmax, dmax_atom, pair_id, npair, maxterms):
+    """Sums over the grid for the Jacobian of the MBIS map, with f_u = w t_u / rho0 and
+    h_u = d / sigma_u - 3 (d log t_u / d log sigma_u): per ordered atom pair (pair_id) and
+    shell pair, A = sum f_u f_v / w, B = sum f_u f_v h_v / w, C = sum d f_u f_v / w,
+    E = sum d f_u f_v h_v / w; per shell, sum f, f h, d f, d f h. Serial, in point order,
+    so the result does not depend on the thread count."""
+    nat, m = tmpden.shape
+    blocks = np.zeros((npair, 4, MBIS_MAXSHELL, MBIS_MAXSHELL))
+    dg = np.zeros((4, nat, MBIS_MAXSHELL))
+    tj = np.empty(maxterms, dtype=np.int64)
+    tk = np.empty(maxterms, dtype=np.int64)
+    tt = np.empty(maxterms)
+    tdd = np.empty(maxterms)
+    th = np.empty(maxterms)
+    f = np.empty(maxterms)
+    fh = np.empty(maxterms)
+    for ip in range(nat * m):
+        n = 0
+        rho0 = 0.0
+        for s in range(pptr[ip], pptr[ip + 1]):
+            j = pj[s]
+            d = pd[s]
+            if d > dmax_atom[j]:
+                continue
+            for k in range(mshell[j]):
+                if d > dmax[j, k]:
+                    continue
+                t = amp[j, k] * np.exp(-d / sig[j, k])
+                if t < MBIS_DENCUT:
+                    continue
+                tj[n] = j
+                tk[n] = k
+                tt[n] = t
+                tdd[n] = d
+                th[n] = d / sig[j, k] - 3.0
+                n += 1
+                rho0 += t
+        if rho0 > 0.0:
+            c = ip // m
+            w = tmpden[c, ip - c * m]
+            wr = w / rho0
+            winv = 1.0 / w
+            for u in range(n):
+                f[u] = wr * tt[u]
+                fh[u] = f[u] * th[u]
+            for u in range(n):
+                ju, ku = tj[u], tk[u]
+                fu = f[u]
+                fdu = fu * tdd[u]
+                dg[0, ju, ku] += fu
+                dg[1, ju, ku] += fh[u]
+                dg[2, ju, ku] += fdu
+                dg[3, ju, ku] += fdu * th[u]
+                a = fu * winv
+                ad = fdu * winv
+                for v in range(n):
+                    b = pair_id[ju, tj[v]]
+                    kv = tk[v]
+                    blocks[b, 0, ku, kv] += a * f[v]
+                    blocks[b, 1, ku, kv] += a * fh[v]
+                    blocks[b, 2, ku, kv] += ad * f[v]
+                    blocks[b, 3, ku, kv] += ad * fh[v]
+    return blocks, dg
+
+
+def _mbis_jacobian_matrix(tmpden, pairs, coords, mshell, pop, sig):
+    """The live shells (_mbis_live) and the sparse Jacobian J of the MBIS map in (log
+    populations, log widths) of those shells, at (mshell, pop, sig). Atom pairs farther
+    apart than the sum of their shells' reach never share a point and are left out.
+    None when a live shell gets no population from the map."""
+    from scipy import sparse
+
+    pptr, pj, pd, maxpairs = pairs
+    amp, dmax, dmax_atom = _mbis_amp_dmax(mshell, pop, sig)
+    nat = len(mshell)
+    dist = np.linalg.norm(coords[:, None, :] - coords[None, :, :], axis=2)
+    reach = dmax_atom[:, None] + dmax_atom[None, :]
+    ok = (dmax_atom[:, None] >= 0) & (dmax_atom[None, :] >= 0) & (dist <= reach * (1 + 1e-9))
+    jj, kk = np.nonzero(ok)
+    pair_id = np.full((nat, nat), -1, dtype=np.int64)
+    pair_id[jj, kk] = np.arange(len(jj))
+    blocks, dg = _mbis_jac_blocks(tmpden, pptr, pj, pd, mshell, amp, sig, dmax, dmax_atom, pair_id, len(jj),
+                                  maxpairs * MBIS_MAXSHELL)
+    live = _mbis_live(mshell, pop)
+    n = int(live.sum())
+    d0, d1, d2, d3 = (dg[q][live] for q in range(4))
+    if not (d0 > 0).all() or not (d2 > 0).all():
+        return None
+    li = np.full(live.shape, -1, dtype=np.int64)
+    li[live] = np.arange(n)
+    k1, k2 = np.meshgrid(np.arange(MBIS_MAXSHELL), np.arange(MBIS_MAXSHELL), indexing="ij")
+    rows = li[jj[:, None, None], k1[None]]
+    cols = li[kk[:, None, None], k2[None]]
+    sel = (rows >= 0) & (cols >= 0)
+    r, c = rows[sel], cols[sel]
+
+    def deriv(q, diag):  # diag(sum) - pair sums: d (map sum) / d (log parameter)
+        return sparse.diags(diag) - sparse.csr_matrix((blocks[:, q][sel], (r, c)), shape=(n, n))
+
+    inv_n, inv_s = sparse.diags(1.0 / d0), sparse.diags(1.0 / d2)
+    jnn, jns = inv_n @ deriv(0, d0), inv_n @ deriv(1, d1)
+    return live, sparse.bmat([[jnn, jns], [inv_s @ deriv(2, d2) - jnn, inv_s @ deriv(3, d3) - jns]], format="csc")
+
+
+def _mbis_jacobian(tmpden, pairs, coords, mshell, pop, sig):
+    """Chord solver at (mshell, pop, sig): the live shells and the sparse LU of I - J
+    (_mbis_jacobian_matrix), or None."""
+    from scipy import sparse
+    from scipy.sparse.linalg import splu
+
+    lj = _mbis_jacobian_matrix(tmpden, pairs, coords, mshell, pop, sig)
+    if lj is None:
+        return None
+    live, jac = lj
+    return live, splu(sparse.identity(jac.shape[0], format="csc") - jac)
+
+
+def _mbis_chord(step, mshell, pop, sig, solver, tol, budget):
+    """Chord iteration x <- x + (I - J)^-1 (G(x) - x) with a fixed factorized Jacobian
+    (_mbis_jacobian), x the log populations and log widths of the solver's live shells.
+    The step is the estimated distance to the fixed point; converged when it moves no
+    population by tol (e) and no width by tol (relative), and the returned parameters are
+    then x plus that step. Gives up when the live shells change, a step leaves the trust
+    region of the plain step (factor MBIS_ANDERSON_TRUST), or from the third step the
+    estimate shrinks by less than MBIS_CHORD_SLOW per evaluation, returning the last plain
+    map output to continue from. Returns (pop, sig, map evaluations), converged."""
+    live, lu = solver
+    n = int(live.sum())
+    trust = np.log(MBIS_ANDERSON_TRUST)
+    p, s = pop, sig
+    last = np.inf
+    pn, sn, icyc = p, s, 0
+    for icyc in range(1, min(MBIS_CHORD_MAXCYC, budget) + 1):
+        if not np.array_equal(_mbis_live(mshell, p), live):
+            return (p, s, icyc - 1), False
+        pn, sn = step(mshell, p, s)
+        if not np.array_equal(_mbis_live(mshell, pn), live):
+            return (pn, sn, icyc), False
+        x = np.concatenate([np.log(p[live]), np.log(s[live])])
+        r = np.concatenate([np.log(pn[live]), np.log(sn[live])]) - x
+        d = lu.solve(r)
+        if not np.isfinite(d).all() or np.abs(d - r).max() > trust:
+            return (pn, sn, icyc), False
+        dist = max(np.abs(p[live] * np.expm1(d[:n])).max(), np.abs(np.expm1(d[n:])).max())
+        p2, s2 = p.copy(), s.copy()
+        p2[live], s2[live] = np.exp(x[:n] + d[:n]), np.exp(x[n:] + d[n:])
+        if dist < tol:
+            return (p2, s2, icyc), True
+        if icyc > 2 and dist > MBIS_CHORD_SLOW * last:
+            return (pn, sn, icyc), False
+        last = dist
+        p, s = p2, s2
+    return (pn, sn, icyc), False
+
+
+def _mbis_logdist(mshell, pop, sig, pref, sref):
+    """Largest |log| ratio of populations and widths to a reference state over its live
+    shells above MBIS_EMPTY_POP (inf when one of them is empty here)."""
+    live = _mbis_live(mshell, pref) & (pref > MBIS_EMPTY_POP)
+    if not live.any() or (pop[live] <= 0).any() or (sig[live] <= 0).any():
+        return np.inf
+    return max(np.abs(np.log(pop[live] / pref[live])).max(), np.abs(np.log(sig[live] / sref[live])).max())
+
+
+def _mbis_fit_converged(step, mshell, pop, sig, qbase, fallback=True, objective=None, fallback_above=None,
+                        jac=None, near=None, start=None, record=None):
     """Accelerated fit; with fallback, redone by plain iteration from the guess
     when acceleration stalls (MBIS_ANDERSON_MAXCYC evaluations) or settles on a
     merged/emptied-shell fixed point plain iteration leaves. Without fallback,
@@ -961,15 +1146,27 @@ def _mbis_fit_converged(step, mshell, pop, sig, qbase, fallback=True, objective=
     plain state it came from; otherwise plain iteration continues. step is
     called as step(mshell, pop, sig). Returns (charge, mshell, pop, sig,
     evaluations), whether the returned fit met the stopping rule, and whether
-    the fallback ran."""
-    res = _mbis_converged(step, mshell, pop, sig, qbase, maxcyc=MBIS_ANDERSON_MAXCYC)
-    converged = res[4] < MBIS_ANDERSON_MAXCYC
+    the fallback ran.
+
+    jac, near, start: the chord endgame of _mbis_converged (near and start only for
+    the accelerated fit from the guess). record (a dict) receives the stopping rule
+    the returned fit met ("distance", "step", or None) and the chord solver it used."""
+    rec = {}
+    res = _mbis_converged(step, mshell, pop, sig, qbase, maxcyc=MBIS_ANDERSON_MAXCYC, jac=jac, near=near,
+                          start=start, record=rec)
+    converged = rec["rule"] is not None
+
+    def done_with(r, conv, fell, rr):
+        if record is not None:
+            record.update(rule=rr["rule"] if conv else None, solver=rr.get("solver"))
+        return r, conv, fell
+
     if converged and not mbis_degenerate(res[1], res[2], res[3]):
-        return res, converged, False
+        return done_with(res, converged, False, rec)
     p, s = pop, sig
     if not fallback:
         if fallback_above is None or not objective(res[1], res[2], res[3]) > fallback_above:
-            return res, converged, False
+            return done_with(res, converged, False, rec)
         # plain iteration never lowers the objective (the MBIS update is an EM step), so from the
         # stalled state it reaches a fixed point better than fallback_above; from the guess, it
         # slid back to the default's fixed point on 9 local nitrates
@@ -979,36 +1176,52 @@ def _mbis_fit_converged(step, mshell, pop, sig, qbase, fallback=True, objective=
         chunk = MBIS_MAXCYC - done
         if objective is not None:
             chunk = min(chunk, MBIS_MERGE_FIRST if done == 0 else MBIS_MERGE_EVERY)
-        plain = _mbis_converged(step, mshell, p, s, qbase, maxcyc=chunk, history=0)
+        prec = {}
+        plain = _mbis_converged(step, mshell, p, s, qbase, maxcyc=chunk, history=0, jac=jac, record=prec)
         evals, done, p, s = evals + plain[4], done + plain[4], plain[2], plain[3]
-        if plain[4] < chunk:
-            return plain[:4] + (evals,), True, True
+        if prec["rule"] is not None:
+            return done_with(plain[:4] + (evals,), True, True, prec)
         if objective is None:
             break
         m2, p2, s2 = mbis_merge_shells(mshell, p, s)
         if (m2 == mshell).all():
             continue
-        fit = _mbis_converged(step, m2, p2, s2, qbase, maxcyc=MBIS_ANDERSON_MAXCYC)
+        frec = {}
+        fit = _mbis_converged(step, m2, p2, s2, qbase, maxcyc=MBIS_ANDERSON_MAXCYC, jac=jac, record=frec)
         evals += fit[4]
-        if (fit[4] < MBIS_ANDERSON_MAXCYC and not mbis_degenerate(fit[1], fit[2], fit[3])
+        if (frec["rule"] is not None and not mbis_degenerate(fit[1], fit[2], fit[3])
                 and objective(fit[1], fit[2], fit[3]) >= objective(mshell, p, s)):
-            return fit[:4] + (evals,), True, True
-    return plain[:4] + (evals,), False, True
+            return done_with(fit[:4] + (evals,), True, True, frec)
+    return done_with(plain[:4] + (evals,), False, True, prec)
 
 
-def _mbis_converged(step, mshell, pop, sig, qbase, tol=None, maxcyc=None, history=None):
+def _mbis_converged(step, mshell, pop, sig, qbase, tol=None, maxcyc=None, history=None, jac=None, near=None,
+                    start=None, record=None):
     """Fixed point of the MBIS map by Anderson acceleration (type II, on the log
     populations and log widths of the active shells). An extrapolated point that
     moves any parameter by more than a factor MBIS_ANDERSON_TRUST from the plain
     step is replaced by the plain step and the history reset: unguarded, the
     extrapolation can empty a shell and land on a degenerate fixed point plain
     iteration never reaches (Li 1s population to 0). A shell whose population is
-    exactly 0 stays empty, as in plain iteration. Converged when no population
-    moves by more than tol (e) and no width by more than tol relative in one plain
-    step; returns charge, mshell, pop, sig, the number of map evaluations."""
+    exactly 0 stays empty, as in plain iteration. Returns charge, mshell, pop, sig,
+    the number of map evaluations (maxcyc when no rule was met).
+
+    Without jac: converged when no population moves by more than tol (e) and no
+    width by more than tol relative in one plain step ("step" rule). With jac
+    (callable (mshell, pop, sig) -> chord solver or None, see _mbis_jacobian): once
+    the per-step change falls below MBIS_CHORD_SWITCH, or the iterate comes within
+    MBIS_CHORD_NEAR of near's state (near = (pop, sig, solver): a check fit borrowing
+    the default fit's Jacobian), the fit switches to _mbis_chord, converged when its
+    distance estimate is below tol ("distance" rule). A chord that gives up hands its
+    state back to the accelerated iteration; after two failed chords the step rule
+    applies. start: a solver to try the chord with from the first iterate (the fuzzy
+    refit, starting from the charge fit with its Jacobian). record (a dict) receives
+    the rule met ("distance", "step", or None) and the solver of a converged chord."""
     tol = MBIS_TOL if tol is None else tol
     maxcyc = MBIS_MAXCYC if maxcyc is None else maxcyc
     history = MBIS_ANDERSON if history is None else history
+    rec = record if record is not None else {}
+    rec.update(rule=None, solver=None)
     act = np.zeros(pop.shape, dtype=bool)
     for a, m in enumerate(mshell):
         act[a, :m] = True
@@ -1016,12 +1229,41 @@ def _mbis_converged(step, mshell, pop, sig, qbase, tol=None, maxcyc=None, histor
 
     xs, gs = [], []
     p, s = pop, sig
-    for icyc in range(1, maxcyc + 1):
+    pn, sn = p, s
+    icyc = 0
+    tries = 0
+    if jac is not None and start is not None:
+        (p, s, k), ok = _mbis_chord(step, mshell, p, s, start, tol, maxcyc)
+        icyc += k
+        if ok:
+            rec.update(rule="distance", solver=start)
+            return qbase - p.sum(axis=1), mshell, p, s, icyc
+        pn, sn = p, s
+    while icyc < maxcyc:
+        icyc += 1
         pn, sn = step(mshell, p, s)
         dpop = np.abs(pn - p)[act].max()
         with np.errstate(divide="ignore", invalid="ignore"):
             dsig = np.where(sn[act] > 0, np.abs(sn[act] - s[act]) / sn[act], 0.0).max()
-        if dpop < tol and dsig < tol:
+        if jac is not None and tries < 2 and icyc < maxcyc:
+            solver = None
+            if (near is not None and near[2] is not None and tries == 0
+                    and _mbis_logdist(mshell, pn, sn, near[0], near[1]) < MBIS_CHORD_NEAR):
+                solver = near[2]
+            elif max(dpop, dsig) < MBIS_CHORD_SWITCH:
+                solver = jac(mshell, pn, sn)
+            if solver is not None:
+                tries += 1
+                (p, s, k), ok = _mbis_chord(step, mshell, pn, sn, solver, tol, maxcyc - icyc)
+                icyc += k
+                if ok:
+                    rec.update(rule="distance", solver=solver)
+                    return qbase - p.sum(axis=1), mshell, p, s, icyc
+                pn, sn = p, s
+                xs, gs = [], []
+                continue
+        if (jac is None or tries >= 2) and dpop < tol and dsig < tol:
+            rec["rule"] = "step"
             return qbase - pn.sum(axis=1), mshell, pn, sn, icyc
         live = act & (pn > 0) & (p > 0)
         x = np.concatenate([np.log(p[live]), np.log(s[live])])
@@ -1148,7 +1390,7 @@ def mbis_merged_record(atnums, mshell_guess, mshell_fit):
              "shells_fit": int(mshell_fit[a])} for a in np.flatnonzero(mshell_fit < mshell_guess)]
 
 
-def mbis_select(grel, coords, tmpden, atnums, qbase):
+def mbis_select(grel, coords, tmpden, atnums, qbase, record=None):
     """MBIS can have several fixed points (on 27 local jobs below Rn, 8 had
     another more than 0.005 e away; every actinide tested did, up to 0.9 e).
     Fit from the default guess and from it with every width scaled by each of
@@ -1169,17 +1411,30 @@ def mbis_select(grel, coords, tmpden, atnums, qbase):
     5e-3 relative, and whether it converged in MBIS_ANDERSON_MAXCYC evaluations
     flipped the stored charges by up to 0.3 e between runs). spread and
     solutions count only converged, non-degenerate fits; merged lists, per
-    guess, the atoms whose shells merged (mbis_merged_record)."""
+    guess, the atoms whose shells merged (mbis_merged_record); rule, per guess, the
+    stopping rule its fit met (_mbis_converged: "distance", "step" or None).
+
+    Every fit ends with the chord iteration; a check fit that comes within
+    MBIS_CHORD_NEAR of a converged, non-degenerate default fit's fixed point uses
+    the default fit's Jacobian. record (a dict) receives the selected fit's chord
+    solver ("solver", None without one), for the fuzzy refit."""
     pairs = mbis_pairs(grel, coords, tmpden, atnums)
     step = lambda mm, pp, ss: _mbis_step(tmpden, pairs, mm, pp, ss)  # noqa: E731
     objective = lambda mm, pp, ss: mbis_objective(grel, coords, tmpden, atnums, mm, pp, ss)  # noqa: E731
-    fits = []
+    jac = lambda mm, pp, ss: _mbis_jacobian(tmpden, pairs, coords, mm, pp, ss)  # noqa: E731
+    fits, recs = [], []
     for i, (name, (m0, p0, s0)) in enumerate(mbis_guesses(atnums)):
         fallback = i == 0 or fits[0][9]
         good_so_far = [f[6] for f in fits if f[8] and not f[7]]
         above = max(good_so_far) + MBIS_TIE_REL * abs(max(good_so_far)) if good_so_far else None
+        near = None
+        if i and fits[0][8] and not fits[0][7] and recs[0].get("solver") is not None:
+            near = (fits[0][3], fits[0][4], recs[0]["solver"])
+        rec = {}
         (q, m, p, s, n), conv, fell_back = _mbis_fit_converged(step, m0, p0, s0, qbase, fallback=fallback,
-                                                               objective=objective, fallback_above=above)
+                                                               objective=objective, fallback_above=above,
+                                                               jac=jac, near=near, record=rec)
+        recs.append(rec)
         merged = mbis_merged_record(atnums, m0, m)
         fits.append((name, q, m, p, s, n, objective(m, p, s), mbis_degenerate(m, p, s), conv, fell_back, merged))
     good = [f for f in fits if f[8] and not f[7]]
@@ -1197,7 +1452,10 @@ def mbis_select(grel, coords, tmpden, atnums, qbase):
     info = {"selected": best[0], "objective": {f[0]: f[6] for f in fits},
             "degenerate": {f[0]: bool(f[7]) for f in fits}, "converged": {f[0]: bool(f[8]) for f in fits},
             "merged": {f[0]: f[10] for f in fits},
+            "rule": {f[0]: r.get("rule") for f, r in zip(fits, recs)},
             "spread": float(max(np.abs(f[1] - best[1]).max() for f in kept)), "solutions": len(distinct)}
+    if record is not None:
+        record["solver"] = recs[fits.index(best)].get("solver")
     return best[1], best[2], best[3], best[4], sum(f[5] for f in fits), info
 
 
@@ -1705,8 +1963,10 @@ def run(wfx_path, nrad=75, nang=434, radcut=10.0, bond_nrad=45, bond_nang=170, f
             td_m[b] = _becke(pts, coords, rinv, aij, BECKE_TOL)[:, b] * mgrid_wts * rho
         mbis_mode = mbis_mode or MBIS_MODE
         selection = {}
+        charge_rec, fuzzy_rec = {}, {}
         if mbis_mode == "converged":
-            q_mbis, cm, cp, cs, ncyc_charge, selection["charge"] = mbis_select(mgrid_pts, coords, td_m, atnums, qbase)
+            q_mbis, cm, cp, cs, ncyc_charge, selection["charge"] = mbis_select(mgrid_pts, coords, td_m, atnums, qbase,
+                                                                               record=charge_rec)
             mbis_converged = {"charge": selection["charge"]["converged"][selection["charge"]["selected"]]}
         else:
             (q_mbis, cm, cp, cs, ncyc_charge), conv = mbis_fit(mgrid_pts, coords, td_m, atnums, qbase, mode=mbis_mode,
@@ -1724,7 +1984,8 @@ def run(wfx_path, nrad=75, nang=434, radcut=10.0, bond_nrad=45, bond_nang=170, f
             # could return to the default's fixed point (0.25 e away on a U nitrate)
             guess = dict(mbis_guesses(atnums))[selection["charge"]["selected"]]
             (_, mshell, spop, ssig, ncyc_fuzzy), mbis_converged["fuzzy"] = mbis_fit(
-                grid_pts, coords, td_rho, atnums, qbase, mode=mbis_mode, guess=(cm, cp, cs), status=True)
+                grid_pts, coords, td_rho, atnums, qbase, mode=mbis_mode, guess=(cm, cp, cs), status=True,
+                solver=charge_rec.get("solver"), record=fuzzy_rec)
         else:
             guess = mbis_initial_shells(atnums)
             (_, mshell, spop, ssig, ncyc_fuzzy), mbis_converged["fuzzy"] = mbis_fit(
@@ -1836,6 +2097,10 @@ def run(wfx_path, nrad=75, nang=434, radcut=10.0, bond_nrad=45, bond_nang=170, f
         # met the mode's stopping rule rather than the cycle cap
         "mbis_converged": mbis_converged if mbis_ok else None,
         "mbis_mode": mbis_mode if mbis_ok else None,
+        # the stopping rule the stored fits met: "distance" (chord estimate of the distance to the
+        # fixed point below MBIS_TOL), "step" (per-step change, after two failed chords) or None
+        "mbis_stop_rule": ({"charge": selection["charge"]["rule"][selection["charge"]["selected"]],
+                            "fuzzy": fuzzy_rec.get("rule")} if mbis_ok and selection else None),
         # converged mode: which guess's fixed point the charge-grid fit kept and why (mbis_select;
         # the fuzzy refit starts from that fit); not unique when another guess reached a fixed
         # point more than MBIS_UNIQUE_TOL away, None (unknown) when a guess did not converge
